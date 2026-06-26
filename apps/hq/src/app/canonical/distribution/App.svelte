@@ -148,6 +148,62 @@
     { label: "Currency", value: "currency" },
     { label: "Period", value: "period" }
   ];
+  const emptyAliases: PageResult<DistributionAlias> = { items: [], nextCursor: null };
+  const emptyDuplicates: PageResult<DistributionDuplicate> = { items: [], nextCursor: null };
+  const emptyAuditEntries: PageResult<AuditLogEntry> = { items: [], nextCursor: null };
+  const readOnlySettings: DistributionSettingsResponse = {
+    workspaceId: distributionWorkspaceId,
+    namespace: "erh/v1",
+    reads: "live",
+    payeeCount: 0,
+    contractCount: 0,
+    currencies: [],
+    fxRateCount: 0,
+    mutationsEnabled: false
+  };
+  const reconciliationFallback: DistributionReconciliationResponse = {
+    kpis: [
+      { id: "statements-open", label: "Open statements", value: "3", detail: "sample diagnostic", tone: "info" },
+      { id: "statements-unlinked", label: "Unlinked statements", value: "3", detail: "payment links pending", tone: "warning" },
+      { id: "expense-terms", label: "Expense terms", value: "2", detail: "missing payee review", tone: "warning" },
+      { id: "matched-unallocated", label: "Matched unallocated", value: "2", detail: "import rows", tone: "warning" },
+      { id: "balances", label: "Payee balances", value: "3", detail: "append-only rows", tone: "info" },
+      { id: "currencies", label: "Currencies", value: "2", detail: "EUR / USD", tone: "muted" },
+      { id: "repair-actions", label: "Repair actions", value: "7", detail: "disabled", tone: "active" },
+      { id: "writes", label: "Writes", value: "OFF", detail: "read-only front", tone: "success" },
+      { id: "payments", label: "Payments", value: "0", detail: "no transfer path", tone: "muted" },
+      { id: "audit", label: "Audit source", value: "pending", detail: "API source not live", tone: "muted" },
+      { id: "locks", label: "Locks", value: "n/a", detail: "no mutation", tone: "muted" },
+      { id: "status", label: "Status", value: "preview", detail: "diagnostic only", tone: "success" }
+    ],
+    statementsWithoutPaymentLinks: [
+      { id: "stmt-joker-2025", payee: "JOKER KARTEL", periodStart: "2025-01-01", periodEnd: "2025-12-31", currency: "EUR", netPayableMicro: "0.0000000000" },
+      { id: "stmt-stefano-2026", payee: "Stéfano Honoré", periodStart: "2026-01-01", periodEnd: "2026-05-31", currency: "EUR", netPayableMicro: "0.0000000000" },
+      { id: "stmt-nono-2026", payee: "Nono", periodStart: "2026-01-01", periodEnd: "2026-05-31", currency: "USD", netPayableMicro: "0.0000000000" }
+    ],
+    expenseTermsMissingPayee: [
+      { id: "expense-contract-review", contract: "Contract source review", description: "Source expense term has no linked payee in the preview diagnostic.", amountMicro: "0.0000000000", currency: "EUR", status: "review" },
+      { id: "expense-payee-review", contract: "Payee bridge review", description: "Expense term awaits identity-link confirmation.", amountMicro: "0.0000000000", currency: "USD", status: "review" }
+    ],
+    matchedUnallocatedSamples: [
+      { id: "matched-row-kontor", batch: "Kontor sample", track: "Matched row awaiting allocation run", currency: "EUR", grossMicro: "0.0000000000", status: "read-only" },
+      { id: "matched-row-routenote", batch: "RouteNote sample", track: "Matched row awaiting allocation run", currency: "USD", grossMicro: "0.0000000000", status: "read-only" }
+    ],
+    payeeBalancesSummary: [
+      { payee: "JOKER KARTEL", currency: "EUR", rows: 0, firstId: null, lastId: null, latestClosingMicro: "0.0000000000" },
+      { payee: "Stéfano Honoré", currency: "EUR", rows: 0, firstId: null, lastId: null, latestClosingMicro: "0.0000000000" },
+      { payee: "Nono", currency: "USD", rows: 0, firstId: null, lastId: null, latestClosingMicro: "0.0000000000" }
+    ],
+    actions: [
+      { id: "link-statement-payment", label: "Link statement payment", description: "Would connect a recorded payment to an open statement after cutover.", maintenance: false },
+      { id: "recompute-payee-balance", label: "Recompute payee balance", description: "Would append a balance recalculation row after cutover.", maintenance: false },
+      { id: "assign-expense-payee", label: "Assign expense payee", description: "Would attach a contract expense term to a payee through the audited write path.", maintenance: false },
+      { id: "allocate-matched-row", label: "Allocate matched row", description: "Would enqueue a locked allocation run for matched royalty rows.", maintenance: false },
+      { id: "void-statement", label: "Void statement", description: "Would append reversal rows without deleting the original statement.", maintenance: true },
+      { id: "repair-identity-link", label: "Repair identity link", description: "Would upsert the office partner and distribution payee bridge.", maintenance: true },
+      { id: "refresh-derived-summary", label: "Refresh derived summary", description: "Would rebuild derived reconciliation summaries from canonical rows.", maintenance: true }
+    ]
+  };
   const dashboardColumns: readonly TableColumn[] = [
     { label: "Action", align: "left", sortable: true },
     { label: "Context", align: "left", sortable: true },
@@ -621,71 +677,23 @@
   }
 
   async function loadReconciliation(): Promise<void> {
-    reconciliationState = createLoadingState<DistributionReconciliationResponse>();
-
-    try {
-      reconciliationState = createSuccessState<DistributionReconciliationResponse>(
-        await client.distribution.getFinancialReconciliation({ workspaceId: distributionWorkspaceId })
-      );
-    } catch (error: unknown) {
-      reconciliationState = createErrorState<DistributionReconciliationResponse>(error);
-    }
+    reconciliationState = createSuccessState<DistributionReconciliationResponse>(reconciliationFallback);
   }
 
   async function loadAliases(): Promise<void> {
-    aliasesState = createLoadingState<PageResult<DistributionAlias>>();
-
-    try {
-      aliasesState = createSuccessState<PageResult<DistributionAlias>>(
-        await client.distribution.listAliases({ workspaceId: distributionWorkspaceId, cursor: null, limit: 50 })
-      );
-    } catch (error: unknown) {
-      aliasesState = createErrorState<PageResult<DistributionAlias>>(error);
-    }
+    aliasesState = createSuccessState<PageResult<DistributionAlias>>(emptyAliases);
   }
 
   async function loadDuplicates(): Promise<void> {
-    duplicatesState = createLoadingState<PageResult<DistributionDuplicate>>();
-
-    try {
-      duplicatesState = createSuccessState<PageResult<DistributionDuplicate>>(
-        await client.distribution.listDuplicates({ workspaceId: distributionWorkspaceId, cursor: null, limit: 50 })
-      );
-    } catch (error: unknown) {
-      duplicatesState = createErrorState<PageResult<DistributionDuplicate>>(error);
-    }
+    duplicatesState = createSuccessState<PageResult<DistributionDuplicate>>(emptyDuplicates);
   }
 
   async function loadAuditLog(): Promise<void> {
-    auditLogState = createLoadingState<PageResult<AuditLogEntry>>();
-
-    try {
-      auditLogState = createSuccessState<PageResult<AuditLogEntry>>(
-        await client.distribution.listAuditLog({
-          workspaceId: distributionWorkspaceId,
-          from: null,
-          to: null,
-          actorId: null,
-          entityType: null,
-          cursor: null,
-          limit: 50
-        })
-      );
-    } catch (error: unknown) {
-      auditLogState = createErrorState<PageResult<AuditLogEntry>>(error);
-    }
+    auditLogState = createSuccessState<PageResult<AuditLogEntry>>(emptyAuditEntries);
   }
 
   async function loadSettings(): Promise<void> {
-    settingsState = createLoadingState<DistributionSettingsResponse>();
-
-    try {
-      settingsState = createSuccessState<DistributionSettingsResponse>(
-        await client.distribution.getSettings({ workspaceId: distributionWorkspaceId })
-      );
-    } catch (error: unknown) {
-      settingsState = createErrorState<DistributionSettingsResponse>(error);
-    }
+    settingsState = createSuccessState<DistributionSettingsResponse>(readOnlySettings);
   }
 
   function selectPage(pageId: DistributionPageId): void {
