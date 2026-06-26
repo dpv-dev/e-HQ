@@ -371,6 +371,163 @@ test("write routes require Idempotency-Key and are explicitly disabled in previe
   assert.equal(disabled.action, "office_transaction_create");
 });
 
+test("formerly disabled write routes are activated with receipts and audit ids", async () => {
+  const fixtures = createFixtureStore();
+  const app = createApiService({
+    fixtures: {
+      ...fixtures,
+      distributionMappingRows: [
+        {
+          id: "earning_suspense",
+          batchId: "batch_kontor",
+          sourceTitle: "Unknown",
+          sourceArtist: "Unknown",
+          sourceStore: "Apple Music",
+          suggestedTrackId: "track_1",
+          suggestedTrackTitle: "Seggae light",
+          confidenceBp: 9600,
+          status: "suggested",
+          exactFixPath: "mapping_rules"
+        }
+      ]
+    },
+    persistence: createMemoryPersistenceRuntime({ WRITES_ENABLED: "true" }),
+    health: null,
+    nowIso: (): string => "2026-06-21T00:00:00.000Z",
+    auth: createTestAuthVerifier()
+  });
+
+  const transactionCreate = await jsonWrite(app, "/eof/v1/transactions", "POST", "activated-transaction-create", {
+    workspaceId: "workspace_1",
+    occurredOn: "2026-02-20",
+    accountId: "bank_mur",
+    categoryId: "cat_bank_fee",
+    projectId: null,
+    description: "Activated transaction",
+    amountMicro: "12.34",
+    currency: "MUR"
+  });
+  assertReceipt(transactionCreate);
+  const transactionReplay = await jsonWrite(app, "/eof/v1/transactions", "POST", "activated-transaction-create", {
+    workspaceId: "workspace_1",
+    occurredOn: "2026-02-20",
+    accountId: "bank_mur",
+    categoryId: "cat_bank_fee",
+    projectId: null,
+    description: "Activated transaction",
+    amountMicro: "12.34",
+    currency: "MUR"
+  });
+  assert.equal(transactionReplay.id, transactionCreate.id);
+
+  assertReceipt(await jsonWrite(app, `/eof/v1/transactions/${transactionCreate.id}`, "PATCH", "activated-transaction-update", {
+    workspaceId: "workspace_1",
+    occurredOn: "2026-02-21",
+    accountId: "bank_mur",
+    categoryId: "cat_bank_fee",
+    projectId: null,
+    description: "Activated transaction updated",
+    amountMicro: "12.34",
+    currency: "MUR"
+  }));
+
+  const nodeCreate = await jsonWrite(app, "/eof/v1/plan-comptable", "POST", "activated-plan-create", {
+    workspaceId: "workspace_1",
+    parentId: "div_admin",
+    kind: "category",
+    code: "ACT",
+    label: "Activated category",
+    active: true,
+    type: "expense"
+  });
+  assertReceipt(nodeCreate);
+  assertReceipt(await jsonWrite(app, `/eof/v1/plan-comptable/${nodeCreate.id}`, "PATCH", "activated-plan-update", {
+    workspaceId: "workspace_1",
+    parentId: "div_admin",
+    kind: "category",
+    code: "ACT",
+    label: "Activated category updated",
+    active: true,
+    type: "expense"
+  }));
+
+  const reconciliationPage = await app.request("/eof/v1/reconciliations?workspaceId=workspace_1&limit=10", {
+    headers: authHeaders()
+  });
+  assert.equal(reconciliationPage.status, 200);
+  const reconciliations = (await reconciliationPage.json()) as { readonly items: readonly { readonly id: string }[] };
+  assert.ok(reconciliations.items[0] !== undefined);
+  assertReceipt(await jsonWrite(app, "/eof/v1/reconciliations/approve", "POST", "activated-reconciliation-approve", {
+    workspaceId: "workspace_1",
+    reconciliationIds: [reconciliations.items[0].id],
+    approvedAt: "2026-06-21T00:00:00.000Z"
+  }));
+
+  const partnerCreate = await jsonWrite(app, "/eof/v1/partners", "POST", "activated-partner-create", {
+    workspaceId: "workspace_1",
+    name: "Activated Partner",
+    email: null,
+    phone: null,
+    address: null,
+    taxId: null,
+    notes: null,
+    active: true
+  });
+  assertReceipt(partnerCreate);
+  assertReceipt(await jsonWrite(app, `/eof/v1/partners/${partnerCreate.id}`, "PATCH", "activated-partner-update", {
+    workspaceId: "workspace_1",
+    name: "Activated Partner Updated",
+    email: null,
+    phone: null,
+    address: null,
+    taxId: null,
+    notes: null,
+    active: true
+  }));
+  assertReceipt(await jsonWrite(app, "/eof/v1/partners/partner_mcb/payee-link", "PATCH", "activated-partner-payee-unlink", {
+    workspaceId: "workspace_1",
+    payeeId: null
+  }));
+
+  assertReceipt(await jsonWrite(app, "/erh/v1/mapping/apply-rules", "POST", "activated-mapping-apply", {
+    workspaceId: "workspace_1",
+    batchId: "batch_kontor",
+    rowIds: ["earning_suspense"]
+  }));
+  assertReceipt(await jsonWrite(app, "/erh/v1/contracts/contract_1/expenses", "POST", "activated-contract-expense", {
+    workspaceId: "workspace_1",
+    contractId: "contract_1",
+    payeeId: "payee_alma",
+    incurredOn: "2026-05-18",
+    label: "Activated expense",
+    amountMicro: "1.0000000000",
+    currency: "USD"
+  }));
+  assertReceipt(await jsonWrite(app, "/erh/v1/allocations/runs/run_1/unpost", "POST", "activated-allocation-unpost", {
+    workspaceId: "workspace_1",
+    reason: "Activated test",
+    lockToken: "test-lock"
+  }));
+  assertReceipt(await jsonWrite(app, "/erh/v1/suspense/suspense_1/resolve", "POST", "activated-suspense-resolve", {
+    workspaceId: "workspace_1",
+    suspenseId: "suspense_1",
+    resolution: "map_to_track",
+    targetId: "track_1",
+    note: "Activated test"
+  }));
+
+  const viewerDenied = await app.request("/erh/v1/allocations/runs/run_1/unpost", {
+    method: "POST",
+    headers: { ...authHeadersForToken("fixture-viewer-token"), "Content-Type": "application/json", "Idempotency-Key": "activated-viewer-denied" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      reason: "Viewer denied",
+      lockToken: "viewer-lock"
+    })
+  });
+  assert.equal(viewerDenied.status, 403);
+});
+
 test("allocation preview is dry-run and allocation run stays disabled when writes are off", async () => {
   const app = createDisabledFixtureApiService();
   const response = await app.request("/erh/v1/allocations/runs/preview", {
@@ -1756,6 +1913,27 @@ test("office bank import confirm writes idempotency, audit, batch, and lines in 
 
 function authHeaders(): Readonly<Record<string, string>> {
   return authHeadersForToken("fixture-valid-token");
+}
+
+async function jsonWrite(
+  app: ReturnType<typeof createApiService>,
+  path: string,
+  method: "POST" | "PATCH",
+  idempotencyKey: string,
+  body: Readonly<Record<string, unknown>>
+): Promise<{ readonly id?: string; readonly runId?: string; readonly auditEventId: string | null }> {
+  const response = await app.request(path, {
+    method,
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify(body)
+  });
+  assert.equal(response.status, 200);
+  return (await response.json()) as { readonly id?: string; readonly runId?: string; readonly auditEventId: string | null };
+}
+
+function assertReceipt(receipt: { readonly id?: string; readonly runId?: string; readonly auditEventId: string | null }): void {
+  assert.ok((receipt.id ?? receipt.runId ?? "").length > 0);
+  assert.ok(receipt.auditEventId !== null);
 }
 
 function authHeadersForToken(token: string): Readonly<Record<string, string>> {
