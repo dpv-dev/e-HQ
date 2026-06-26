@@ -32,6 +32,7 @@
   } from "@ehq/ui";
   import { onMount } from "svelte";
   import { createShellApiClient } from "../../app-shell-data.js";
+  import { getLatestDataPeriod, periodLabel } from "../../period-controls.js";
   import DevSessionMenu from "../../DevSessionMenu.svelte";
 
   type CommandCenterPageId = "dashboard" | "users" | "integrations" | "settings";
@@ -94,7 +95,7 @@
   const { session, onLogout }: Props = $props();
   const client = createShellApiClient();
   const workspaceId = "eeee-mu";
-  const period = "2026-05";
+  const period = getLatestDataPeriod();
   const navItems: readonly NavItem[] = [
     {
       id: "dashboard",
@@ -160,7 +161,7 @@
   const dashboardToolbar: readonly ToolbarFilter[] = [
     { label: "Scope", value: "All apps", active: true, disabled: false },
     { label: "Mode", value: "Read-only", active: false, disabled: false },
-    { label: "Period", value: "Today", active: false, disabled: false }
+    { label: "Period", value: periodLabel(period), active: false, disabled: false }
   ];
   const usersToolbar: readonly ToolbarFilter[] = [
     { label: "Source", value: "@ehq/auth", active: true, disabled: false },
@@ -727,7 +728,7 @@
           <span>Command Center remains available from the unlocked administrator card.</span>
         </section>
       {:else if activePageId === "dashboard"}
-        <Toolbar label="Dashboard controls" filters={dashboardToolbar} actionLabel="Refresh" loading={false} />
+        <Toolbar label="Dashboard controls" filters={dashboardToolbar} actionLabel="" loading={false} />
 
         <section class="kpi-grid" aria-label="Command Center indicators">
           {#each dashboardKpis as kpi (kpi.label)}
@@ -760,10 +761,10 @@
             </div>
           </section>
 
-          <Table title="Action list" columns={actionColumns} rows={actionRows} state="default" actionLabel="View all" />
+          <Table title="Action list" columns={actionColumns} rows={actionRows} state="default" actionLabel="" />
         </section>
       {:else if activePageId === "users"}
-        <Toolbar label="Permission controls" filters={usersToolbar} actionLabel="Invite user" loading={false} />
+        <Toolbar label="Permission controls" filters={usersToolbar} actionLabel="" loading={false} />
 
         <section class="kpi-grid" aria-label="Permission indicators">
           {#each usersKpis as kpi (kpi.label)}
@@ -806,9 +807,9 @@
           </section>
         </section>
 
-        <Table title="Members" columns={permissionColumns} rows={permissionRows} state="default" actionLabel="Export" />
+        <Table title="Members" columns={permissionColumns} rows={permissionRows} state="default" actionLabel="" />
       {:else if activePageId === "integrations"}
-        <Toolbar label="Integration controls" filters={integrationToolbar} actionLabel="Refresh status" loading={false} />
+        <Toolbar label="Integration controls" filters={integrationToolbar} actionLabel="" loading={false} />
 
         <section class="kpi-grid" aria-label="Integration indicators">
           {#each integrationKpis as kpi (kpi.label)}
@@ -845,7 +846,7 @@
 
         <Table title="Connectors" columns={integrationColumns} rows={integrationRows} state="default" actionLabel="" />
       {:else}
-        <Toolbar label="Settings controls" filters={settingsToolbar} actionLabel="Review settings" loading={false} />
+        <Toolbar label="Settings controls" filters={settingsToolbar} actionLabel="" loading={false} />
 
         <section class="kpi-grid" aria-label="Settings indicators">
           {#each settingsKpis as kpi (kpi.label)}
