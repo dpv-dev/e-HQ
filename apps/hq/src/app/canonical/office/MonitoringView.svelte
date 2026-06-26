@@ -25,6 +25,7 @@
     type OfficeTransaction,
     type PageResult
   } from "@ehq/api-client";
+  import { formatMoneyValue, moneyToneForValue } from "../../money-format.js";
 
   interface Props {
     readonly client: OfficeApiClient;
@@ -333,32 +334,11 @@
   }
 
   function moneyTone(amountMicro: string): Tone {
-    const amount = BigInt(amountMicro);
-
-    if (amount > 0n) {
-      return "success";
-    }
-
-    if (amount < 0n) {
-      return "error";
-    }
-
-    return "muted";
+    return moneyToneForValue(amountMicro);
   }
 
   function formatMoneyMicro(amountMicro: string): string {
-    const amount = BigInt(amountMicro);
-    const sign = amount < 0n ? "-" : "";
-    const absolute = amount < 0n ? -amount : amount;
-    const units = absolute / 1_000_000n;
-    const micros = absolute % 1_000_000n;
-    const unitText = units.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-
-    if (micros === 0n) {
-      return `${sign}MUR ${unitText}`;
-    }
-
-    return `${sign}MUR ${unitText}.${micros.toString().padStart(6, "0")}`;
+    return formatMoneyValue(amountMicro, "MUR");
   }
 
   function getErrorMessage(error: unknown): string {

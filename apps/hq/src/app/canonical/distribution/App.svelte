@@ -31,6 +31,7 @@
   import { BarsChart, KPI, Table, Toolbar } from "@ehq/ui";
   import type { ChartPoint, SelectOption, TableColumn, TableRow, Tone, ToolbarFilter } from "@ehq/ui";
   import { createShellApiClient } from "../../app-shell-data.js";
+  import { formatMoneyValue, moneyToneForValue } from "../../money-format.js";
 
   type DistributionPageId =
     | "dashboard"
@@ -1329,49 +1330,11 @@
   }
 
   function formatMoney(amountMicro: string, currency: CurrencyCode): string {
-    const amount = BigInt(amountMicro);
-    const sign = amount < 0n ? "-" : "";
-    const absolute = amount < 0n ? -amount : amount;
-    const units = absolute / 1_000_000n;
-    const micros = absolute % 1_000_000n;
-    const unitText = units.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-    const prefix = currencyPrefix(currency);
-
-    if (micros === 0n) {
-      return `${sign}${prefix}${unitText}`;
-    }
-
-    return `${sign}${prefix}${unitText}.${micros.toString().padStart(6, "0")}`;
-  }
-
-  function currencyPrefix(currency: CurrencyCode): string {
-    if (currency === "MUR") {
-      return "Rs ";
-    }
-
-    if (currency === "USD") {
-      return "US$ ";
-    }
-
-    if (currency === "EUR") {
-      return "€ ";
-    }
-
-    return `${currency} `;
+    return formatMoneyValue(amountMicro, currency);
   }
 
   function moneyTone(amountMicro: string): Tone {
-    const amount = BigInt(amountMicro);
-
-    if (amount > 0n) {
-      return "success";
-    }
-
-    if (amount < 0n) {
-      return "error";
-    }
-
-    return "muted";
+    return moneyToneForValue(amountMicro);
   }
 
   function formatBasisPoints(value: number): string {

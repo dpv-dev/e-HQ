@@ -18,6 +18,7 @@
     type OfficePartnerWriteRequest,
     type PageResult
   } from "@ehq/api-client";
+  import { formatMoneyValue, moneySignForValue, moneyToneForValue } from "../../money-format.js";
 
   type DrawerMode = "closed" | "detail" | "create" | "edit";
   type RequestStatus = "idle" | "loading" | "success" | "error";
@@ -397,19 +398,11 @@
   }
 
   function hasAlsoActivity(partner: OfficePartnerListItem): boolean {
-    return BigInt(alsoActivity(partner).periodTotalMicro) !== 0n;
+    return moneySignForValue(alsoActivity(partner).periodTotalMicro) !== 0;
   }
 
   function netTone(value: string): Tone {
-    if (BigInt(value) < 0n) {
-      return "error";
-    }
-
-    if (BigInt(value) === 0n) {
-      return "muted";
-    }
-
-    return "success";
+    return moneyToneForValue(value);
   }
 
   function suggestionTone(type: "income" | "expense"): Tone {
@@ -421,15 +414,7 @@
   }
 
   function formatMoneyMicro(amountMicro: string): string {
-    const amount = BigInt(amountMicro);
-    const negative = amount < 0n;
-    const absolute = negative ? -amount : amount;
-    const whole = absolute / 1000000n;
-    const fractional = absolute % 1000000n;
-    const cents = fractional.toString().padStart(6, "0").slice(0, 2);
-    const prefix = negative ? "-" : "";
-
-    return `${prefix}${currency} ${whole.toLocaleString("en-US")}.${cents}`;
+    return formatMoneyValue(amountMicro, currency);
   }
 
   function formatConfidence(confidenceBp: number): string {

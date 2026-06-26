@@ -38,6 +38,7 @@
     type OfficeCategoryType
   } from "@ehq/api-client";
   import { createShellApiClient } from "../../app-shell-data.js";
+  import { formatMoneyValue, formatSignedMoneyValue, moneyToneForValue } from "../../money-format.js";
   import MonitoringView from "./MonitoringView.svelte";
   import PartnersView from "./PartnersView.svelte";
   import ProjectsView from "./ProjectsView.svelte";
@@ -1337,59 +1338,15 @@
   }
 
   function formatMoney(amountMicro: string, currency: CurrencyCode): string {
-    const amount = BigInt(amountMicro);
-    const sign = amount < 0n ? "-" : "";
-    const absolute = amount < 0n ? -amount : amount;
-    const units = absolute / 1_000_000n;
-    const micros = absolute % 1_000_000n;
-    const unitText = units.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-    const prefix = currencyPrefix(currency);
-
-    if (micros === 0n) {
-      return `${sign}${prefix}${unitText}`;
-    }
-
-    return `${sign}${prefix}${unitText}.${micros.toString().padStart(6, "0")}`;
-  }
-
-  function currencyPrefix(currency: CurrencyCode): string {
-    if (currency === "EUR") {
-      return "€ ";
-    }
-
-    if (currency === "USD") {
-      return "US$ ";
-    }
-
-    if (currency === "MUR") {
-      return "Rs ";
-    }
-
-    return `${currency} `;
+    return formatMoneyValue(amountMicro, currency);
   }
 
   function formatSignedMicro(amountMicro: string): string {
-    const amount = BigInt(amountMicro);
-
-    if (amount > 0n) {
-      return `+${formatMicro(amountMicro)}`;
-    }
-
-    return formatMicro(amountMicro);
+    return formatSignedMoneyValue(amountMicro, "MUR");
   }
 
   function moneyTone(amountMicro: string): Tone {
-    const amount = BigInt(amountMicro);
-
-    if (amount > 0n) {
-      return "success";
-    }
-
-    if (amount < 0n) {
-      return "error";
-    }
-
-    return "muted";
+    return moneyToneForValue(amountMicro);
   }
 
   function planKindTone(kind: "department" | "division" | "category"): Tone {
