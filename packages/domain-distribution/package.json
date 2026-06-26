@@ -1,0 +1,17 @@
+{
+  "name": "@ehq/domain-distribution",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "check": "tsc -b --pretty false",
+    "test": "node --loader ./test/ts-source-loader.mjs --test test/*.test.ts",
+    "typecheck": "tsc -b --pretty false"
+  },
+  "dependencies": {
+    "@ehq/db": "workspace:*",
+    "@ehq/domain-finance": "workspace:*"
+  }
+}

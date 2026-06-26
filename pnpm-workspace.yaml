@@ -1,0 +1,6 @@
+packages:
+  - "apps/hq"
+  - "services/*"
+  - "packages/*"
+allowBuilds:
+  esbuild: true

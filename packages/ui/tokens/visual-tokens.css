@@ -1,0 +1,242 @@
+/* ë • HQ — Canonical Visual Tokens
+   Source of truth for the whole platform UI layer (all apps consume this).
+   Brand accent locked to #FFB800 (per David, 2026-06).
+   Fonts aligned to the live brand site eeee.mu: Inter (UI + display) + Space Mono
+   (labels / technical / editorial). Open Sans & Fönt are archived, not active.
+   Do NOT hardcode hex in apps — import these variables.
+   Scope: UI/CSS layer only. Never touches financial logic, allocations,
+   migrations, DB, payments, or statement formulas.
+*/
+
+/* Brand fonts — same as eeee.mu. Self-host later if you prefer; for now Google Fonts. */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Space+Mono:wght@400&display=swap');
+
+:root{
+  /* Core accent — #FFB800 canonical */
+  --ehq-yellow:#FFB800;
+  --ehq-yellow-hover:#FFC633;
+  --ehq-yellow-active:#E6A600;
+  --ehq-yellow-muted:rgba(255,184,0,.13);
+  --ehq-yellow-border:rgba(255,184,0,.45);
+
+  /* Surfaces (dark) */
+  --ehq-black:#0D0F14;
+  --ehq-bg-main:#0D0F14;
+  --ehq-surface:#171B22;
+  --ehq-surface-high:#222831;
+  --ehq-surface-raised:#30363D;
+
+  /* Text — warmed off-white (eeee.mu) */
+  --ehq-text:#FFFFFF;
+  --ehq-text-muted:rgba(255,255,255,.48);
+  --ehq-text-soft:rgba(255,255,255,.74);
+  --ehq-text-secondary:var(--ehq-text-soft);
+  --ehq-text-disabled:rgba(255,255,255,.30);
+  --ehq-text-on-yellow:#0A0A0A;
+
+  /* Borders */
+  --ehq-border:rgba(255,255,255,.11);
+  --ehq-border-soft:rgba(255,255,255,.06);
+  --ehq-border-strong:rgba(255,184,0,.42);
+
+  /* States */
+  --ehq-success:#22C55E; --ehq-success-bg:rgba(34,197,94,.12);
+  --ehq-info:#3B82F6;    --ehq-info-bg:rgba(59,130,246,.12);
+  --ehq-warning:#FBBF24; --ehq-warning-bg:rgba(251,191,36,.12);
+  --ehq-error:#FF3B30;   --ehq-error-bg:rgba(255,59,48,.12);   /* eeee.mu red */
+  --ehq-purple:#A855F7;
+
+  /* Typography — Inter (body + display) + Space Mono (labels / technical) */
+  --ehq-font:'Inter',-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif;   /* body / UI */
+  --ehq-display:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;                        /* headings */
+  --ehq-mono:'Space Mono','SFMono-Regular','JetBrains Mono',Consolas,monospace;             /* labels, coords, editorial */
+  --ehq-brand-font:var(--ehq-display);
+  --ehq-h1:32px; --ehq-h2:24px; --ehq-h3:18px;
+  --ehq-body:16px; --ehq-small:14px; --ehq-caption:12px;
+  --ehq-type-display-weight:600;
+  --ehq-type-heading-weight:500;
+  --ehq-type-heading-color:var(--ehq-text-secondary);
+  --ehq-type-body-weight:400;
+  --ehq-type-label-weight:400;
+  --ehq-type-label-color:var(--ehq-text-muted);
+  --ehq-type-figure-weight:400;
+
+  /* Spacing */
+  --ehq-space-1:4px; --ehq-space-2:8px; --ehq-space-3:12px; --ehq-space-4:16px;
+  --ehq-space-5:24px; --ehq-space-6:32px; --ehq-space-7:40px; --ehq-space-8:48px;
+
+  /* Radius */
+  --ehq-radius-sm:8px; --ehq-radius-md:12px; --ehq-radius-lg:16px;
+  --ehq-radius-xl:22px; --ehq-radius-pill:999px;
+
+  /* Shadows */
+  --ehq-shadow-sm:0 4px 16px rgba(0,0,0,.28);
+  --ehq-shadow-md:0 12px 36px rgba(0,0,0,.34);
+  --ehq-shadow-lg:0 24px 72px rgba(0,0,0,.48);
+  --ehq-glow-yellow:0 0 0 1px rgba(255,184,0,.26),0 0 28px rgba(255,184,0,.12);
+
+  /* Edge-fade surfaces */
+  --ehq-edge-fill:var(--ehq-surface);
+  --ehq-edge-border-color:var(--ehq-border);
+  --ehq-edge-feather-distance:20px;
+  --ehq-edge-hairline-opacity:.95;
+  --ehq-edge-mask-x:linear-gradient(to right,transparent,black var(--ehq-edge-feather-distance),black calc(100% - var(--ehq-edge-feather-distance)),transparent);
+  --ehq-edge-mask-y:linear-gradient(to bottom,transparent,black var(--ehq-edge-feather-distance),black calc(100% - var(--ehq-edge-feather-distance)),transparent);
+  --ehq-nav-highlight-opacity:1;
+  --ehq-nav-highlight-hairline-opacity:.55;
+
+  /* Motion */
+  --ehq-transition-fast:120ms ease;
+  --ehq-transition-normal:180ms ease;
+  --ehq-ease:cubic-bezier(.19,1,.22,1);
+}
+
+/* ---- Base component classes (apps may extend, not redefine colors) ---- */
+.ehq-type-display{
+  font-family:var(--ehq-display);
+  font-weight:var(--ehq-type-display-weight);
+  letter-spacing:0;
+}
+.ehq-type-heading{
+  font-family:var(--ehq-display);
+  font-weight:var(--ehq-type-heading-weight);
+  color:var(--ehq-type-heading-color);
+  letter-spacing:0;
+}
+.ehq-type-body{
+  font-family:var(--ehq-font);
+  font-weight:var(--ehq-type-body-weight);
+  letter-spacing:0;
+}
+.ehq-type-label-mono{
+  font-family:var(--ehq-mono);
+  font-weight:var(--ehq-type-label-weight);
+  color:var(--ehq-type-label-color);
+  letter-spacing:.12em;
+  text-transform:uppercase;
+}
+.ehq-type-figure{
+  font-family:var(--ehq-font);
+  font-weight:var(--ehq-type-figure-weight);
+  font-variant-numeric:tabular-nums;
+  letter-spacing:0;
+}
+.ehq-card{
+  position:relative;
+  background:transparent;
+  border:0;
+  border-radius:var(--ehq-radius-lg);
+  color:var(--ehq-text);
+  box-shadow:var(--ehq-shadow-sm);
+}
+.ehq-edge-surface{
+  position:relative;
+  isolation:isolate;
+  background:transparent;
+  border:0;
+  --ehq-edge-fill:var(--ehq-surface);
+  --ehq-edge-border-color:var(--ehq-border);
+}
+.ehq-edge-surface::before,
+.ehq-edge-surface::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  border-radius:inherit;
+  pointer-events:none;
+}
+.ehq-edge-surface::before{
+  -webkit-mask-image:var(--ehq-edge-mask-x),var(--ehq-edge-mask-y);
+  mask-image:var(--ehq-edge-mask-x),var(--ehq-edge-mask-y);
+  -webkit-mask-repeat:no-repeat;
+  mask-repeat:no-repeat;
+  -webkit-mask-size:100% 100%;
+  mask-size:100% 100%;
+  -webkit-mask-composite:source-in;
+  mask-composite:intersect;
+}
+.ehq-edge-surface::before{
+  z-index:0;
+  background:var(--ehq-edge-fill);
+}
+.ehq-edge-surface::after{
+  z-index:0;
+  background:
+    linear-gradient(to right,transparent,var(--ehq-edge-border-color) var(--ehq-edge-feather-distance),var(--ehq-edge-border-color) calc(100% - var(--ehq-edge-feather-distance)),transparent) top left / 100% 1px no-repeat,
+    linear-gradient(to right,transparent,var(--ehq-edge-border-color) var(--ehq-edge-feather-distance),var(--ehq-edge-border-color) calc(100% - var(--ehq-edge-feather-distance)),transparent) bottom left / 100% 1px no-repeat,
+    linear-gradient(to bottom,transparent,var(--ehq-edge-border-color) var(--ehq-edge-feather-distance),var(--ehq-edge-border-color) calc(100% - var(--ehq-edge-feather-distance)),transparent) top left / 1px 100% no-repeat,
+    linear-gradient(to bottom,transparent,var(--ehq-edge-border-color) var(--ehq-edge-feather-distance),var(--ehq-edge-border-color) calc(100% - var(--ehq-edge-feather-distance)),transparent) top right / 1px 100% no-repeat;
+  opacity:var(--ehq-edge-hairline-opacity);
+}
+.ehq-edge-surface > *{
+  position:relative;
+  z-index:1;
+}
+.ehq-edge-surface.hover{
+  --ehq-edge-border-color:var(--ehq-yellow-border);
+}
+.ehq-edge-surface.error{
+  --ehq-edge-fill:var(--ehq-error-bg);
+  --ehq-edge-border-color:var(--ehq-error);
+}
+.ehq-edge-surface.locked{
+  --ehq-edge-border-color:var(--ehq-error);
+}
+.ehq-nav-fade-item{
+  position:relative;
+  isolation:isolate;
+  background:transparent;
+  border:0;
+  --ehq-edge-fill:var(--ehq-yellow-muted);
+  --ehq-edge-border-color:var(--ehq-yellow-border);
+}
+.ehq-nav-fade-item.ehq-edge-surface::before,
+.ehq-nav-fade-item.ehq-edge-surface::after{
+  opacity:0;
+  transition:opacity var(--ehq-transition-fast);
+}
+.ehq-nav-fade-item.ehq-edge-surface:hover::before,
+.ehq-nav-fade-item.ehq-edge-surface.active::before{
+  opacity:var(--ehq-nav-highlight-opacity);
+}
+.ehq-nav-fade-item.ehq-edge-surface:hover::after,
+.ehq-nav-fade-item.ehq-edge-surface.active::after{
+  opacity:var(--ehq-nav-highlight-hairline-opacity);
+}
+.ehq-nav-fade-item:focus-visible{
+  outline:none;
+  box-shadow:0 0 0 3px var(--ehq-yellow-muted);
+}
+.ehq-nav-fade-item.active:focus-visible{
+  box-shadow:inset 2px 0 0 var(--ehq-yellow),0 0 0 3px var(--ehq-yellow-muted);
+}
+.ehq-button-primary{
+  background:var(--ehq-yellow); color:var(--ehq-text-on-yellow);
+  border:1px solid var(--ehq-yellow); border-radius:var(--ehq-radius-sm);
+  font-family:var(--ehq-font); text-transform:uppercase; letter-spacing:.08em; font-weight:500;
+}
+.ehq-button-primary:hover{ background:var(--ehq-yellow-hover); }
+.ehq-button-secondary{
+  background:transparent; color:var(--ehq-text);
+  border:1px solid var(--ehq-border); border-radius:var(--ehq-radius-sm);
+  font-family:var(--ehq-font); text-transform:uppercase; letter-spacing:.08em; font-weight:500;
+}
+.ehq-button-secondary:hover{ border-color:var(--ehq-yellow-border); }
+.ehq-button-danger{
+  background:var(--ehq-error-bg); color:var(--ehq-text);
+  border:1px solid var(--ehq-error); border-radius:var(--ehq-radius-sm);
+}
+.ehq-label{ font-family:var(--ehq-mono); text-transform:uppercase; letter-spacing:.16em; font-size:11px; color:var(--ehq-text-muted); }
+.ehq-input,.ehq-select{
+  background:var(--ehq-black); color:var(--ehq-text);
+  border:1px solid var(--ehq-border); border-radius:var(--ehq-radius-sm);
+}
+.ehq-input:focus,.ehq-select:focus{
+  outline:none; border-color:var(--ehq-yellow-border);
+  box-shadow:0 0 0 3px var(--ehq-yellow-muted);
+}
+.ehq-badge-success{ color:var(--ehq-success); background:var(--ehq-success-bg); border:1px solid rgba(34,197,94,.35); }
+.ehq-badge-info{ color:var(--ehq-info); background:var(--ehq-info-bg); border:1px solid rgba(59,130,246,.35); }
+.ehq-badge-warning{ color:var(--ehq-text-soft); background:var(--ehq-surface-high); border:1px solid var(--ehq-border); }
+.ehq-badge-error{ color:var(--ehq-error); background:var(--ehq-error-bg); border:1px solid rgba(255,59,48,.40); }
+.ehq-badge-active{ color:var(--ehq-text-soft); background:var(--ehq-surface-high); border:1px solid var(--ehq-border); }

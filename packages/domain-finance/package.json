@@ -1,0 +1,16 @@
+{
+  "name": "@ehq/domain-finance",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "check": "tsc -b --pretty false",
+    "typecheck": "tsc -b --pretty false",
+    "test": "node --loader ./test/ts-source-loader.mjs --test test/*.test.ts"
+  },
+  "dependencies": {
+    "zod": "^3.25.76"
+  }
+}

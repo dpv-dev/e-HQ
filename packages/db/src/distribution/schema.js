@@ -1,0 +1,565 @@
+import { sql } from "drizzle-orm";
+import { boolean, char, date, index, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid, varchar, check } from "drizzle-orm/pg-core";
+import { partners as officePartners } from "../office/schema.js";
+export const distributionImportStatusEnum = pgEnum("distribution_import_status", ["draft", "processing", "completed", "failed", "void"]);
+export const distributionMappingStatusEnum = pgEnum("distribution_mapping_status", ["unmapped", "matched", "suspense", "ignored"]);
+export const distributionCalculationStatusEnum = pgEnum("distribution_calculation_status", ["pending", "calculated", "error", "excluded"]);
+export const distributionIssueSeverityEnum = pgEnum("distribution_issue_severity", ["info", "warning", "error"]);
+export const distributionIdentityStatusEnum = pgEnum("distribution_identity_status", ["pending", "linked", "rejected", "archived"]);
+export const distributionContractStatusEnum = pgEnum("distribution_contract_status", ["draft", "active", "paused", "expired", "terminated", "archived"]);
+export const distributionCostTermStatusEnum = pgEnum("distribution_cost_term_status", [
+    "draft",
+    "active",
+    "open",
+    "partially_recovered",
+    "recovered",
+    "satisfied",
+    "cancelled",
+    "deleted"
+]);
+export const distributionRoyaltyRuleStatusEnum = pgEnum("distribution_royalty_rule_status", ["draft", "active", "inactive", "archived"]);
+export const distributionAllocationStatusEnum = pgEnum("distribution_allocation_status", ["preview", "posted", "void", "error"]);
+export const distributionStatementStatusEnum = pgEnum("distribution_statement_status", ["draft", "generated", "locked", "sent", "paid", "void"]);
+export const distributionPaymentStatusEnum = pgEnum("distribution_payment_status", ["recorded", "edited", "void", "reconciled"]);
+export const distributionBalanceMovementTypeEnum = pgEnum("distribution_balance_movement_type", [
+    "opening",
+    "period",
+    "statement",
+    "void_reversal",
+    "adjustment",
+    "carry_forward"
+]);
+function createdAtColumn() {
+    return timestamp("created_at", { withTimezone: true, mode: "string" }).notNull().defaultNow();
+}
+function updatedAtColumn() {
+    return timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull().defaultNow();
+}
+function amountColumn(name) {
+    return numeric(name, { precision: 28, scale: 10 });
+}
+function percentageColumn(name) {
+    return numeric(name, { precision: 12, scale: 6 });
+}
+function quantityColumn(name) {
+    return numeric(name, { precision: 24, scale: 6 });
+}
+function fxRateColumn(name) {
+    return numeric(name, { precision: 24, scale: 10 });
+}
+export const importBatches = pgTable("import_batches", {
+    id: uuid("id").defaultRandom().primaryKey(),
+    source: varchar("source", { length: 160 }).notNull(),
+    fileName: text("file_name").notNull(),
+    status: distributionImportStatusEnum("status").notNull().default("draft"),
+    importedAt: timestamp("imported_at", { withTimezone: true, mode: "string" }),
+    metadata: jsonb("metadata").$type().notNull().default(sql `'{}'::jsonb`),
+    createdAt: createdAtColumn(),
+    updatedAt: updatedAtColumn()
+}, (table) => [
+    index("import_batches_source_idx").on(table.source),
+    index("import_batches_status_idx").on(table.status),
+    index("import_batches_imported_at_idx").on(table.importedAt)
+]);
+export const rawImportRows = pgTable("raw_import_rows", {
+    id: uuid("id").defaultRandom().primaryKey(),
+    batchId: uuid("batch_id")
+        .notNull()
+        .references(() => importBatches.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    rowNumber: integer("row_number").notNull(),
+    rawData: jsonb("raw_data").$type().notNull(),
+    createdAt: createdAtColumn()
+}, (table) => [
+    uniqueIndex("raw_import_rows_batch_row_unique").on(table.batchId, table.rowNumber),
+    index("raw_import_rows_batch_id_idx").on(table.batchId),
+    check("raw_import_rows_row_number_check", sql `${table.rowNumber} > 0`)
+]);
+export const normalizedEarnings = pgTable("normalized_earnings", {
+    id: uuid("id").defaultRandom().primaryKey(),
+    batchId: uuid("batch_id")
+        .notNull()
+        .references(() => importBatches.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    rawImportRowId: uuid("raw_import_row_id").references(() => rawImportRows.id, { onDelete: "set null", onUpdate: "cascade" }),
+    dsp: varchar("dsp", { length: 160 }).notNull(),
+    grossAmount: amountColumn("gross_amount").notNull(),
+    quantity: quantityColumn("quantity").notNull(),
+    currency: char("currency", { length: 3 }).notNull(),
+    isrc: varchar("isrc", { length: 32 }),
+    upc: varchar("upc", { length: 32 }),
+    rawTitle: text("raw_title"),
+    rawArtist: text("raw_artist"),
+    rawLabel: text("raw_label"),
+    mappingStatus: distributionMappingStatusEnum("mapping_status").notNull().default("unmapped"),
+    calculationStatus: distributionCalculationStatusEnum("calculation_status").notNull().default("pending"),
+    createdAt: createdAtColumn(),
+    updatedAt: updatedAtColumn()
+}, (table) => [
+    index("normalized_earnings_batch_id_idx").on(table.batchId),
+    index("normalized_earnings_raw_import_row_id_idx").on(table.rawImportRowId),
+    index("normalized_earnings_isrc_idx").on(table.isrc),
+    index("normalized_earnings_upc_idx").on(table.upc),
+    index("normalized_earnings_mapping_status_idx").on(table.mappingStatus),
+    index("normalized_earnings_calculation_status_idx").on(table.calculationStatus)
+]);
+export const mappingStatsByBatch = pgTable("mapping_stats_by_batch", {
+    id: uuid("id").defaultRandom().primaryKey(),
+    batchId: uuid("batch_id")
+        .notNull()
+        .references(() => importBatches.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    totalRows: integer("total_rows").notNull().default(0),
+    matchedRows: integer("matched_rows").notNull().default(0),
+    suspenseRows: integer("suspense_rows").notNull().default(0),
+    ignoredRows: integer("ignored_rows").notNull().default(0),
+    createdAt: createdAtColumn(),
+    updatedAt: updatedAtColumn()
+}, (table) => [
+    uniqueIndex("mapping_stats_by_batch_batch_unique").on(table.batchId),
+    check("mapping_stats_by_batch_counts_check", sql `${table.totalRows} >= 0 and ${table.matchedRows} >= 0 and ${table.suspenseRows} >= 0 and ${table.ignoredRows} >= 0`)
+]);
+export const importIssues = pgTable("import_issues", {
+    id: uuid("id").defaultRandom().primaryKey(),
+    batchId: uuid("batch_id")
+        .notNull()
+        .references(() => importBatches.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    rawImportRowId: uuid("raw_import_row_id").references(() => rawImportRows.id, { onDelete: "set null", onUpdate: "cascade" }),
+    severity: distributionIssueSeverityEnum("severity").notNull(),
+    code: varchar("code", { length: 160 }).notNull(),
+    message: text("message").notNull(),
+    metadata: jsonb("metadata").$type().notNull().default(sql `'{}'::jsonb`),
+    createdAt: createdAtColumn()
+}, (table) => [
+    index("import_issues_batch_id_idx").on(table.batchId),
+    index("import_issues_raw_import_row_id_idx").on(table.rawImportRowId),
+    index("import_issues_severity_idx").on(table.severity)
+]);
+export const payees = pgTable("payees", {
+    id: uuid("id").defaultRandom().primaryKey(),
+    name: text("name").notNull(),
+    linkedArtistIds: jsonb("linked_artist_ids").$type().notNull().default(sql `'[]'::jsonb`),
+    preferredCurrency: char("preferred_currency", { length: 3 }).notNull().default("MUR"),
+    paymentMethod: text("payment_method"),
+    taxInfo: jsonb("tax_info").$type().notNull().default(sql `'{}'::jsonb`),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: createdAtColumn(),
+    updatedAt: updatedAtColumn()
+}, (table) => [
+    index("payees_is_active_idx").on(table.isActive),
+    index("payees_preferred_currency_idx").on(table.preferredCurrency)
+]);
+export const contracts = pgTable("contracts", {
+    id: uuid("id").defaultRandom().primaryKey(),
+    contractNumber: varchar("contract_number", { length: 160 }),
+    title: text("title").notNull(),
+    status: distributionContractStatusEnum("status").notNull().default("draft"),
+    effectiveFrom: date("effective_from", { mode: "string" }),
+    effectiveTo: date("effective_to", { mode: "string" }),
+    signedAt: timestamp("signed_at", { withTimezone: true, mode: "string" }),
+    metadata: jsonb("metadata").$type().notNull().default(sql `'{}'::jsonb`),
+    createdAt: createdAtColumn(),
+    updatedAt: updatedAtColumn()
+}, (table) => [
+    uniqueIndex("contracts_contract_number_unique").on(table.contractNumber),
+    index("contracts_status_idx").on(table.status),
+    index("contracts_effective_from_idx").on(table.effectiveFrom)
+]);
+export const artists = pgTable("artists", {
+    id: uuid("id").defaultRandom().primaryKey(),
+    name: text("name").notNull(),
+    aliases: jsonb("aliases").$type().notNull().default(sql `'[]'::jsonb`),
+    defaultPayeeId: uuid("default_payee_id").references(() => payees.id, { onDelete: "set null", onUpdate: "cascade" }),
+    defaultSplitContractId: uuid("default_split_contract_id").references(() => contracts.id, { onDelete: "set null", onUpdate: "cascade" }),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: createdAtColumn(),
+    updatedAt: updatedAtColumn()
+}, (table) => [
+    index("artists_default_payee_id_idx").on(table.defaultPayeeId),
+    index("artists_default_split_contract_id_idx").on(table.defaultSplitContractId),
+    index("artists_is_active_idx").on(table.isActive)
+]);
+export const labels = pgTable("labels", {
+    id: uuid("id").defaultRandom().primaryKey(),
+    name: text("name").notNull(),
+    defaultSplitPct: numeric("default_split_pct", { precision: 5, scale: 2 }),
+    payeeId: uuid("payee_id").references(() => payees.id, { onDelete: "set null", onUpdate: "cascade" }),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: createdAtColumn(),
+    updatedAt: updatedAtColumn()
+}, (table) => [
+    index("labels_payee_id_idx").on(table.payeeId),
+    index("labels_is_active_idx").on(table.isActive),
+    check("labels_default_split_pct_check", sql `${table.defaultSplitPct} is null or (${table.defaultSplitPct} >= 0 and ${table.defaultSplitPct} <= 100)`)
+]);
+export const releases = pgTable("releases", {
+    id: uuid("id").defaultRandom().primaryKey(),
+    title: text("title").notNull(),
+    upc: varchar("upc", { length: 32 }),
+    labelId: uuid("label_id").references(() => labels.id, { onDelete: "set null", onUpdate: "cascade" }),
+    labelName: text("label_name"),
+    releaseDate: date("release_date", { mode: "string" }),
+    createdAt: createdAtColumn(),
+    updatedAt: updatedAtColumn()
+}, (table) => [
+    index("releases_label_id_idx").on(table.labelId),
+    index("releases_upc_idx").on(table.upc)
+]);
+export const tracks = pgTable("tracks", {
+    id: uuid("id").defaultRandom().primaryKey(),
+    title: text("title").notNull(),
+    isrc: varchar("isrc", { length: 32 }),
+    releaseId: uuid("release_id").references(() => releases.id, { onDelete: "set null", onUpdate: "cascade" }),
+    versionTitle: text("version_title"),
+    createdAt: createdAtColumn(),
+    updatedAt: updatedAtColumn()
+}, (table) => [
+    index("tracks_isrc_idx").on(table.isrc),
+    index("tracks_release_id_idx").on(table.releaseId)
+]);
+export const trackContributors = pgTable("track_contributors", {
+    id: uuid("id").defaultRandom().primaryKey(),
+    trackId: uuid("track_id")
+        .notNull()
+        .references(() => tracks.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    artistId: uuid("artist_id")
+        .notNull()
+        .references(() => artists.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    role: varchar("role", { length: 160 }).notNull(),
+    createdAt: createdAtColumn()
+}, (table) => [
+    uniqueIndex("track_contributors_track_artist_role_unique").on(table.trackId, table.artistId, table.role),
+    index("track_contributors_track_id_idx").on(table.trackId),
+    index("track_contributors_artist_id_idx").on(table.artistId)
+]);
+export const identityLink = pgTable("identity_link", {
+    id: uuid("id").defaultRandom().primaryKey(),
+    payeeId: uuid("payee_id")
+        .notNull()
+        .references(() => payees.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    officePartnerId: uuid("office_partner_id")
+        .notNull()
+        .references(() => officePartners.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    confidence: percentageColumn("confidence").notNull(),
+    status: distributionIdentityStatusEnum("status").notNull().default("pending"),
+    createdAt: createdAtColumn(),
+    updatedAt: updatedAtColumn()
+}, (table) => [
+    uniqueIndex("identity_link_payee_office_partner_unique").on(table.payeeId, table.officePartnerId),
+    index("identity_link_payee_id_idx").on(table.payeeId),
+    index("identity_link_office_partner_id_idx").on(table.officePartnerId),
+    check("identity_link_confidence_check", sql `${table.confidence} >= 0 and ${table.confidence} <= 100`)
+]);
+export const contractScopes = pgTable("contract_scopes", {
+    id: uuid("id").defaultRandom().primaryKey(),
+    contractId: uuid("contract_id")
+        .notNull()
+        .references(() => contracts.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    scopeType: varchar("scope_type", { length: 80 }).notNull(),
+    scopeId: text("scope_id").notNull(),
+    territory: varchar("territory", { length: 80 }),
+    dsp: varchar("dsp", { length: 160 }),
+    createdAt: createdAtColumn()
+}, (table) => [
+    index("contract_scopes_contract_id_idx").on(table.contractId),
+    index("contract_scopes_scope_idx").on(table.scopeType, table.scopeId),
+    index("contract_scopes_dsp_idx").on(table.dsp)
+]);
+export const contractCostTerms = pgTable("contract_cost_terms", {
+    id: uuid("id").defaultRandom().primaryKey(),
+    contractId: uuid("contract_id")
+        .notNull()
+        .references(() => contracts.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    payeeId: uuid("payee_id").references(() => payees.id, { onDelete: "set null", onUpdate: "cascade" }),
+    amount: amountColumn("amount").notNull(),
+    currency: char("currency", { length: 3 }).notNull(),
+    recoupable: boolean("recoupable").notNull().default(true),
+    recoveryMethod: varchar("recovery_method", { length: 160 }).notNull(),
+    recoveryParam: percentageColumn("recovery_param"),
+    status: distributionCostTermStatusEnum("status").notNull().default("draft"),
+    scopeType: varchar("scope_type", { length: 80 }),
+    scopeId: text("scope_id"),
+    createdAt: createdAtColumn(),
+    updatedAt: updatedAtColumn()
+}, (table) => [
+    index("contract_cost_terms_contract_id_idx").on(table.contractId),
+    index("contract_cost_terms_payee_id_idx").on(table.payeeId),
+    index("contract_cost_terms_status_idx").on(table.status)
+]);
+export const contractExtractions = pgTable("contract_extractions", {
+    id: uuid("id").defaultRandom().primaryKey(),
+    contractId: uuid("contract_id")
+        .notNull()
+        .references(() => contracts.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    rawText: text("raw_text").notNull(),
+    extractedJson: jsonb("extracted_json").$type().notNull().default(sql `'{}'::jsonb`),
+    createdAt: createdAtColumn()
+}, (table) => [index("contract_extractions_contract_id_idx").on(table.contractId)]);
+export const royaltyRules = pgTable("royalty_rules", {
+    id: uuid("id").defaultRandom().primaryKey(),
+    contractId: uuid("contract_id")
+        .notNull()
+        .references(() => contracts.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    payeeId: uuid("payee_id")
+        .notNull()
+        .references(() => payees.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    percentage: percentageColumn("percentage").notNull(),
+    scopeType: varchar("scope_type", { length: 80 }),
+    scopeId: text("scope_id"),
+    priority: integer("priority").notNull().default(0),
+    effectiveFrom: date("effective_from", { mode: "string" }),
+    effectiveTo: date("effective_to", { mode: "string" }),
+    recoupable: boolean("recoupable").notNull().default(true),
+    status: distributionRoyaltyRuleStatusEnum("status").notNull().default("draft"),
+    createdAt: createdAtColumn(),
+    updatedAt: updatedAtColumn()
+}, (table) => [
+    index("royalty_rules_contract_id_idx").on(table.contractId),
+    index("royalty_rules_payee_id_idx").on(table.payeeId),
+    index("royalty_rules_scope_idx").on(table.scopeType, table.scopeId),
+    index("royalty_rules_priority_idx").on(table.priority),
+    check("royalty_rules_percentage_check", sql `${table.percentage} >= 0 and ${table.percentage} <= 100`)
+]);
+export const earningTrackMatches = pgTable("earning_track_matches", {
+    id: uuid("id").defaultRandom().primaryKey(),
+    earningId: uuid("earning_id")
+        .notNull()
+        .references(() => normalizedEarnings.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    trackId: uuid("track_id")
+        .notNull()
+        .references(() => tracks.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    confidence: percentageColumn("confidence").notNull(),
+    status: distributionMappingStatusEnum("status").notNull().default("matched"),
+    createdAt: createdAtColumn()
+}, (table) => [
+    uniqueIndex("earning_track_matches_earning_track_unique").on(table.earningId, table.trackId),
+    index("earning_track_matches_earning_id_idx").on(table.earningId),
+    index("earning_track_matches_track_id_idx").on(table.trackId),
+    check("earning_track_matches_confidence_check", sql `${table.confidence} >= 0 and ${table.confidence} <= 100`)
+]);
+export const mappingRules = pgTable("mapping_rules", {
+    id: uuid("id").defaultRandom().primaryKey(),
+    name: text("name").notNull(),
+    source: varchar("source", { length: 160 }).notNull(),
+    conditionsJson: jsonb("conditions_json").$type().notNull().default(sql `'{}'::jsonb`),
+    targetTrackId: uuid("target_track_id").references(() => tracks.id, { onDelete: "set null", onUpdate: "cascade" }),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: createdAtColumn(),
+    updatedAt: updatedAtColumn()
+}, (table) => [
+    index("mapping_rules_source_idx").on(table.source),
+    index("mapping_rules_target_track_id_idx").on(table.targetTrackId),
+    index("mapping_rules_is_active_idx").on(table.isActive)
+]);
+export const catalogAliases = pgTable("catalog_aliases", {
+    id: uuid("id").defaultRandom().primaryKey(),
+    aliasText: text("alias_text").notNull(),
+    artistId: uuid("artist_id").references(() => artists.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    payeeId: uuid("payee_id").references(() => payees.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    labelId: uuid("label_id").references(() => labels.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    releaseId: uuid("release_id").references(() => releases.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    trackId: uuid("track_id").references(() => tracks.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    createdAt: createdAtColumn()
+}, (table) => [
+    index("catalog_aliases_alias_text_idx").on(table.aliasText),
+    index("catalog_aliases_artist_id_idx").on(table.artistId),
+    index("catalog_aliases_payee_id_idx").on(table.payeeId),
+    index("catalog_aliases_label_id_idx").on(table.labelId),
+    index("catalog_aliases_release_id_idx").on(table.releaseId),
+    index("catalog_aliases_track_id_idx").on(table.trackId)
+]);
+export const calculationRuns = pgTable("calculation_runs", {
+    id: uuid("id").defaultRandom().primaryKey(),
+    batchId: uuid("batch_id").references(() => importBatches.id, { onDelete: "set null", onUpdate: "cascade" }),
+    status: distributionCalculationStatusEnum("status").notNull().default("pending"),
+    reconciliationJson: jsonb("reconciliation_json").$type().notNull().default(sql `'{}'::jsonb`),
+    startedAt: timestamp("started_at", { withTimezone: true, mode: "string" }),
+    finishedAt: timestamp("finished_at", { withTimezone: true, mode: "string" }),
+    createdAt: createdAtColumn()
+}, (table) => [
+    index("calculation_runs_batch_id_idx").on(table.batchId),
+    index("calculation_runs_status_idx").on(table.status)
+]);
+export const earningAllocations = pgTable("earning_allocations", {
+    id: uuid("id").defaultRandom().primaryKey(),
+    earningId: uuid("earning_id")
+        .notNull()
+        .references(() => normalizedEarnings.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    calculationRunId: uuid("calculation_run_id")
+        .notNull()
+        .references(() => calculationRuns.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    payeeId: uuid("payee_id")
+        .notNull()
+        .references(() => payees.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    contractId: uuid("contract_id").references(() => contracts.id, { onDelete: "set null", onUpdate: "cascade" }),
+    trackId: uuid("track_id").references(() => tracks.id, { onDelete: "set null", onUpdate: "cascade" }),
+    grossAmount: amountColumn("gross_amount").notNull(),
+    originalGrossAmount: amountColumn("original_gross_amount").notNull(),
+    fxRate: fxRateColumn("fx_rate"),
+    grossShare: amountColumn("gross_share").notNull(),
+    recoupmentApplied: amountColumn("recoupment_applied").notNull(),
+    netPayable: amountColumn("net_payable").notNull(),
+    splitPercentage: percentageColumn("split_percentage").notNull(),
+    currency: char("currency", { length: 3 }).notNull(),
+    originalCurrency: char("original_currency", { length: 3 }).notNull(),
+    status: distributionAllocationStatusEnum("status").notNull().default("preview"),
+    createdAt: createdAtColumn()
+}, (table) => [
+    index("earning_allocations_earning_id_idx").on(table.earningId),
+    index("earning_allocations_calculation_run_id_idx").on(table.calculationRunId),
+    index("earning_allocations_payee_id_idx").on(table.payeeId),
+    index("earning_allocations_contract_id_idx").on(table.contractId),
+    index("earning_allocations_track_id_idx").on(table.trackId),
+    index("earning_allocations_status_idx").on(table.status),
+    check("earning_allocations_split_percentage_check", sql `${table.splitPercentage} >= 0 and ${table.splitPercentage} <= 100`)
+]);
+export const suspenseItems = pgTable("suspense_items", {
+    id: uuid("id").defaultRandom().primaryKey(),
+    earningId: uuid("earning_id").references(() => normalizedEarnings.id, { onDelete: "set null", onUpdate: "cascade" }),
+    amount: amountColumn("amount").notNull(),
+    currency: char("currency", { length: 3 }).notNull(),
+    reasonCode: varchar("reason_code", { length: 160 }).notNull(),
+    resolved: boolean("resolved").notNull().default(false),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true, mode: "string" }),
+    createdAt: createdAtColumn()
+}, (table) => [
+    index("suspense_items_earning_id_idx").on(table.earningId),
+    index("suspense_items_reason_code_idx").on(table.reasonCode),
+    index("suspense_items_resolved_idx").on(table.resolved)
+]);
+export const statements = pgTable("statements", {
+    id: uuid("id").defaultRandom().primaryKey(),
+    payeeId: uuid("payee_id")
+        .notNull()
+        .references(() => payees.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    calculationRunId: uuid("calculation_run_id").references(() => calculationRuns.id, { onDelete: "set null", onUpdate: "cascade" }),
+    periodStart: date("period_start", { mode: "string" }).notNull(),
+    periodEnd: date("period_end", { mode: "string" }).notNull(),
+    currency: char("currency", { length: 3 }).notNull(),
+    grossTotal: amountColumn("gross_total").notNull(),
+    recoupmentTotal: amountColumn("recoupment_total").notNull(),
+    netPayable: amountColumn("net_payable").notNull(),
+    amountDue: amountColumn("amount_due").notNull(),
+    version: integer("version").notNull().default(1),
+    status: distributionStatementStatusEnum("status").notNull().default("draft"),
+    lockedAt: timestamp("locked_at", { withTimezone: true, mode: "string" }),
+    createdAt: createdAtColumn(),
+    updatedAt: updatedAtColumn()
+}, (table) => [
+    uniqueIndex("statements_payee_period_currency_version_unique").on(table.payeeId, table.periodStart, table.periodEnd, table.currency, table.version),
+    index("statements_payee_id_idx").on(table.payeeId),
+    index("statements_calculation_run_id_idx").on(table.calculationRunId),
+    index("statements_status_idx").on(table.status)
+]);
+export const payeeBalances = pgTable("payee_balances", {
+    id: uuid("id").defaultRandom().primaryKey(),
+    payeeId: uuid("payee_id")
+        .notNull()
+        .references(() => payees.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    statementId: uuid("statement_id").references(() => statements.id, { onDelete: "set null", onUpdate: "cascade" }),
+    currency: char("currency", { length: 3 }).notNull(),
+    openingBalance: amountColumn("opening_balance").notNull(),
+    periodNet: amountColumn("period_net").notNull(),
+    closingBalance: amountColumn("closing_balance").notNull(),
+    movementType: distributionBalanceMovementTypeEnum("movement_type").notNull(),
+    createdAt: createdAtColumn()
+}, (table) => [
+    index("payee_balances_payee_currency_idx").on(table.payeeId, table.currency),
+    index("payee_balances_statement_id_idx").on(table.statementId),
+    index("payee_balances_movement_type_idx").on(table.movementType)
+]);
+export const statementLines = pgTable("statement_lines", {
+    id: uuid("id").defaultRandom().primaryKey(),
+    statementId: uuid("statement_id")
+        .notNull()
+        .references(() => statements.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    earningAllocationId: uuid("earning_allocation_id").references(() => earningAllocations.id, { onDelete: "set null", onUpdate: "cascade" }),
+    trackId: uuid("track_id").references(() => tracks.id, { onDelete: "set null", onUpdate: "cascade" }),
+    grossShare: amountColumn("gross_share").notNull(),
+    recoupmentApplied: amountColumn("recoupment_applied").notNull(),
+    netPayable: amountColumn("net_payable").notNull(),
+    quantity: quantityColumn("quantity").notNull(),
+    currency: char("currency", { length: 3 }).notNull(),
+    createdAt: createdAtColumn()
+}, (table) => [
+    index("statement_lines_statement_id_idx").on(table.statementId),
+    index("statement_lines_earning_allocation_id_idx").on(table.earningAllocationId),
+    index("statement_lines_track_id_idx").on(table.trackId)
+]);
+export const payments = pgTable("payments", {
+    id: uuid("id").defaultRandom().primaryKey(),
+    payeeId: uuid("payee_id")
+        .notNull()
+        .references(() => payees.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    amount: amountColumn("amount").notNull(),
+    currency: char("currency", { length: 3 }).notNull(),
+    exchangeRate: fxRateColumn("exchange_rate"),
+    status: distributionPaymentStatusEnum("status").notNull().default("recorded"),
+    paidAt: timestamp("paid_at", { withTimezone: true, mode: "string" }),
+    reference: text("reference"),
+    createdAt: createdAtColumn(),
+    updatedAt: updatedAtColumn()
+}, (table) => [
+    index("payments_payee_id_idx").on(table.payeeId),
+    index("payments_status_idx").on(table.status),
+    index("payments_paid_at_idx").on(table.paidAt)
+]);
+export const statementPaymentLinks = pgTable("statement_payment_links", {
+    id: uuid("id").defaultRandom().primaryKey(),
+    statementId: uuid("statement_id")
+        .notNull()
+        .references(() => statements.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    paymentId: uuid("payment_id")
+        .notNull()
+        .references(() => payments.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    amountApplied: amountColumn("amount_applied").notNull(),
+    createdAt: createdAtColumn()
+}, (table) => [
+    uniqueIndex("statement_payment_links_statement_payment_unique").on(table.statementId, table.paymentId),
+    index("statement_payment_links_statement_id_idx").on(table.statementId),
+    index("statement_payment_links_payment_id_idx").on(table.paymentId)
+]);
+export const expenseApplications = pgTable("expense_applications", {
+    id: uuid("id").defaultRandom().primaryKey(),
+    costTermId: uuid("cost_term_id")
+        .notNull()
+        .references(() => contractCostTerms.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    payeeId: uuid("payee_id")
+        .notNull()
+        .references(() => payees.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    statementId: uuid("statement_id").references(() => statements.id, { onDelete: "set null", onUpdate: "cascade" }),
+    calculationRunId: uuid("calculation_run_id").references(() => calculationRuns.id, { onDelete: "set null", onUpdate: "cascade" }),
+    amountApplied: amountColumn("amount_applied").notNull(),
+    currency: char("currency", { length: 3 }).notNull(),
+    createdAt: createdAtColumn()
+}, (table) => [
+    index("expense_applications_cost_term_id_idx").on(table.costTermId),
+    index("expense_applications_payee_id_idx").on(table.payeeId),
+    index("expense_applications_statement_id_idx").on(table.statementId),
+    index("expense_applications_calculation_run_id_idx").on(table.calculationRunId)
+]);
+export const auditLogs = pgTable("audit_logs", {
+    id: uuid("id").defaultRandom().primaryKey(),
+    entityType: varchar("entity_type", { length: 160 }).notNull(),
+    entityId: text("entity_id").notNull(),
+    action: varchar("action", { length: 160 }).notNull(),
+    actorUserId: text("actor_user_id"),
+    before: jsonb("before").$type().notNull().default(sql `'{}'::jsonb`),
+    after: jsonb("after").$type().notNull().default(sql `'{}'::jsonb`),
+    metadata: jsonb("metadata").$type().notNull().default(sql `'{}'::jsonb`),
+    createdAt: createdAtColumn()
+}, (table) => [
+    index("audit_logs_entity_idx").on(table.entityType, table.entityId),
+    index("audit_logs_action_idx").on(table.action),
+    index("audit_logs_created_at_idx").on(table.createdAt)
+]);
+export const fxRates = pgTable("fx_rates", {
+    id: uuid("id").defaultRandom().primaryKey(),
+    fromCurrency: char("from_currency", { length: 3 }).notNull(),
+    toCurrency: char("to_currency", { length: 3 }).notNull(),
+    rate: fxRateColumn("rate").notNull(),
+    effectiveDate: date("effective_date", { mode: "string" }).notNull(),
+    createdAt: createdAtColumn()
+}, (table) => [
+    uniqueIndex("fx_rates_currency_date_unique").on(table.fromCurrency, table.toCurrency, table.effectiveDate),
+    index("fx_rates_effective_date_idx").on(table.effectiveDate),
+    check("fx_rates_rate_check", sql `${table.rate} > 0`)
+]);
+//# sourceMappingURL=schema.js.map

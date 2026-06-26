@@ -1,0 +1,12 @@
+{
+  "name": "@ehq/api-client",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "check": "tsc -b --pretty false",
+    "typecheck": "tsc -b --pretty false"
+  }
+}

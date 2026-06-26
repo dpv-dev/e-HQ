@@ -1,0 +1,384 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ë • hq — platform</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;700;900&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#050505; --surface:#0E0F12; --surface-2:#15161A; --surface-3:#1B1D22;
+    --text:#FFFFFF; --soft:rgba(255,255,255,.74); --muted:rgba(255,255,255,.48);
+    --line:rgba(255,255,255,.10); --line-soft:rgba(255,255,255,.055);
+    --yellow:#FFB800; --yellow-soft:rgba(255,184,0,.13); --yellow-bd:rgba(255,184,0,.45);
+    --red:#FF3B30; --red-bg:rgba(255,59,48,.12);
+    --green:#22C55E; --green-bg:rgba(34,197,94,.12);
+    --blue:#3B82F6; --blue-bg:rgba(59,130,246,.12);
+    --on-yellow:#0A0A0A;
+    --sans:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
+    --mono:'Space Mono','SFMono-Regular',monospace;
+    --ease:cubic-bezier(.19,1,.22,1);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{font-family:var(--sans);background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased;overflow:hidden}
+  .mono{font-family:var(--mono)}
+  .shell{display:grid;grid-template-columns:236px 1fr;height:100dvh}
+
+  /* sidebar */
+  .side{border-right:1px solid var(--line-soft);background:rgba(8,9,11,.6);display:flex;flex-direction:column;min-height:0}
+  .brand{display:flex;align-items:center;gap:10px;padding:18px 16px 14px}
+  .brand .e{color:var(--yellow);font-weight:900;font-size:24px;line-height:1}
+  .brand .wm{font-family:var(--mono);font-size:12px;letter-spacing:.16em;color:var(--soft)}
+  .nav{flex:1;overflow-y:auto;padding:4px 10px 16px}
+  .nav::-webkit-scrollbar{width:8px}.nav::-webkit-scrollbar-thumb{background:var(--line);border-radius:8px}
+  .grp{font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);padding:16px 10px 7px}
+  .nav a{display:flex;align-items:center;gap:10px;padding:8px 11px;border-radius:8px;color:var(--soft);text-decoration:none;font-size:13px;font-weight:500;cursor:pointer}
+  .nav a .ic{width:7px;height:7px;border-radius:2px;background:currentColor;opacity:.5;flex:none}
+  .nav a:hover{background:var(--surface);color:var(--text)}
+  .nav a.on{color:var(--text);background:var(--yellow-soft);box-shadow:inset 2px 0 0 var(--yellow)}
+  .nav a.on .ic{background:var(--yellow);opacity:1}
+  .nav a .lk{margin-left:auto;color:var(--red);font-family:var(--mono);font-size:11px}
+  .sstat{display:flex;align-items:center;gap:8px;padding:12px 18px;border-top:1px solid var(--line-soft);font-family:var(--mono);font-size:11px;color:var(--muted)}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 9px rgba(34,197,94,.6)}
+
+  /* topbar */
+  .main{display:flex;flex-direction:column;min-width:0;min-height:0}
+  .top{flex:0 0 auto;display:flex;align-items:center;gap:16px;padding:13px 24px;border-bottom:1px solid var(--line-soft)}
+  .crumb{font-family:var(--mono);font-size:12px;letter-spacing:.04em;color:var(--soft)}
+  .crumb b{color:var(--text)}
+  .search{margin-left:6px;flex:1;max-width:380px;display:flex;align-items:center;gap:8px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 12px;color:var(--muted);font-size:13px}
+  .search .kbd{margin-left:auto;font-family:var(--mono);border:1px solid var(--line);border-radius:5px;padding:0 5px;font-size:10px}
+  .tright{margin-left:auto;display:flex;align-items:center;gap:14px}
+  .bell{position:relative;width:18px;height:18px;border:1.6px solid var(--muted);border-radius:6px 6px 8px 8px}
+  .bell b{position:absolute;top:-6px;right:-6px;background:var(--yellow);color:var(--on-yellow);font-size:9px;font-weight:800;border-radius:50%;width:14px;height:14px;display:grid;place-items:center}
+  .usr{display:flex;align-items:center;gap:8px}
+  .usr .av{width:28px;height:28px;border-radius:50%;background:var(--surface-3);display:grid;place-items:center;font-family:var(--mono);font-size:10px;font-weight:700;color:var(--yellow);border:1px solid var(--line)}
+  .usr .nm{font-size:12px;font-weight:600;line-height:1.2}
+  .usr .nm small{display:block;font-family:var(--mono);color:var(--muted);font-weight:400;font-size:10px}
+
+  /* content */
+  .view{flex:1;overflow-y:auto;padding:24px 26px 40px}
+  .view::-webkit-scrollbar{width:10px}.view::-webkit-scrollbar-thumb{background:var(--line);border-radius:10px}
+  .ph{margin-bottom:18px}
+  .ph .eb{font-family:var(--mono);font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted)}
+  .ph h1{font-size:27px;font-weight:900;letter-spacing:-.02em;margin-top:6px}
+  .ph .sub{color:var(--soft);font-size:13.5px;margin-top:5px;font-weight:300}
+
+  .row{display:flex;gap:14px;flex-wrap:wrap}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:16px}
+  .kpi{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:15px 17px}
+  .kpi .l{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+  .kpi .v{font-size:24px;font-weight:900;letter-spacing:-.02em;margin:9px 0 5px;font-variant-numeric:tabular-nums}
+  .kpi .d{font-size:12px;font-weight:700;font-family:var(--mono)}
+  .kpi.acc{box-shadow:inset 3px 0 0 var(--yellow)}
+  .pos{color:var(--green)} .neg{color:var(--red)} .ylw{color:var(--yellow)}
+
+  .panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:17px 19px;margin-top:14px;min-width:0}
+  .panel h2{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.08em}
+  .panel .hint{font-size:12px;color:var(--muted);margin-top:3px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .grid3{display:grid;grid-template-columns:2fr 1fr;gap:14px}
+  @media(max-width:1000px){.grid2,.grid3{grid-template-columns:1fr}}
+
+  /* toolbar */
+  .toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:14px}
+  .sel{display:flex;flex-direction:column;gap:4px;min-width:128px}
+  .sel label{font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+  .sel .box{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 11px;font-size:13px;font-weight:500;display:flex;justify-content:space-between;gap:10px}
+  .sel .box .c{color:var(--muted)}
+  .sel.on .box{border-color:var(--yellow-bd);box-shadow:0 0 0 3px var(--yellow-soft)}
+  .tb-sp{margin-left:auto}
+
+  /* table */
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  thead th{font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);text-align:left;font-weight:400;padding:9px 12px;border-bottom:1px solid var(--line)}
+  thead th.r,tbody td.r{text-align:right;font-variant-numeric:tabular-nums}
+  tbody td{padding:11px 12px;border-bottom:1px solid var(--line-soft)}
+  tbody tr:hover{background:var(--yellow-soft)}
+  tbody td.b{font-weight:600}
+  .tbl-wrap{background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-top:14px}
+  .tbl-wrap .thead-actions{display:flex;align-items:center;justify-content:space-between;padding:13px 14px;border-bottom:1px solid var(--line)}
+  .tbl-wrap .thead-actions h2{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.08em}
+  .scrollx{overflow-x:auto}
+
+  .badge{font-family:var(--mono);font-size:10.5px;font-weight:700;letter-spacing:.04em;padding:3px 9px;border-radius:999px;display:inline-block}
+  .b-ok{color:var(--green);background:var(--green-bg);border:1px solid rgba(34,197,94,.35)}
+  .b-warn{color:var(--yellow);background:var(--yellow-soft);border:1px solid var(--yellow-bd)}
+  .b-err{color:var(--red);background:var(--red-bg);border:1px solid rgba(255,59,48,.35)}
+  .b-info{color:var(--blue);background:var(--blue-bg);border:1px solid rgba(59,130,246,.35)}
+  .b-mute{color:var(--muted);background:var(--surface-3);border:1px solid var(--line)}
+
+  .btn{display:inline-flex;align-items:center;gap:7px;padding:8px 13px;border-radius:8px;font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;font-weight:700;cursor:pointer;border:1px solid var(--line);background:transparent;color:var(--text);text-decoration:none}
+  .btn:hover{border-color:var(--yellow-bd)}
+  .btn.pri{background:var(--yellow);color:var(--on-yellow);border-color:var(--yellow)}
+  .btn.dan{color:var(--red);border-color:rgba(255,59,48,.4)}
+  .btn.sm{padding:6px 10px;font-size:10px}
+
+  .bars{display:flex;align-items:flex-end;gap:7px;height:120px;margin-top:14px}
+  .bars .bar{flex:1;background:linear-gradient(180deg,var(--yellow),var(--yellow-active,#E6A600));border-radius:3px 3px 0 0;min-width:6px;position:relative}
+  .bars .bar span{position:absolute;bottom:-20px;left:0;right:0;text-align:center;font-family:var(--mono);font-size:9.5px;color:var(--muted)}
+  .legendline{display:flex;gap:18px;margin-top:30px;font-family:var(--mono);font-size:11px;color:var(--muted)}
+
+  /* diverge bars (P&L) */
+  .drow{display:grid;grid-template-columns:130px 100px 100px 96px 1fr;align-items:center;gap:12px;padding:9px 4px;border-top:1px solid var(--line-soft)}
+  .drow:first-child{border-top:none}
+  .drow .n{font-weight:600;font-size:13px}
+  .drow .f{text-align:right;font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .drow .net{text-align:right;font-weight:800;font-size:13px;font-variant-numeric:tabular-nums}
+  .dbar{position:relative;height:16px}
+  .dbar .ax{position:absolute;left:50%;top:-3px;bottom:-3px;width:1px;background:var(--line)}
+  .dbar .fl{position:absolute;top:2px;height:12px;border-radius:3px}
+  .dbar .fl.p{left:50%;background:linear-gradient(90deg,rgba(34,197,94,.5),var(--green))}
+  .dbar .fl.n{right:50%;background:linear-gradient(270deg,rgba(255,59,48,.5),var(--red))}
+
+  .tree{font-size:13.5px;margin-top:8px}
+  .tnode{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px}
+  .tnode:hover{background:var(--surface-2)}
+  .tnode.d1{font-weight:800}.tnode.d2{padding-left:26px;color:var(--soft)}.tnode.d3{padding-left:46px;color:var(--soft);font-weight:400}
+  .tnode .id{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--muted)}
+  .tnode .add{font-family:var(--mono);font-size:10px;color:var(--yellow);cursor:pointer}
+
+  .checks{display:flex;flex-direction:column;gap:10px;margin-top:12px}
+  .chk{display:flex;align-items:center;gap:10px;font-size:13px}
+  .chk .mk{width:18px;height:18px;border-radius:6px;display:grid;place-items:center;font-size:11px;font-weight:900}
+  .chk .mk.ok{background:var(--green-bg);color:var(--green);border:1px solid rgba(34,197,94,.4)}
+  .chk .mk.no{background:var(--red-bg);color:var(--red);border:1px solid rgba(255,59,48,.4)}
+  .chk .mk.wa{background:var(--yellow-soft);color:var(--yellow);border:1px solid var(--yellow-bd)}
+
+  .access{display:flex;gap:6px}
+  .acc-pill{font-family:var(--mono);font-size:10px;padding:3px 8px;border-radius:6px;border:1px solid var(--line);color:var(--muted)}
+  .acc-pill.y{color:var(--green);border-color:rgba(34,197,94,.4)}
+  .acc-pill.n{color:var(--red);border-color:rgba(255,59,48,.4)}
+
+  .note{margin-top:18px;font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.7}
+</style>
+
+<div class="shell">
+  <aside class="side">
+    <div class="brand"><span class="e">ë</span><span class="wm">ë • hq</span></div>
+    <nav class="nav" id="nav"></nav>
+    <div class="sstat"><span class="dot"></span>system · operational</div>
+  </aside>
+  <div class="main">
+    <div class="top">
+      <div class="crumb" id="crumb"></div>
+      <div class="search">Search anything…<span class="kbd">⌘K</span></div>
+      <div class="tright">
+        <div class="bell"><b>3</b></div>
+        <div class="usr"><div class="av">DV</div><div class="nm">David<small>general manager</small></div></div>
+      </div>
+    </div>
+    <div class="view" id="view"></div>
+  </div>
+</div>
+
+<script>
+const RS=n=>'Rs '+n.toLocaleString('en-US');
+// ---------- helpers ----------
+function kpis(items){return `<div class="kpis">${items.map(k=>`
+  <div class="kpi ${k.acc?'acc':''}"><div class="l">${k.l}</div><div class="v">${k.v}</div>
+  ${k.d?`<div class="d ${k.dc||''}">${k.d}</div>`:''}</div>`).join('')}</div>`}
+function toolbar(sels,actions){return `<div class="toolbar">${sels.map((s,i)=>`
+  <div class="sel ${i==0?'on':''}"><label>${s.l}</label><div class="box">${s.v}<span class="c">▾</span></div></div>`).join('')}
+  <div class="tb-sp"></div>${(actions||[]).map(a=>btn(a.t,a.k)).join('')}</div>`}
+function btn(t,k){return `<a class="btn ${k||''}" onclick="return false" href="#">${t}</a>`}
+function badge(t,k){return `<span class="badge ${k}">${t}</span>`}
+function table(cols,rows,opts){opts=opts||{};return `<div class="tbl-wrap">
+  ${opts.title?`<div class="thead-actions"><h2>${opts.title}</h2><div>${(opts.actions||[]).map(a=>btn(a.t,a.k)).join('')}</div></div>`:''}
+  <div class="scrollx"><table><thead><tr>${cols.map(c=>`<th class="${c.r?'r':''}">${c.t}</th>`).join('')}</tr></thead>
+  <tbody>${rows.map(r=>`<tr>${r.map((cell,i)=>`<td class="${cols[i].r?'r':''} ${cols[i].b?'b':''}">${cell}</td>`).join('')}</tr>`).join('')}</tbody></table></div></div>`}
+function panel(title,hint,body){return `<div class="panel"><h2>${title}</h2>${hint?`<div class="hint">${hint}</div>`:''}${body}</div>`}
+function bars(vals,labels){const m=Math.max(...vals);return `<div class="bars">${vals.map((v,i)=>`<div class="bar" style="height:${Math.round(v/m*100)}%"><span>${labels[i]}</span></div>`).join('')}</div><div style="height:14px"></div>`}
+function diverge(rows){const m=Math.max(...rows.map(r=>Math.abs(r.net)));return `<div style="margin-top:10px">
+  <div class="drow"><div class="n"></div><div class="f">Revenue</div><div class="f">Expenses</div><div class="net" style="color:var(--muted);font-weight:700;font-size:10px">NET</div><div></div></div>
+  ${rows.map(r=>{const w=Math.abs(r.net)/m*50;const pos=r.net>=0;return `<div class="drow"><div class="n">${r.n}</div>
+    <div class="f">${RS(r.rev)}</div><div class="f">${RS(r.exp)}</div>
+    <div class="net ${pos?'pos':'neg'}">${pos?'+ ':'− '}${Math.abs(r.net).toLocaleString('en-US')}</div>
+    <div class="dbar"><div class="ax"></div><div class="fl ${pos?'p':'n'}" style="width:${w}%"></div></div></div>`}).join('')}</div>`}
+function checks(items){return `<div class="checks">${items.map(c=>`<div class="chk"><span class="mk ${c.s}">${c.s=='ok'?'✓':c.s=='no'?'✕':'!'}</span>${c.t}</div>`).join('')}</div>`}
+
+// ---------- pages ----------
+const P={};
+// COMMAND CENTER
+P.cc_dash=()=>head('Command Center','Dashboard','Ecosystem overview, health and actions.')
+ +kpis([{l:'Revenue (MTD)',v:RS(5890000),d:'↑ 8.2%',dc:'pos',acc:1},{l:'Active labels',v:'5',d:'mutewax · zanana · bad…',dc:''},{l:'Suspense items',v:'42',d:'↓ 11 this week',dc:'pos'},{l:'Pending payouts',v:RS(318000),d:'7 payees',dc:''}])
+ +`<div class="grid3">${panel('Revenue by quarter','ë • music + distribution',bars([2.1,2.7,3.3,4.0],['Q1','Q2','Q3','Q4']))}
+   ${panel('Readiness',' ',checks([{s:'ok',t:'Imports normalized'},{s:'ok',t:'Mapping rules applied'},{s:'wa',t:'12 splits need review'},{s:'no',t:'3 statements blocked'}]))}</div>`
+ +table([{t:'Payee',b:1},{t:'Label'},{t:'Royalties',r:1},{t:'Status'},{t:''}],[
+   ['Alma Kreol','zanana',RS(184000),badge('PAID','b-ok'),btn('Open statement','sm')],
+   ['Avneesh','bad',RS(96000),badge('PENDING','b-warn'),btn('Open statement','sm')],
+   ['Kaya estate','babani',RS(132000),badge('REVIEW','b-info'),btn('Fix split','sm')],
+ ],{title:'Top royalties',actions:[{t:'View all',k:'sm'}]});
+
+P.cc_users=()=>head('Command Center','Users & permissions','Who can reach Command Center, Office and Distribution.')
+ +table([{t:'User',b:1},{t:'Role'},{t:'Command Center'},{t:'Office'},{t:'Distribution'},{t:''}],[
+   ['David','General Manager','<span class="acc-pill y">allowed</span>','<span class="acc-pill y">allowed</span>','<span class="acc-pill y">allowed</span>',btn('Edit','sm')],
+   ['Sophie','Office Manager','<span class="acc-pill n">denied</span>','<span class="acc-pill y">allowed</span>','<span class="acc-pill n">denied</span>',btn('Edit','sm')],
+   ['Théo','Royalty Manager','<span class="acc-pill n">denied</span>','<span class="acc-pill y">allowed</span>','<span class="acc-pill y">allowed</span>',btn('Edit','sm')],
+   ['Camille','PR / Marketing','<span class="acc-pill n">denied</span>','<span class="acc-pill n">denied</span>','<span class="acc-pill n">denied</span>',btn('Edit','sm')],
+ ],{title:'Members',actions:[{t:'Invite user',k:'pri sm'}]})
+ +`<div class="note">A denied app shows on the user's home as a <b style="color:var(--red)">locked card (red cross)</b> — visible but not enterable.</div>`;
+
+P.cc_integ=()=>head('Command Center','Integrations','Connected services and their status.')
+ +table([{t:'Connector',b:1},{t:'Type'},{t:'Scope'},{t:'Status'},{t:''}],[
+   ['WordPress (e-hq)','REST / MCP','Office · Distribution',badge('CONNECTED','b-ok'),btn('Manage','sm')],
+   ['MCB statements','Bank import','Office',badge('CONNECTED','b-ok'),btn('Manage','sm')],
+   ['SBI statements','Bank import','Office',badge('IDLE','b-mute'),btn('Connect','sm')],
+   ['Firefly / Adobe','Assets','Visuals',badge('CONNECTED','b-ok'),btn('Manage','sm')],
+ ],{title:'Connectors'});
+
+P.cc_settings=()=>head('Command Center','Settings','Workspace preferences.')
+ +`<div class="grid2">${panel('Appearance','Theme is locked to the ë identity.',`<div style="margin-top:12px;display:flex;gap:10px">${btn('Dark (default)','pri sm')}${btn('High contrast','sm')}</div>`)}
+   ${panel('System','',checks([{s:'ok',t:'Integrity check passed'},{s:'ok',t:'Backups nightly'},{s:'wa',t:'1 export control notice'}]))}</div>`;
+
+// OFFICE
+P.of_pnl=()=>head('Office','P&L · income statement','Consolidated · all departments · May 2026.')
+ +kpis([{l:'Revenue',v:RS(5890000),d:'↑ 8.2%',dc:'pos'},{l:'Expenses',v:RS(5560000),d:'↑ 3.1%',dc:'neg'},{l:'Net result',v:'+ '+RS(330000),dc:'pos',d:'↑ 19.4%',acc:1},{l:'Net margin',v:'5.6%',d:'↑ 0.7 pt',dc:'pos'}])
+ +panel('Result by department','Where money is made and lost — net = revenue − expenses, sorted.',diverge([
+   {n:'ë • music',rev:1240000,exp:890000,net:350000},{n:'the storë',rev:980000,exp:760000,net:220000},
+   {n:'mōris',rev:720000,exp:540000,net:180000},{n:'ë • visuals',rev:610000,exp:480000,net:130000},
+   {n:'evënts',rev:1560000,exp:1610000,net:-50000},{n:'bōucan',rev:290000,exp:350000,net:-60000},
+   {n:'ë • talent',rev:430000,exp:520000,net:-90000},{n:'ë • office',rev:60000,exp:410000,net:-350000}]))
+ +`<div class="note">Figures from validated ledger lines tagged <b>Department → Division → Category</b>, type revenue/expense, optional project. No ad-hoc queries — the dashboard reads validated projections.</div>`;
+
+P.of_coa=()=>head('Office','Chart of accounts','Managed tree · Department → Division → Category.')
+ +toolbar([{l:'Department',v:'All'},{l:'Type',v:'All'}],[{t:'Add category',k:'pri'}])
+ +panel('Plan comptable','548 categories · 491 expense · 57 income · editable.',`<div class="tree">
+   <div class="tnode d1">ë • office <span class="id">dept</span><span class="add" style="margin-left:14px">+ division</span></div>
+   <div class="tnode d2">Shared Costs <span class="id">div</span><span class="add" style="margin-left:14px">+ category</span></div>
+   <div class="tnode d3">Rent <span class="badge b-err" style="margin-left:8px">expense</span><span class="id">cat_009</span></div>
+   <div class="tnode d3">Salaries <span class="badge b-err" style="margin-left:8px">expense</span><span class="id">cat_008</span></div>
+   <div class="tnode d1">ë • music <span class="id">dept</span></div>
+   <div class="tnode d2">Releases</div>
+   <div class="tnode d3">Track Production <span class="badge b-err" style="margin-left:8px">expense</span><span class="id">cat_014</span></div>
+   <div class="tnode d3">Streaming income <span class="badge b-ok" style="margin-left:8px">income</span><span class="id">cat_031</span></div>
+ </div>`);
+
+P.of_tx=()=>head('Office','Transactions','Ledger · filter by any dimension.')
+ +toolbar([{l:'Department',v:'All'},{l:'Division',v:'All'},{l:'Category',v:'All'},{l:'Project',v:'All'},{l:'Type',v:'All'}],[{t:'New entry',k:'pri'}])
+ +table([{t:'Date'},{t:'Label',b:1},{t:'Department'},{t:'Category'},{t:'Project'},{t:'Amount',r:1},{t:'Status'}],[
+   ['12 May','MCB transfer — rent','ë • office','Rent','—','<span class="neg">−'+RS(35000).slice(3)+'</span>',badge('POSTED','b-ok')],
+   ['11 May','Bandcamp payout','ë • music','Streaming income','—','<span class="pos">+'+RS(82000).slice(3)+'</span>',badge('POSTED','b-ok')],
+   ['10 May','Stage build','evënts','Stage & Build','NG Groove','<span class="neg">−'+RS(120000).slice(3)+'</span>',badge('DRAFT','b-warn')],
+   ['09 May','Vinyl restock','the storë','Cost of Goods','—','<span class="neg">−'+RS(48000).slice(3)+'</span>',badge('POSTED','b-ok')],
+ ],{title:'May 2026'});
+
+P.of_imports=()=>head('Office','Imports','Bank statements, cashflow and PDF documents.')
+ +table([{t:'File',b:1},{t:'Source'},{t:'Rows'},{t:'Period'},{t:'Status'},{t:''}],[
+   ['mcb_may.csv','MCB statement','214','May 2026',badge('PARSED','b-ok'),btn('Review','sm')],
+   ['cashflow_q2.xlsx','Cashflow','96','Apr–Jun',badge('PREVIEW','b-info'),btn('Confirm','sm')],
+   ['supplier_inv.pdf','PDF invoice','1','May 2026',badge('NEEDS FIX','b-warn'),btn('Fix mapping','sm')],
+   ['sbi_apr.csv','SBI statement','—','—',badge('FAILED','b-err'),btn('Retry import','sm dan')],
+ ],{title:'Recent imports',actions:[{t:'Import file',k:'pri sm'}]});
+
+P.of_recon=()=>head('Office','Reconciliation','Match unmatched bank lines to the ledger.')
+ +kpis([{l:'Unmatched lines',v:'18',acc:1},{l:'High-confidence',v:'12',d:'ready to post',dc:'pos'},{l:'Needs review',v:'6',dc:'ylw'}])
+ +table([{t:'Bank line',b:1},{t:'Date'},{t:'Amount',r:1},{t:'Proposed match'},{t:'Conf.'},{t:''}],[
+   ['CARD — vinyl pressing','08 May',RS(48000),'Cost of Goods · the storë',badge('98%','b-ok'),btn('Approve','sm pri')],
+   ['TRANSFER — studio','06 May',RS(22000),'Studio Costs · bōucan',badge('91%','b-ok'),btn('Approve','sm pri')],
+   ['DEBIT — unknown','05 May',RS(7500),'—',badge('LOW','b-warn'),btn('Assign','sm')],
+ ],{title:'Proposed matches',actions:[{t:'Approve all high-confidence',k:'pri sm'}]});
+
+P.of_pending=()=>head('Office','Pending','Classify drafts, then bulk-validate the clean ones.')
+ +table([{t:'',b:1},{t:'Label',b:1},{t:'Suggested department'},{t:'Category'},{t:'Amount',r:1},{t:''}],[
+   ['<input type=checkbox checked>','Uber — airport run','ë • talent','Travel',RS(2400),btn('Validate','sm')],
+   ['<input type=checkbox checked>','Print run — posters','ë • visuals','Print',RS(18000),btn('Validate','sm')],
+   ['<input type=checkbox>','Misc — to classify','—','—',RS(5200),btn('Classify','sm')],
+ ],{title:'Draft queue · 24 items',actions:[{t:'Bulk validate selected',k:'pri sm'}]});
+
+P.of_cash=()=>head('Office','Cash flow','Inflows and outflows.')
+ +kpis([{l:'Opening',v:RS(1240000)},{l:'Inflows',v:'+ '+RS(890000),dc:'pos'},{l:'Outflows',v:'− '+RS(640000),dc:'neg'},{l:'Closing',v:RS(1490000),acc:1}])
+ +panel('Daily movement · May',' ',bars([3,5,2,6,4,7,5,8,6,9],['1','5','8','11','14','17','20','23','26','29']));
+
+// DISTRIBUTION
+P.di_dash=()=>head('Distribution','Dashboard','Royalty operations cockpit.')
+ +kpis([{l:'Catalog tracks',v:'1,284',d:'+24 this month',dc:'pos'},{l:'Open royalties',v:RS(412000),acc:1},{l:'Suspense',v:'42',d:'grouped by reason',dc:'ylw'},{l:'Last allocation',v:'3d ago',d:'posted',dc:''}])
+ +`<div class="grid3">${panel('Revenue by quarter',' ',bars([1.6,2.0,2.4,2.9],['Q1','Q2','Q3','Q4']))}
+   ${panel('Health',' ',checks([{s:'ok',t:'Imports up to date'},{s:'wa',t:'12 splits need review'},{s:'no',t:'3 statements blocked'},{s:'ok',t:'Server lock idle'}]))}</div>`
+ +table([{t:'Action',b:1},{t:'Context'},{t:'Count'},{t:''}],[
+   ['Fix contributors','catalog · needs review','7',btn('Open','sm')],
+   ['Resolve suspense','missing split','19',btn('Open','sm')],
+   ['Post payments','approved statements','5',btn('Reconcile payments','sm pri')],
+ ],{title:'Action list'});
+
+P.di_imports=()=>head('Distribution','Imports','Upload health and batch diagnostics.')
+ +table([{t:'Batch',b:1},{t:'Store'},{t:'Rows'},{t:'Currency'},{t:'Status'},{t:''}],[
+   ['2026-05 spotify','Spotify','8,210','USD',badge('NORMALIZED','b-ok'),btn('Open','sm')],
+   ['2026-05 apple','Apple Music','5,044','USD',badge('MAPPING','b-info'),btn('Review rows','sm')],
+   ['2026-05 deezer','Deezer','1,902','EUR',badge('NEEDS FIX','b-warn'),btn('Fix mapping','sm')],
+ ],{title:'Batches',actions:[{t:'Import file',k:'pri sm'}]});
+
+P.di_mapping=()=>head('Distribution','Mapping','Review imported rows, automate safe matches, apply rules.')
+ +toolbar([{l:'Batch',v:'2026-05 apple'},{l:'State',v:'Unmapped'}],[{t:'Automate',k:''},{t:'Apply rules',k:'pri'}])
+ +table([{t:'Imported title',b:1},{t:'Artist'},{t:'Matched track'},{t:'Confidence'},{t:''}],[
+   ['Alma (radio edit)','Alma Kreol','Alma — Alma Kreol',badge('96%','b-ok'),btn('Accept','sm pri')],
+   ['Untitled 03','Avneesh','—',badge('LOW','b-warn'),btn('Map manually','sm')],
+   ['Séga 2024','Various','Séga 2024 — V/A',badge('88%','b-ok'),btn('Accept','sm pri')],
+ ],{title:'Rows to review'});
+
+P.di_catalog=()=>head('Distribution','Catalog','Canonical catalog and contributor review.')
+ +toolbar([{l:'Source',v:'All'},{l:'Status',v:'Needs review'}],[{t:'Add release',k:'pri'}])
+ +table([{t:'Title',b:1},{t:'Artist'},{t:'ISRC'},{t:'Contributors'},{t:'Status'},{t:''}],[
+   ['Alma Kreol','Alma Kreol','MU-A01-26-001','3',badge('OK','b-ok'),btn('Open','sm')],
+   ['Redlight','Babani','MU-B02-26-014','—',badge('NEEDS REVIEW','b-warn'),btn('Fix contributors','sm')],
+   ['Hal','V/A','MU-Z01-26-007','5',badge('OK','b-ok'),btn('Open','sm')],
+ ],{title:'Releases'});
+
+P.di_contracts=()=>head('Distribution','Contracts','Splits, payees, expenses, recoupments.')
+ +kpis([{l:'Active contracts',v:'63',acc:1},{l:'Open recoupments',v:RS(214000),dc:'ylw'},{l:'Unbalanced splits',v:'12',dc:'neg'}])
+ +table([{t:'Track',b:1},{t:'Artist'},{t:'ISRC'},{t:'Splits'},{t:'Expenses',r:1},{t:'Status'},{t:''}],[
+   ['Alma','Alma Kreol','MU-A01-26-001','100%',RS(36000),badge('BALANCED','b-ok'),btn('Open exact split','sm')],
+   ['Redlight','Babani','MU-B02-26-014','92%',RS(58000),badge('FIX','b-warn'),btn('Fix contributors','sm')],
+   ['Séga 2024','V/A','MU-Z01-26-007','100%',RS(12000),badge('BALANCED','b-ok'),btn('Open exact split','sm')],
+ ],{title:'Tracks & releases'});
+
+P.di_alloc=()=>head('Distribution','Allocations','Preview, post and unpost allocation batches — safely.')
+ +`<div class="grid2">${panel('Run control','Server-paced waves protect the engine.',`<div style="margin-top:12px">${checks([{s:'ok',t:'Server lock: idle'},{s:'ok',t:'Pending batch validated'},{s:'wa',t:'Run all pending = 6 waves'}])}<div style="margin-top:14px;display:flex;gap:10px">${btn('Preview batch','')}${btn('Post wave 1 / 6','pri')}</div></div>`)}
+   ${panel('Last run',' ',`<div style="margin-top:12px">${kpisInline([['Lines','18,402'],['Posted','18,402'],['Diverged','3 (audited)']])}</div>`)}</div>`;
+
+P.di_suspense=()=>head('Distribution','Suspense','Resolve blockers by reason and exact fix path.')
+ +kpis([{l:'Total suspense',v:'42',acc:1},{l:'Missing split',v:'19',dc:'ylw'},{l:'Unmapped',v:'14',dc:'ylw'},{l:'Retry',v:'9',dc:''}])
+ +table([{t:'Reason',b:1},{t:'Track'},{t:'Amount',r:1},{t:'Fix path'},{t:''}],[
+   ['Missing split','Redlight — Babani',RS(58000),'contracts',btn('Fix split','sm pri')],
+   ['Unmapped row','Untitled 03',RS(3200),'mapping',btn('Open mapping','sm')],
+   ['Import retry','deezer 05',RS(0),'imports',btn('Retry import','sm')],
+ ],{title:'Blockers · grouped'});
+
+P.di_state=()=>head('Distribution','Statements','Generate artist / payee statements by period and currency.')
+ +toolbar([{l:'Payee',v:'Alma Kreol'},{l:'Period',v:'Q2 2026'},{l:'Currency',v:'USD'}],[{t:'Generate PDF',k:'pri'}])
+ +`<div class="grid2">${panel('Financial summary','Alma Kreol · Q2 2026 · USD',`<div style="margin-top:10px">${kpisInline([['Revenue',RS(184000)],['Recoup','− '+RS(36000).slice(3)],['Expenses','− '+RS(12000).slice(3)],['Total due',RS(136000)]])}</div>`)}
+   ${panel('Lines',' ',`<div class="note" style="margin-top:6px">12 statement lines · 3 stores · multi-currency kept separate.</div>${btn('View lines','sm')}`)}</div>`;
+
+P.di_pay=()=>head('Distribution','Payments','Record, edit, void and reconcile payments.')
+ +table([{t:'Payee',b:1},{t:'Amount',r:1},{t:'Method'},{t:'Reference'},{t:'Status'},{t:''}],[
+   ['Alma Kreol',RS(136000),'Bank','MU-PAY-0142',badge('PAID','b-ok'),btn('Edit','sm')],
+   ['Avneesh',RS(42000),'Bank','—',badge('PENDING','b-warn'),btn('Post payment','sm pri')],
+   ['Babani estate',RS(0),'—','—',badge('VOID','b-mute'),btn('Edit','sm')],
+ ],{title:'Payments',actions:[{t:'Record payment',k:'pri sm'}]});
+
+P.di_rev=()=>head('Distribution','Revenue','Financial view by payee, track, currency, store, period.')
+ +toolbar([{l:'Group by',v:'Store'},{l:'Period',v:'Q2 2026'},{l:'Currency',v:'USD'}])
+ +`<div class="grid3">${panel('By store',' ',bars([4.2,3.1,2.4,1.8,1.1],['Spot.','Apple','YT','Deez.','Other']))}
+  ${panel('Totals',' ',`<div style="margin-top:12px">${kpisInline([['Gross',RS(612000)],['Net',RS(498000)],['Payable',RS(412000)]])}</div>`)}</div>`;
+
+function kpisInline(pairs){return `<div style="display:flex;flex-direction:column;gap:9px">${pairs.map(p=>`<div style="display:flex;justify-content:space-between;font-size:13px"><span class="mono" style="color:var(--muted);font-size:11px">${p[0]}</span><b style="font-variant-numeric:tabular-nums">${p[1]}</b></div>`).join('')}</div>`}
+function head(app,page,sub){return `<div class="ph"><div class="eb">${app}</div><h1>${page}</h1>${sub?`<div class="sub">${sub}</div>`:''}</div>`}
+
+// ---------- nav ----------
+const NAV=[
+ {g:'Command Center',items:[['cc_dash','Dashboard'],['cc_users','Users & permissions'],['cc_integ','Integrations'],['cc_settings','Settings']]},
+ {g:'Office',items:[['of_pnl','P&L'],['of_coa','Chart of accounts'],['of_tx','Transactions'],['of_imports','Imports'],['of_recon','Reconciliation'],['of_pending','Pending'],['of_cash','Cash flow']]},
+ {g:'Distribution',items:[['di_dash','Dashboard'],['di_imports','Imports'],['di_mapping','Mapping'],['di_catalog','Catalog'],['di_contracts','Contracts'],['di_alloc','Allocations'],['di_suspense','Suspense'],['di_state','Statements'],['di_pay','Payments'],['di_rev','Revenue']]},
+];
+const LABELS={};NAV.forEach(s=>s.items.forEach(([id,l])=>LABELS[id]=[s.g,l]));
+const nav=document.getElementById('nav');
+nav.innerHTML=NAV.map(s=>`<div class="grp">${s.g}</div>`+s.items.map(([id,l])=>`<a data-id="${id}"><span class="ic"></span>${l}</a>`).join('')).join('');
+function show(id){
+  document.querySelectorAll('.nav a').forEach(a=>a.classList.toggle('on',a.dataset.id===id));
+  document.getElementById('view').innerHTML=P[id]();
+  document.getElementById('view').scrollTop=0;
+  document.getElementById('crumb').innerHTML=`${LABELS[id][0]} <span style="color:var(--muted)">/</span> <b>${LABELS[id][1]}</b>`;
+}
+nav.querySelectorAll('a').forEach(a=>a.addEventListener('click',()=>show(a.dataset.id)));
+show('cc_dash');
+</script>

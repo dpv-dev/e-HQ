@@ -1,0 +1,18 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./apps/hq" },
+    { "path": "./services/api" },
+    { "path": "./services/workers" },
+    { "path": "./services/realtime" },
+    { "path": "./packages/domain-finance" },
+    { "path": "./packages/domain-distribution" },
+    { "path": "./packages/domain-office" },
+    { "path": "./packages/migration-tools" },
+    { "path": "./packages/db" },
+    { "path": "./packages/api-client" },
+    { "path": "./packages/api-contracts" },
+    { "path": "./packages/ui" },
+    { "path": "./packages/auth" }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "name": "@ehq/office",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "check": "tsc -b --pretty false",
+    "typecheck": "tsc -b --pretty false"
+  },
+  "dependencies": {
+    "@ehq/api-client": "workspace:*",
+    "@ehq/ui": "workspace:*"
+  }
+}

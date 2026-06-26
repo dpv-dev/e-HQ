@@ -1,0 +1,15 @@
+{
+  "name": "@ehq/api-deploy",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.bundle.js"
+  },
+  "dependencies": {
+    "pg": "8.22.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

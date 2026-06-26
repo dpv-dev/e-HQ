@@ -1,0 +1,56 @@
+{
+  "sourceDatabaseName": "u384688932_HZ0LD",
+  "tablePrefix": "wp_",
+  "rawImportRowsMode": "migrate",
+  "excludeTables": ["audit_logs"],
+  "identityLinkMustBeEmpty": true,
+  "expectedCounts": {
+    "earning_allocations": 82736,
+    "normalized_earnings": 155027,
+    "suspense_items": 100460,
+    "statement_lines": 12241,
+    "statements": 3,
+    "payee_balances": 3,
+    "contract_cost_terms": 31,
+    "royalty_rules": 1160,
+    "fx_rates": 12
+  },
+  "moneyGoldens": {
+    "earning_allocations": {
+      "EUR": { "n": 81923, "payees": 18, "contracts": 26, "gross_amount": "67201.0103459200", "gross_share": "23779.4051701500", "net_payable": "23779.4051701500", "original_gross_amount": "67201.0103459200" },
+      "USD": { "n": 813, "payees": 3, "contracts": 1, "gross_amount": "1556.7788100000", "gross_share": "518.9262700000", "net_payable": "518.9262700000", "original_gross_amount": "1556.7788100000" }
+    },
+    "normalized_earnings": {
+      "EUR": { "n": 115478, "gross_amount": "36747.3849804700", "quantity": "165697876" },
+      "USD": { "n": 39549, "gross_amount": "9358.6292000000", "quantity": "74927685" }
+    },
+    "suspense_items": {
+      "EUR": { "n": 89546, "resolved": 2357, "amount": "13411.3559078100" },
+      "USD": { "n": 10914, "resolved": 1, "amount": "2390.9962400000" }
+    },
+    "statement_lines": { "n": 12241, "net_payable": "2926.3706153260", "recoupment_applied": "0.0000000000" },
+    "contract_cost_terms_recoupable": { "EUR": { "n": 30, "amount": "2533.3400000000" } }
+  },
+  "statementsVerbatim": [
+    { "id": 2, "payee_id": 68, "currency": "EUR", "period_start": "2025-01-01", "period_end": "2025-12-31", "gross_total": "2704.9601577060", "recoupment_total": "0.0000000000", "net_payable": "2704.9601577060", "status": "generated" },
+    { "id": 3, "payee_id": 97, "currency": "EUR", "period_start": "2023-01-01", "period_end": "2026-06-01", "gross_total": "36.0329037850", "recoupment_total": "0.0000000000", "net_payable": "36.0329037850", "status": "generated" },
+    { "id": 4, "payee_id": 62, "currency": "EUR", "period_start": "2023-01-01", "period_end": "2026-06-17", "gross_total": "185.3775538350", "recoupment_total": "0.0000000000", "net_payable": "185.3775538350", "status": "generated" }
+  ],
+  "payeeBalancesVerbatim": [
+    { "id": 2, "payee_id": 68, "currency": "EUR", "statement_id": 2, "period_end": "2025-12-31", "opening_balance": "0.0000000000", "period_net": "2704.9601577060", "closing_balance": "0.0000000000", "movement_type": "statement" },
+    { "id": 3, "payee_id": 97, "currency": "EUR", "statement_id": 3, "period_end": "2026-06-01", "opening_balance": "0.0000000000", "period_net": "36.0329037850", "closing_balance": "0.0000000000", "movement_type": "statement" },
+    { "id": 4, "payee_id": 62, "currency": "EUR", "statement_id": 4, "period_end": "2026-06-17", "opening_balance": "0.0000000000", "period_net": "185.3775538350", "closing_balance": "0.0000000000", "movement_type": "statement" }
+  ],
+  "mappingCoverage": {
+    "matched": { "n": 56923, "gross_amount": "30737.7146901500" },
+    "suspense": { "n": 98102, "gross_amount": "15358.9720303200" },
+    "unmatched": { "n": 2, "gross_amount": "9.3274600000" }
+  },
+  "orphanFksExpectZero": [
+    "alloc.normalized_earning_id->normalized_earnings",
+    "alloc.payee_id->payees",
+    "sline.earning_allocation_id->earning_allocations",
+    "sline.statement_id->statements",
+    "pbal.payee_id->payees"
+  ]
+}

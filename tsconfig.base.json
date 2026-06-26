@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "baseUrl": ".",
+    "paths": {
+      "@ehq/api-client": ["packages/api-client/src/index.ts"],
+      "@ehq/api-contracts": ["packages/api-contracts/src/index.ts"],
+      "@ehq/auth": ["packages/auth/src/index.ts"],
+      "@ehq/db": ["packages/db/src/index.ts"],
+      "@ehq/domain-distribution": ["packages/domain-distribution/src/index.ts"],
+      "@ehq/domain-finance": ["packages/domain-finance/src/index.ts"],
+      "@ehq/domain-office": ["packages/domain-office/src/index.ts"],
+      "@ehq/migration-tools": ["packages/migration-tools/src/index.ts"],
+      "@ehq/ui": ["packages/ui/src/index.ts"]
+    },
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noUncheckedIndexedAccess": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true
+  },
+  "exclude": ["node_modules", "dist"]
+}

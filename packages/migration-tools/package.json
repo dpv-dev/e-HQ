@@ -1,0 +1,29 @@
+{
+  "name": "@ehq/migration-tools",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b --pretty false",
+    "check": "tsc -b --pretty false",
+    "erh:b2-diagnostic": "node --loader ./bin/workspace-source-loader.mjs ./bin/erh-b2-diagnostic.mjs",
+    "erh:b2-load": "node --loader ./bin/workspace-source-loader.mjs ./bin/erh-b2-load.mjs",
+    "erh:b2-pglite": "node --loader ./bin/workspace-source-loader.mjs ./bin/erh-b2-pglite.mjs",
+    "office:b2-diagnostic": "node --loader ./bin/workspace-source-loader.mjs ./bin/office-b2-diagnostic.mjs",
+    "office:b2-load": "node --loader ./bin/workspace-source-loader.mjs ./bin/office-b2-load.mjs",
+    "office:b2-pglite": "node --loader ./bin/workspace-source-loader.mjs ./bin/office-b2-pglite.mjs",
+    "test": "node --loader ./bin/workspace-source-loader.mjs --test test/*.test.ts",
+    "typecheck": "tsc -b --pretty false"
+  },
+  "dependencies": {
+    "@ehq/domain-distribution": "workspace:*",
+    "@ehq/domain-finance": "workspace:*",
+    "@ehq/domain-office": "workspace:*",
+    "@electric-sql/pglite": "^0.5.3",
+    "drizzle-orm": "^0.45.2",
+    "pg": "^8.22.0",
+    "pg-copy-streams": "^7.0.0"
+  }
+}

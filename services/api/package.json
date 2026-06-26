@@ -1,0 +1,34 @@
+{
+  "name": "@ehq/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -b --pretty false",
+    "check": "tsc -b --pretty false",
+    "build:deploy": "esbuild src/server.ts --bundle --platform=node --format=esm --target=node18 --external:pg --external:pg-pool --external:pg-protocol --outfile=deploy/server.bundle.js",
+    "phase-e:parity": "node dist/phase-e-parity.js",
+    "start": "node dist/server.js",
+    "smoke": "node dist/smoke.js",
+    "test": "node --loader ./test/ts-source-loader.mjs --test test/*.test.ts",
+    "typecheck": "tsc -b --pretty false"
+  },
+  "dependencies": {
+    "@ehq/api-client": "workspace:*",
+    "@ehq/api-contracts": "workspace:*",
+    "@ehq/auth": "workspace:*",
+    "@ehq/db": "workspace:*",
+    "@ehq/domain-distribution": "workspace:*",
+    "@ehq/domain-finance": "workspace:*",
+    "@ehq/domain-office": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "hono": "^4.12.26",
+    "jose": "^6.2.3",
+    "pg": "^8.22.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.3",
+    "@types/node": "^26.0.0",
+    "esbuild": "^0.28.1"
+  }
+}
