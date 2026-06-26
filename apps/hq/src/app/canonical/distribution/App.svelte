@@ -1671,7 +1671,7 @@
     return data.expenseTermsMissingPayee.map((row): TableRow => ({
       id: row.id,
       cells: [
-        { kind: "text", value: row.expenseReference, strong: true },
+        { kind: "text", value: humanReference(row.expenseReference, row.contract), strong: true },
         { kind: "text", value: row.contract, strong: false },
         { kind: "text", value: row.description, strong: false },
         { kind: "money", value: formatMoney(row.amountMicro, row.currency), tone: "info" },
@@ -1689,9 +1689,9 @@
     return data.matchedUnallocatedSamples.map((row): TableRow => ({
       id: row.id,
       cells: [
-        { kind: "text", value: row.sourceReference, strong: true },
-        { kind: "text", value: row.batch, strong: false },
-        { kind: "text", value: row.track, strong: false },
+        { kind: "text", value: humanReference(row.sourceReference, row.track), strong: true },
+        { kind: "text", value: humanReference(row.batch, row.track), strong: false },
+        { kind: "text", value: humanReference(row.track, row.sourceReference), strong: false },
         { kind: "badge", value: row.currency, tone: "muted" },
         { kind: "money", value: formatMoney(row.grossMicro, row.currency), tone: "info" },
         { kind: "badge", value: row.status, tone: "warning" }
@@ -1865,6 +1865,29 @@
     }
 
     return "Verified actor";
+  }
+
+  function humanReference(value: string, fallback: string): string {
+    const trimmed = stripRawMoneySuffix(value.trim());
+    const [firstPart, ...rest] = trimmed.split(" · ");
+
+    if (isUuidLike(firstPart) && rest.length > 0) {
+      return rest.join(" · ");
+    }
+
+    if (isUuidLike(trimmed)) {
+      return stripRawMoneySuffix(fallback.trim());
+    }
+
+    return trimmed;
+  }
+
+  function stripRawMoneySuffix(value: string): string {
+    return value.replace(/ · [A-Z]{3} -?\d+\.\d{3,}$/u, "");
+  }
+
+  function isUuidLike(value: string): boolean {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
   }
 
   function formatBasisPoints(value: number): string {
