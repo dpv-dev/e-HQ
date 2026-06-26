@@ -128,7 +128,7 @@
     { label: "Context", align: "left", sortable: true },
     { label: "Volume", align: "right", sortable: true },
     { label: "Status", align: "left", sortable: true },
-    { label: "", align: "left", sortable: false }
+    { label: "Next", align: "left", sortable: false }
   ];
   const permissionColumns: readonly TableColumn[] = [
     { label: "User", align: "left", sortable: true },
@@ -137,20 +137,20 @@
     { label: "Office", align: "left", sortable: true },
     { label: "Distribution", align: "left", sortable: true },
     { label: "Status", align: "left", sortable: true },
-    { label: "", align: "left", sortable: false }
+    { label: "Review", align: "left", sortable: false }
   ];
   const integrationColumns: readonly TableColumn[] = [
     { label: "Connector", align: "left", sortable: true },
     { label: "Type", align: "left", sortable: true },
     { label: "Scope", align: "left", sortable: true },
     { label: "Status", align: "left", sortable: true },
-    { label: "", align: "left", sortable: false }
+    { label: "Action", align: "left", sortable: false }
   ];
   const settingColumns: readonly TableColumn[] = [
     { label: "Setting", align: "left", sortable: true },
     { label: "Value", align: "left", sortable: true },
     { label: "Status", align: "left", sortable: true },
-    { label: "", align: "left", sortable: false }
+    { label: "Review", align: "left", sortable: false }
   ];
   const roleOptions: readonly SelectOption[] = [
     { label: "Administrator", value: "administrator" },
@@ -484,21 +484,21 @@
         { kind: "text", value: "Users & permissions", strong: false },
         { kind: "money", value: "3", tone: "warning" },
         { kind: "badge", value: "review", tone: "warning" },
-        { kind: "action", value: "Open", tone: "active", locked: false }
+        { kind: "badge", value: "open from users", tone: "active" }
       ]),
       createTableRow("action_integrations", [
         { kind: "text", value: "Inspect SBI connector", strong: true },
         { kind: "text", value: "Office bank imports", strong: false },
         { kind: "money", value: "1", tone: "muted" },
         { kind: "badge", value: "idle", tone: "muted" },
-        { kind: "action", value: "Inspect", tone: "muted", locked: false }
+        { kind: "badge", value: "inspect in office", tone: "muted" }
       ]),
       createTableRow("action_settings", [
         { kind: "text", value: "Confirm release gate", strong: true },
         { kind: "text", value: "Settings", strong: false },
         { kind: "money", value: "1", tone: "warning" },
         { kind: "badge", value: "required", tone: "warning" },
-        { kind: "action", value: "Review", tone: "muted", locked: false }
+        { kind: "badge", value: "review settings", tone: "muted" }
       ])
     ];
   }
@@ -512,7 +512,7 @@
         permissionCell(user, "office"),
         permissionCell(user, "distribution"),
         { kind: "badge", value: user.status, tone: user.status === "active" ? "success" : "warning" },
-        { kind: "action", value: "Edit", tone: "muted", locked: false }
+        { kind: "badge", value: "local review", tone: "muted" }
       ])
     );
   }
@@ -524,7 +524,7 @@
         { kind: "text", value: row.kind, strong: false },
         { kind: "text", value: row.scope, strong: false },
         { kind: "badge", value: row.status, tone: integrationTone(row.status) },
-        { kind: "action", value: row.action, tone: row.status === "attention" ? "error" : "muted", locked: false }
+        { kind: "badge", value: row.action.toLowerCase(), tone: row.status === "attention" ? "error" : "muted" }
       ])
     );
   }
@@ -535,7 +535,7 @@
         { kind: "text", value: row.key, strong: true },
         { kind: "text", value: row.value, strong: false },
         { kind: "badge", value: row.status, tone: row.tone },
-        { kind: "action", value: "View", tone: "muted", locked: false }
+        { kind: "badge", value: "view only", tone: "muted" }
       ])
     );
   }
