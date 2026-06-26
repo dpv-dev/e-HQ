@@ -99,7 +99,8 @@ test("Business routes require Supabase bearer auth and auth/me returns the verif
   assert.deepEqual(await me.json(), {
     userId: "user_fixture",
     email: "fixture@eeee.mu",
-    role: "administrator"
+    role: "administrator",
+    workspaceId: "eeee-mu"
   });
 });
 
@@ -127,6 +128,74 @@ test("API responds with CORS headers for the HQ origin", async () => {
   assert.equal(preflight.status, 204);
   assert.equal(preflight.headers.get("access-control-allow-origin"), "https://app.eeee.mu");
   assert.match(preflight.headers.get("access-control-allow-methods") ?? "", /GET/);
+});
+
+test("Bot roles are scoped to their own workspace write doors", async () => {
+  const app = createDisabledFixtureApiService();
+  const bankPreviewBody = {
+    workspaceId: "eeee-mu",
+    source: "csv",
+    fileName: "sophie-smoke.csv",
+    checksum: "sophie-smoke",
+    rows: []
+  };
+
+  const officeAllowed = await app.request("/eof/v1/bank-import/preview", {
+    method: "POST",
+    headers: { ...authHeadersForToken("fixture-bot-office-token"), "Content-Type": "application/json" },
+    body: JSON.stringify(bankPreviewBody)
+  });
+  assert.equal(officeAllowed.status, 200);
+
+  const officeCrossWorkspace = await app.request("/eof/v1/bank-import/preview", {
+    method: "POST",
+    headers: { ...authHeadersForToken("fixture-bot-office-token"), "Content-Type": "application/json" },
+    body: JSON.stringify({ ...bankPreviewBody, workspaceId: "other-workspace" })
+  });
+  assert.equal(officeCrossWorkspace.status, 403);
+  assert.equal((await officeCrossWorkspace.json()).error.code, "bot_workspace_denied");
+
+  const distributionCannotOffice = await app.request("/eof/v1/bank-import/preview", {
+    method: "POST",
+    headers: { ...authHeadersForToken("fixture-bot-distribution-token"), "Content-Type": "application/json" },
+    body: JSON.stringify(bankPreviewBody)
+  });
+  assert.equal(distributionCannotOffice.status, 403);
+  assert.equal((await distributionCannotOffice.json()).error.code, "bot_permission_denied");
+});
+
+test("Distribution bot can only reach guarded Distribution write doors and cannot read settings", async () => {
+  const app = createDisabledFixtureApiService();
+
+  const catalogDoor = await app.request("/erh/v1/contracts", {
+    method: "POST",
+    headers: {
+      ...authHeadersForToken("fixture-bot-distribution-token"),
+      "Content-Type": "application/json",
+      "Idempotency-Key": "bot-contract-door"
+    },
+    body: JSON.stringify({ workspaceId: "eeee-mu", externalReference: "codex-bot-door" })
+  });
+  assert.equal(catalogDoor.status, 501);
+  assert.equal((await catalogDoor.json()).error, "action_not_enabled_yet");
+
+  const officeCannotDistribution = await app.request("/erh/v1/contracts", {
+    method: "POST",
+    headers: {
+      ...authHeadersForToken("fixture-bot-office-token"),
+      "Content-Type": "application/json",
+      "Idempotency-Key": "bot-office-contract-door"
+    },
+    body: JSON.stringify({ workspaceId: "eeee-mu", externalReference: "codex-bot-door" })
+  });
+  assert.equal(officeCannotDistribution.status, 403);
+  assert.equal((await officeCannotDistribution.json()).error.code, "bot_permission_denied");
+
+  const settings = await app.request("/erh/v1/settings?workspaceId=eeee-mu", {
+    headers: authHeadersForToken("fixture-bot-distribution-token")
+  });
+  assert.equal(settings.status, 403);
+  assert.equal((await settings.json()).error.code, "bot_route_denied");
 });
 
 test("Office dashboard tolerates a missing runway month and still returns 200", async () => {
@@ -1984,7 +2053,26 @@ function createTestAuthVerifier(): SupabaseJwtVerifier {
         return {
           userId: "user_viewer",
           email: "viewer@eeee.mu",
-          role: "viewer"
+          role: "viewer",
+          workspaceId: null
+        };
+      }
+
+      if (token === "fixture-bot-office-token") {
+        return {
+          userId: "bot_sophie",
+          email: "sophie@eeee.mu",
+          role: "bot_office",
+          workspaceId: "eeee-mu"
+        };
+      }
+
+      if (token === "fixture-bot-distribution-token") {
+        return {
+          userId: "bot_theo",
+          email: "theo@eeee.mu",
+          role: "bot_distribution",
+          workspaceId: "eeee-mu"
         };
       }
 
@@ -1995,7 +2083,8 @@ function createTestAuthVerifier(): SupabaseJwtVerifier {
       return {
         userId: "user_fixture",
         email: "fixture@eeee.mu",
-        role: "administrator"
+        role: "administrator",
+        workspaceId: "eeee-mu"
       };
     }
   };

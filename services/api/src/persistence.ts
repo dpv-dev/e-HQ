@@ -300,7 +300,9 @@ const SENSITIVE_ACTIONS = new Set<string>([
   "distribution_allocations_run",
   "distribution_allocations_unpost",
   "distribution_contract_expense_create",
+  "distribution_contract_expense_update",
   "distribution_contract_rules_update",
+  "distribution_contract_upsert",
   "distribution_fx_rates_save",
   "distribution_identity_link",
   "distribution_import_confirm",
@@ -310,9 +312,12 @@ const SENSITIVE_ACTIONS = new Set<string>([
   "distribution_payment_record",
   "distribution_payment_reconcile",
   "distribution_payment_update",
+  "distribution_payee_upsert",
+  "distribution_release_upsert",
   "distribution_statement_generate",
   "distribution_statement_void",
   "distribution_suspense_resolve",
+  "distribution_track_upsert",
   "office_bank_import_confirm",
   "office_bank_import_preview",
   "office_bank_import_reverse",
@@ -329,6 +334,29 @@ const ALLOWED_MUTATING_ACTIONS = new Set<string>([
   "office_plan_comptable_update",
   "office_transaction_create",
   "office_transaction_update"
+]);
+
+const OFFICE_BOT_ACTIONS = new Set<string>([
+  "office_bank_import_preview",
+  "office_bank_import_confirm",
+  "office_transaction_create",
+  "office_transaction_update"
+]);
+
+const DISTRIBUTION_BOT_ACTIONS = new Set<string>([
+  "distribution_contract_expense_create",
+  "distribution_contract_expense_update",
+  "distribution_contract_rules_update",
+  "distribution_contract_upsert",
+  "distribution_mapping_apply_rules",
+  "distribution_payment_record",
+  "distribution_payment_reconcile",
+  "distribution_payment_update",
+  "distribution_payee_upsert",
+  "distribution_release_upsert",
+  "distribution_statement_generate",
+  "distribution_suspense_resolve",
+  "distribution_track_upsert"
 ]);
 
 export function createPostgresPersistenceRuntime(pool: Pool, env: Readonly<Record<string, string | undefined>>): ApiPersistenceRuntime {
@@ -379,6 +407,10 @@ export function createMemoryPersistenceRuntime(env: Readonly<Record<string, stri
 }
 
 export function requirePermission(actor: AuthenticatedApiUser | undefined, action: string): AuthenticatedApiUser {
+  return requirePermissionForWorkspace(actor, action, null);
+}
+
+export function requirePermissionForWorkspace(actor: AuthenticatedApiUser | undefined, action: string, workspaceId: string | null): AuthenticatedApiUser {
   if (actor === undefined) {
     throwPersistenceHttpError(401, "auth_required", "A verified Supabase user is required for this action.", [`action=${action}`]);
   }
@@ -388,6 +420,11 @@ export function requirePermission(actor: AuthenticatedApiUser | undefined, actio
       `action=${action}`,
       `actorRole=${actor.role}`
     ]);
+  }
+
+  if (actor.role === "bot_office" || actor.role === "bot_distribution") {
+    requireBotPermission(actor, action, workspaceId);
+    return actor;
   }
 
   if (SENSITIVE_ACTIONS.has(action) && actor.role !== "administrator") {
@@ -401,8 +438,62 @@ export function requirePermission(actor: AuthenticatedApiUser | undefined, actio
   return actor;
 }
 
+export function isBotApiUser(actor: AuthenticatedApiUser): boolean {
+  return actor.role === "bot_office" || actor.role === "bot_distribution";
+}
+
+function requireBotPermission(actor: AuthenticatedApiUser, action: string, workspaceId: string | null): void {
+  const allowedActions = actor.role === "bot_office" ? OFFICE_BOT_ACTIONS : DISTRIBUTION_BOT_ACTIONS;
+  if (!allowedActions.has(action)) {
+    throwPersistenceHttpError(403, "bot_permission_denied", "The bot role is not allowed to perform this action.", [
+      `action=${action}`,
+      `actorRole=${actor.role}`,
+      `actorUserId=${actor.userId}`
+    ]);
+  }
+
+  if (actor.workspaceId === null) {
+    throwPersistenceHttpError(403, "bot_workspace_missing", "The bot token must carry an explicit workspace id.", [
+      `action=${action}`,
+      `actorRole=${actor.role}`,
+      `actorUserId=${actor.userId}`
+    ]);
+  }
+
+  if (workspaceId === null) {
+    throwPersistenceHttpError(403, "bot_workspace_required", "Bot writes must include an explicit workspace id.", [
+      `action=${action}`,
+      `actorRole=${actor.role}`,
+      `actorWorkspaceId=${actor.workspaceId}`
+    ]);
+  }
+
+  if (workspaceId !== actor.workspaceId) {
+    throwPersistenceHttpError(403, "bot_workspace_denied", "The bot role cannot write outside its assigned workspace.", [
+      `action=${action}`,
+      `actorRole=${actor.role}`,
+      `actorWorkspaceId=${actor.workspaceId}`,
+      `requestWorkspaceId=${workspaceId}`
+    ]);
+  }
+}
+
+function workspaceIdFromRequestBody(requestBody: unknown): string | null {
+  if (typeof requestBody !== "object" || requestBody === null || Array.isArray(requestBody)) {
+    return null;
+  }
+
+  const workspaceId = (requestBody as Readonly<Record<string, unknown>>)["workspaceId"];
+  if (typeof workspaceId !== "string") {
+    return null;
+  }
+
+  const trimmedWorkspaceId = workspaceId.trim();
+  return trimmedWorkspaceId.length === 0 ? null : trimmedWorkspaceId;
+}
+
 export async function runIdempotentMutation<TBody extends ApiMutationResponse>(input: RunIdempotentMutationInput<TBody>): Promise<ApiMutationResult<TBody | DisabledWriteBody>> {
-  requirePermission(input.actor, input.action);
+  requirePermissionForWorkspace(input.actor, input.action, workspaceIdFromRequestBody(input.requestBody));
   const requestHash = hashRequestBody(input.requestBody);
   return input.runtime.withTx(async (tx: ApiWriteTransaction): Promise<ApiMutationResult<TBody | DisabledWriteBody>> => {
     const idempotency = await beginIdempotent(tx, {
@@ -445,7 +536,7 @@ export async function runIdempotentMutation<TBody extends ApiMutationResponse>(i
 }
 
 export async function runDisabledMutation(input: RunDisabledMutationInput): Promise<ApiMutationResult<DisabledWriteBody>> {
-  requirePermission(input.actor, input.action);
+  requirePermissionForWorkspace(input.actor, input.action, workspaceIdFromRequestBody(input.requestBody));
   const requestHash = hashRequestBody(input.requestBody);
   return input.runtime.withTx(async (tx: ApiWriteTransaction): Promise<ApiMutationResult<DisabledWriteBody>> => {
     const idempotency = await beginIdempotent(tx, {

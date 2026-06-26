@@ -170,7 +170,10 @@ import {
   persistDistributionStatementVoid,
   persistIdentityLink,
   persistOfficeBankImportConfirmation,
+  isBotApiUser,
   requirePermission,
+  requirePermissionForWorkspace,
+  runDisabledMutation,
   runIdempotentMutation,
   type ApiImportPreviewRow,
   type ApiMutationResponse,
@@ -446,6 +449,7 @@ const moneyStringPattern = /^-?\d+(?:\.\d+)?$/u;
 
 const nullableStringSchema = z.string().min(1).nullable();
 const workspaceBodySchema = z.object({ workspaceId: z.string().min(1) });
+const workspacePassthroughSchema = workspaceBodySchema.passthrough();
 const officeTransactionWriteSchema = workspaceBodySchema.extend({
   occurredOn: z.string().regex(isoDatePattern),
   accountId: z.string().min(1),
@@ -502,6 +506,8 @@ const suspenseResolveSchema = workspaceBodySchema.extend({
   note: z.string().min(1)
 });
 
+type WorkspacePassthroughRequest = z.infer<typeof workspacePassthroughSchema>;
+
 export const legacyRestSurfaces: readonly LegacyRestSurface[] = [
   {
     namespace: "eof/v1",
@@ -537,11 +543,11 @@ export const legacyAdapterMappings: readonly LegacyAdapterMapping[] = [
 ];
 
 class ApiRouteError extends Error {
-  readonly status: 400 | 404 | 409 | 422 | 500;
+  readonly status: 400 | 403 | 404 | 409 | 422 | 500;
   readonly code: string;
   readonly context: readonly string[];
 
-  constructor(status: 400 | 404 | 409 | 422 | 500, code: string, message: string, context: readonly string[]) {
+  constructor(status: 400 | 403 | 404 | 409 | 422 | 500, code: string, message: string, context: readonly string[]) {
     super(message);
     this.name = "ApiRouteError";
     this.status = status;
@@ -608,7 +614,8 @@ export function createApiService(dependencies: ApiServiceDependencies): Hono<Api
     return context.json({
       userId: authUser.userId,
       email: authUser.email,
-      role: authUser.role
+      role: authUser.role,
+      workspaceId: authUser.workspaceId
     });
   });
   app.use("/eof/v1/*", async (context, next) => {
@@ -654,7 +661,8 @@ function createFixtureAuthVerifier(): SupabaseJwtVerifier {
       return {
         userId: "user_fixture",
         email: "fixture@eeee.mu",
-        role: "administrator"
+        role: "administrator",
+        workspaceId: "eeee-mu"
       };
     }
   };
@@ -973,6 +981,10 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
     return context.json(pageItems(context, contracts));
   });
 
+  app.post("/erh/v1/contracts", async (context) => {
+    return disabledWorkspaceWriteResponse(context, dependencies, "distribution_contract_upsert");
+  });
+
   app.get("/erh/v1/contracts/:contractId", (context) => {
     requireQuery(context, "workspaceId");
     const contractId = context.req.param("contractId");
@@ -1002,6 +1014,10 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
 
   app.post("/erh/v1/contracts/:contractId/expenses", async (context) => {
     return distributionContractExpenseCreateResponse(context, dependencies);
+  });
+
+  app.patch("/erh/v1/contracts/:contractId/expenses/:expenseId", async (context) => {
+    return disabledWorkspaceWriteResponse(context, dependencies, "distribution_contract_expense_update");
   });
 
   app.post("/erh/v1/contracts/:contractId/rules", async (context) => {
@@ -1040,10 +1056,18 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
     });
   });
 
+  app.post("/erh/v1/payees", async (context) => {
+    return disabledWorkspaceWriteResponse(context, dependencies, "distribution_payee_upsert");
+  });
+
   app.get("/erh/v1/releases", (context) => {
     requireQuery(context, "workspaceId");
     const releases = toReleaseSummaries(dependencies.fixtures.distribution);
     return context.json(pageItems(context, releases));
+  });
+
+  app.post("/erh/v1/releases", async (context) => {
+    return disabledWorkspaceWriteResponse(context, dependencies, "distribution_release_upsert");
   });
 
   app.get("/erh/v1/tracks", (context) => {
@@ -1062,6 +1086,10 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
         contributorCount: 1
       }));
     return context.json(pageItems(context, tracks));
+  });
+
+  app.post("/erh/v1/tracks", async (context) => {
+    return disabledWorkspaceWriteResponse(context, dependencies, "distribution_track_upsert");
   });
 
   app.get("/erh/v1/ping", (_context) => {
@@ -1278,6 +1306,7 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
 
   app.get("/erh/v1/settings", (context) => {
     requireQuery(context, "workspaceId");
+    assertNonBotRouteAccess(context, "distribution_settings_read");
     return context.json(toDistributionSettings(context, dependencies.fixtures, dependencies.persistence.writesEnabled));
   });
 }
@@ -1302,6 +1331,20 @@ function requireQuery(context: ApiContext, key: string): string {
   }
 
   return value;
+}
+
+function assertNonBotRouteAccess(context: ApiContext, action: string): void {
+  const authUser = context.get("authUser");
+  if (!isBotApiUser(authUser)) {
+    return;
+  }
+
+  throw new ApiRouteError(403, "bot_route_denied", "Bot roles cannot access settings, maintenance, or unrestricted administrative routes.", [
+    `action=${action}`,
+    `path=${context.req.path}`,
+    `actorRole=${authUser.role}`,
+    `actorUserId=${authUser.userId}`
+  ]);
 }
 
 function requirePathParam(context: ApiContext, key: string): string {
@@ -1775,6 +1818,21 @@ async function distributionContractExpenseCreateResponse(context: ApiContext, de
       appendDistributionContractExpenseFixture(dependencies.fixtures, expenseId, { ...request, amountMicro: amount });
       return mutationReceipt(expenseId, auditEventId);
     }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function disabledWorkspaceWriteResponse(context: ApiContext, dependencies: ApiServiceDependencies, action: string): Promise<Response> {
+  const request = await readZodBody<WorkspacePassthroughRequest>(context, workspacePassthroughSchema);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runDisabledMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action,
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request
   });
   return context.json(result.body, result.status);
 }
@@ -2493,9 +2551,9 @@ function upsertById<TItem extends { readonly id: string }>(items: readonly TItem
 }
 
 async function distributionAllocationPreviewResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
-  requirePermission(context.get("authUser"), "distribution_allocations_preview");
   const request = await readJsonBody<AllocationRunPreviewRequest>(context);
   assertAllocationRunPreviewRequest(context, request);
+  requirePermissionForWorkspace(context.get("authUser"), "distribution_allocations_preview", request.workspaceId);
   const runId = previewIdFor("allocation-run", `${request.period}:${request.lockKey}`);
   const plan = buildAllocationExecutionPlan(dependencies, request.period, request.lockKey, runId);
   return context.json(toAllocationRunPlanResponse(plan, null));
@@ -3026,9 +3084,9 @@ async function identityLinkResponse(
 }
 
 async function distributionImportPreviewResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
-  requirePermission(context.get("authUser"), "distribution_import_preview");
   const request = await readJsonBody<DistributionImportPreviewRequest>(context);
   assertDistributionImportPreviewRequest(context, request);
+  requirePermissionForWorkspace(context.get("authUser"), "distribution_import_preview", request.workspaceId);
   const previewRows = previewRowsFromRecords(request.rows);
   const idempotencyFingerprint = `${request.source}:${request.checksum}:${hashRequestBody(request.rows)}`;
   const previewId = previewIdFor("distribution", idempotencyFingerprint);
@@ -3169,9 +3227,9 @@ async function distributionImportReverseResponse(context: ApiContext, dependenci
 }
 
 async function officeBankImportPreviewResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
-  requirePermission(context.get("authUser"), "office_bank_import_preview");
   const request = await readJsonBody<BankImportPreviewRequest>(context);
   assertOfficeBankImportPreviewRequest(context, request);
+  requirePermissionForWorkspace(context.get("authUser"), "office_bank_import_preview", request.workspaceId);
   const previewRows = previewRowsFromRecords(request.rows);
   const parsedRows = previewRows
     .map((row: ApiImportPreviewRow): ParsedOfficeBankPreviewRow => parseOfficeBankPreviewRow(row, request.workspaceId, dependencies.fixtures.office.bankAccounts))

@@ -1,0 +1,17 @@
+{
+  "name": "@ehq/bots-bureau",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "ehq-bots-bureau": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -b --pretty false",
+    "check": "tsc -b --pretty false",
+    "start": "node dist/index.js"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.0"
+  }
+}

@@ -12,6 +12,7 @@ export interface AuthenticatedApiUser {
   readonly userId: string;
   readonly email: string | null;
   readonly role: AuthRoleId;
+  readonly workspaceId: string | null;
 }
 
 export interface ApiAuthBindings {
@@ -160,7 +161,8 @@ function authenticatedUserFromPayload(payload: JWTPayload): AuthenticatedApiUser
   return {
     userId: payload.sub,
     email: stringClaim(payload["email"]),
-    role: getAuthRoleFromMetadata(appMetadata, userMetadata)
+    role: getAuthRoleFromMetadata(appMetadata, userMetadata),
+    workspaceId: workspaceIdFromMetadata(appMetadata, userMetadata)
   };
 }
 
@@ -192,6 +194,25 @@ function metadataFromClaim(value: unknown): AuthMetadata {
 }
 
 function stringClaim(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmedValue = value.trim();
+  return trimmedValue.length === 0 ? null : trimmedValue;
+}
+
+function workspaceIdFromMetadata(appMetadata: AuthMetadata, userMetadata: AuthMetadata): string | null {
+  return stringFromMetadata(appMetadata, "workspaceId") ??
+    stringFromMetadata(userMetadata, "workspaceId") ??
+    stringFromMetadata(appMetadata, "workspace_id") ??
+    stringFromMetadata(userMetadata, "workspace_id") ??
+    stringFromMetadata(appMetadata, "ehq_workspace_id") ??
+    stringFromMetadata(userMetadata, "ehq_workspace_id");
+}
+
+function stringFromMetadata(metadata: AuthMetadata, key: string): string | null {
+  const value = metadata[key];
   if (typeof value !== "string") {
     return null;
   }

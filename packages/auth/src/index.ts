@@ -1,6 +1,6 @@
 export type WorkspaceAppId = "command-center" | "office" | "distribution";
 export type WorkspaceAccessStatus = "allowed" | "locked";
-export type AuthRoleId = "administrator" | "operator" | "office" | "distribution" | "viewer";
+export type AuthRoleId = "administrator" | "operator" | "office" | "distribution" | "bot_office" | "bot_distribution" | "viewer";
 export type PreviewUserStatus = "active" | "review";
 
 export type AuthMetadata = Readonly<Record<string, unknown>>;
@@ -173,6 +173,14 @@ export function normalizeAuthRoleId(role: string | null): AuthRoleId {
     return "distribution";
   }
 
+  if (normalizedRole === "bot_office" || normalizedRole === "bot-office" || normalizedRole === "sophie") {
+    return "bot_office";
+  }
+
+  if (normalizedRole === "bot_distribution" || normalizedRole === "bot-distribution" || normalizedRole === "theo" || normalizedRole === "théo") {
+    return "bot_distribution";
+  }
+
   return "viewer";
 }
 
@@ -197,6 +205,22 @@ export function getAuthRoleProfile(roleId: AuthRoleId): AuthRoleProfile {
     return {
       roleId,
       roleLabel: "distribution",
+      allowedWorkspaces: ["distribution"]
+    };
+  }
+
+  if (roleId === "bot_office") {
+    return {
+      roleId,
+      roleLabel: "bot office",
+      allowedWorkspaces: ["office"]
+    };
+  }
+
+  if (roleId === "bot_distribution") {
+    return {
+      roleId,
+      roleLabel: "bot distribution",
       allowedWorkspaces: ["distribution"]
     };
   }

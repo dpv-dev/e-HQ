@@ -3,6 +3,7 @@
   "references": [
     { "path": "./apps/hq" },
     { "path": "./services/api" },
+    { "path": "./services/bots-bureau" },
     { "path": "./services/workers" },
     { "path": "./services/realtime" },
     { "path": "./packages/domain-finance" },

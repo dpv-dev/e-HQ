@@ -30,6 +30,12 @@ function normalizeAuthRoleId(role) {
   if (normalizedRole === "distribution") {
     return "distribution";
   }
+  if (normalizedRole === "bot_office" || normalizedRole === "bot-office" || normalizedRole === "sophie") {
+    return "bot_office";
+  }
+  if (normalizedRole === "bot_distribution" || normalizedRole === "bot-distribution" || normalizedRole === "theo" || normalizedRole === "th\xE9o") {
+    return "bot_distribution";
+  }
   return "viewer";
 }
 function stringFromMetadata(metadata, key) {
@@ -1572,7 +1578,8 @@ function authenticatedUserFromPayload(payload) {
   return {
     userId: payload.sub,
     email: stringClaim(payload["email"]),
-    role: getAuthRoleFromMetadata(appMetadata, userMetadata)
+    role: getAuthRoleFromMetadata(appMetadata, userMetadata),
+    workspaceId: workspaceIdFromMetadata(appMetadata, userMetadata)
   };
 }
 function bearerTokenFromHeader(authorizationHeader) {
@@ -1598,6 +1605,17 @@ function metadataFromClaim(value) {
   return value;
 }
 function stringClaim(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmedValue = value.trim();
+  return trimmedValue.length === 0 ? null : trimmedValue;
+}
+function workspaceIdFromMetadata(appMetadata, userMetadata) {
+  return stringFromMetadata2(appMetadata, "workspaceId") ?? stringFromMetadata2(userMetadata, "workspaceId") ?? stringFromMetadata2(appMetadata, "workspace_id") ?? stringFromMetadata2(userMetadata, "workspace_id") ?? stringFromMetadata2(appMetadata, "ehq_workspace_id") ?? stringFromMetadata2(userMetadata, "ehq_workspace_id");
+}
+function stringFromMetadata2(metadata, key) {
+  const value = metadata[key];
   if (typeof value !== "string") {
     return null;
   }
@@ -15103,7 +15121,9 @@ var SENSITIVE_ACTIONS = /* @__PURE__ */ new Set([
   "distribution_allocations_run",
   "distribution_allocations_unpost",
   "distribution_contract_expense_create",
+  "distribution_contract_expense_update",
   "distribution_contract_rules_update",
+  "distribution_contract_upsert",
   "distribution_fx_rates_save",
   "distribution_identity_link",
   "distribution_import_confirm",
@@ -15113,9 +15133,12 @@ var SENSITIVE_ACTIONS = /* @__PURE__ */ new Set([
   "distribution_payment_record",
   "distribution_payment_reconcile",
   "distribution_payment_update",
+  "distribution_payee_upsert",
+  "distribution_release_upsert",
   "distribution_statement_generate",
   "distribution_statement_void",
   "distribution_suspense_resolve",
+  "distribution_track_upsert",
   "office_bank_import_confirm",
   "office_bank_import_preview",
   "office_bank_import_reverse",
@@ -15131,6 +15154,27 @@ var ALLOWED_MUTATING_ACTIONS = /* @__PURE__ */ new Set([
   "office_plan_comptable_update",
   "office_transaction_create",
   "office_transaction_update"
+]);
+var OFFICE_BOT_ACTIONS = /* @__PURE__ */ new Set([
+  "office_bank_import_preview",
+  "office_bank_import_confirm",
+  "office_transaction_create",
+  "office_transaction_update"
+]);
+var DISTRIBUTION_BOT_ACTIONS = /* @__PURE__ */ new Set([
+  "distribution_contract_expense_create",
+  "distribution_contract_expense_update",
+  "distribution_contract_rules_update",
+  "distribution_contract_upsert",
+  "distribution_mapping_apply_rules",
+  "distribution_payment_record",
+  "distribution_payment_reconcile",
+  "distribution_payment_update",
+  "distribution_payee_upsert",
+  "distribution_release_upsert",
+  "distribution_statement_generate",
+  "distribution_suspense_resolve",
+  "distribution_track_upsert"
 ]);
 function createPostgresPersistenceRuntime(pool, env) {
   const database = drizzle(pool);
@@ -15151,7 +15195,7 @@ function createDrizzlePersistenceRuntime(database, env) {
     getOfficeBankImportPreview: (previewId) => state.officeBankPreviews.get(previewId) ?? null
   };
 }
-function requirePermission(actor, action) {
+function requirePermissionForWorkspace(actor, action, workspaceId) {
   if (actor === void 0) {
     throwPersistenceHttpError(401, "auth_required", "A verified Supabase user is required for this action.", [`action=${action}`]);
   }
@@ -15160,6 +15204,10 @@ function requirePermission(actor, action) {
       `action=${action}`,
       `actorRole=${actor.role}`
     ]);
+  }
+  if (actor.role === "bot_office" || actor.role === "bot_distribution") {
+    requireBotPermission(actor, action, workspaceId);
+    return actor;
   }
   if (SENSITIVE_ACTIONS.has(action) && actor.role !== "administrator") {
     throwPersistenceHttpError(403, "permission_denied", "Administrator permission is required for this action.", [
@@ -15170,8 +15218,54 @@ function requirePermission(actor, action) {
   }
   return actor;
 }
+function isBotApiUser(actor) {
+  return actor.role === "bot_office" || actor.role === "bot_distribution";
+}
+function requireBotPermission(actor, action, workspaceId) {
+  const allowedActions = actor.role === "bot_office" ? OFFICE_BOT_ACTIONS : DISTRIBUTION_BOT_ACTIONS;
+  if (!allowedActions.has(action)) {
+    throwPersistenceHttpError(403, "bot_permission_denied", "The bot role is not allowed to perform this action.", [
+      `action=${action}`,
+      `actorRole=${actor.role}`,
+      `actorUserId=${actor.userId}`
+    ]);
+  }
+  if (actor.workspaceId === null) {
+    throwPersistenceHttpError(403, "bot_workspace_missing", "The bot token must carry an explicit workspace id.", [
+      `action=${action}`,
+      `actorRole=${actor.role}`,
+      `actorUserId=${actor.userId}`
+    ]);
+  }
+  if (workspaceId === null) {
+    throwPersistenceHttpError(403, "bot_workspace_required", "Bot writes must include an explicit workspace id.", [
+      `action=${action}`,
+      `actorRole=${actor.role}`,
+      `actorWorkspaceId=${actor.workspaceId}`
+    ]);
+  }
+  if (workspaceId !== actor.workspaceId) {
+    throwPersistenceHttpError(403, "bot_workspace_denied", "The bot role cannot write outside its assigned workspace.", [
+      `action=${action}`,
+      `actorRole=${actor.role}`,
+      `actorWorkspaceId=${actor.workspaceId}`,
+      `requestWorkspaceId=${workspaceId}`
+    ]);
+  }
+}
+function workspaceIdFromRequestBody(requestBody) {
+  if (typeof requestBody !== "object" || requestBody === null || Array.isArray(requestBody)) {
+    return null;
+  }
+  const workspaceId = requestBody["workspaceId"];
+  if (typeof workspaceId !== "string") {
+    return null;
+  }
+  const trimmedWorkspaceId = workspaceId.trim();
+  return trimmedWorkspaceId.length === 0 ? null : trimmedWorkspaceId;
+}
 async function runIdempotentMutation(input) {
-  requirePermission(input.actor, input.action);
+  requirePermissionForWorkspace(input.actor, input.action, workspaceIdFromRequestBody(input.requestBody));
   const requestHash = hashRequestBody(input.requestBody);
   return input.runtime.withTx(async (tx) => {
     const idempotency = await beginIdempotent(tx, {
@@ -15204,6 +15298,29 @@ async function runIdempotentMutation(input) {
     await completeIdempotent(tx, input.idempotencyKey, response);
     return {
       status: 200,
+      body: response
+    };
+  });
+}
+async function runDisabledMutation(input) {
+  requirePermissionForWorkspace(input.actor, input.action, workspaceIdFromRequestBody(input.requestBody));
+  const requestHash = hashRequestBody(input.requestBody);
+  return input.runtime.withTx(async (tx) => {
+    const idempotency = await beginIdempotent(tx, {
+      key: input.idempotencyKey,
+      route: input.route,
+      requestHash
+    });
+    if (idempotency.status === "replay") {
+      return {
+        status: statusForStoredResponse(idempotency.responseJson),
+        body: idempotency.responseJson
+      };
+    }
+    const response = disabledWriteBody(input.action);
+    await completeIdempotent(tx, input.idempotencyKey, response);
+    return {
+      status: 501,
       body: response
     };
   });
@@ -16050,6 +16167,7 @@ var currencyCodePattern = /^[A-Z]{3}$/u;
 var moneyStringPattern = /^-?\d+(?:\.\d+)?$/u;
 var nullableStringSchema = external_exports.string().min(1).nullable();
 var workspaceBodySchema = external_exports.object({ workspaceId: external_exports.string().min(1) });
+var workspacePassthroughSchema = workspaceBodySchema.passthrough();
 var officeTransactionWriteSchema = workspaceBodySchema.extend({
   occurredOn: external_exports.string().regex(isoDatePattern),
   accountId: external_exports.string().min(1),
@@ -16169,7 +16287,8 @@ function createApiService(dependencies) {
     return context.json({
       userId: authUser.userId,
       email: authUser.email,
-      role: authUser.role
+      role: authUser.role,
+      workspaceId: authUser.workspaceId
     });
   });
   app.use("/eof/v1/*", async (context, next) => {
@@ -16437,6 +16556,9 @@ function registerDistributionRoutes(app, dependencies) {
     const contracts = dependencies.fixtures.distributionContracts.filter((contract) => payeeId === null || contract.payeeId === payeeId).filter((contract) => status === null || contract.status === status);
     return context.json(pageItems(context, contracts));
   });
+  app.post("/erh/v1/contracts", async (context) => {
+    return disabledWorkspaceWriteResponse(context, dependencies, "distribution_contract_upsert");
+  });
   app.get("/erh/v1/contracts/:contractId", (context) => {
     requireQuery(context, "workspaceId");
     const contractId = context.req.param("contractId");
@@ -16461,6 +16583,9 @@ function registerDistributionRoutes(app, dependencies) {
   });
   app.post("/erh/v1/contracts/:contractId/expenses", async (context) => {
     return distributionContractExpenseCreateResponse(context, dependencies);
+  });
+  app.patch("/erh/v1/contracts/:contractId/expenses/:expenseId", async (context) => {
+    return disabledWorkspaceWriteResponse(context, dependencies, "distribution_contract_expense_update");
   });
   app.post("/erh/v1/contracts/:contractId/rules", async (context) => {
     return distributionContractRulesUpdateResponse(context, dependencies);
@@ -16492,10 +16617,16 @@ function registerDistributionRoutes(app, dependencies) {
       defaultCurrency: payee.preferredCurrency
     });
   });
+  app.post("/erh/v1/payees", async (context) => {
+    return disabledWorkspaceWriteResponse(context, dependencies, "distribution_payee_upsert");
+  });
   app.get("/erh/v1/releases", (context) => {
     requireQuery(context, "workspaceId");
     const releases = toReleaseSummaries(dependencies.fixtures.distribution);
     return context.json(pageItems(context, releases));
+  });
+  app.post("/erh/v1/releases", async (context) => {
+    return disabledWorkspaceWriteResponse(context, dependencies, "distribution_release_upsert");
   });
   app.get("/erh/v1/tracks", (context) => {
     requireQuery(context, "workspaceId");
@@ -16511,6 +16642,9 @@ function registerDistributionRoutes(app, dependencies) {
       contributorCount: 1
     }));
     return context.json(pageItems(context, tracks));
+  });
+  app.post("/erh/v1/tracks", async (context) => {
+    return disabledWorkspaceWriteResponse(context, dependencies, "distribution_track_upsert");
   });
   app.get("/erh/v1/ping", (_context) => {
     return _context.json({ ok: true });
@@ -16690,6 +16824,7 @@ function registerDistributionRoutes(app, dependencies) {
   });
   app.get("/erh/v1/settings", (context) => {
     requireQuery(context, "workspaceId");
+    assertNonBotRouteAccess(context, "distribution_settings_read");
     return context.json(toDistributionSettings(context, dependencies.fixtures, dependencies.persistence.writesEnabled));
   });
 }
@@ -16711,6 +16846,18 @@ function requireQuery(context, key) {
     ]);
   }
   return value;
+}
+function assertNonBotRouteAccess(context, action) {
+  const authUser = context.get("authUser");
+  if (!isBotApiUser(authUser)) {
+    return;
+  }
+  throw new ApiRouteError(403, "bot_route_denied", "Bot roles cannot access settings, maintenance, or unrestricted administrative routes.", [
+    `action=${action}`,
+    `path=${context.req.path}`,
+    `actorRole=${authUser.role}`,
+    `actorUserId=${authUser.userId}`
+  ]);
 }
 function requirePathParam(context, key) {
   const value = context.req.param(key);
@@ -17154,6 +17301,20 @@ async function distributionContractExpenseCreateResponse(context, dependencies) 
       appendDistributionContractExpenseFixture(dependencies.fixtures, expenseId, { ...request, amountMicro: amount });
       return mutationReceipt(expenseId, auditEventId);
     }
+  });
+  return context.json(result.body, result.status);
+}
+async function disabledWorkspaceWriteResponse(context, dependencies, action) {
+  const request = await readZodBody(context, workspacePassthroughSchema);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runDisabledMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action,
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request
   });
   return context.json(result.body, result.status);
 }
@@ -17760,9 +17921,9 @@ function upsertById(items, item) {
   return items.map((candidate) => candidate.id === item.id ? item : candidate);
 }
 async function distributionAllocationPreviewResponse(context, dependencies) {
-  requirePermission(context.get("authUser"), "distribution_allocations_preview");
   const request = await readJsonBody(context);
   assertAllocationRunPreviewRequest(context, request);
+  requirePermissionForWorkspace(context.get("authUser"), "distribution_allocations_preview", request.workspaceId);
   const runId = previewIdFor("allocation-run", `${request.period}:${request.lockKey}`);
   const plan = buildAllocationExecutionPlan(dependencies, request.period, request.lockKey, runId);
   return context.json(toAllocationRunPlanResponse(plan, null));
@@ -18270,9 +18431,9 @@ async function identityLinkResponse(context, dependencies, input) {
   return context.json(result.body, result.status);
 }
 async function distributionImportPreviewResponse(context, dependencies) {
-  requirePermission(context.get("authUser"), "distribution_import_preview");
   const request = await readJsonBody(context);
   assertDistributionImportPreviewRequest(context, request);
+  requirePermissionForWorkspace(context.get("authUser"), "distribution_import_preview", request.workspaceId);
   const previewRows = previewRowsFromRecords(request.rows);
   const idempotencyFingerprint = `${request.source}:${request.checksum}:${hashRequestBody(request.rows)}`;
   const previewId = previewIdFor("distribution", idempotencyFingerprint);
@@ -18410,9 +18571,9 @@ async function distributionImportReverseResponse(context, dependencies) {
   return context.json(result.body, result.status);
 }
 async function officeBankImportPreviewResponse(context, dependencies) {
-  requirePermission(context.get("authUser"), "office_bank_import_preview");
   const request = await readJsonBody(context);
   assertOfficeBankImportPreviewRequest(context, request);
+  requirePermissionForWorkspace(context.get("authUser"), "office_bank_import_preview", request.workspaceId);
   const previewRows = previewRowsFromRecords(request.rows);
   const parsedRows = previewRows.map((row) => parseOfficeBankPreviewRow(row, request.workspaceId, dependencies.fixtures.office.bankAccounts)).filter((row) => row.line !== null);
   const idempotencyFingerprint = `${request.source}:${request.checksum}:${hashRequestBody(request.rows)}`;
