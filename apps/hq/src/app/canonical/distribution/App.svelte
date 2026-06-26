@@ -36,7 +36,9 @@
   import { BarsChart, KPI, Loader, Table, Toolbar } from "@ehq/ui";
   import type { ChartPoint, SelectOption, TableColumn, TableRow, Tone, ToolbarFilter } from "@ehq/ui";
   import { createShellApiClient } from "../../app-shell-data.js";
+  import { formatDateOnly, formatDateRange } from "../../date-format.js";
   import { formatMoneyValue, moneyToneForValue } from "../../money-format.js";
+  import { createPeriodOptions, getLatestDataPeriod, periodEndDate, periodLabel, rangeForScope, type PeriodScope } from "../../period-controls.js";
 
   type DistributionPageId =
     | "dashboard"
@@ -94,9 +96,11 @@
   const { session, onLogout }: Props = $props();
   const client = createShellApiClient();
   const distributionWorkspaceId = "eeee-mu";
-  const distributionPeriod = "2026-05";
+  const writesEnabled = false;
   const allValue = "all";
-  const allocationLockKey = `distribution:allocations:${distributionPeriod}`;
+  const periodOptions = createPeriodOptions();
+  const fallbackLatestPeriod = getLatestDataPeriod();
+  const fallbackLatestPeriodEnd = periodEndDate(fallbackLatestPeriod);
   const navItems: readonly DistributionNavItem[] = [
     { id: "dashboard", label: "Dashboard", title: "Dashboard", subtitle: "Royalty cockpit, blockers, and actions." },
     { id: "imports", label: "Imports", title: "Imports", subtitle: "Kontor and RouteNote exports, preview then confirm." },
@@ -178,8 +182,8 @@
     ],
     statementsWithoutPaymentLinks: [
       { id: "stmt-joker-2025", statementReference: "JOKER KARTEL · 2025-01-01 → 2025-12-31", payee: "JOKER KARTEL", periodStart: "2025-01-01", periodEnd: "2025-12-31", currency: "EUR", netPayableMicro: "0.0000000000" },
-      { id: "stmt-stefano-2026", statementReference: "Stéfano Honoré · 2026-01-01 → 2026-05-31", payee: "Stéfano Honoré", periodStart: "2026-01-01", periodEnd: "2026-05-31", currency: "EUR", netPayableMicro: "0.0000000000" },
-      { id: "stmt-nono-2026", statementReference: "Nono · 2026-01-01 → 2026-05-31", payee: "Nono", periodStart: "2026-01-01", periodEnd: "2026-05-31", currency: "USD", netPayableMicro: "0.0000000000" }
+      { id: "stmt-stefano-2026", statementReference: `Stéfano Honoré · 2026-01-01 → ${fallbackLatestPeriodEnd}`, payee: "Stéfano Honoré", periodStart: "2026-01-01", periodEnd: fallbackLatestPeriodEnd, currency: "EUR", netPayableMicro: "0.0000000000" },
+      { id: "stmt-nono-2026", statementReference: `Nono · 2026-01-01 → ${fallbackLatestPeriodEnd}`, payee: "Nono", periodStart: "2026-01-01", periodEnd: fallbackLatestPeriodEnd, currency: "USD", netPayableMicro: "0.0000000000" }
     ],
     expenseTermsMissingPayee: [
       { id: "expense-contract-review", expenseReference: "Contract source review · EUR 0.0000000000", contract: "Contract source review", description: "Source expense term has no linked payee in the preview diagnostic.", amountMicro: "0.0000000000", currency: "EUR", status: "review" },
@@ -273,6 +277,7 @@
     { label: "Expenses", align: "right", sortable: true },
     { label: "Paid", align: "right", sortable: true },
     { label: "Due", align: "right", sortable: true },
+    { label: "Period", align: "left", sortable: true },
     { label: "Status", align: "left", sortable: true }
   ];
   const paymentColumns: readonly TableColumn[] = [
@@ -316,8 +321,8 @@
     { label: "Payee", align: "left", sortable: true },
     { label: "Currency", align: "left", sortable: true },
     { label: "Rows", align: "right", sortable: true },
-    { label: "First id", align: "left", sortable: false },
-    { label: "Last id", align: "left", sortable: false },
+    { label: "First row", align: "left", sortable: false },
+    { label: "Last row", align: "left", sortable: false },
     { label: "Latest closing", align: "right", sortable: true }
   ];
   const aliasColumns: readonly TableColumn[] = [
@@ -340,6 +345,8 @@
   ];
 
   let activePageId = $state<DistributionPageId>("dashboard");
+  let periodScope = $state<PeriodScope>("month");
+  let selectedPeriod = $state(getLatestDataPeriod());
   let dashboardState = $state<ApiRequestState<DistributionDashboardResponse>>(
     createIdleState<DistributionDashboardResponse>()
   );
@@ -403,6 +410,10 @@
   let mutationReceiptPageId = $state<DistributionPageId | null>(null);
 
   const activePage = $derived(getNavItem(activePageId));
+  const distributionPeriod = $derived(selectedPeriod);
+  const activeRange = $derived(rangeForScope(periodScope, selectedPeriod));
+  const periodControlVisible = $derived(pageUsesPeriodControl(activePageId));
+  const allocationLockKey = $derived(`distribution:allocations:${distributionPeriod}`);
   const dashboardKpis = $derived(createDashboardKpis(dashboardState));
   const importBatches = $derived(readPageItems(importBatchesState));
   const mappingRows = $derived(readPageItems(mappingState));
@@ -954,6 +965,20 @@
     revenueGroupBy = readSelectValue(event) as RevenueGroupBy;
   }
 
+  function updatePeriodScope(event: Event): void {
+    periodScope = readSelectValue(event) as PeriodScope;
+    void reloadPeriodScopedData();
+  }
+
+  async function reloadPeriodScopedData(): Promise<void> {
+    await Promise.all([
+      loadDashboard(),
+      loadSuspense(),
+      loadPayments(),
+      loadRevenue()
+    ]);
+  }
+
   async function previewImport(): Promise<void> {
     importState = {
       ...importState,
@@ -1079,7 +1104,7 @@
           workspaceId: distributionWorkspaceId,
           contractId: contract.id,
           payeeId: contract.payeeId,
-          incurredOn: "2026-05-18",
+          incurredOn: `${distributionPeriod}-18`,
           label: "Advance preview",
           amountMicro: "6000000000",
           currency: contract.currency
@@ -1526,7 +1551,7 @@
       id: expense.id,
       cells: [
         { kind: "text", value: expense.label, strong: true },
-        { kind: "text", value: expense.incurredOn, strong: false },
+        { kind: "text", value: formatDateOnly(expense.incurredOn), strong: false },
         { kind: "money", value: formatMoney(expense.originalAmountMicro, expense.currency), tone: "info" },
         { kind: "money", value: formatMoney(expense.openAmountMicro, expense.currency), tone: moneyTone(expense.openAmountMicro) },
         { kind: "badge", value: expense.status, tone: expense.status === "open" ? "warning" : "success" }
@@ -1571,6 +1596,7 @@
         { kind: "money", value: formatMoney(statement.expenseMicro, statement.currency), tone: "error" },
         { kind: "money", value: formatMoney(statement.paidMicro, statement.currency), tone: "success" },
         { kind: "money", value: formatMoney(statement.netPayableMicro, statement.currency), tone: "active" },
+        { kind: "text", value: formatDateRange(statement.period_start, statement.period_end), strong: false },
         { kind: "badge", value: statement.status, tone: statement.status === "paid" ? "success" : "warning" }
       ]
     }));
@@ -1583,7 +1609,7 @@
         { kind: "text", value: payment.payeeName, strong: true },
         { kind: "money", value: formatMoney(payment.amountMicro, payment.currency), tone: moneyTone(payment.amountMicro) },
         { kind: "text", value: payment.reference ?? "to complete", strong: false },
-        { kind: "text", value: payment.paidAt ?? "not paid", strong: false },
+        { kind: "text", value: payment.paidAt === null ? "not paid" : formatDateOnly(payment.paidAt), strong: false },
         { kind: "badge", value: payment.status, tone: payment.status === "paid" ? "success" : "warning" }
       ]
     }));
@@ -1630,7 +1656,7 @@
       cells: [
         { kind: "text", value: row.statementReference, strong: true },
         { kind: "text", value: row.payee, strong: false },
-        { kind: "text", value: `${row.periodStart} → ${row.periodEnd}`, strong: false },
+        { kind: "text", value: formatDateRange(row.periodStart, row.periodEnd), strong: false },
         { kind: "badge", value: row.currency, tone: "muted" },
         { kind: "money", value: formatMoney(row.netPayableMicro, row.currency), tone: moneyTone(row.netPayableMicro) }
       ]
@@ -1719,8 +1745,8 @@
     return items.map((entry: AuditLogEntry): TableRow => ({
       id: entry.id,
       cells: [
-        { kind: "text", value: entry.occurredAt, strong: false },
-        { kind: "text", value: entry.actorId, strong: false },
+        { kind: "text", value: formatDateOnly(entry.occurredAt), strong: false },
+        { kind: "text", value: auditActorLabel(entry), strong: false },
         { kind: "badge", value: entry.action, tone: "info" },
         { kind: "text", value: `${entry.entityType} · ${entry.entityReference}`, strong: false }
       ]
@@ -1829,6 +1855,16 @@
 
   function moneyTone(amountMicro: string): Tone {
     return moneyToneForValue(amountMicro);
+  }
+
+  function auditActorLabel(entry: AuditLogEntry): string {
+    const actorEmail = entry.context.actorEmail ?? entry.context.actor_email ?? entry.context.actor;
+
+    if (actorEmail !== undefined && actorEmail.trim() !== "") {
+      return actorEmail;
+    }
+
+    return "Verified actor";
   }
 
   function formatBasisPoints(value: number): string {
@@ -1940,6 +1976,18 @@
     return "map_to_track";
   }
 
+  function pageUsesPeriodControl(pageId: DistributionPageId): boolean {
+    return pageId === "dashboard" ||
+      pageId === "allocations" ||
+      pageId === "suspense" ||
+      pageId === "payments" ||
+      pageId === "revenue";
+  }
+
+  function writeDisabledTitle(): string {
+    return writesEnabled ? "" : "enable writes";
+  }
+
   function createIdempotencyKey(scope: string): string {
     return `distribution-${scope}-${Date.now().toString()}`;
   }
@@ -1999,12 +2047,26 @@
         <span>{activePage.subtitle}</span>
       </section>
 
+      {#if periodControlVisible}
+        <section class="period-control ehq-edge-surface" aria-label="Period control">
+          <label>
+            <span>Period</span>
+            <select value={periodScope} onchange={updatePeriodScope}>
+              {#each periodOptions as option (option.value)}
+                <option value={option.value}>{option.label} · {option.detail}</option>
+              {/each}
+            </select>
+          </label>
+          <p>{periodLabel(distributionPeriod)} · {activeRange.from} -> {activeRange.to}</p>
+        </section>
+      {/if}
+
       {#if mutationReceipt !== null && mutationReceiptPageId === activePageId}
-        <p class="receipt" role="status">Action accepted · {mutationReceipt.id} · audit {mutationReceipt.auditEventId}</p>
+        <p class="receipt" role="status">Action accepted · audit recorded.</p>
       {/if}
 
       {#if runReceipt !== null && runReceiptPageId === activePageId}
-        <p class="receipt" role="status">Run queued · {runReceipt.runId} · lock {runReceipt.lockKey}</p>
+        <p class="receipt" role="status">Run queued · lock held by the workflow.</p>
       {/if}
 
       {#if activePageId === "dashboard"}
@@ -2033,7 +2095,7 @@
             <input value={importState.fileName} oninput={updateImportFile} />
           </label>
           <button class="distribution-action" type="button" onclick={previewImport}>Preview export</button>
-          <button class="distribution-action primary" type="button" disabled={!canConfirmImport} onclick={confirmImport}>Validate import</button>
+          <button class="distribution-action primary" type="button" disabled={!canConfirmImport || !writesEnabled} title={writeDisabledTitle()} onclick={confirmImport}>Validate import</button>
         </section>
         <section class="filter-strip ehq-edge-surface" aria-label="Import filters">
           <label>
@@ -2049,14 +2111,14 @@
         <section class="import-result ehq-edge-surface" class:error={importState.status === "error"} aria-live="polite">
           <strong>{importState.message}</strong>
           {#if importState.preview !== null}
-            <span>{importState.preview.previewId} · {importState.preview.acceptedRowCount} accepted · {importState.preview.unmappedRowCount} to suspense · {formatMoney(importState.preview.payableMicro, importState.preview.currencyCodes[0] ?? "USD")}</span>
-            <span>{importState.preview.statementReference} · keys {importState.preview.joinKeys.join(" + ")} · idempotency {importState.preview.idempotencyFingerprint}</span>
+            <span>{importState.preview.acceptedRowCount} accepted · {importState.preview.unmappedRowCount} to suspense · {formatMoney(importState.preview.payableMicro, importState.preview.currencyCodes[0] ?? "USD")}</span>
+            <span>{importState.preview.statementReference} · keys {importState.preview.joinKeys.join(" + ")}</span>
           {/if}
           {#if importState.confirm !== null}
-            <span>Confirm {importState.confirm.id} · {importState.confirm.importedRoyaltyEventCount} royalty events</span>
+            <span>{importState.confirm.importedRoyaltyEventCount} royalty events imported.</span>
           {/if}
         </section>
-        <Table title="Batches Kontor / RouteNote" columns={importColumns} rows={importRows} state={importBatchesState.status === "loading" ? "loading" : importBatchesState.status === "error" ? "error" : "default"} actionLabel="" />
+        <Table title="Batches Kontor / RouteNote" columns={importColumns} rows={importRows} state={tableStateFor(importBatchesState.status, importBatches.length)} actionLabel="" />
       {:else if activePageId === "mapping"}
         <section class="filter-strip ehq-edge-surface" aria-label="Mapping filters">
           <label>
@@ -2068,12 +2130,12 @@
             </select>
           </label>
           <button class="distribution-action" type="button" onclick={loadMappingRows}>Filter</button>
-          <button class="distribution-action primary" type="button" onclick={applyMappingRules}>Apply reusable rules</button>
+          <button class="distribution-action primary" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={applyMappingRules}>Apply reusable rules</button>
         </section>
         <Table title="Kontor / RouteNote rows to map" columns={mappingColumns} rows={mappingTableRows} state={mappingState.status === "loading" ? "loading" : mappingState.status === "error" ? "error" : mappingRows.length === 0 ? "empty" : "default"} actionLabel="" />
       {:else if activePageId === "catalog"}
         <section class="dashboard-grid">
-          <Table title="Catalog canonical + contributors" columns={catalogColumns} rows={catalogRows} state={tracksState.status === "loading" ? "loading" : tracksState.status === "error" ? "error" : "default"} actionLabel="" />
+          <Table title="Catalog canonical + contributors" columns={catalogColumns} rows={catalogRows} state={tableStateFor(tracksState.status, catalogRows.length)} actionLabel="" />
           <div class="command-card ehq-edge-surface">
             <h2>Review focus</h2>
             <p>Import artist and catalog contributors stay separate until an exact track match is approved.</p>
@@ -2082,12 +2144,12 @@
         </section>
       {:else if activePageId === "contracts"}
         <section class="contracts-actions ehq-edge-surface">
-          <button class="distribution-action primary" type="button" onclick={recordExpense}>Record recoupable expense</button>
+          <button class="distribution-action primary" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={recordExpense}>Record recoupable expense</button>
           <span>Expenses remain source records; corrections later become audited overrides.</span>
         </section>
         <section class="dashboard-grid">
-          <Table title="Splits / contracts" columns={contractColumns} rows={contractRows} state={contractsState.status === "loading" ? "loading" : contractsState.status === "error" ? "error" : "default"} actionLabel="" />
-          <Table title="Expenses / recoupments" columns={expenseColumns} rows={expenseRows} state={expensesState.status === "loading" ? "loading" : expensesState.status === "error" ? "error" : "default"} actionLabel="" />
+          <Table title="Splits / contracts" columns={contractColumns} rows={contractRows} state={tableStateFor(contractsState.status, contracts.length)} actionLabel="" />
+          <Table title="Expenses / recoupments" columns={expenseColumns} rows={expenseRows} state={tableStateFor(expensesState.status, expenses.length)} actionLabel="" />
         </section>
       {:else if activePageId === "allocations"}
         <section class="lock-panel ehq-edge-surface">
@@ -2097,10 +2159,10 @@
             <span>Preview, post and unpost are available only through cadenced workflow runs.</span>
           </div>
           <button class="distribution-action" type="button" onclick={previewAllocationRun}>Preview locked run</button>
-          <button class="distribution-action primary" type="button" onclick={startCadencedAllocationRun}>Post cadence wave</button>
-          <button class="distribution-action danger" type="button" onclick={unpostAllocationRun}>Request unpost run</button>
+          <button class="distribution-action primary" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={startCadencedAllocationRun}>Post cadence wave</button>
+          <button class="distribution-action danger" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={unpostAllocationRun}>Request unpost run</button>
         </section>
-        <Table title="Allocation runs" columns={allocationColumns} rows={allocationRows} state={allocationsState.status === "loading" ? "loading" : allocationsState.status === "error" ? "error" : "default"} actionLabel="" />
+        <Table title="Allocation runs" columns={allocationColumns} rows={allocationRows} state={tableStateFor(allocationsState.status, allocationRuns.length)} actionLabel="" />
       {:else if activePageId === "suspense"}
         <section class="filter-strip ehq-edge-surface" aria-label="Suspense filters">
           <label>
@@ -2112,7 +2174,7 @@
             </select>
           </label>
           <button class="distribution-action" type="button" onclick={loadSuspense}>Filter</button>
-          <button class="distribution-action primary" type="button" onclick={resolveFirstSuspense}>Resolve first exact path</button>
+          <button class="distribution-action primary" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={resolveFirstSuspense}>Resolve first exact path</button>
         </section>
         <Table title="Suspense grouped by reason" columns={suspenseColumns} rows={suspenseTableRows} state={suspenseState.status === "loading" ? "loading" : suspenseState.status === "error" ? "error" : suspenseItems.length === 0 ? "empty" : "default"} actionLabel="" />
       {:else if activePageId === "statements"}
@@ -2120,7 +2182,7 @@
           {#if statementPreview !== null}
             <div>
               <p>Financial summary first</p>
-              <h2>{statementPreview.payeeName} · {statementPreview.period}</h2>
+              <h2>{statementPreview.payeeName} · {formatDateRange(statementPreview.period_start, statementPreview.period_end)}</h2>
               <dl>
                 <div><dt>Gross</dt><dd>{formatMoney(statementPreview.grossMicro, statementPreview.currency)}</dd></div>
                 <div><dt>Recoup</dt><dd>{formatMoney(statementPreview.recoupedMicro, statementPreview.currency)}</dd></div>
@@ -2130,7 +2192,7 @@
               </dl>
             </div>
           {/if}
-          <button class="distribution-action primary" type="button" onclick={generateStatements}>Generate statements run</button>
+          <button class="distribution-action primary" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={generateStatements}>Generate statements run</button>
         </section>
         <section class="statement-pdf ehq-edge-surface" aria-label="A4 statement PDF preview">
           <header>
@@ -2138,8 +2200,8 @@
             <span>A4 PDF · print-first</span>
           </header>
           <h2>{statementPreview?.payeeName ?? "Payee"} Statement</h2>
-          <p>Period {statementPreview?.period ?? distributionPeriod} · currency {statementPreview?.currency ?? "MUR"}</p>
-          <Table title="Statements" columns={statementColumns} rows={statementRows} state={statementsState.status === "loading" ? "loading" : statementsState.status === "error" ? "error" : "default"} actionLabel="" />
+          <p>Period {statementPreview === null ? periodLabel(distributionPeriod) : formatDateRange(statementPreview.period_start, statementPreview.period_end)} · currency {statementPreview?.currency ?? "MUR"}</p>
+          <Table title="Statements" columns={statementColumns} rows={statementRows} state={tableStateFor(statementsState.status, statements.length)} actionLabel="" />
         </section>
       {:else if activePageId === "payments"}
         <section class="filter-strip ehq-edge-surface" aria-label="Payment filters">
@@ -2152,10 +2214,10 @@
             </select>
           </label>
           <button class="distribution-action" type="button" onclick={loadPayments}>Filter</button>
-          <button class="distribution-action primary" type="button" onclick={recordPayment}>Record payment</button>
-          <button class="distribution-action" type="button" onclick={editPayment}>Edit reference</button>
-          <button class="distribution-action" type="button" onclick={reconcilePayment}>Reconcile payment</button>
-          <button class="distribution-action danger" type="button" onclick={voidPayment}>Void payment</button>
+          <button class="distribution-action primary" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={recordPayment}>Record payment</button>
+          <button class="distribution-action" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={editPayment}>Edit reference</button>
+          <button class="distribution-action" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={reconcilePayment}>Reconcile payment</button>
+          <button class="distribution-action danger" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={voidPayment}>Void payment</button>
         </section>
         <Table title="Payments" columns={paymentColumns} rows={paymentRows} state={paymentsState.status === "loading" ? "loading" : paymentsState.status === "error" ? "error" : payments.length === 0 ? "empty" : "default"} actionLabel="" />
       {:else if activePageId === "revenue"}
@@ -2172,7 +2234,7 @@
         </section>
         <section class="dashboard-grid">
           <BarsChart title="Revenue grouped view" points={revenueChartPoints} tone="active" />
-          <Table title="Revenue detail" columns={revenueColumns} rows={revenueTableRows} state={revenueState.status === "loading" ? "loading" : revenueState.status === "error" ? "error" : "default"} actionLabel="" />
+          <Table title="Revenue detail" columns={revenueColumns} rows={revenueTableRows} state={tableStateFor(revenueState.status, revenueRows.length)} actionLabel="" />
         </section>
       {:else if activePageId === "financial-reconciliation"}
         {#if reconciliationState.status === "loading"}
@@ -2209,8 +2271,9 @@
                   <button
                     class="distribution-action"
                     type="button"
-                    disabled={action.maintenance}
-                    aria-disabled={action.maintenance}
+                    disabled={action.maintenance || !writesEnabled}
+                    aria-disabled={action.maintenance || !writesEnabled}
+                    title={action.maintenance ? "maintenance only" : writeDisabledTitle()}
                     onclick={() => runReconciliationAction(action)}
                   >
                     {action.maintenance ? "Maintenance only" : "Run guarded action"}
@@ -2580,6 +2643,7 @@
   .filter-strip,
   .contracts-actions,
   .lock-panel,
+  .period-control,
   .statement-summary {
     padding: var(--ehq-space-3);
     border: 0;
@@ -2589,6 +2653,21 @@
     flex-wrap: wrap;
     align-items: end;
     gap: var(--ehq-space-3);
+  }
+
+  .period-control {
+    justify-content: space-between;
+  }
+
+  .period-control label {
+    width: min(360px, 100%);
+  }
+
+  .period-control p {
+    margin: 0;
+    color: var(--ehq-text-muted);
+    font-family: var(--ehq-mono);
+    font-size: 11px;
   }
 
   label {
@@ -2652,8 +2731,11 @@
   }
 
   .distribution-action:disabled {
+    border-color: var(--ehq-border-soft);
+    background: var(--ehq-surface);
     color: var(--ehq-text-disabled);
     cursor: not-allowed;
+    opacity: 0.76;
   }
 
   .import-result {
