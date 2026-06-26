@@ -6,6 +6,8 @@ import type {
   AllocationRunSummary,
   AllocationRunUnpostRequest,
   ApiClientConfig,
+  AuditLogEntry,
+  AuditLogQuery,
   ApiMutationReceipt,
   ApiRunReceipt,
   DistributionContract,
@@ -24,8 +26,14 @@ import type {
   DistributionMappingApplyRulesRequest,
   DistributionMappingRow,
   DistributionMappingRowsQuery,
+  DistributionAlias,
+  DistributionDuplicate,
+  DistributionReconciliationResponse,
   DistributionRevenueQuery,
   DistributionRevenueRow,
+  DistributionSettingsResponse,
+  DistributionWorkspacePageQuery,
+  DistributionWorkspaceQuery,
   EntityId,
   PageResult,
   PayeeSummary,
@@ -113,6 +121,13 @@ export interface DistributionApiClient {
     options: WriteRequestOptions
   ) => Promise<ApiMutationReceipt>;
   readonly getRevenue: (query: DistributionRevenueQuery) => Promise<PageResult<DistributionRevenueRow>>;
+  readonly getFinancialReconciliation: (
+    query: DistributionWorkspaceQuery
+  ) => Promise<DistributionReconciliationResponse>;
+  readonly listAliases: (query: DistributionWorkspacePageQuery) => Promise<PageResult<DistributionAlias>>;
+  readonly listDuplicates: (query: DistributionWorkspacePageQuery) => Promise<PageResult<DistributionDuplicate>>;
+  readonly listAuditLog: (query: AuditLogQuery) => Promise<PageResult<AuditLogEntry>>;
+  readonly getSettings: (query: DistributionWorkspaceQuery) => Promise<DistributionSettingsResponse>;
 }
 
 export function createDistributionApiClient(config: ApiClientConfig): DistributionApiClient {
@@ -304,6 +319,38 @@ export function createDistributionApiClient(config: ApiClientConfig): Distributi
         groupBy: query.groupBy,
         cursor: query.cursor,
         limit: query.limit
+      }),
+    getFinancialReconciliation: (
+      query: DistributionWorkspaceQuery
+    ): Promise<DistributionReconciliationResponse> =>
+      transport.get<DistributionReconciliationResponse>("financial-reconciliation", {
+        workspaceId: query.workspaceId
+      }),
+    listAliases: (query: DistributionWorkspacePageQuery): Promise<PageResult<DistributionAlias>> =>
+      transport.get<PageResult<DistributionAlias>>("aliases", {
+        workspaceId: query.workspaceId,
+        cursor: query.cursor,
+        limit: query.limit
+      }),
+    listDuplicates: (query: DistributionWorkspacePageQuery): Promise<PageResult<DistributionDuplicate>> =>
+      transport.get<PageResult<DistributionDuplicate>>("duplicates", {
+        workspaceId: query.workspaceId,
+        cursor: query.cursor,
+        limit: query.limit
+      }),
+    listAuditLog: (query: AuditLogQuery): Promise<PageResult<AuditLogEntry>> =>
+      transport.get<PageResult<AuditLogEntry>>("audit-log", {
+        workspaceId: query.workspaceId,
+        from: query.from,
+        to: query.to,
+        actorId: query.actorId,
+        entityType: query.entityType,
+        cursor: query.cursor,
+        limit: query.limit
+      }),
+    getSettings: (query: DistributionWorkspaceQuery): Promise<DistributionSettingsResponse> =>
+      transport.get<DistributionSettingsResponse>("settings", {
+        workspaceId: query.workspaceId
       })
   };
 }

@@ -53,6 +53,14 @@ const exactConsoleTargets: Readonly<Record<string, ConsoleTarget>> = {
     workspaceId: "distribution",
     pageId: "di_contracts"
   },
+  "/console/distribution/duplicates": {
+    workspaceId: "distribution",
+    pageId: "di_contracts"
+  },
+  "/console/distribution/settings": {
+    workspaceId: "distribution",
+    pageId: "di_dash"
+  },
   "/console/distribution/allocations": {
     workspaceId: "distribution",
     pageId: "di_alloc"

@@ -10,16 +10,21 @@
     type ApiRequestState,
     type ApiRunReceipt,
     type AllocationRunSummary,
+    type AuditLogEntry,
     type CurrencyCode,
+    type DistributionAlias,
     type DistributionContract,
     type DistributionContractExpense,
     type DistributionDashboardResponse,
+    type DistributionDuplicate,
     type DistributionImportBatch,
     type DistributionImportConfirmResponse,
     type DistributionImportPreviewRequest,
     type DistributionImportPreviewResponse,
     type DistributionMappingRow,
+    type DistributionReconciliationResponse,
     type DistributionRevenueRow,
+    type DistributionSettingsResponse,
     type PageResult,
     type PayeeSummary,
     type PaymentSummary,
@@ -28,7 +33,7 @@
     type SuspenseItem,
     type TrackSummary
   } from "@ehq/api-client";
-  import { BarsChart, KPI, Table, Toolbar } from "@ehq/ui";
+  import { BarsChart, KPI, Loader, Table, Toolbar } from "@ehq/ui";
   import type { ChartPoint, SelectOption, TableColumn, TableRow, Tone, ToolbarFilter } from "@ehq/ui";
   import { createShellApiClient } from "../../app-shell-data.js";
   import { formatMoneyValue, moneyToneForValue } from "../../money-format.js";
@@ -43,7 +48,12 @@
     | "suspense"
     | "statements"
     | "payments"
-    | "revenue";
+    | "revenue"
+    | "financial-reconciliation"
+    | "aliases"
+    | "duplicates"
+    | "audit-log"
+    | "settings";
   type ImportSourceFilter = "all" | "kontor" | "routenote";
   type ImportSource = "kontor" | "routenote";
   type MappingStatusFilter = "all" | "unmapped" | "suggested" | "mapped";
@@ -97,7 +107,12 @@
     { id: "suspense", label: "Suspense", title: "Suspense", subtitle: "Grouped by reason with an exact fix path." },
     { id: "statements", label: "Statements", title: "Statements", subtitle: "Financial summary first, print-first A4 PDF." },
     { id: "payments", label: "Payments", title: "Payments", subtitle: "Record, edit, void, and reconcile payment records." },
-    { id: "revenue", label: "Revenue", title: "Revenue", subtitle: "Financial view by payee, track, currency, store, or period." }
+    { id: "revenue", label: "Revenue", title: "Revenue", subtitle: "Financial view by payee, track, currency, store, or period." },
+    { id: "financial-reconciliation", label: "Financial reconciliation", title: "Financial reconciliation", subtitle: "Read-only diagnostic of payments, statements, balances, and allocations." },
+    { id: "aliases", label: "Aliases", title: "Aliases", subtitle: "Catalog aliases that route imported names to canonical entities." },
+    { id: "duplicates", label: "Duplicates", title: "Duplicates", subtitle: "Potential duplicate records detected across the catalog." },
+    { id: "audit-log", label: "Audit log", title: "Audit log", subtitle: "Distribution-scoped audit trail of recorded actions." },
+    { id: "settings", label: "Settings", title: "Settings", subtitle: "Read-only workspace configuration for Distribution." }
   ];
   const importSourceOptions: readonly SelectOption[] = [
     { label: "Kontor", value: "kontor" },
@@ -218,6 +233,55 @@
     { label: "Payable", align: "right", sortable: true },
     { label: "Currency", align: "left", sortable: true }
   ];
+  const reconStatementColumns: readonly TableColumn[] = [
+    { label: "Statement", align: "left", sortable: true },
+    { label: "Payee", align: "left", sortable: true },
+    { label: "Period", align: "left", sortable: true },
+    { label: "Currency", align: "left", sortable: true },
+    { label: "Net payable", align: "right", sortable: true }
+  ];
+  const reconExpenseColumns: readonly TableColumn[] = [
+    { label: "Cost term", align: "left", sortable: true },
+    { label: "Contract", align: "left", sortable: true },
+    { label: "Description", align: "left", sortable: true },
+    { label: "Amount", align: "right", sortable: true },
+    { label: "Currency", align: "left", sortable: true },
+    { label: "Status", align: "left", sortable: true }
+  ];
+  const reconMatchedColumns: readonly TableColumn[] = [
+    { label: "Earning", align: "left", sortable: true },
+    { label: "Batch", align: "left", sortable: true },
+    { label: "Track", align: "left", sortable: true },
+    { label: "Currency", align: "left", sortable: true },
+    { label: "Gross", align: "right", sortable: true },
+    { label: "Status", align: "left", sortable: true }
+  ];
+  const reconBalanceColumns: readonly TableColumn[] = [
+    { label: "Payee", align: "left", sortable: true },
+    { label: "Currency", align: "left", sortable: true },
+    { label: "Rows", align: "right", sortable: true },
+    { label: "First id", align: "left", sortable: false },
+    { label: "Last id", align: "left", sortable: false },
+    { label: "Latest closing", align: "right", sortable: true }
+  ];
+  const aliasColumns: readonly TableColumn[] = [
+    { label: "Alias", align: "left", sortable: true },
+    { label: "Target", align: "left", sortable: true },
+    { label: "Type", align: "left", sortable: true }
+  ];
+  const duplicateColumns: readonly TableColumn[] = [
+    { label: "Label", align: "left", sortable: true },
+    { label: "Kind", align: "left", sortable: true },
+    { label: "Count", align: "right", sortable: true },
+    { label: "Samples", align: "left", sortable: false },
+    { label: "Merge", align: "left", sortable: false }
+  ];
+  const auditColumns: readonly TableColumn[] = [
+    { label: "When", align: "left", sortable: true },
+    { label: "Actor", align: "left", sortable: true },
+    { label: "Action", align: "left", sortable: true },
+    { label: "Entity", align: "left", sortable: true }
+  ];
 
   let activePageId = $state<DistributionPageId>("dashboard");
   let dashboardState = $state<ApiRequestState<DistributionDashboardResponse>>(
@@ -248,6 +312,21 @@
   let paymentsState = $state<ApiRequestState<PageResult<PaymentSummary>>>(createIdleState<PageResult<PaymentSummary>>());
   let revenueState = $state<ApiRequestState<PageResult<DistributionRevenueRow>>>(
     createIdleState<PageResult<DistributionRevenueRow>>()
+  );
+  let reconciliationState = $state<ApiRequestState<DistributionReconciliationResponse>>(
+    createIdleState<DistributionReconciliationResponse>()
+  );
+  let aliasesState = $state<ApiRequestState<PageResult<DistributionAlias>>>(
+    createIdleState<PageResult<DistributionAlias>>()
+  );
+  let duplicatesState = $state<ApiRequestState<PageResult<DistributionDuplicate>>>(
+    createIdleState<PageResult<DistributionDuplicate>>()
+  );
+  let auditLogState = $state<ApiRequestState<PageResult<AuditLogEntry>>>(
+    createIdleState<PageResult<AuditLogEntry>>()
+  );
+  let settingsState = $state<ApiRequestState<DistributionSettingsResponse>>(
+    createIdleState<DistributionSettingsResponse>()
   );
   let importSourceFilter = $state<ImportSourceFilter>(allValue);
   let mappingStatusFilter = $state<MappingStatusFilter>("suggested");
@@ -293,6 +372,19 @@
   const paymentRows = $derived(createPaymentRows(payments));
   const revenueTableRows = $derived(createRevenueRows(revenueRows));
   const revenueChartPoints = $derived(createRevenueChartPoints(revenueRows));
+  const reconciliation = $derived(reconciliationState.status === "success" ? reconciliationState.data : null);
+  const reconciliationKpis = $derived(createReconciliationKpis(reconciliation));
+  const reconStatementRows = $derived(createReconStatementRows(reconciliation));
+  const reconExpenseRows = $derived(createReconExpenseRows(reconciliation));
+  const reconMatchedRows = $derived(createReconMatchedRows(reconciliation));
+  const reconBalanceRows = $derived(createReconBalanceRows(reconciliation));
+  const aliases = $derived(readPageItems(aliasesState));
+  const duplicates = $derived(readPageItems(duplicatesState));
+  const auditEntries = $derived(readPageItems(auditLogState));
+  const aliasRows = $derived(createAliasRows(aliases));
+  const duplicateRows = $derived(createDuplicateRows(duplicates));
+  const auditRows = $derived(createAuditRows(auditEntries));
+  const settings = $derived(settingsState.status === "success" ? settingsState.data : null);
   const importToolbarFilters = $derived(createImportToolbarFilters(importState));
   const canConfirmImport = $derived(importState.preview !== null && importState.status !== "loading");
   const statementPreview = $derived(statements[0] ?? null);
@@ -319,7 +411,12 @@
       loadSuspense(),
       loadStatements(),
       loadPayments(),
-      loadRevenue()
+      loadRevenue(),
+      loadReconciliation(),
+      loadAliases(),
+      loadDuplicates(),
+      loadAuditLog(),
+      loadSettings()
     ]);
   }
 
@@ -523,6 +620,74 @@
     }
   }
 
+  async function loadReconciliation(): Promise<void> {
+    reconciliationState = createLoadingState<DistributionReconciliationResponse>();
+
+    try {
+      reconciliationState = createSuccessState<DistributionReconciliationResponse>(
+        await client.distribution.getFinancialReconciliation({ workspaceId: distributionWorkspaceId })
+      );
+    } catch (error: unknown) {
+      reconciliationState = createErrorState<DistributionReconciliationResponse>(error);
+    }
+  }
+
+  async function loadAliases(): Promise<void> {
+    aliasesState = createLoadingState<PageResult<DistributionAlias>>();
+
+    try {
+      aliasesState = createSuccessState<PageResult<DistributionAlias>>(
+        await client.distribution.listAliases({ workspaceId: distributionWorkspaceId, cursor: null, limit: 50 })
+      );
+    } catch (error: unknown) {
+      aliasesState = createErrorState<PageResult<DistributionAlias>>(error);
+    }
+  }
+
+  async function loadDuplicates(): Promise<void> {
+    duplicatesState = createLoadingState<PageResult<DistributionDuplicate>>();
+
+    try {
+      duplicatesState = createSuccessState<PageResult<DistributionDuplicate>>(
+        await client.distribution.listDuplicates({ workspaceId: distributionWorkspaceId, cursor: null, limit: 50 })
+      );
+    } catch (error: unknown) {
+      duplicatesState = createErrorState<PageResult<DistributionDuplicate>>(error);
+    }
+  }
+
+  async function loadAuditLog(): Promise<void> {
+    auditLogState = createLoadingState<PageResult<AuditLogEntry>>();
+
+    try {
+      auditLogState = createSuccessState<PageResult<AuditLogEntry>>(
+        await client.distribution.listAuditLog({
+          workspaceId: distributionWorkspaceId,
+          from: null,
+          to: null,
+          actorId: null,
+          entityType: null,
+          cursor: null,
+          limit: 50
+        })
+      );
+    } catch (error: unknown) {
+      auditLogState = createErrorState<PageResult<AuditLogEntry>>(error);
+    }
+  }
+
+  async function loadSettings(): Promise<void> {
+    settingsState = createLoadingState<DistributionSettingsResponse>();
+
+    try {
+      settingsState = createSuccessState<DistributionSettingsResponse>(
+        await client.distribution.getSettings({ workspaceId: distributionWorkspaceId })
+      );
+    } catch (error: unknown) {
+      settingsState = createErrorState<DistributionSettingsResponse>(error);
+    }
+  }
+
   function selectPage(pageId: DistributionPageId): void {
     activePageId = pageId;
     clearActionReceipts();
@@ -581,6 +746,26 @@
       return "revenue";
     }
 
+    if (pathname.endsWith("/console/distribution/financial-reconciliation")) {
+      return "financial-reconciliation";
+    }
+
+    if (pathname.endsWith("/console/distribution/aliases")) {
+      return "aliases";
+    }
+
+    if (pathname.endsWith("/console/distribution/duplicates")) {
+      return "duplicates";
+    }
+
+    if (pathname.endsWith("/console/distribution/audit-log")) {
+      return "audit-log";
+    }
+
+    if (pathname.endsWith("/console/distribution/settings")) {
+      return "settings";
+    }
+
     return "dashboard";
   }
 
@@ -619,6 +804,26 @@
 
     if (pageId === "revenue") {
       return "/console/distribution/revenue";
+    }
+
+    if (pageId === "financial-reconciliation") {
+      return "/console/distribution/financial-reconciliation";
+    }
+
+    if (pageId === "aliases") {
+      return "/console/distribution/aliases";
+    }
+
+    if (pageId === "duplicates") {
+      return "/console/distribution/duplicates";
+    }
+
+    if (pageId === "audit-log") {
+      return "/console/distribution/audit-log";
+    }
+
+    if (pageId === "settings") {
+      return "/console/distribution/settings";
     }
 
     return "/console/distribution/dashboard";
@@ -1249,6 +1454,143 @@
     return items.map((row: DistributionRevenueRow): ChartPoint => ({ label: row.label, value: row.barLevel }));
   }
 
+  function createReconciliationKpis(data: DistributionReconciliationResponse | null): readonly DistributionKpi[] {
+    if (data === null) {
+      return [];
+    }
+
+    return data.kpis.map((kpi): DistributionKpi => ({
+      label: kpi.label,
+      value: kpi.value,
+      detail: kpi.detail,
+      tone: kpi.tone,
+      accent: false
+    }));
+  }
+
+  function createReconStatementRows(data: DistributionReconciliationResponse | null): readonly TableRow[] {
+    if (data === null) {
+      return [];
+    }
+
+    return data.statementsWithoutPaymentLinks.map((row): TableRow => ({
+      id: row.id,
+      cells: [
+        { kind: "text", value: row.id, strong: true },
+        { kind: "text", value: row.payee, strong: false },
+        { kind: "text", value: `${row.periodStart} → ${row.periodEnd}`, strong: false },
+        { kind: "badge", value: row.currency, tone: "muted" },
+        { kind: "money", value: formatMoney(row.netPayableMicro, row.currency), tone: moneyTone(row.netPayableMicro) }
+      ]
+    }));
+  }
+
+  function createReconExpenseRows(data: DistributionReconciliationResponse | null): readonly TableRow[] {
+    if (data === null) {
+      return [];
+    }
+
+    return data.expenseTermsMissingPayee.map((row): TableRow => ({
+      id: row.id,
+      cells: [
+        { kind: "text", value: row.id, strong: true },
+        { kind: "text", value: row.contract, strong: false },
+        { kind: "text", value: row.description, strong: false },
+        { kind: "money", value: formatMoney(row.amountMicro, row.currency), tone: "info" },
+        { kind: "badge", value: row.currency, tone: "muted" },
+        { kind: "badge", value: row.status, tone: "warning" }
+      ]
+    }));
+  }
+
+  function createReconMatchedRows(data: DistributionReconciliationResponse | null): readonly TableRow[] {
+    if (data === null) {
+      return [];
+    }
+
+    return data.matchedUnallocatedSamples.map((row): TableRow => ({
+      id: row.id,
+      cells: [
+        { kind: "text", value: row.id, strong: true },
+        { kind: "text", value: row.batch, strong: false },
+        { kind: "text", value: row.track, strong: false },
+        { kind: "badge", value: row.currency, tone: "muted" },
+        { kind: "money", value: formatMoney(row.grossMicro, row.currency), tone: "info" },
+        { kind: "badge", value: row.status, tone: "warning" }
+      ]
+    }));
+  }
+
+  function createReconBalanceRows(data: DistributionReconciliationResponse | null): readonly TableRow[] {
+    if (data === null) {
+      return [];
+    }
+
+    return data.payeeBalancesSummary.map((row): TableRow => ({
+      id: `${row.payee}-${row.currency}`,
+      cells: [
+        { kind: "text", value: row.payee, strong: true },
+        { kind: "badge", value: row.currency, tone: "muted" },
+        { kind: "text", value: String(row.rows), strong: false },
+        { kind: "text", value: row.firstId ?? "—", strong: false },
+        { kind: "text", value: row.lastId ?? "—", strong: false },
+        { kind: "money", value: formatMoney(row.latestClosingMicro, row.currency), tone: moneyTone(row.latestClosingMicro) }
+      ]
+    }));
+  }
+
+  function createAliasRows(items: readonly DistributionAlias[]): readonly TableRow[] {
+    return items.map((alias: DistributionAlias): TableRow => ({
+      id: alias.id,
+      cells: [
+        { kind: "text", value: alias.aliasText, strong: true },
+        { kind: "text", value: alias.target, strong: false },
+        { kind: "badge", value: alias.targetType, tone: "muted" }
+      ]
+    }));
+  }
+
+  function createDuplicateRows(items: readonly DistributionDuplicate[]): readonly TableRow[] {
+    return items.map((duplicate: DistributionDuplicate): TableRow => ({
+      id: duplicate.id,
+      cells: [
+        { kind: "text", value: duplicate.label, strong: true },
+        { kind: "badge", value: duplicate.kind, tone: "muted" },
+        { kind: "text", value: String(duplicate.count), strong: false },
+        { kind: "text", value: duplicate.sampleIds.join(", "), strong: false },
+        { kind: "badge", value: "merge disabled", tone: "warning" }
+      ]
+    }));
+  }
+
+  function createAuditRows(items: readonly AuditLogEntry[]): readonly TableRow[] {
+    return items.map((entry: AuditLogEntry): TableRow => ({
+      id: entry.id,
+      cells: [
+        { kind: "text", value: entry.occurredAt, strong: false },
+        { kind: "text", value: entry.actorId, strong: false },
+        { kind: "badge", value: entry.action, tone: "info" },
+        { kind: "text", value: `${entry.entityType} · ${entry.entityId}`, strong: false }
+      ]
+    }));
+  }
+
+  function tableStateFor(status: RequestStatus, count: number): "loading" | "error" | "empty" | "default" {
+    if (status === "loading") {
+      return "loading";
+    }
+
+    if (status === "error") {
+      return "error";
+    }
+
+    if (count === 0) {
+      return "empty";
+    }
+
+    return "default";
+  }
+
   function createImportToolbarFilters(state: ImportUiState): readonly ToolbarFilter[] {
     return [
       { label: "Source", value: state.source, active: true, disabled: false },
@@ -1680,6 +2022,100 @@
           <BarsChart title="Revenue grouped view" points={revenueChartPoints} tone="active" />
           <Table title="Revenue detail" columns={revenueColumns} rows={revenueTableRows} state={revenueState.status === "loading" ? "loading" : revenueState.status === "error" ? "error" : "default"} actionLabel="" />
         </section>
+      {:else if activePageId === "financial-reconciliation"}
+        {#if reconciliationState.status === "loading"}
+          <Loader label="Loading reconciliation" detail="Computing read-only diagnostics." size="medium" />
+        {:else if reconciliationState.status === "error"}
+          <section class="empty-state ehq-edge-surface">
+            <strong>Reconciliation unavailable</strong>
+            <span>The read-only diagnostic could not be loaded. Retry the request.</span>
+            <button class="distribution-action" type="button" onclick={loadReconciliation}>Retry</button>
+          </section>
+        {:else}
+          <section class="kpi-grid recon" aria-label="Reconciliation KPIs">
+            {#each reconciliationKpis as kpi (kpi.label)}
+              <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state="default" accent={kpi.accent} />
+            {/each}
+          </section>
+          <Table title="Statements without payment links" columns={reconStatementColumns} rows={reconStatementRows} state={reconStatementRows.length === 0 ? "empty" : "default"} actionLabel="" />
+          <Table title="Expense terms missing payee" columns={reconExpenseColumns} rows={reconExpenseRows} state={reconExpenseRows.length === 0 ? "empty" : "default"} actionLabel="" />
+          <Table title="Matched unallocated (sample)" columns={reconMatchedColumns} rows={reconMatchedRows} state={reconMatchedRows.length === 0 ? "empty" : "default"} actionLabel="" />
+          <Table title="Payee balances summary" columns={reconBalanceColumns} rows={reconBalanceRows} state={reconBalanceRows.length === 0 ? "empty" : "default"} actionLabel="" />
+          <section class="recon-actions ehq-edge-surface" aria-label="Guarded repair actions">
+            <header>
+              <h2>Guarded repair actions</h2>
+              <span>Read-only view. All actions are disabled and not wired to any mutation.</span>
+            </header>
+            <div class="recon-action-grid">
+              {#each (reconciliation?.actions ?? []) as action (action.id)}
+                <div class="recon-action ehq-edge-surface">
+                  <strong>{action.label}</strong>
+                  <p>{action.description}</p>
+                  {#if action.maintenance}
+                    <span class="recon-action-flag">One-time maintenance · flagged for review</span>
+                  {/if}
+                  <button class="distribution-action" type="button" disabled aria-disabled="true">Disabled (read-only)</button>
+                </div>
+              {/each}
+            </div>
+          </section>
+        {/if}
+      {:else if activePageId === "aliases"}
+        {#if aliases.length === 0 && aliasesState.status === "success"}
+          <section class="empty-state ehq-edge-surface">
+            <strong>No catalog aliases</strong>
+            <span>No alias records are available for this workspace. Aliases route imported names to canonical entities once configured.</span>
+          </section>
+        {:else}
+          <Table title="Catalog aliases" columns={aliasColumns} rows={aliasRows} state={tableStateFor(aliasesState.status, aliases.length)} actionLabel="" />
+        {/if}
+      {:else if activePageId === "duplicates"}
+        <section class="recon-actions ehq-edge-surface" aria-label="Duplicates note">
+          <header>
+            <h2>Duplicate detection</h2>
+            <span>Read-only view. The merge action is disabled and not wired to any mutation.</span>
+          </header>
+        </section>
+        {#if duplicates.length === 0 && duplicatesState.status === "success"}
+          <section class="empty-state ehq-edge-surface">
+            <strong>No duplicates detected</strong>
+            <span>No potential duplicate records were found across the catalog.</span>
+          </section>
+        {:else}
+          <Table title="Potential duplicates" columns={duplicateColumns} rows={duplicateRows} state={tableStateFor(duplicatesState.status, duplicates.length)} actionLabel="" />
+        {/if}
+      {:else if activePageId === "audit-log"}
+        {#if auditEntries.length === 0 && auditLogState.status === "success"}
+          <section class="empty-state ehq-edge-surface">
+            <strong>No audit entries</strong>
+            <span>No distribution-scoped audit events are recorded for this workspace.</span>
+          </section>
+        {:else}
+          <Table title="Audit log" columns={auditColumns} rows={auditRows} state={tableStateFor(auditLogState.status, auditEntries.length)} actionLabel="" />
+        {/if}
+      {:else if activePageId === "settings"}
+        {#if settingsState.status === "loading"}
+          <Loader label="Loading settings" detail="Reading workspace configuration." size="medium" />
+        {:else if settingsState.status === "error"}
+          <section class="empty-state ehq-edge-surface">
+            <strong>Settings unavailable</strong>
+            <span>The workspace configuration could not be loaded.</span>
+            <button class="distribution-action" type="button" onclick={loadSettings}>Retry</button>
+          </section>
+        {:else if settings !== null}
+          <section class="settings-panel ehq-edge-surface" aria-label="Distribution settings">
+            <dl>
+              <div><dt>Workspace</dt><dd>{settings.workspaceId}</dd></div>
+              <div><dt>API namespace</dt><dd>{settings.namespace}</dd></div>
+              <div><dt>Reads</dt><dd>{settings.reads}</dd></div>
+              <div><dt>Payees</dt><dd>{settings.payeeCount}</dd></div>
+              <div><dt>Contracts</dt><dd>{settings.contractCount}</dd></div>
+              <div><dt>Currencies</dt><dd>{settings.currencies.length === 0 ? "—" : settings.currencies.join(", ")}</dd></div>
+              <div><dt>FX rates</dt><dd>{settings.fxRateCount}</dd></div>
+              <div><dt>Mutations</dt><dd>{settings.mutationsEnabled ? "enabled" : "read-only"}</dd></div>
+            </dl>
+          </section>
+        {/if}
       {/if}
     </div>
   </section>
@@ -2184,6 +2620,128 @@
     margin: var(--ehq-space-2) 0 var(--ehq-space-4);
     color: var(--ehq-text-muted);
     font-size: 12px;
+  }
+
+  .kpi-grid.recon {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .empty-state {
+    padding: var(--ehq-space-5);
+    border: 0;
+    border-radius: var(--ehq-radius-sm);
+    background: transparent;
+    display: grid;
+    gap: var(--ehq-space-2);
+    justify-items: start;
+  }
+
+  .empty-state strong {
+    font-family: var(--ehq-display);
+    font-size: 18px;
+    font-weight: var(--ehq-type-heading-weight);
+  }
+
+  .empty-state span {
+    color: var(--ehq-text-soft);
+    font-size: 13px;
+    line-height: 1.6;
+  }
+
+  .recon-actions {
+    padding: var(--ehq-space-4);
+    border: 0;
+    border-radius: var(--ehq-radius-sm);
+    background: transparent;
+    display: grid;
+    gap: var(--ehq-space-3);
+  }
+
+  .recon-actions header h2 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: var(--ehq-type-heading-weight);
+  }
+
+  .recon-actions header span {
+    display: block;
+    margin-top: var(--ehq-space-1);
+    color: var(--ehq-text-muted);
+    font-family: var(--ehq-mono);
+    font-size: 11px;
+  }
+
+  .recon-action-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: var(--ehq-space-3);
+  }
+
+  .recon-action {
+    padding: var(--ehq-space-3);
+    border: 0;
+    border-radius: var(--ehq-radius-sm);
+    background: transparent;
+    display: grid;
+    gap: var(--ehq-space-2);
+    align-content: start;
+  }
+
+  .recon-action strong {
+    font-size: 13px;
+    font-weight: var(--ehq-type-heading-weight);
+  }
+
+  .recon-action p {
+    margin: 0;
+    color: var(--ehq-text-soft);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .recon-action-flag {
+    color: var(--ehq-text-muted);
+    font-family: var(--ehq-mono);
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .settings-panel {
+    padding: var(--ehq-space-4);
+    border: 0;
+    border-radius: var(--ehq-radius-sm);
+    background: transparent;
+  }
+
+  .settings-panel dl {
+    margin: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: var(--ehq-space-3);
+  }
+
+  .settings-panel div {
+    min-width: 0;
+  }
+
+  .settings-panel dt,
+  .settings-panel dd {
+    margin: 0;
+  }
+
+  .settings-panel dt {
+    color: var(--ehq-text-muted);
+    font-family: var(--ehq-mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .settings-panel dd {
+    margin-top: var(--ehq-space-1);
+    color: var(--ehq-text);
+    font-weight: var(--ehq-type-figure-weight);
   }
 
   @media print {

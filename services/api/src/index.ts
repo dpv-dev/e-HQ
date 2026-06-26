@@ -88,9 +88,19 @@ import type {
   DistributionImportConfirmResponse,
   DistributionImportPreviewRequest,
   DistributionImportPreviewResponse,
+  DistributionAlias,
+  DistributionDuplicate,
   DistributionMappingApplyRulesRequest,
   DistributionMappingRow,
+  DistributionReconciliationAction,
+  DistributionReconciliationExpenseGap,
+  DistributionReconciliationKpi,
+  DistributionReconciliationMatchedUnallocated,
+  DistributionReconciliationPayeeBalance,
+  DistributionReconciliationResponse,
+  DistributionReconciliationStatementGap,
   DistributionRevenueRow,
+  DistributionSettingsResponse,
   EntityId,
   OfficeBankQualityResponse,
   OfficeDashboardResponse,
@@ -1168,6 +1178,31 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
 
   app.post("/erh/v1/payees/:payeeId/partner-link", async (context) => {
     return distributionPayeePartnerLinkResponse(context, dependencies);
+  });
+
+  app.get("/erh/v1/financial-reconciliation", (context) => {
+    requireQuery(context, "workspaceId");
+    return context.json(toDistributionReconciliation(dependencies.fixtures));
+  });
+
+  app.get("/erh/v1/aliases", (context) => {
+    requireQuery(context, "workspaceId");
+    return context.json(pageItems(context, toDistributionAliases(dependencies.fixtures)));
+  });
+
+  app.get("/erh/v1/duplicates", (context) => {
+    requireQuery(context, "workspaceId");
+    return context.json(pageItems(context, toDistributionDuplicates(dependencies.fixtures)));
+  });
+
+  app.get("/erh/v1/audit-log", (context) => {
+    requireQuery(context, "workspaceId");
+    return context.json(pageItems(context, toDistributionAuditLog(dependencies.fixtures)));
+  });
+
+  app.get("/erh/v1/settings", (context) => {
+    requireQuery(context, "workspaceId");
+    return context.json(toDistributionSettings(context, dependencies.fixtures));
   });
 }
 
@@ -4937,6 +4972,181 @@ function toDistributionBarLevel(value: bigint, maxUnits: bigint): number {
   }
 
   return parseInt(((value * 100n) / maxUnits).toString(), 10);
+}
+
+const distributionReconciliationSampleLimit = 25;
+
+function toDistributionReconciliation(store: ApiFixtureStore): DistributionReconciliationResponse {
+  const dataset = store.distribution;
+  const payeeName = (payeeId: string): string =>
+    dataset.payees.find((candidate) => candidate.id === payeeId)?.name ?? payeeId;
+  const contractTitle = (contractId: string): string =>
+    store.distributionContracts.find((candidate) => candidate.id === contractId)?.title ?? contractId;
+
+  const linkedPaymentIds = new Set(dataset.statementPaymentLinks.map((link) => link.paymentId));
+  const unlinkedPayments = dataset.payments.filter((payment) => !linkedPaymentIds.has(payment.id));
+  const missingPaymentDates = dataset.payments.filter((payment) => payment.paidAt === null);
+
+  const linkedStatementIds = new Set(dataset.statementPaymentLinks.map((link) => link.statementId));
+  const statementsWithoutLinks = dataset.statements.filter((statement) => !linkedStatementIds.has(statement.id));
+
+  const allocatedEarningIds = new Set(dataset.earningAllocations.map((allocation) => allocation.earningId));
+  const matchedUnallocated = dataset.normalizedEarnings.filter(
+    (earning) => earning.mappingStatus === "matched" && !allocatedEarningIds.has(earning.id)
+  );
+
+  const expenseTermsMissingPayee = store.distributionCostTerms.filter((term) => term.payeeId === null);
+
+  const balanceGroups = new Map<string, { readonly payeeId: string; readonly currency: string; ids: string[]; latest: string }>();
+  for (const balance of store.distributionPayeeBalances) {
+    const key = `${balance.payeeId}:${balance.currency}`;
+    const existing = balanceGroups.get(key);
+    if (existing === undefined) {
+      balanceGroups.set(key, {
+        payeeId: balance.payeeId,
+        currency: balance.currency,
+        ids: [balance.id],
+        latest: balance.closingBalance
+      });
+    } else {
+      existing.ids.push(balance.id);
+      existing.latest = balance.closingBalance;
+    }
+  }
+
+  const kpis: readonly DistributionReconciliationKpi[] = [
+    { id: "payments_total", label: "Payments", value: String(dataset.payments.length), detail: `${String(unlinkedPayments.length)} unlinked`, tone: "info" },
+    { id: "payments_unlinked", label: "Unlinked payments", value: String(unlinkedPayments.length), detail: "no statement link", tone: unlinkedPayments.length > 0 ? "warning" : "success" },
+    { id: "strict_matches", label: "Strict payment matches", value: String(dataset.statementPaymentLinks.length), detail: "statement ↔ payment", tone: "info" },
+    { id: "statement_plans", label: "Statement plans", value: String(linkedStatementIds.size), detail: "statements with a payment", tone: "info" },
+    { id: "payment_only_plans", label: "Payment-only plans", value: String(unlinkedPayments.length), detail: "payment without statement", tone: unlinkedPayments.length > 0 ? "warning" : "success" },
+    { id: "missing_payment_dates", label: "Missing payment dates", value: String(missingPaymentDates.length), detail: "paidAt is null", tone: missingPaymentDates.length > 0 ? "warning" : "success" },
+    { id: "statements", label: "Statements", value: String(dataset.statements.length), detail: `${String(dataset.statementLines.length)} statement lines`, tone: "info" },
+    { id: "payee_balances", label: "Payee balances", value: String(store.distributionPayeeBalances.length), detail: `${String(balanceGroups.size)} payee/currency rows`, tone: "info" },
+    { id: "expense_applications", label: "Expense applications", value: String(store.distributionExpenseApplications.length), detail: "applied cost terms", tone: "info" },
+    { id: "missing_expense_payees", label: "Missing expense payees", value: String(expenseTermsMissingPayee.length), detail: "cost terms with null payee", tone: expenseTermsMissingPayee.length > 0 ? "warning" : "success" },
+    { id: "allocations", label: "Allocations", value: String(dataset.earningAllocations.length), detail: "earning allocations", tone: "info" },
+    { id: "matched_unallocated", label: "Matched unallocated", value: String(matchedUnallocated.length), detail: "matched, no allocation", tone: matchedUnallocated.length > 0 ? "warning" : "success" }
+  ];
+
+  const statementsWithoutPaymentLinks: readonly DistributionReconciliationStatementGap[] = statementsWithoutLinks
+    .slice(0, distributionReconciliationSampleLimit)
+    .map((statement) => ({
+      id: statement.id,
+      payee: payeeName(statement.payeeId),
+      periodStart: statement.periodStart,
+      periodEnd: statement.periodEnd,
+      currency: statement.currency,
+      netPayableMicro: statement.netPayable
+    }));
+
+  const expenseTermsMissingPayeeRows: readonly DistributionReconciliationExpenseGap[] = expenseTermsMissingPayee
+    .slice(0, distributionReconciliationSampleLimit)
+    .map((term) => ({
+      id: term.id,
+      contract: contractTitle(term.contractId),
+      description: term.recoupable ? "recoupable cost term" : "non-recoupable cost term",
+      amountMicro: term.amount,
+      currency: term.currency,
+      status: term.status
+    }));
+
+  const matchedUnallocatedSamples: readonly DistributionReconciliationMatchedUnallocated[] = matchedUnallocated
+    .slice(0, distributionReconciliationSampleLimit)
+    .map((earning) => ({
+      id: earning.id,
+      batch: earning.batchId,
+      track: earning.rawTitle ?? earning.id,
+      currency: earning.currency,
+      grossMicro: earning.grossAmount,
+      status: earning.calculationStatus
+    }));
+
+  const payeeBalancesSummary: readonly DistributionReconciliationPayeeBalance[] = [...balanceGroups.values()]
+    .slice(0, distributionReconciliationSampleLimit)
+    .map((group) => ({
+      payee: payeeName(group.payeeId),
+      currency: group.currency,
+      rows: group.ids.length,
+      firstId: group.ids[0] ?? null,
+      lastId: group.ids[group.ids.length - 1] ?? null,
+      latestClosingMicro: group.latest
+    }));
+
+  const actions: readonly DistributionReconciliationAction[] = [
+    { id: "reset_matched_unallocated", label: "Reset matched unallocated to pending", description: "Reverts matched earnings without allocations back to pending.", maintenance: false },
+    { id: "backfill_known_cost_payees", label: "Backfill known cost payees", description: "One-time maintenance flagged for review, not a permanent product action.", maintenance: true },
+    { id: "backfill_mutecell_cost_payee", label: "Backfill Mutecell cost payee", description: "One-time maintenance flagged for review, not a permanent product action.", maintenance: true },
+    { id: "generate_payment_payee_statements", label: "Generate payment-payee statements", description: "Generates statements for payees that already have payments.", maintenance: false },
+    { id: "generate_payment_only_statements", label: "Generate payment-only statements", description: "Generates statements for payment-only plans.", maintenance: false },
+    { id: "link_strict_matches", label: "Link strict statement/payment matches", description: "Links statements and payments that match exactly.", maintenance: false },
+    { id: "link_period_matches", label: "Link period payment matches", description: "Links payments to statements within the same period.", maintenance: false }
+  ];
+
+  return {
+    kpis,
+    statementsWithoutPaymentLinks,
+    expenseTermsMissingPayee: expenseTermsMissingPayeeRows,
+    matchedUnallocatedSamples,
+    payeeBalancesSummary,
+    actions
+  };
+}
+
+function toDistributionAliases(store: ApiFixtureStore): readonly DistributionAlias[] {
+  void store;
+  // catalog_aliases is not surfaced through the read dataset, so this returns an empty,
+  // typed result that drives the empty-state UI rather than fabricating alias data.
+  return [];
+}
+
+function toDistributionDuplicates(store: ApiFixtureStore): readonly DistributionDuplicate[] {
+  const dataset = store.distribution;
+  const groups = new Map<string, { readonly title: string; ids: string[] }>();
+  for (const earning of dataset.normalizedEarnings) {
+    if (earning.isrc === null) {
+      continue;
+    }
+
+    const existing = groups.get(earning.isrc);
+    if (existing === undefined) {
+      groups.set(earning.isrc, { title: earning.rawTitle ?? earning.isrc, ids: [earning.id] });
+    } else {
+      existing.ids.push(earning.id);
+    }
+  }
+
+  return [...groups.entries()]
+    .filter(([, group]) => group.ids.length > 1)
+    .map(([isrc, group]) => ({
+      id: isrc,
+      label: group.title,
+      kind: "normalized_earning_isrc",
+      count: group.ids.length,
+      sampleIds: group.ids.slice(0, distributionReconciliationSampleLimit)
+    }));
+}
+
+function toDistributionAuditLog(store: ApiFixtureStore): readonly AuditLogEntry[] {
+  // Distribution has no dedicated audit-log fixture; reuse the shared audit data when present
+  // and filter to distribution-scoped entries, otherwise return a typed empty list.
+  return store.officeAuditLog.filter((entry) => entry.action.startsWith("distribution."));
+}
+
+function toDistributionSettings(context: ApiContext, store: ApiFixtureStore): DistributionSettingsResponse {
+  const workspaceId = requireQuery(context, "workspaceId");
+  const dataset = store.distribution;
+  const currencies = [...new Set(dataset.payees.map((payee) => payee.preferredCurrency))].sort();
+  return {
+    workspaceId,
+    namespace: "erh/v1",
+    reads: "live",
+    payeeCount: dataset.payees.length,
+    contractCount: store.distributionContracts.length,
+    currencies,
+    fxRateCount: store.distributionFxRates.length,
+    mutationsEnabled: false
+  };
 }
 
 function createMutationReceipt(entityId: string, idempotencyKey: string): ApiMutationReceipt {

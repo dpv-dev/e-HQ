@@ -885,3 +885,97 @@ export interface DistributionRevenueRow {
   readonly currency: CurrencyCode;
   readonly barLevel: number;
 }
+
+export interface DistributionWorkspaceQuery {
+  readonly workspaceId: EntityId;
+}
+
+export interface DistributionWorkspacePageQuery extends PageQuery {
+  readonly workspaceId: EntityId;
+}
+
+export interface DistributionReconciliationKpi {
+  readonly id: string;
+  readonly label: string;
+  readonly value: string;
+  readonly detail: string;
+  readonly tone: "info" | "warning" | "success" | "error" | "muted" | "active";
+}
+
+export interface DistributionReconciliationStatementGap {
+  readonly id: EntityId;
+  readonly payee: string;
+  readonly periodStart: IsoDateString;
+  readonly periodEnd: IsoDateString;
+  readonly currency: CurrencyCode;
+  readonly netPayableMicro: MoneyMicroString;
+}
+
+export interface DistributionReconciliationExpenseGap {
+  readonly id: EntityId;
+  readonly contract: string;
+  readonly description: string;
+  readonly amountMicro: MoneyMicroString;
+  readonly currency: CurrencyCode;
+  readonly status: string;
+}
+
+export interface DistributionReconciliationMatchedUnallocated {
+  readonly id: EntityId;
+  readonly batch: string;
+  readonly track: string;
+  readonly currency: CurrencyCode;
+  readonly grossMicro: MoneyMicroString;
+  readonly status: string;
+}
+
+export interface DistributionReconciliationPayeeBalance {
+  readonly payee: string;
+  readonly currency: CurrencyCode;
+  readonly rows: number;
+  readonly firstId: EntityId | null;
+  readonly lastId: EntityId | null;
+  readonly latestClosingMicro: MoneyMicroString;
+}
+
+export interface DistributionReconciliationAction {
+  readonly id: string;
+  readonly label: string;
+  readonly description: string;
+  readonly maintenance: boolean;
+}
+
+export interface DistributionReconciliationResponse {
+  readonly kpis: readonly DistributionReconciliationKpi[];
+  readonly statementsWithoutPaymentLinks: readonly DistributionReconciliationStatementGap[];
+  readonly expenseTermsMissingPayee: readonly DistributionReconciliationExpenseGap[];
+  readonly matchedUnallocatedSamples: readonly DistributionReconciliationMatchedUnallocated[];
+  readonly payeeBalancesSummary: readonly DistributionReconciliationPayeeBalance[];
+  readonly actions: readonly DistributionReconciliationAction[];
+}
+
+export interface DistributionAlias {
+  readonly id: EntityId;
+  readonly aliasText: string;
+  readonly target: string;
+  readonly targetType: "artist" | "payee" | "label" | "release" | "track" | "unassigned";
+}
+
+export interface DistributionDuplicate {
+  readonly id: EntityId;
+  readonly label: string;
+  readonly kind: string;
+  readonly count: number;
+  readonly sampleIds: readonly EntityId[];
+}
+
+export interface DistributionSettingsResponse {
+  readonly workspaceId: EntityId;
+  readonly namespace: string;
+  readonly reads: string;
+  readonly payeeCount: number;
+  readonly contractCount: number;
+  readonly currencies: readonly CurrencyCode[];
+  readonly fxRateCount: number;
+  readonly mutationsEnabled: boolean;
+}
