@@ -833,6 +833,12 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
     };
     return context.json(response);
   });
+
+  app.get("/eof/v1/vat", (context) => {
+    const period = requireCompatQuery(context, ["period", "month"], "period");
+    resolveWorkspaceId(context);
+    return context.json(toOfficeVatReport(dependencies.fixtures.office, period));
+  });
 }
 
 function filterRunwayWindowMonths(
@@ -3937,6 +3943,37 @@ function toApiDivisionPnl(row: OfficePnlDivisionRow): { readonly id: string; rea
     incomeMicro: row.income,
     expenseMicro: row.expense,
     netMicro: row.profit
+  };
+}
+
+function toOfficeVatReport(
+  _dataset: OfficeAnalyticsDataset,
+  period: string
+): {
+  readonly period: string;
+  readonly hasVatSource: boolean;
+  readonly outputVatMicro: string;
+  readonly inputVatMicro: string;
+  readonly netVatMicro: string;
+  readonly rows: readonly {
+    readonly id: string;
+    readonly label: string;
+    readonly baseMicro: string;
+    readonly rateBp: number;
+    readonly vatMicro: string;
+  }[];
+} {
+  // The Office data layer carries no VAT/tax-rate source. Per the read-only
+  // contract we never fabricate money: return a typed empty report with
+  // zeroed totals so the UI can render a clearly-labelled empty state.
+  const zeroMicro = eofMoney.format(0n);
+  return {
+    period,
+    hasVatSource: false,
+    outputVatMicro: zeroMicro,
+    inputVatMicro: zeroMicro,
+    netVatMicro: zeroMicro,
+    rows: []
   };
 }
 
