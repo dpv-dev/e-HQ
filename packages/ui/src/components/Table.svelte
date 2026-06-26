@@ -17,6 +17,10 @@
   function moneyTone(tone: Tone): string {
     return `money tone-${tone}`;
   }
+
+  function rowKey(row: TableRow, index: number): string {
+    return `${row.id}:${String(index)}`;
+  }
 </script>
 
 <section class={`ehq-table-shell ehq-edge-surface ${props.state}`} aria-label={props.title}>
@@ -72,7 +76,7 @@
           </tr>
         </thead>
         <tbody>
-          {#each props.rows as row (row.id)}
+          {#each props.rows as row, index (rowKey(row, index))}
             <tr>
               {#each row.cells as cell}
                 <td class:right={cell.kind === "money"}>
