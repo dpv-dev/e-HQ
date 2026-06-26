@@ -11,12 +11,18 @@ import type {
   CashflowBucket,
   CashflowQuery,
   EntityId,
+  OfficeBankAccountsQuery,
+  OfficeBankAccountSummary,
   OfficeBankQualityQuery,
   OfficeBankQualityResponse,
+  OfficeBankRawLine,
+  OfficeBankRawLinesQuery,
   OfficeDashboardQuery,
   OfficeDashboardResponse,
   OfficeDepartmentPnl,
   OfficeDepartmentPnlQuery,
+  OfficeDivisionPnl,
+  OfficeDivisionPnlQuery,
   OfficeGlobalPnl,
   OfficeGlobalPnlQuery,
   OfficeIntegrityCheckAllResponse,
@@ -49,6 +55,8 @@ import type {
   OfficeTransaction,
   OfficeTransactionsQuery,
   OfficeTransactionWriteRequest,
+  OfficeVatQuery,
+  OfficeVatReport,
   PageResult,
   WriteRequestOptions
 } from "./types.js";
@@ -57,6 +65,7 @@ export interface OfficeApiClient {
   readonly getDashboard: (query: OfficeDashboardQuery) => Promise<OfficeDashboardResponse>;
   readonly getGlobalPnl: (query: OfficeGlobalPnlQuery) => Promise<OfficeGlobalPnl>;
   readonly getDepartmentPnl: (departmentId: EntityId, query: OfficeDepartmentPnlQuery) => Promise<OfficeDepartmentPnl>;
+  readonly getDivisionPnl: (query: OfficeDivisionPnlQuery) => Promise<PageResult<OfficeDivisionPnl>>;
   readonly getPnlProjection: (query: OfficePnlProjectionQuery) => Promise<readonly OfficePnlProjectionRow[]>;
   readonly listTransactions: (query: OfficeTransactionsQuery) => Promise<PageResult<OfficeTransaction>>;
   readonly createTransaction: (
@@ -131,6 +140,9 @@ export interface OfficeApiClient {
   readonly getProjectPnl: (projectId: EntityId, query: OfficeProjectPnlQuery) => Promise<OfficeProjectPnl>;
   readonly checkIntegrity: (query: OfficeIntegrityCheckQuery) => Promise<OfficeIntegrityCheckAllResponse>;
   readonly getBankQuality: (query: OfficeBankQualityQuery) => Promise<OfficeBankQualityResponse>;
+  readonly listBankAccounts: (query: OfficeBankAccountsQuery) => Promise<PageResult<OfficeBankAccountSummary>>;
+  readonly listBankRawLines: (query: OfficeBankRawLinesQuery) => Promise<PageResult<OfficeBankRawLine>>;
+  readonly getVatReport: (query: OfficeVatQuery) => Promise<OfficeVatReport>;
 }
 
 export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient {
@@ -149,6 +161,11 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
       }),
     getDepartmentPnl: (departmentId: EntityId, query: OfficeDepartmentPnlQuery): Promise<OfficeDepartmentPnl> =>
       transport.get<OfficeDepartmentPnl>(`pl/department/${encodePathSegment(departmentId)}`, {
+        workspaceId: query.workspaceId,
+        period: query.period
+      }),
+    getDivisionPnl: (query: OfficeDivisionPnlQuery): Promise<PageResult<OfficeDivisionPnl>> =>
+      transport.get<PageResult<OfficeDivisionPnl>>("pl/division", {
         workspaceId: query.workspaceId,
         period: query.period
       }),
@@ -362,6 +379,24 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
       }),
     getBankQuality: (query: OfficeBankQualityQuery): Promise<OfficeBankQualityResponse> =>
       transport.get<OfficeBankQualityResponse>("analytics/bank-quality", {
+        workspaceId: query.workspaceId,
+        period: query.period
+      }),
+    listBankAccounts: (query: OfficeBankAccountsQuery): Promise<PageResult<OfficeBankAccountSummary>> =>
+      transport.get<PageResult<OfficeBankAccountSummary>>("bank/accounts", {
+        workspaceId: query.workspaceId,
+        limit: query.limit
+      }),
+    listBankRawLines: (query: OfficeBankRawLinesQuery): Promise<PageResult<OfficeBankRawLine>> =>
+      transport.get<PageResult<OfficeBankRawLine>>("bank/raw", {
+        workspaceId: query.workspaceId,
+        period: query.period,
+        accountId: query.accountId,
+        cursor: query.cursor,
+        limit: query.limit
+      }),
+    getVatReport: (query: OfficeVatQuery): Promise<OfficeVatReport> =>
+      transport.get<OfficeVatReport>("vat", {
         workspaceId: query.workspaceId,
         period: query.period
       })

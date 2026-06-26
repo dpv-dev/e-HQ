@@ -148,6 +148,22 @@ const exactConsoleTargets: Readonly<Record<string, ConsoleTarget>> = {
   "/console/office/audit": {
     workspaceId: "office",
     pageId: "of_recon"
+  },
+  "/console/office/ceo": {
+    workspaceId: "office",
+    pageId: "of_dash"
+  },
+  "/console/office/bank": {
+    workspaceId: "office",
+    pageId: "of_recon"
+  },
+  "/console/office/settings": {
+    workspaceId: "office",
+    pageId: "of_dash"
+  },
+  "/console/office/wave-invoices": {
+    workspaceId: "office",
+    pageId: "of_imports"
   }
 };
 

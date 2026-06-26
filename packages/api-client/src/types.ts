@@ -159,6 +159,16 @@ export interface OfficeGlobalPnl {
   readonly lines: readonly OfficePnlLine[];
 }
 
+export interface OfficeDivisionPnlQuery extends PeriodQuery {}
+
+export interface OfficeDivisionPnl {
+  readonly id: EntityId;
+  readonly label: string;
+  readonly incomeMicro: MoneyMicroString;
+  readonly expenseMicro: MoneyMicroString;
+  readonly netMicro: MoneyMicroString;
+}
+
 export interface OfficeDepartmentPnlQuery extends PeriodQuery {}
 
 export interface OfficeDepartmentPnl {
@@ -546,6 +556,67 @@ export interface OfficeBankQualityResponse {
   readonly missingReferenceCount: number;
   readonly staleImportCount: number;
   readonly lastImportAt: IsoDateTimeString | null;
+}
+
+export interface OfficeBankAccountsQuery {
+  readonly workspaceId: EntityId;
+  readonly limit: number;
+}
+
+export interface OfficeBankAccountSummary {
+  readonly id: EntityId;
+  readonly workspaceId: EntityId;
+  readonly bankName: string;
+  readonly accountLabel: string;
+  readonly currency: CurrencyCode;
+  readonly currentBalanceMicro: MoneyMicroString;
+  readonly currentBalanceMurMicro: MoneyMicroString | null;
+  readonly isActive: boolean;
+  readonly balanceAsOf: IsoDateString | null;
+}
+
+export interface OfficeBankRawLinesQuery extends PageQuery {
+  readonly workspaceId: EntityId;
+  readonly period: IsoMonthString | null;
+  readonly accountId: EntityId | null;
+}
+
+export interface OfficeBankRawLine {
+  readonly id: EntityId;
+  readonly workspaceId: EntityId;
+  readonly importBatchId: EntityId;
+  readonly accountId: EntityId;
+  readonly occurredOn: IsoDateString;
+  readonly transactionDate: IsoDateString;
+  readonly description: string;
+  readonly direction: "credit" | "debit";
+  readonly reference: string;
+  readonly amountMicro: MoneyMicroString;
+  readonly amountMurMicro: MoneyMicroString;
+  readonly currency: CurrencyCode;
+  readonly isDuplicateCandidate: boolean;
+  readonly status: "unmatched" | "suggested" | "matched" | "rejected";
+  readonly reconciliationStatus: "unmatched" | "suggested" | "matched" | "rejected";
+  readonly matchedTransactionId: EntityId | null;
+}
+
+export interface OfficeVatQuery extends PeriodQuery {}
+
+export interface OfficeVatRow {
+  readonly id: EntityId;
+  readonly label: string;
+  readonly baseMicro: MoneyMicroString;
+  readonly rateBp: BasisPoints;
+  readonly vatMicro: MoneyMicroString;
+}
+
+export interface OfficeVatReport {
+  readonly period: IsoMonthString;
+  readonly hasVatSource: boolean;
+  readonly outputVatMicro: MoneyMicroString;
+  readonly inputVatMicro: MoneyMicroString;
+  readonly netVatMicro: MoneyMicroString;
+  readonly rows: readonly OfficeVatRow[];
 }
 
 export interface DistributionDashboardQuery extends PeriodQuery {}

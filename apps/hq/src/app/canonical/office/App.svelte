@@ -23,6 +23,7 @@
     createSuccessState,
     type ApiMutationReceipt,
     type ApiRequestState,
+    type AuditLogEntry,
     type BankImportPreviewResponse,
     type CashflowBucket,
     type OfficeDashboardResponse,
@@ -39,12 +40,17 @@
   } from "@ehq/api-client";
   import { createShellApiClient } from "../../app-shell-data.js";
   import { formatMoneyValue, formatSignedMoneyValue, moneyToneForValue } from "../../money-format.js";
+  import BankView from "./BankView.svelte";
+  import CeoView from "./CeoView.svelte";
   import MonitoringView from "./MonitoringView.svelte";
   import PartnersView from "./PartnersView.svelte";
   import ProjectsView from "./ProjectsView.svelte";
+  import SettingsView from "./SettingsView.svelte";
+  import VatView from "./VatView.svelte";
 
   type OfficePageId =
     | "dashboard"
+    | "ceo"
     | "pnl"
     | "coa"
     | "transactions"
@@ -55,7 +61,12 @@
     | "clients"
     | "suppliers"
     | "projects"
-    | "monitoring";
+    | "monitoring"
+    | "bank"
+    | "audit"
+    | "vat"
+    | "settings"
+    | "wave-invoices";
   type SelectFilterValue = string;
   type ImportSource = "mcb" | "sbi" | "csv" | "cashflow" | "pdf";
   type RequestStatus = "idle" | "loading" | "success" | "error";
@@ -109,6 +120,12 @@
       label: "Dashboard",
       title: "Office Dashboard",
       subtitle: "Finance, bank, monitoring, and project summary."
+    },
+    {
+      id: "ceo",
+      label: "CEO view",
+      title: "CEO view",
+      subtitle: "Executive summary composed from dashboard and validated P&L."
     },
     {
       id: "pnl",
@@ -175,6 +192,36 @@
       label: "Cash-flow",
       title: "Cash-flow",
       subtitle: "Inflows, outflows, and closing balances by period."
+    },
+    {
+      id: "bank",
+      label: "Bank",
+      title: "Bank",
+      subtitle: "Bank accounts, raw bank lines, and bank quality."
+    },
+    {
+      id: "audit",
+      label: "Audit log",
+      title: "Audit log",
+      subtitle: "Read-only trail of Office audit events."
+    },
+    {
+      id: "vat",
+      label: "VAT",
+      title: "VAT report",
+      subtitle: "VAT by period, derived from existing typed data."
+    },
+    {
+      id: "settings",
+      label: "Settings",
+      title: "Settings",
+      subtitle: "Read-only Office configuration: reference currency and maintenance."
+    },
+    {
+      id: "wave-invoices",
+      label: "Wave invoices — coming",
+      title: "Wave invoices",
+      subtitle: "Wave invoice integration is not yet available in this console."
     }
   ];
 
@@ -230,6 +277,9 @@
   let cashflowState = $state<ApiRequestState<readonly CashflowBucket[]>>(
     createIdleState<readonly CashflowBucket[]>()
   );
+  let auditState = $state<ApiRequestState<PageResult<AuditLogEntry>>>(
+    createIdleState<PageResult<AuditLogEntry>>()
+  );
   let actionReceipt = $state<ApiMutationReceipt | null>(null);
   let departmentFilter = $state<SelectFilterValue>(allValue);
   let divisionFilter = $state<SelectFilterValue>(allValue);
@@ -263,6 +313,8 @@
   const pendingRows = $derived(readPageItems(pendingState));
   const reconciliationRows = $derived(readPageItems(reconciliationState));
   const cashflowRows = $derived(readArrayState(cashflowState));
+  const auditRows = $derived(readPageItems(auditState));
+  const auditTableRows = $derived(createAuditTableRows(auditRows));
   const pnlRows = $derived(readArrayState(pnlState));
   const departmentOptions = $derived(createPlanOptions(planNodes, "department", "All departments"));
   const divisionOptions = $derived(createPlanOptions(planNodes, "division", "All divisions"));
@@ -300,8 +352,28 @@
       loadTransactions(),
       loadPendingTransactions(),
       loadReconciliations(),
-      loadCashflow()
+      loadCashflow(),
+      loadAuditLog()
     ]);
+  }
+
+  async function loadAuditLog(): Promise<void> {
+    auditState = createLoadingState<PageResult<AuditLogEntry>>();
+
+    try {
+      const page = await client.office.listAuditLog({
+        workspaceId: officeWorkspaceId,
+        from: null,
+        to: null,
+        actorId: null,
+        entityType: null,
+        cursor: null,
+        limit: 50
+      });
+      auditState = createSuccessState<PageResult<AuditLogEntry>>(page);
+    } catch (error: unknown) {
+      auditState = createErrorState<PageResult<AuditLogEntry>>(error);
+    }
   }
 
   async function loadDashboard(): Promise<void> {
@@ -452,6 +524,30 @@
       return "dashboard";
     }
 
+    if (pathname.endsWith("/console/office/ceo")) {
+      return "ceo";
+    }
+
+    if (pathname.endsWith("/console/office/bank")) {
+      return "bank";
+    }
+
+    if (pathname.endsWith("/console/office/audit")) {
+      return "audit";
+    }
+
+    if (pathname.endsWith("/console/office/vat")) {
+      return "vat";
+    }
+
+    if (pathname.endsWith("/console/office/settings")) {
+      return "settings";
+    }
+
+    if (pathname.endsWith("/console/office/wave-invoices")) {
+      return "wave-invoices";
+    }
+
     if (pathname.endsWith("/console/office/clients")) {
       return "clients";
     }
@@ -498,6 +594,30 @@
   function pagePath(pageId: OfficePageId): string {
     if (pageId === "dashboard") {
       return "/console/office/dashboard";
+    }
+
+    if (pageId === "ceo") {
+      return "/console/office/ceo";
+    }
+
+    if (pageId === "bank") {
+      return "/console/office/bank";
+    }
+
+    if (pageId === "audit") {
+      return "/console/office/audit";
+    }
+
+    if (pageId === "vat") {
+      return "/console/office/vat";
+    }
+
+    if (pageId === "settings") {
+      return "/console/office/settings";
+    }
+
+    if (pageId === "wave-invoices") {
+      return "/console/office/wave-invoices";
     }
 
     if (pageId === "clients") {
@@ -1195,6 +1315,19 @@
     }));
   }
 
+  function createAuditTableRows(rows: readonly AuditLogEntry[]): readonly TableRow[] {
+    return rows.map((entry: AuditLogEntry): TableRow => ({
+      id: entry.id,
+      cells: [
+        { kind: "text", value: entry.occurredAt, strong: false },
+        { kind: "text", value: entry.action, strong: true },
+        { kind: "text", value: entry.entityType, strong: false },
+        { kind: "text", value: entry.entityId, strong: false },
+        { kind: "badge", value: entry.idempotencyKey === null ? "read" : "idempotent", tone: entry.idempotencyKey === null ? "muted" : "success" }
+      ]
+    }));
+  }
+
   function createPlanOptions(
     nodes: readonly OfficePlanComptableNode[],
     kind: "department" | "division" | "category",
@@ -1776,6 +1909,21 @@
         </section>
 
         <Table title="Cash-flow by month" columns={cashflowColumns} rows={cashflowTableRows} state={cashflowState.status === "loading" ? "loading" : cashflowState.status === "error" ? "error" : "default"} actionLabel="" />
+      {:else if activePageId === "ceo"}
+        <CeoView client={client.office} workspaceId={officeWorkspaceId} {period} />
+      {:else if activePageId === "bank"}
+        <BankView client={client.office} workspaceId={officeWorkspaceId} {period} />
+      {:else if activePageId === "audit"}
+        <Table title="Audit log" columns={auditColumns} rows={auditTableRows} state={auditState.status === "loading" ? "loading" : auditState.status === "error" ? "error" : auditTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
+      {:else if activePageId === "vat"}
+        <VatView client={client.office} workspaceId={officeWorkspaceId} {period} />
+      {:else if activePageId === "settings"}
+        <SettingsView client={client.office} workspaceId={officeWorkspaceId} {period} />
+      {:else if activePageId === "wave-invoices"}
+        <section class="coming-panel ehq-edge-surface" aria-label="Wave invoices">
+          <strong class="ehq-type-heading">Wave invoices — coming</strong>
+          <span class="ehq-type-body">Wave invoice integration is not yet available in this console. There is no Wave data or actions here yet.</span>
+        </section>
       {/if}
     </div>
   </section>
@@ -1835,6 +1983,13 @@
     { label: "Inflows", align: "right", sortable: true },
     { label: "Outflows", align: "right", sortable: true },
     { label: "Closing", align: "right", sortable: true }
+  ];
+  const auditColumns: readonly TableColumn[] = [
+    { label: "Time", align: "left", sortable: true },
+    { label: "Action", align: "left", sortable: true },
+    { label: "Entity", align: "left", sortable: true },
+    { label: "Entity id", align: "left", sortable: true },
+    { label: "Write guard", align: "left", sortable: true }
   ];
   const importRows: readonly TableRow[] = [
     {
@@ -2273,6 +2428,24 @@
 
   .pending-list strong {
     font-size: 13px;
+  }
+
+  .coming-panel {
+    min-width: 0;
+    min-height: 180px;
+    padding: var(--ehq-space-5);
+    border-radius: var(--ehq-radius-sm);
+    display: grid;
+    place-items: center;
+    gap: var(--ehq-space-2);
+    text-align: center;
+  }
+
+  .coming-panel span {
+    max-width: 520px;
+    color: var(--ehq-text-soft);
+    font-size: 13px;
+    line-height: 1.5;
   }
 
   .pending-list span {
