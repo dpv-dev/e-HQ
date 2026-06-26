@@ -6,7 +6,13 @@
   import LoginPage from "./LoginPage.svelte";
   import PlatformShell from "./PlatformShell.svelte";
   import type { PlatformPageId } from "./platform-data.js";
-  import { normalizeRoute, resolveConsoleRouteForWorkspace, resolveConsoleTarget, type AppRoute } from "./routes";
+  import {
+    normalizeRoute,
+    resolveBareWorkspaceRedirect,
+    resolveConsoleRouteForWorkspace,
+    resolveConsoleTarget,
+    type AppRoute
+  } from "./routes";
   import { restoreSupabaseAuthSession, signOutOfSupabase, subscribeToSupabaseAuthSession } from "./supabase";
 
   let route = $state<AppRoute>("/");
@@ -51,9 +57,20 @@
     navigate(nextRoute);
   };
 
+  const readRouteFromLocation = (): AppRoute => {
+    const redirectRoute = resolveBareWorkspaceRedirect(window.location.pathname);
+
+    if (redirectRoute !== null) {
+      window.history.replaceState({}, "", `${redirectRoute}${window.location.search}${window.location.hash}`);
+      return redirectRoute;
+    }
+
+    return normalizeRoute(window.location.pathname);
+  };
+
   onMount((): (() => void) => {
     let cancelled = false;
-    route = normalizeRoute(window.location.pathname);
+    route = readRouteFromLocation();
     const target = resolveConsoleTarget(route);
     if (target !== null) {
       initialWorkspaceId = target.workspaceId;
@@ -64,7 +81,7 @@
     }
 
     const handlePopState = (): void => {
-      route = normalizeRoute(window.location.pathname);
+      route = readRouteFromLocation();
       const popTarget = resolveConsoleTarget(route);
       if (popTarget !== null) {
         initialWorkspaceId = popTarget.workspaceId;

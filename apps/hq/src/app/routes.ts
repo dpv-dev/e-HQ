@@ -198,6 +198,16 @@ const workspaceRoutes: Readonly<Record<WorkspaceAppId, string>> = {
   distribution: "/console/distribution/dashboard"
 };
 
+const bareWorkspaceRedirects: Readonly<Record<string, AppRoute>> = {
+  "/command-center": "/console/command-center/dashboard",
+  "/distribution": "/console/distribution/dashboard",
+  "/office": "/console/office/dashboard"
+};
+
+export const resolveBareWorkspaceRedirect = (path: string): AppRoute | null => {
+  return bareWorkspaceRedirects[path] ?? null;
+};
+
 export const normalizeRoute = (path: string): AppRoute => {
   if (path === "/login") {
     return "/login";
