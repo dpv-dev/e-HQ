@@ -1473,7 +1473,7 @@
       { label: "Root", value: allValue },
       ...nodes
         .filter((node: OfficePlanComptableNode): boolean => node.kind !== "category")
-        .map((node: OfficePlanComptableNode): SelectOption => ({ label: `${node.code} · ${node.label}`, value: node.id }))
+        .map((node: OfficePlanComptableNode): SelectOption => ({ label: planReferenceLabel(node), value: node.id }))
     ];
   }
 
