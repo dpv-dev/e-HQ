@@ -3819,8 +3819,8 @@ function earningMatchesPeriod(
   period: string
 ): boolean {
   const batch = dataset.importBatches.find((candidate) => candidate.id === earning.batchId);
-  if (batch?.importedAt === null || batch?.importedAt === undefined) {
-    return true;
+  if (batch === undefined || batch.importedAt === null) {
+    return false;
   }
 
   return batch.importedAt.startsWith(period);

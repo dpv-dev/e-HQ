@@ -18959,8 +18959,8 @@ function costStateForAllocation(dependencies) {
 }
 function earningMatchesPeriod(dataset, earning, period) {
   const batch = dataset.importBatches.find((candidate) => candidate.id === earning.batchId);
-  if (batch?.importedAt === null || batch?.importedAt === void 0) {
-    return true;
+  if (batch === void 0 || batch.importedAt === null) {
+    return false;
   }
   return batch.importedAt.startsWith(period);
 }
