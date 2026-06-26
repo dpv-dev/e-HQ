@@ -118,7 +118,7 @@
   const { session, onLogout }: Props = $props();
   const client = createShellApiClient();
   const officeWorkspaceId = "eeee-mu";
-  const writesEnabled = false;
+  const writesEnabled = true;
   const allValue = "all";
   const periodOptions = createPeriodOptions();
   const officeNavItems: readonly OfficeNavItem[] = [

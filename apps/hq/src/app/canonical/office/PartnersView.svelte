@@ -55,7 +55,7 @@
 
   const props: Props = $props();
   const currency = "MUR";
-  const writesEnabled = false;
+  const writesEnabled = true;
   const emptyFormState: PartnerFormState = {
     name: "",
     email: "",

@@ -166,6 +166,17 @@ test("Bot roles are scoped to their own workspace write doors", async () => {
 
 test("Distribution bot can only reach guarded Distribution write doors and cannot read settings", async () => {
   const app = createDisabledFixtureApiService();
+  const contractBody = {
+    workspaceId: "eeee-mu",
+    id: null,
+    payeeId: null,
+    title: "Codex bot door",
+    status: "draft",
+    effectiveFrom: "2026-06-26",
+    effectiveTo: null,
+    splitBp: 0,
+    currency: "EUR"
+  };
 
   const catalogDoor = await app.request("/erh/v1/contracts", {
     method: "POST",
@@ -174,7 +185,7 @@ test("Distribution bot can only reach guarded Distribution write doors and canno
       "Content-Type": "application/json",
       "Idempotency-Key": "bot-contract-door"
     },
-    body: JSON.stringify({ workspaceId: "eeee-mu", externalReference: "codex-bot-door" })
+    body: JSON.stringify(contractBody)
   });
   assert.equal(catalogDoor.status, 501);
   assert.equal((await catalogDoor.json()).error, "action_not_enabled_yet");
@@ -186,7 +197,7 @@ test("Distribution bot can only reach guarded Distribution write doors and canno
       "Content-Type": "application/json",
       "Idempotency-Key": "bot-office-contract-door"
     },
-    body: JSON.stringify({ workspaceId: "eeee-mu", externalReference: "codex-bot-door" })
+    body: JSON.stringify(contractBody)
   });
   assert.equal(officeCannotDistribution.status, 403);
   assert.equal((await officeCannotDistribution.json()).error.code, "bot_permission_denied");
@@ -2098,6 +2109,15 @@ async function createPgliteWriteTables(pglite: PGlite): Promise<void> {
       request_hash text not null,
       response_json jsonb,
       created_at timestamp with time zone default now() not null
+    );
+
+    create table api_import_previews (
+      preview_id text primary key,
+      workspace_id text not null,
+      kind varchar(64) not null,
+      payload_json jsonb not null,
+      created_at timestamp with time zone default now() not null,
+      expires_at timestamp with time zone
     );
 
     create table audit_logs (

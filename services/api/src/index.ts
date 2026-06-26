@@ -20,6 +20,7 @@ import {
   type DistributionAllocationOutcome,
   type DistributionAllocationPlan,
   type DistributionCalculationRunRow,
+  type DistributionCostTermInput,
   type DistributionCostState,
   type DistributionEarningAllocationRow,
   type DistributionEarningInput,
@@ -173,7 +174,6 @@ import {
   isBotApiUser,
   requirePermission,
   requirePermissionForWorkspace,
-  runDisabledMutation,
   runIdempotentMutation,
   type ApiImportPreviewRow,
   type ApiMutationResponse,
@@ -449,7 +449,6 @@ const moneyStringPattern = /^-?\d+(?:\.\d+)?$/u;
 
 const nullableStringSchema = z.string().min(1).nullable();
 const workspaceBodySchema = z.object({ workspaceId: z.string().min(1) });
-const workspacePassthroughSchema = workspaceBodySchema.passthrough();
 const officeTransactionWriteSchema = workspaceBodySchema.extend({
   occurredOn: z.string().regex(isoDatePattern),
   accountId: z.string().min(1),
@@ -495,6 +494,42 @@ const distributionContractExpenseRecordSchema = workspaceBodySchema.extend({
   amountMicro: z.string().regex(moneyStringPattern),
   currency: z.string().regex(currencyCodePattern)
 });
+const distributionContractUpsertSchema = workspaceBodySchema.extend({
+  id: nullableStringSchema,
+  payeeId: nullableStringSchema,
+  title: z.string().min(1),
+  status: z.enum(["draft", "active", "paused", "ended"]),
+  effectiveFrom: z.string().regex(isoDatePattern),
+  effectiveTo: z.string().regex(isoDatePattern).nullable(),
+  splitBp: z.number().int().min(0).max(10_000),
+  currency: z.string().regex(currencyCodePattern)
+});
+const distributionContractExpenseUpdateSchema = distributionContractExpenseRecordSchema.extend({
+  status: z.enum(["open", "recouped", "waived"])
+});
+const distributionPayeeUpsertSchema = workspaceBodySchema.extend({
+  id: nullableStringSchema,
+  displayName: z.string().min(1),
+  email: nullableStringSchema,
+  status: z.enum(["active", "inactive"]),
+  defaultCurrency: z.string().regex(currencyCodePattern)
+});
+const distributionReleaseUpsertSchema = workspaceBodySchema.extend({
+  id: nullableStringSchema,
+  title: z.string().min(1),
+  artistName: z.string().min(1),
+  upc: nullableStringSchema,
+  status: z.enum(["draft", "released", "archived"]),
+  releaseDate: z.string().regex(isoDatePattern).nullable()
+});
+const distributionTrackUpsertSchema = workspaceBodySchema.extend({
+  id: nullableStringSchema,
+  releaseId: nullableStringSchema,
+  title: z.string().min(1),
+  artistName: z.string().min(1),
+  isrc: nullableStringSchema,
+  status: z.enum(["draft", "released", "archived"])
+});
 const allocationRunUnpostSchema = workspaceBodySchema.extend({
   reason: z.string().min(1),
   lockToken: z.string().min(1)
@@ -506,7 +541,11 @@ const suspenseResolveSchema = workspaceBodySchema.extend({
   note: z.string().min(1)
 });
 
-type WorkspacePassthroughRequest = z.infer<typeof workspacePassthroughSchema>;
+type DistributionContractUpsertRequest = z.infer<typeof distributionContractUpsertSchema>;
+type DistributionContractExpenseUpdateRequest = z.infer<typeof distributionContractExpenseUpdateSchema>;
+type DistributionPayeeUpsertRequest = z.infer<typeof distributionPayeeUpsertSchema>;
+type DistributionReleaseUpsertRequest = z.infer<typeof distributionReleaseUpsertSchema>;
+type DistributionTrackUpsertRequest = z.infer<typeof distributionTrackUpsertSchema>;
 
 export const legacyRestSurfaces: readonly LegacyRestSurface[] = [
   {
@@ -982,7 +1021,7 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
   });
 
   app.post("/erh/v1/contracts", async (context) => {
-    return disabledWorkspaceWriteResponse(context, dependencies, "distribution_contract_upsert");
+    return distributionContractUpsertResponse(context, dependencies);
   });
 
   app.get("/erh/v1/contracts/:contractId", (context) => {
@@ -1017,7 +1056,7 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
   });
 
   app.patch("/erh/v1/contracts/:contractId/expenses/:expenseId", async (context) => {
-    return disabledWorkspaceWriteResponse(context, dependencies, "distribution_contract_expense_update");
+    return distributionContractExpenseUpdateResponse(context, dependencies);
   });
 
   app.post("/erh/v1/contracts/:contractId/rules", async (context) => {
@@ -1057,7 +1096,7 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
   });
 
   app.post("/erh/v1/payees", async (context) => {
-    return disabledWorkspaceWriteResponse(context, dependencies, "distribution_payee_upsert");
+    return distributionPayeeUpsertResponse(context, dependencies);
   });
 
   app.get("/erh/v1/releases", (context) => {
@@ -1067,7 +1106,7 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
   });
 
   app.post("/erh/v1/releases", async (context) => {
-    return disabledWorkspaceWriteResponse(context, dependencies, "distribution_release_upsert");
+    return distributionReleaseUpsertResponse(context, dependencies);
   });
 
   app.get("/erh/v1/tracks", (context) => {
@@ -1089,7 +1128,7 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
   });
 
   app.post("/erh/v1/tracks", async (context) => {
-    return disabledWorkspaceWriteResponse(context, dependencies, "distribution_track_upsert");
+    return distributionTrackUpsertResponse(context, dependencies);
   });
 
   app.get("/erh/v1/ping", (_context) => {
@@ -1822,17 +1861,178 @@ async function distributionContractExpenseCreateResponse(context: ApiContext, de
   return context.json(result.body, result.status);
 }
 
-async function disabledWorkspaceWriteResponse(context: ApiContext, dependencies: ApiServiceDependencies, action: string): Promise<Response> {
-  const request = await readZodBody<WorkspacePassthroughRequest>(context, workspacePassthroughSchema);
+async function distributionContractUpsertResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const request = await readZodBody<DistributionContractUpsertRequest>(context, distributionContractUpsertSchema);
+  const contractId = request.id ?? randomUUID();
+  const before = dependencies.fixtures.distributionContracts.find((contract) => contract.id === contractId) ?? null;
+  if (request.payeeId !== null) {
+    requireDistributionPayee(dependencies.fixtures.distribution, request.payeeId);
+  }
+
   const idempotencyKey = requireIdempotencyKey(context);
   const actor = context.get("authUser");
-  const result = await runDisabledMutation({
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
     runtime: dependencies.persistence,
     actor,
-    action,
+    action: "distribution_contract_upsert",
     route: context.req.path,
     idempotencyKey,
-    requestBody: request
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `distribution:contract:${contractId}`);
+      await persistDistributionContractUpsert(tx, contractId, request);
+      const after = distributionContractFromUpsertRequest(contractId, request, before);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_contract_upsert",
+        targetType: "contract",
+        targetId: contractId,
+        before: { contract: before },
+        after: { contract: after },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      upsertDistributionContractFixture(dependencies.fixtures, after);
+      return mutationReceipt(contractId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function distributionContractExpenseUpdateResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const contractId = requirePathParam(context, "contractId");
+  const expenseId = requirePathParam(context, "expenseId");
+  const request = await readZodBody<DistributionContractExpenseUpdateRequest>(context, distributionContractExpenseUpdateSchema);
+  if (request.contractId !== contractId) {
+    throw new ApiRouteError(400, "body_path_mismatch", "Contract expense body must match the route contract id.", [
+      `pathContractId=${contractId}`,
+      `bodyContractId=${request.contractId}`
+    ]);
+  }
+  requireDistributionContract(dependencies, contractId);
+  requireDistributionPayee(dependencies.fixtures.distribution, request.payeeId);
+  const before = requireDistributionContractExpense(dependencies.fixtures, expenseId);
+  const amount = normalizeErhAmountField(context, request.amountMicro, "amountMicro");
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "distribution_contract_expense_update",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `distribution:contract:${contractId}:expenses`);
+      await persistDistributionContractExpenseUpdate(tx, expenseId, { ...request, amountMicro: amount });
+      const after = distributionContractExpenseFromUpdateRequest(expenseId, { ...request, amountMicro: amount });
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_contract_expense_update",
+        targetType: "contract_cost_term",
+        targetId: expenseId,
+        before: { expense: before },
+        after: { expense: after },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      upsertDistributionContractExpenseFixture(dependencies.fixtures, after);
+      return mutationReceipt(expenseId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function distributionPayeeUpsertResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const request = await readZodBody<DistributionPayeeUpsertRequest>(context, distributionPayeeUpsertSchema);
+  const payeeId = request.id ?? randomUUID();
+  const before = dependencies.fixtures.distribution.payees.find((payee) => payee.id === payeeId) ?? null;
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "distribution_payee_upsert",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `distribution:payee:${payeeId}`);
+      await persistDistributionPayeeUpsert(tx, payeeId, request);
+      const after = distributionPayeeFromUpsertRequest(payeeId, request);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_payee_upsert",
+        targetType: "payee",
+        targetId: payeeId,
+        before: { payee: before },
+        after: { payee: after },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      upsertDistributionPayeeFixture(dependencies.fixtures, after);
+      return mutationReceipt(payeeId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function distributionReleaseUpsertResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const request = await readZodBody<DistributionReleaseUpsertRequest>(context, distributionReleaseUpsertSchema);
+  const releaseId = request.id ?? randomUUID();
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "distribution_release_upsert",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `distribution:release:${releaseId}`);
+      await persistDistributionReleaseUpsert(tx, releaseId, request);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_release_upsert",
+        targetType: "release",
+        targetId: releaseId,
+        before: {},
+        after: { releaseId, request },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      return mutationReceipt(releaseId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function distributionTrackUpsertResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const request = await readZodBody<DistributionTrackUpsertRequest>(context, distributionTrackUpsertSchema);
+  const trackId = request.id ?? randomUUID();
+  const before = dependencies.fixtures.distribution.tracks.find((track) => track.id === trackId) ?? null;
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "distribution_track_upsert",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `distribution:track:${trackId}`);
+      await persistDistributionTrackUpsert(tx, trackId, request);
+      const after = distributionTrackFromUpsertRequest(trackId, request);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_track_upsert",
+        targetType: "track",
+        targetId: trackId,
+        before: { track: before },
+        after: { track: after },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      upsertDistributionTrackFixture(dependencies.fixtures, after);
+      return mutationReceipt(trackId, auditEventId);
+    }
   });
   return context.json(result.body, result.status);
 }
@@ -2477,6 +2677,298 @@ function appendDistributionContractExpenseFixture(
   ];
 }
 
+async function persistDistributionContractUpsert(
+  tx: ApiWriteTransaction,
+  contractId: string,
+  request: DistributionContractUpsertRequest
+): Promise<void> {
+  if (tx.kind === "memory") {
+    return;
+  }
+
+  await tx.executor.execute(sql`
+    insert into contracts (
+      id,
+      title,
+      status,
+      effective_from,
+      effective_to,
+      metadata
+    )
+    values (
+      ${contractId},
+      ${request.title.trim()},
+      ${apiContractStatusToDb(request.status)},
+      ${request.effectiveFrom},
+      ${request.effectiveTo},
+      ${JSON.stringify({
+        workspaceId: request.workspaceId,
+        requestedPayeeId: request.payeeId,
+        requestedSplitBp: request.splitBp,
+        requestedCurrency: request.currency
+      })}::jsonb
+    )
+    on conflict (id) do update
+    set
+      title = excluded.title,
+      status = excluded.status,
+      effective_from = excluded.effective_from,
+      effective_to = excluded.effective_to,
+      metadata = contracts.metadata || excluded.metadata,
+      updated_at = now()
+  `);
+}
+
+function distributionContractFromUpsertRequest(
+  contractId: string,
+  request: DistributionContractUpsertRequest,
+  before: DistributionContract | null
+): DistributionContract {
+  return {
+    id: contractId,
+    payeeId: request.payeeId ?? before?.payeeId ?? "unassigned",
+    title: request.title.trim(),
+    status: request.status,
+    effectiveFrom: request.effectiveFrom,
+    effectiveTo: request.effectiveTo,
+    splitBp: request.splitBp,
+    openExpenseMicro: before?.openExpenseMicro ?? "0.0000000000",
+    currency: request.currency
+  };
+}
+
+function upsertDistributionContractFixture(fixtures: ApiFixtureStore, contract: DistributionContract): void {
+  const mutableFixtures = fixtures as Mutable<ApiFixtureStore>;
+  mutableFixtures.distributionContracts = upsertById(fixtures.distributionContracts, contract);
+}
+
+async function persistDistributionContractExpenseUpdate(
+  tx: ApiWriteTransaction,
+  expenseId: string,
+  request: DistributionContractExpenseUpdateRequest
+): Promise<void> {
+  if (tx.kind === "memory") {
+    return;
+  }
+
+  await tx.executor.execute(sql`
+    update contract_cost_terms
+    set
+      payee_id = ${request.payeeId},
+      amount = ${request.amountMicro},
+      currency = ${request.currency},
+      status = ${apiExpenseStatusToDb(request.status)},
+      scope_id = ${request.incurredOn},
+      updated_at = now()
+    where id = ${expenseId}
+  `);
+}
+
+function distributionContractExpenseFromUpdateRequest(
+  expenseId: string,
+  request: DistributionContractExpenseUpdateRequest
+): DistributionContractExpense {
+  return {
+    id: expenseId,
+    contractId: request.contractId,
+    payeeId: request.payeeId,
+    incurredOn: request.incurredOn,
+    label: request.label.trim(),
+    originalAmountMicro: request.amountMicro,
+    openAmountMicro: request.status === "open" ? request.amountMicro : "0.0000000000",
+    currency: request.currency,
+    status: request.status
+  };
+}
+
+function requireDistributionContractExpense(fixtures: ApiFixtureStore, expenseId: string): DistributionContractExpense {
+  const expense = fixtures.distributionContractExpenses.find((candidate) => candidate.id === expenseId);
+  if (expense === undefined) {
+    throw new ApiRouteError(404, "distribution_contract_expense_not_found", "Distribution contract expense was not found.", [
+      `expenseId=${expenseId}`
+    ]);
+  }
+
+  return expense;
+}
+
+function upsertDistributionContractExpenseFixture(fixtures: ApiFixtureStore, expense: DistributionContractExpense): void {
+  const mutableFixtures = fixtures as Mutable<ApiFixtureStore>;
+  mutableFixtures.distributionContractExpenses = upsertById(fixtures.distributionContractExpenses, expense);
+  mutableFixtures.distributionCostTerms = upsertById(fixtures.distributionCostTerms, {
+    id: expense.id,
+    contractId: expense.contractId,
+    payeeId: expense.payeeId,
+    amount: expense.originalAmountMicro,
+    currency: expense.currency,
+    recoupable: true,
+    status: apiExpenseStatusToCostTermStatus(expense.status),
+    expenseDate: expense.incurredOn
+  });
+}
+
+async function persistDistributionPayeeUpsert(
+  tx: ApiWriteTransaction,
+  payeeId: string,
+  request: DistributionPayeeUpsertRequest
+): Promise<void> {
+  if (tx.kind === "memory") {
+    return;
+  }
+
+  await tx.executor.execute(sql`
+    insert into payees (
+      id,
+      name,
+      preferred_currency,
+      is_active
+    )
+    values (
+      ${payeeId},
+      ${request.displayName.trim()},
+      ${request.defaultCurrency},
+      ${request.status === "active"}
+    )
+    on conflict (id) do update
+    set
+      name = excluded.name,
+      preferred_currency = excluded.preferred_currency,
+      is_active = excluded.is_active,
+      updated_at = now()
+  `);
+}
+
+function distributionPayeeFromUpsertRequest(
+  payeeId: string,
+  request: DistributionPayeeUpsertRequest
+): DistributionReadDataset["payees"][number] {
+  return {
+    id: payeeId,
+    name: request.displayName.trim(),
+    preferredCurrency: request.defaultCurrency as CurrencyCode,
+    isActive: request.status === "active"
+  };
+}
+
+function upsertDistributionPayeeFixture(fixtures: ApiFixtureStore, payee: DistributionReadDataset["payees"][number]): void {
+  const mutableDistribution = fixtures.distribution as Mutable<DistributionReadDataset>;
+  mutableDistribution.payees = upsertById(fixtures.distribution.payees, payee);
+}
+
+async function persistDistributionReleaseUpsert(
+  tx: ApiWriteTransaction,
+  releaseId: string,
+  request: DistributionReleaseUpsertRequest
+): Promise<void> {
+  if (tx.kind === "memory") {
+    return;
+  }
+
+  await tx.executor.execute(sql`
+    insert into releases (
+      id,
+      title,
+      upc,
+      label_name,
+      release_date
+    )
+    values (
+      ${releaseId},
+      ${request.title.trim()},
+      ${request.upc},
+      ${request.artistName.trim()},
+      ${request.releaseDate}
+    )
+    on conflict (id) do update
+    set
+      title = excluded.title,
+      upc = excluded.upc,
+      label_name = excluded.label_name,
+      release_date = excluded.release_date,
+      updated_at = now()
+  `);
+}
+
+async function persistDistributionTrackUpsert(
+  tx: ApiWriteTransaction,
+  trackId: string,
+  request: DistributionTrackUpsertRequest
+): Promise<void> {
+  if (tx.kind === "memory") {
+    return;
+  }
+
+  await tx.executor.execute(sql`
+    insert into tracks (
+      id,
+      title,
+      isrc,
+      release_id
+    )
+    values (
+      ${trackId},
+      ${request.title.trim()},
+      ${request.isrc},
+      ${request.releaseId}
+    )
+    on conflict (id) do update
+    set
+      title = excluded.title,
+      isrc = excluded.isrc,
+      release_id = excluded.release_id,
+      updated_at = now()
+  `);
+}
+
+function distributionTrackFromUpsertRequest(
+  trackId: string,
+  request: DistributionTrackUpsertRequest
+): DistributionReadDataset["tracks"][number] {
+  return {
+    id: trackId,
+    title: request.title.trim(),
+    isrc: request.isrc,
+    releaseId: request.releaseId
+  };
+}
+
+function upsertDistributionTrackFixture(fixtures: ApiFixtureStore, track: DistributionReadDataset["tracks"][number]): void {
+  const mutableDistribution = fixtures.distribution as Mutable<DistributionReadDataset>;
+  mutableDistribution.tracks = upsertById(fixtures.distribution.tracks, track);
+}
+
+function apiContractStatusToDb(status: DistributionContract["status"]): string {
+  if (status === "ended") {
+    return "expired";
+  }
+
+  return status;
+}
+
+function apiExpenseStatusToDb(status: DistributionContractExpense["status"]): string {
+  if (status === "recouped") {
+    return "recovered";
+  }
+
+  if (status === "waived") {
+    return "non_recoverable";
+  }
+
+  return "open";
+}
+
+function apiExpenseStatusToCostTermStatus(status: DistributionContractExpense["status"]): DistributionCostTermInput["status"] {
+  if (status === "recouped") {
+    return "recovered";
+  }
+
+  if (status === "waived") {
+    return "non_recoverable";
+  }
+
+  return "open";
+}
+
 function requireDistributionAllocationRun(dataset: DistributionReadDataset, runId: string): DistributionCalculationRunRow {
   const run = dataset.calculationRuns.find((candidate) => candidate.id === runId);
   if (run === undefined) {
@@ -3100,7 +3592,7 @@ async function distributionImportPreviewResponse(context: ApiContext, dependenci
     rows: previewRows,
     createdAtIso: dependencies.nowIso()
   };
-  dependencies.persistence.storeDistributionImportPreview(preview);
+  await dependencies.persistence.storeDistributionImportPreview(preview);
   const currencyCodes = currencyCodesFromRows(request.rows, request.source === "kontor" ? "EUR" : "USD");
   const response: DistributionImportPreviewResponse = {
     previewId,
@@ -3134,7 +3626,7 @@ async function distributionImportConfirmResponse(context: ApiContext, dependenci
     idempotencyKey,
     requestBody: request,
     write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<DistributionImportConfirmMutationResponse> => {
-      const preview = requireDistributionPreview(context, dependencies, request.previewId, request.workspaceId);
+      const preview = await requireDistributionPreview(context, dependencies, request.previewId, request.workspaceId);
       const batchId = randomUUID();
       const importedAtIso = dependencies.nowIso();
       await persistDistributionImportConfirmation(tx, {
@@ -3246,7 +3738,7 @@ async function officeBankImportPreviewResponse(context: ApiContext, dependencies
     rows: previewRows,
     createdAtIso: dependencies.nowIso()
   };
-  dependencies.persistence.storeOfficeBankImportPreview(preview);
+  await dependencies.persistence.storeOfficeBankImportPreview(preview);
   const dateRange = officeDateRange(parsedRows.map((row) => row.line.occurredOn));
   const response: BankImportPreviewResponse = {
     previewId,
@@ -3284,7 +3776,7 @@ async function officeBankImportConfirmResponse(context: ApiContext, dependencies
     idempotencyKey,
     requestBody: request,
     write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<OfficeBankImportConfirmMutationResponse> => {
-      const preview = requireOfficeBankPreview(context, dependencies, request.previewId, request.workspaceId);
+      const preview = await requireOfficeBankPreview(context, dependencies, request.previewId, request.workspaceId);
       const acceptedRowIds = new Set<string>(request.acceptedRowIds);
       const parsedRows = preview.rows
         .filter((row: ApiImportPreviewRow): boolean => acceptedRowIds.has(row.id))
@@ -4339,13 +4831,13 @@ function officeDateRange(dates: readonly string[]): OfficeDateRange {
   };
 }
 
-function requireDistributionPreview(
+async function requireDistributionPreview(
   context: ApiContext,
   dependencies: ApiServiceDependencies,
   previewId: string,
   workspaceId: string
-): DistributionImportPreviewRecord {
-  const preview = dependencies.persistence.getDistributionImportPreview(previewId);
+): Promise<DistributionImportPreviewRecord> {
+  const preview = await dependencies.persistence.getDistributionImportPreview(previewId);
   if (preview === null) {
     throw new ApiRouteError(400, "import_preview_missing", "Import preview was not found or has expired; run preview again before confirm.", [
       `path=${context.req.path}`,
@@ -4365,13 +4857,13 @@ function requireDistributionPreview(
   return preview;
 }
 
-function requireOfficeBankPreview(
+async function requireOfficeBankPreview(
   context: ApiContext,
   dependencies: ApiServiceDependencies,
   previewId: string,
   workspaceId: string
-): OfficeBankImportPreviewRecord {
-  const preview = dependencies.persistence.getOfficeBankImportPreview(previewId);
+): Promise<OfficeBankImportPreviewRecord> {
+  const preview = await dependencies.persistence.getOfficeBankImportPreview(previewId);
   if (preview === null) {
     throw new ApiRouteError(400, "bank_import_preview_missing", "Bank import preview was not found or has expired; run preview again before confirm.", [
       `path=${context.req.path}`,

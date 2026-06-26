@@ -66,6 +66,22 @@ export const apiIdempotencyKeys = pgTable("api_idempotency_keys", {
   createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull().defaultNow()
 });
 
+export const apiImportPreviews = pgTable(
+  "api_import_previews",
+  {
+    previewId: text("preview_id").primaryKey(),
+    workspaceId: text("workspace_id").notNull(),
+    kind: varchar("kind", { length: 64 }).notNull(),
+    payloadJson: jsonb("payload_json").$type<Readonly<Record<string, unknown>>>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" })
+  },
+  (table) => [
+    index("api_import_previews_workspace_kind_idx").on(table.workspaceId, table.kind),
+    index("api_import_previews_expires_at_idx").on(table.expiresAt)
+  ]
+);
+
 function createdAtColumn() {
   return timestamp("created_at", { withTimezone: true, mode: "string" }).notNull().defaultNow();
 }

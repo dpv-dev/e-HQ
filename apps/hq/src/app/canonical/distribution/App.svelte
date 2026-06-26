@@ -96,7 +96,7 @@
   const { session, onLogout }: Props = $props();
   const client = createShellApiClient();
   const distributionWorkspaceId = "eeee-mu";
-  const writesEnabled = false;
+  const writesEnabled = true;
   const allValue = "all";
   const periodOptions = createPeriodOptions();
   const fallbackLatestPeriod = getLatestDataPeriod();

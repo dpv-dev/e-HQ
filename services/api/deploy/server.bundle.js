@@ -15185,14 +15185,44 @@ function createDrizzlePersistenceRuntime(database, env) {
   return {
     writesEnabled: isWritesEnabled(env),
     withTx: async (callback) => database.transaction(async (executor) => callback({ kind: "postgres", executor })),
-    storeDistributionImportPreview: (preview) => {
+    storeDistributionImportPreview: async (preview) => {
       state.distributionPreviews.set(preview.previewId, preview);
+      await database.transaction(async (executor) => {
+        await persistApiImportPreview(executor, "distribution_import", preview);
+      });
     },
-    getDistributionImportPreview: (previewId) => state.distributionPreviews.get(previewId) ?? null,
-    storeOfficeBankImportPreview: (preview) => {
+    getDistributionImportPreview: async (previewId) => {
+      const cached = state.distributionPreviews.get(previewId);
+      if (cached !== void 0) {
+        return cached;
+      }
+      const stored = await database.transaction(
+        async (executor) => readApiImportPreview(executor, "distribution_import", previewId)
+      );
+      if (stored !== null) {
+        state.distributionPreviews.set(stored.previewId, stored);
+      }
+      return stored;
+    },
+    storeOfficeBankImportPreview: async (preview) => {
       state.officeBankPreviews.set(preview.previewId, preview);
+      await database.transaction(async (executor) => {
+        await persistApiImportPreview(executor, "office_bank_import", preview);
+      });
     },
-    getOfficeBankImportPreview: (previewId) => state.officeBankPreviews.get(previewId) ?? null
+    getOfficeBankImportPreview: async (previewId) => {
+      const cached = state.officeBankPreviews.get(previewId);
+      if (cached !== void 0) {
+        return cached;
+      }
+      const stored = await database.transaction(
+        async (executor) => readApiImportPreview(executor, "office_bank_import", previewId)
+      );
+      if (stored !== null) {
+        state.officeBankPreviews.set(stored.previewId, stored);
+      }
+      return stored;
+    }
   };
 }
 function requirePermissionForWorkspace(actor, action, workspaceId) {
@@ -15298,29 +15328,6 @@ async function runIdempotentMutation(input) {
     await completeIdempotent(tx, input.idempotencyKey, response);
     return {
       status: 200,
-      body: response
-    };
-  });
-}
-async function runDisabledMutation(input) {
-  requirePermissionForWorkspace(input.actor, input.action, workspaceIdFromRequestBody(input.requestBody));
-  const requestHash = hashRequestBody(input.requestBody);
-  return input.runtime.withTx(async (tx) => {
-    const idempotency = await beginIdempotent(tx, {
-      key: input.idempotencyKey,
-      route: input.route,
-      requestHash
-    });
-    if (idempotency.status === "replay") {
-      return {
-        status: statusForStoredResponse(idempotency.responseJson),
-        body: idempotency.responseJson
-      };
-    }
-    const response = disabledWriteBody(input.action);
-    await completeIdempotent(tx, input.idempotencyKey, response);
-    return {
-      status: 501,
       body: response
     };
   });
@@ -16069,6 +16076,52 @@ async function completeIdempotent(tx, key, responseJson) {
     where key = ${key}
   `);
 }
+async function persistApiImportPreview(executor, kind, preview) {
+  const expiresAtIso = new Date(Date.parse(preview.createdAtIso) + 24 * 60 * 60 * 1e3).toISOString();
+  await executor.execute(sql`
+    insert into api_import_previews (
+      preview_id,
+      workspace_id,
+      kind,
+      payload_json,
+      expires_at
+    )
+    values (
+      ${preview.previewId},
+      ${preview.workspaceId},
+      ${kind},
+      ${JSON.stringify(preview)}::jsonb,
+      ${expiresAtIso}
+    )
+    on conflict (preview_id) do update
+    set
+      workspace_id = excluded.workspace_id,
+      kind = excluded.kind,
+      payload_json = excluded.payload_json,
+      expires_at = excluded.expires_at
+  `);
+}
+async function readApiImportPreview(executor, kind, previewId) {
+  const rows = rowsFromQueryResult(await executor.execute(sql`
+    select payload_json
+    from api_import_previews
+    where preview_id = ${previewId}
+      and kind = ${kind}
+      and (expires_at is null or expires_at > now())
+  `));
+  const row = rows[0];
+  if (row === void 0) {
+    return null;
+  }
+  const payload = row["payload_json"];
+  if (!isJsonRecord(payload)) {
+    throwPersistenceHttpError(500, "import_preview_payload_invalid", "Import preview payload is not a JSON object.", [
+      `previewId=${previewId}`,
+      `kind=${kind}`
+    ]);
+  }
+  return payload;
+}
 function beginResultFromExisting(existing, input) {
   if (existing.route !== input.route || existing.requestHash !== input.requestHash) {
     throwPersistenceHttpError(409, "idempotency_key_conflict", "Idempotency-Key was already used with a different request.", [
@@ -16087,6 +16140,9 @@ function beginResultFromExisting(existing, input) {
     status: "replay",
     responseJson: existing.responseJson
   };
+}
+function isJsonRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function idempotencyRowFromPg(row, key) {
   if (row === void 0) {
@@ -16167,7 +16223,6 @@ var currencyCodePattern = /^[A-Z]{3}$/u;
 var moneyStringPattern = /^-?\d+(?:\.\d+)?$/u;
 var nullableStringSchema = external_exports.string().min(1).nullable();
 var workspaceBodySchema = external_exports.object({ workspaceId: external_exports.string().min(1) });
-var workspacePassthroughSchema = workspaceBodySchema.passthrough();
 var officeTransactionWriteSchema = workspaceBodySchema.extend({
   occurredOn: external_exports.string().regex(isoDatePattern),
   accountId: external_exports.string().min(1),
@@ -16212,6 +16267,42 @@ var distributionContractExpenseRecordSchema = workspaceBodySchema.extend({
   label: external_exports.string().min(1),
   amountMicro: external_exports.string().regex(moneyStringPattern),
   currency: external_exports.string().regex(currencyCodePattern)
+});
+var distributionContractUpsertSchema = workspaceBodySchema.extend({
+  id: nullableStringSchema,
+  payeeId: nullableStringSchema,
+  title: external_exports.string().min(1),
+  status: external_exports.enum(["draft", "active", "paused", "ended"]),
+  effectiveFrom: external_exports.string().regex(isoDatePattern),
+  effectiveTo: external_exports.string().regex(isoDatePattern).nullable(),
+  splitBp: external_exports.number().int().min(0).max(1e4),
+  currency: external_exports.string().regex(currencyCodePattern)
+});
+var distributionContractExpenseUpdateSchema = distributionContractExpenseRecordSchema.extend({
+  status: external_exports.enum(["open", "recouped", "waived"])
+});
+var distributionPayeeUpsertSchema = workspaceBodySchema.extend({
+  id: nullableStringSchema,
+  displayName: external_exports.string().min(1),
+  email: nullableStringSchema,
+  status: external_exports.enum(["active", "inactive"]),
+  defaultCurrency: external_exports.string().regex(currencyCodePattern)
+});
+var distributionReleaseUpsertSchema = workspaceBodySchema.extend({
+  id: nullableStringSchema,
+  title: external_exports.string().min(1),
+  artistName: external_exports.string().min(1),
+  upc: nullableStringSchema,
+  status: external_exports.enum(["draft", "released", "archived"]),
+  releaseDate: external_exports.string().regex(isoDatePattern).nullable()
+});
+var distributionTrackUpsertSchema = workspaceBodySchema.extend({
+  id: nullableStringSchema,
+  releaseId: nullableStringSchema,
+  title: external_exports.string().min(1),
+  artistName: external_exports.string().min(1),
+  isrc: nullableStringSchema,
+  status: external_exports.enum(["draft", "released", "archived"])
 });
 var allocationRunUnpostSchema = workspaceBodySchema.extend({
   reason: external_exports.string().min(1),
@@ -16557,7 +16648,7 @@ function registerDistributionRoutes(app, dependencies) {
     return context.json(pageItems(context, contracts));
   });
   app.post("/erh/v1/contracts", async (context) => {
-    return disabledWorkspaceWriteResponse(context, dependencies, "distribution_contract_upsert");
+    return distributionContractUpsertResponse(context, dependencies);
   });
   app.get("/erh/v1/contracts/:contractId", (context) => {
     requireQuery(context, "workspaceId");
@@ -16585,7 +16676,7 @@ function registerDistributionRoutes(app, dependencies) {
     return distributionContractExpenseCreateResponse(context, dependencies);
   });
   app.patch("/erh/v1/contracts/:contractId/expenses/:expenseId", async (context) => {
-    return disabledWorkspaceWriteResponse(context, dependencies, "distribution_contract_expense_update");
+    return distributionContractExpenseUpdateResponse(context, dependencies);
   });
   app.post("/erh/v1/contracts/:contractId/rules", async (context) => {
     return distributionContractRulesUpdateResponse(context, dependencies);
@@ -16618,7 +16709,7 @@ function registerDistributionRoutes(app, dependencies) {
     });
   });
   app.post("/erh/v1/payees", async (context) => {
-    return disabledWorkspaceWriteResponse(context, dependencies, "distribution_payee_upsert");
+    return distributionPayeeUpsertResponse(context, dependencies);
   });
   app.get("/erh/v1/releases", (context) => {
     requireQuery(context, "workspaceId");
@@ -16626,7 +16717,7 @@ function registerDistributionRoutes(app, dependencies) {
     return context.json(pageItems(context, releases));
   });
   app.post("/erh/v1/releases", async (context) => {
-    return disabledWorkspaceWriteResponse(context, dependencies, "distribution_release_upsert");
+    return distributionReleaseUpsertResponse(context, dependencies);
   });
   app.get("/erh/v1/tracks", (context) => {
     requireQuery(context, "workspaceId");
@@ -16644,7 +16735,7 @@ function registerDistributionRoutes(app, dependencies) {
     return context.json(pageItems(context, tracks));
   });
   app.post("/erh/v1/tracks", async (context) => {
-    return disabledWorkspaceWriteResponse(context, dependencies, "distribution_track_upsert");
+    return distributionTrackUpsertResponse(context, dependencies);
   });
   app.get("/erh/v1/ping", (_context) => {
     return _context.json({ ok: true });
@@ -17304,17 +17395,173 @@ async function distributionContractExpenseCreateResponse(context, dependencies) 
   });
   return context.json(result.body, result.status);
 }
-async function disabledWorkspaceWriteResponse(context, dependencies, action) {
-  const request = await readZodBody(context, workspacePassthroughSchema);
+async function distributionContractUpsertResponse(context, dependencies) {
+  const request = await readZodBody(context, distributionContractUpsertSchema);
+  const contractId = request.id ?? randomUUID2();
+  const before = dependencies.fixtures.distributionContracts.find((contract) => contract.id === contractId) ?? null;
+  if (request.payeeId !== null) {
+    requireDistributionPayee(dependencies.fixtures.distribution, request.payeeId);
+  }
   const idempotencyKey = requireIdempotencyKey(context);
   const actor = context.get("authUser");
-  const result = await runDisabledMutation({
+  const result = await runIdempotentMutation({
     runtime: dependencies.persistence,
     actor,
-    action,
+    action: "distribution_contract_upsert",
     route: context.req.path,
     idempotencyKey,
-    requestBody: request
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `distribution:contract:${contractId}`);
+      await persistDistributionContractUpsert(tx, contractId, request);
+      const after = distributionContractFromUpsertRequest(contractId, request, before);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_contract_upsert",
+        targetType: "contract",
+        targetId: contractId,
+        before: { contract: before },
+        after: { contract: after },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      upsertDistributionContractFixture(dependencies.fixtures, after);
+      return mutationReceipt(contractId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+async function distributionContractExpenseUpdateResponse(context, dependencies) {
+  const contractId = requirePathParam(context, "contractId");
+  const expenseId = requirePathParam(context, "expenseId");
+  const request = await readZodBody(context, distributionContractExpenseUpdateSchema);
+  if (request.contractId !== contractId) {
+    throw new ApiRouteError(400, "body_path_mismatch", "Contract expense body must match the route contract id.", [
+      `pathContractId=${contractId}`,
+      `bodyContractId=${request.contractId}`
+    ]);
+  }
+  requireDistributionContract(dependencies, contractId);
+  requireDistributionPayee(dependencies.fixtures.distribution, request.payeeId);
+  const before = requireDistributionContractExpense(dependencies.fixtures, expenseId);
+  const amount = normalizeErhAmountField(context, request.amountMicro, "amountMicro");
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "distribution_contract_expense_update",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `distribution:contract:${contractId}:expenses`);
+      await persistDistributionContractExpenseUpdate(tx, expenseId, { ...request, amountMicro: amount });
+      const after = distributionContractExpenseFromUpdateRequest(expenseId, { ...request, amountMicro: amount });
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_contract_expense_update",
+        targetType: "contract_cost_term",
+        targetId: expenseId,
+        before: { expense: before },
+        after: { expense: after },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      upsertDistributionContractExpenseFixture(dependencies.fixtures, after);
+      return mutationReceipt(expenseId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+async function distributionPayeeUpsertResponse(context, dependencies) {
+  const request = await readZodBody(context, distributionPayeeUpsertSchema);
+  const payeeId = request.id ?? randomUUID2();
+  const before = dependencies.fixtures.distribution.payees.find((payee) => payee.id === payeeId) ?? null;
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "distribution_payee_upsert",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `distribution:payee:${payeeId}`);
+      await persistDistributionPayeeUpsert(tx, payeeId, request);
+      const after = distributionPayeeFromUpsertRequest(payeeId, request);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_payee_upsert",
+        targetType: "payee",
+        targetId: payeeId,
+        before: { payee: before },
+        after: { payee: after },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      upsertDistributionPayeeFixture(dependencies.fixtures, after);
+      return mutationReceipt(payeeId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+async function distributionReleaseUpsertResponse(context, dependencies) {
+  const request = await readZodBody(context, distributionReleaseUpsertSchema);
+  const releaseId = request.id ?? randomUUID2();
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "distribution_release_upsert",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `distribution:release:${releaseId}`);
+      await persistDistributionReleaseUpsert(tx, releaseId, request);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_release_upsert",
+        targetType: "release",
+        targetId: releaseId,
+        before: {},
+        after: { releaseId, request },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      return mutationReceipt(releaseId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+async function distributionTrackUpsertResponse(context, dependencies) {
+  const request = await readZodBody(context, distributionTrackUpsertSchema);
+  const trackId = request.id ?? randomUUID2();
+  const before = dependencies.fixtures.distribution.tracks.find((track) => track.id === trackId) ?? null;
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "distribution_track_upsert",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `distribution:track:${trackId}`);
+      await persistDistributionTrackUpsert(tx, trackId, request);
+      const after = distributionTrackFromUpsertRequest(trackId, request);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_track_upsert",
+        targetType: "track",
+        targetId: trackId,
+        before: { track: before },
+        after: { track: after },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      upsertDistributionTrackFixture(dependencies.fixtures, after);
+      return mutationReceipt(trackId, auditEventId);
+    }
   });
   return context.json(result.body, result.status);
 }
@@ -17858,6 +18105,237 @@ function appendDistributionContractExpenseFixture(fixtures, expenseId, request) 
     },
     ...fixtures.distributionCostTerms
   ];
+}
+async function persistDistributionContractUpsert(tx, contractId, request) {
+  if (tx.kind === "memory") {
+    return;
+  }
+  await tx.executor.execute(sql`
+    insert into contracts (
+      id,
+      title,
+      status,
+      effective_from,
+      effective_to,
+      metadata
+    )
+    values (
+      ${contractId},
+      ${request.title.trim()},
+      ${apiContractStatusToDb(request.status)},
+      ${request.effectiveFrom},
+      ${request.effectiveTo},
+      ${JSON.stringify({
+    workspaceId: request.workspaceId,
+    requestedPayeeId: request.payeeId,
+    requestedSplitBp: request.splitBp,
+    requestedCurrency: request.currency
+  })}::jsonb
+    )
+    on conflict (id) do update
+    set
+      title = excluded.title,
+      status = excluded.status,
+      effective_from = excluded.effective_from,
+      effective_to = excluded.effective_to,
+      metadata = contracts.metadata || excluded.metadata,
+      updated_at = now()
+  `);
+}
+function distributionContractFromUpsertRequest(contractId, request, before) {
+  return {
+    id: contractId,
+    payeeId: request.payeeId ?? before?.payeeId ?? "unassigned",
+    title: request.title.trim(),
+    status: request.status,
+    effectiveFrom: request.effectiveFrom,
+    effectiveTo: request.effectiveTo,
+    splitBp: request.splitBp,
+    openExpenseMicro: before?.openExpenseMicro ?? "0.0000000000",
+    currency: request.currency
+  };
+}
+function upsertDistributionContractFixture(fixtures, contract) {
+  const mutableFixtures = fixtures;
+  mutableFixtures.distributionContracts = upsertById(fixtures.distributionContracts, contract);
+}
+async function persistDistributionContractExpenseUpdate(tx, expenseId, request) {
+  if (tx.kind === "memory") {
+    return;
+  }
+  await tx.executor.execute(sql`
+    update contract_cost_terms
+    set
+      payee_id = ${request.payeeId},
+      amount = ${request.amountMicro},
+      currency = ${request.currency},
+      status = ${apiExpenseStatusToDb(request.status)},
+      scope_id = ${request.incurredOn},
+      updated_at = now()
+    where id = ${expenseId}
+  `);
+}
+function distributionContractExpenseFromUpdateRequest(expenseId, request) {
+  return {
+    id: expenseId,
+    contractId: request.contractId,
+    payeeId: request.payeeId,
+    incurredOn: request.incurredOn,
+    label: request.label.trim(),
+    originalAmountMicro: request.amountMicro,
+    openAmountMicro: request.status === "open" ? request.amountMicro : "0.0000000000",
+    currency: request.currency,
+    status: request.status
+  };
+}
+function requireDistributionContractExpense(fixtures, expenseId) {
+  const expense = fixtures.distributionContractExpenses.find((candidate) => candidate.id === expenseId);
+  if (expense === void 0) {
+    throw new ApiRouteError(404, "distribution_contract_expense_not_found", "Distribution contract expense was not found.", [
+      `expenseId=${expenseId}`
+    ]);
+  }
+  return expense;
+}
+function upsertDistributionContractExpenseFixture(fixtures, expense) {
+  const mutableFixtures = fixtures;
+  mutableFixtures.distributionContractExpenses = upsertById(fixtures.distributionContractExpenses, expense);
+  mutableFixtures.distributionCostTerms = upsertById(fixtures.distributionCostTerms, {
+    id: expense.id,
+    contractId: expense.contractId,
+    payeeId: expense.payeeId,
+    amount: expense.originalAmountMicro,
+    currency: expense.currency,
+    recoupable: true,
+    status: apiExpenseStatusToCostTermStatus(expense.status),
+    expenseDate: expense.incurredOn
+  });
+}
+async function persistDistributionPayeeUpsert(tx, payeeId, request) {
+  if (tx.kind === "memory") {
+    return;
+  }
+  await tx.executor.execute(sql`
+    insert into payees (
+      id,
+      name,
+      preferred_currency,
+      is_active
+    )
+    values (
+      ${payeeId},
+      ${request.displayName.trim()},
+      ${request.defaultCurrency},
+      ${request.status === "active"}
+    )
+    on conflict (id) do update
+    set
+      name = excluded.name,
+      preferred_currency = excluded.preferred_currency,
+      is_active = excluded.is_active,
+      updated_at = now()
+  `);
+}
+function distributionPayeeFromUpsertRequest(payeeId, request) {
+  return {
+    id: payeeId,
+    name: request.displayName.trim(),
+    preferredCurrency: request.defaultCurrency,
+    isActive: request.status === "active"
+  };
+}
+function upsertDistributionPayeeFixture(fixtures, payee) {
+  const mutableDistribution = fixtures.distribution;
+  mutableDistribution.payees = upsertById(fixtures.distribution.payees, payee);
+}
+async function persistDistributionReleaseUpsert(tx, releaseId, request) {
+  if (tx.kind === "memory") {
+    return;
+  }
+  await tx.executor.execute(sql`
+    insert into releases (
+      id,
+      title,
+      upc,
+      label_name,
+      release_date
+    )
+    values (
+      ${releaseId},
+      ${request.title.trim()},
+      ${request.upc},
+      ${request.artistName.trim()},
+      ${request.releaseDate}
+    )
+    on conflict (id) do update
+    set
+      title = excluded.title,
+      upc = excluded.upc,
+      label_name = excluded.label_name,
+      release_date = excluded.release_date,
+      updated_at = now()
+  `);
+}
+async function persistDistributionTrackUpsert(tx, trackId, request) {
+  if (tx.kind === "memory") {
+    return;
+  }
+  await tx.executor.execute(sql`
+    insert into tracks (
+      id,
+      title,
+      isrc,
+      release_id
+    )
+    values (
+      ${trackId},
+      ${request.title.trim()},
+      ${request.isrc},
+      ${request.releaseId}
+    )
+    on conflict (id) do update
+    set
+      title = excluded.title,
+      isrc = excluded.isrc,
+      release_id = excluded.release_id,
+      updated_at = now()
+  `);
+}
+function distributionTrackFromUpsertRequest(trackId, request) {
+  return {
+    id: trackId,
+    title: request.title.trim(),
+    isrc: request.isrc,
+    releaseId: request.releaseId
+  };
+}
+function upsertDistributionTrackFixture(fixtures, track) {
+  const mutableDistribution = fixtures.distribution;
+  mutableDistribution.tracks = upsertById(fixtures.distribution.tracks, track);
+}
+function apiContractStatusToDb(status) {
+  if (status === "ended") {
+    return "expired";
+  }
+  return status;
+}
+function apiExpenseStatusToDb(status) {
+  if (status === "recouped") {
+    return "recovered";
+  }
+  if (status === "waived") {
+    return "non_recoverable";
+  }
+  return "open";
+}
+function apiExpenseStatusToCostTermStatus(status) {
+  if (status === "recouped") {
+    return "recovered";
+  }
+  if (status === "waived") {
+    return "non_recoverable";
+  }
+  return "open";
 }
 function requireDistributionAllocationRun(dataset, runId) {
   const run = dataset.calculationRuns.find((candidate) => candidate.id === runId);
@@ -18447,7 +18925,7 @@ async function distributionImportPreviewResponse(context, dependencies) {
     rows: previewRows,
     createdAtIso: dependencies.nowIso()
   };
-  dependencies.persistence.storeDistributionImportPreview(preview);
+  await dependencies.persistence.storeDistributionImportPreview(preview);
   const currencyCodes = currencyCodesFromRows(request.rows, request.source === "kontor" ? "EUR" : "USD");
   const response = {
     previewId,
@@ -18480,7 +18958,7 @@ async function distributionImportConfirmResponse(context, dependencies) {
     idempotencyKey,
     requestBody: request,
     write: async (tx, resolvedIdempotencyKey) => {
-      const preview = requireDistributionPreview(context, dependencies, request.previewId, request.workspaceId);
+      const preview = await requireDistributionPreview(context, dependencies, request.previewId, request.workspaceId);
       const batchId = randomUUID2();
       const importedAtIso = dependencies.nowIso();
       await persistDistributionImportConfirmation(tx, {
@@ -18588,7 +19066,7 @@ async function officeBankImportPreviewResponse(context, dependencies) {
     rows: previewRows,
     createdAtIso: dependencies.nowIso()
   };
-  dependencies.persistence.storeOfficeBankImportPreview(preview);
+  await dependencies.persistence.storeOfficeBankImportPreview(preview);
   const dateRange = officeDateRange(parsedRows.map((row) => row.line.occurredOn));
   const response = {
     previewId,
@@ -18623,7 +19101,7 @@ async function officeBankImportConfirmResponse(context, dependencies) {
     idempotencyKey,
     requestBody: request,
     write: async (tx, resolvedIdempotencyKey) => {
-      const preview = requireOfficeBankPreview(context, dependencies, request.previewId, request.workspaceId);
+      const preview = await requireOfficeBankPreview(context, dependencies, request.previewId, request.workspaceId);
       const acceptedRowIds = new Set(request.acceptedRowIds);
       const parsedRows = preview.rows.filter((row) => acceptedRowIds.has(row.id)).map((row) => parseOfficeBankPreviewRow(row, request.workspaceId, dependencies.fixtures.office.bankAccounts));
       const lines = parsedRows.map((row) => row.line).filter((line) => line !== null);
@@ -19479,8 +19957,8 @@ function officeDateRange(dates) {
     label: start === end ? start : `${start} to ${end}`
   };
 }
-function requireDistributionPreview(context, dependencies, previewId, workspaceId) {
-  const preview = dependencies.persistence.getDistributionImportPreview(previewId);
+async function requireDistributionPreview(context, dependencies, previewId, workspaceId) {
+  const preview = await dependencies.persistence.getDistributionImportPreview(previewId);
   if (preview === null) {
     throw new ApiRouteError(400, "import_preview_missing", "Import preview was not found or has expired; run preview again before confirm.", [
       `path=${context.req.path}`,
@@ -19497,8 +19975,8 @@ function requireDistributionPreview(context, dependencies, previewId, workspaceI
   }
   return preview;
 }
-function requireOfficeBankPreview(context, dependencies, previewId, workspaceId) {
-  const preview = dependencies.persistence.getOfficeBankImportPreview(previewId);
+async function requireOfficeBankPreview(context, dependencies, previewId, workspaceId) {
+  const preview = await dependencies.persistence.getOfficeBankImportPreview(previewId);
   if (preview === null) {
     throw new ApiRouteError(400, "bank_import_preview_missing", "Bank import preview was not found or has expired; run preview again before confirm.", [
       `path=${context.req.path}`,

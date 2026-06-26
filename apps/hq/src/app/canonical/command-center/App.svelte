@@ -170,7 +170,7 @@
   ];
   const integrationToolbar: readonly ToolbarFilter[] = [
     { label: "Scope", value: "Platform", active: true, disabled: false },
-    { label: "Writes", value: "Disabled", active: false, disabled: true },
+    { label: "Writes", value: "Enabled", active: false, disabled: false },
     { label: "Network", value: "Status only", active: false, disabled: false }
   ];
   const settingsToolbar: readonly ToolbarFilter[] = [

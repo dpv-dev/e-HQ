@@ -70,10 +70,10 @@ export interface OfficeBankImportPreviewRecord {
 export interface ApiPersistenceRuntime {
   readonly writesEnabled: boolean;
   readonly withTx: <TResult>(callback: (tx: ApiWriteTransaction) => Promise<TResult>) => Promise<TResult>;
-  readonly storeDistributionImportPreview: (preview: DistributionImportPreviewRecord) => void;
-  readonly getDistributionImportPreview: (previewId: string) => DistributionImportPreviewRecord | null;
-  readonly storeOfficeBankImportPreview: (preview: OfficeBankImportPreviewRecord) => void;
-  readonly getOfficeBankImportPreview: (previewId: string) => OfficeBankImportPreviewRecord | null;
+  readonly storeDistributionImportPreview: (preview: DistributionImportPreviewRecord) => Promise<void>;
+  readonly getDistributionImportPreview: (previewId: string) => Promise<DistributionImportPreviewRecord | null>;
+  readonly storeOfficeBankImportPreview: (preview: OfficeBankImportPreviewRecord) => Promise<void>;
+  readonly getOfficeBankImportPreview: (previewId: string) => Promise<OfficeBankImportPreviewRecord | null>;
 }
 
 export interface RunIdempotentMutationInput<TBody extends ApiMutationResponse> {
@@ -295,6 +295,8 @@ interface PersistenceState {
   readonly officeBankPreviews: Map<string, OfficeBankImportPreviewRecord>;
 }
 
+type ImportPreviewKind = "distribution_import" | "office_bank_import";
+
 const SENSITIVE_ACTIONS = new Set<string>([
   "distribution_allocations_preview",
   "distribution_allocations_run",
@@ -370,14 +372,46 @@ export function createDrizzlePersistenceRuntime(database: TransactionalDrizzleDa
     writesEnabled: isWritesEnabled(env),
     withTx: async <TResult>(callback: (tx: ApiWriteTransaction) => Promise<TResult>): Promise<TResult> =>
       database.transaction(async (executor: SqlExecutor): Promise<TResult> => callback({ kind: "postgres", executor })),
-    storeDistributionImportPreview: (preview: DistributionImportPreviewRecord): void => {
+    storeDistributionImportPreview: async (preview: DistributionImportPreviewRecord): Promise<void> => {
       state.distributionPreviews.set(preview.previewId, preview);
+      await database.transaction(async (executor: SqlExecutor): Promise<void> => {
+        await persistApiImportPreview(executor, "distribution_import", preview);
+      });
     },
-    getDistributionImportPreview: (previewId: string): DistributionImportPreviewRecord | null => state.distributionPreviews.get(previewId) ?? null,
-    storeOfficeBankImportPreview: (preview: OfficeBankImportPreviewRecord): void => {
+    getDistributionImportPreview: async (previewId: string): Promise<DistributionImportPreviewRecord | null> => {
+      const cached = state.distributionPreviews.get(previewId);
+      if (cached !== undefined) {
+        return cached;
+      }
+
+      const stored = await database.transaction(async (executor: SqlExecutor): Promise<DistributionImportPreviewRecord | null> =>
+        readApiImportPreview<DistributionImportPreviewRecord>(executor, "distribution_import", previewId)
+      );
+      if (stored !== null) {
+        state.distributionPreviews.set(stored.previewId, stored);
+      }
+      return stored;
+    },
+    storeOfficeBankImportPreview: async (preview: OfficeBankImportPreviewRecord): Promise<void> => {
       state.officeBankPreviews.set(preview.previewId, preview);
+      await database.transaction(async (executor: SqlExecutor): Promise<void> => {
+        await persistApiImportPreview(executor, "office_bank_import", preview);
+      });
     },
-    getOfficeBankImportPreview: (previewId: string): OfficeBankImportPreviewRecord | null => state.officeBankPreviews.get(previewId) ?? null
+    getOfficeBankImportPreview: async (previewId: string): Promise<OfficeBankImportPreviewRecord | null> => {
+      const cached = state.officeBankPreviews.get(previewId);
+      if (cached !== undefined) {
+        return cached;
+      }
+
+      const stored = await database.transaction(async (executor: SqlExecutor): Promise<OfficeBankImportPreviewRecord | null> =>
+        readApiImportPreview<OfficeBankImportPreviewRecord>(executor, "office_bank_import", previewId)
+      );
+      if (stored !== null) {
+        state.officeBankPreviews.set(stored.previewId, stored);
+      }
+      return stored;
+    }
   };
 }
 
@@ -395,14 +429,14 @@ export function createMemoryPersistenceRuntime(env: Readonly<Record<string, stri
       };
       return result;
     },
-    storeDistributionImportPreview: (preview: DistributionImportPreviewRecord): void => {
+    storeDistributionImportPreview: async (preview: DistributionImportPreviewRecord): Promise<void> => {
       state.distributionPreviews.set(preview.previewId, preview);
     },
-    getDistributionImportPreview: (previewId: string): DistributionImportPreviewRecord | null => state.distributionPreviews.get(previewId) ?? null,
-    storeOfficeBankImportPreview: (preview: OfficeBankImportPreviewRecord): void => {
+    getDistributionImportPreview: async (previewId: string): Promise<DistributionImportPreviewRecord | null> => state.distributionPreviews.get(previewId) ?? null,
+    storeOfficeBankImportPreview: async (preview: OfficeBankImportPreviewRecord): Promise<void> => {
       state.officeBankPreviews.set(preview.previewId, preview);
     },
-    getOfficeBankImportPreview: (previewId: string): OfficeBankImportPreviewRecord | null => state.officeBankPreviews.get(previewId) ?? null
+    getOfficeBankImportPreview: async (previewId: string): Promise<OfficeBankImportPreviewRecord | null> => state.officeBankPreviews.get(previewId) ?? null
   };
 }
 
@@ -1366,6 +1400,64 @@ async function completeIdempotent(tx: ApiWriteTransaction, key: string, response
   `);
 }
 
+async function persistApiImportPreview<TPreview extends DistributionImportPreviewRecord | OfficeBankImportPreviewRecord>(
+  executor: SqlExecutor,
+  kind: ImportPreviewKind,
+  preview: TPreview
+): Promise<void> {
+  const expiresAtIso = new Date(Date.parse(preview.createdAtIso) + 24 * 60 * 60 * 1000).toISOString();
+  await executor.execute(sql`
+    insert into api_import_previews (
+      preview_id,
+      workspace_id,
+      kind,
+      payload_json,
+      expires_at
+    )
+    values (
+      ${preview.previewId},
+      ${preview.workspaceId},
+      ${kind},
+      ${JSON.stringify(preview)}::jsonb,
+      ${expiresAtIso}
+    )
+    on conflict (preview_id) do update
+    set
+      workspace_id = excluded.workspace_id,
+      kind = excluded.kind,
+      payload_json = excluded.payload_json,
+      expires_at = excluded.expires_at
+  `);
+}
+
+async function readApiImportPreview<TPreview extends DistributionImportPreviewRecord | OfficeBankImportPreviewRecord>(
+  executor: SqlExecutor,
+  kind: ImportPreviewKind,
+  previewId: string
+): Promise<TPreview | null> {
+  const rows = rowsFromQueryResult(await executor.execute(sql`
+    select payload_json
+    from api_import_previews
+    where preview_id = ${previewId}
+      and kind = ${kind}
+      and (expires_at is null or expires_at > now())
+  `));
+  const row = rows[0];
+  if (row === undefined) {
+    return null;
+  }
+
+  const payload = row["payload_json"];
+  if (!isJsonRecord(payload)) {
+    throwPersistenceHttpError(500, "import_preview_payload_invalid", "Import preview payload is not a JSON object.", [
+      `previewId=${previewId}`,
+      `kind=${kind}`
+    ]);
+  }
+
+  return payload as unknown as TPreview;
+}
+
 function beginResultFromExisting(existing: StoredIdempotencyResult, input: BeginIdempotentInput): BeginIdempotentResult {
   if (existing.route !== input.route || existing.requestHash !== input.requestHash) {
     throwPersistenceHttpError(409, "idempotency_key_conflict", "Idempotency-Key was already used with a different request.", [
@@ -1386,6 +1478,10 @@ function beginResultFromExisting(existing: StoredIdempotencyResult, input: Begin
     status: "replay",
     responseJson: existing.responseJson
   };
+}
+
+function isJsonRecord(value: unknown): value is JsonRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function idempotencyRowFromPg(row: JsonRecord | undefined, key: string): StoredIdempotencyResult {
