@@ -15117,6 +15117,9 @@ function drizzle(...params) {
 
 // src/persistence.ts
 var SENSITIVE_ACTIONS = /* @__PURE__ */ new Set([
+  "command_center_integration_toggle",
+  "command_center_settings_update",
+  "command_center_user_permission_update",
   "distribution_allocations_preview",
   "distribution_allocations_run",
   "distribution_allocations_unpost",
@@ -16223,6 +16226,23 @@ var currencyCodePattern = /^[A-Z]{3}$/u;
 var moneyStringPattern = /^-?\d+(?:\.\d+)?$/u;
 var nullableStringSchema = external_exports.string().min(1).nullable();
 var workspaceBodySchema = external_exports.object({ workspaceId: external_exports.string().min(1) });
+var jsonRecordSchema = external_exports.record(external_exports.string(), external_exports.unknown());
+var commandCenterSettingUpdateSchema = workspaceBodySchema.extend({
+  key: external_exports.string().min(1),
+  value: jsonRecordSchema,
+  status: external_exports.string().min(1)
+});
+var commandCenterIntegrationToggleSchema = workspaceBodySchema.extend({
+  integrationId: external_exports.string().min(1),
+  enabled: external_exports.boolean(),
+  status: external_exports.string().min(1)
+});
+var commandCenterUserPermissionUpdateSchema = workspaceBodySchema.extend({
+  userId: external_exports.string().min(1),
+  email: external_exports.string().email(),
+  role: external_exports.string().min(1),
+  permissions: jsonRecordSchema
+});
 var officeTransactionWriteSchema = workspaceBodySchema.extend({
   occurredOn: external_exports.string().regex(isoDatePattern),
   accountId: external_exports.string().min(1),
@@ -16396,8 +16416,16 @@ function createApiService(dependencies) {
     }
     return authMiddleware(context, next);
   });
+  app.use("/cc/v1/*", async (context, next) => {
+    if (context.req.method === "OPTIONS") {
+      await next();
+      return;
+    }
+    return authMiddleware(context, next);
+  });
   registerOfficeRoutes(app, dependencies);
   registerDistributionRoutes(app, dependencies);
+  registerCommandCenterRoutes(app, dependencies);
   return app;
 }
 function registerOfficeRoutes(app, dependencies) {
@@ -16919,6 +16947,24 @@ function registerDistributionRoutes(app, dependencies) {
     return context.json(toDistributionSettings(context, dependencies.fixtures, dependencies.persistence.writesEnabled));
   });
 }
+function registerCommandCenterRoutes(app, dependencies) {
+  app.get("/cc/v1/status", (context) => {
+    resolveWorkspaceId(context);
+    assertNonBotRouteAccess(context, "command_center_status_read");
+    return context.json({
+      writesEnabled: dependencies.persistence.writesEnabled
+    });
+  });
+  app.post("/cc/v1/settings", async (context) => {
+    return commandCenterSettingUpdateResponse(context, dependencies);
+  });
+  app.post("/cc/v1/integrations/:integrationId/toggle", async (context) => {
+    return commandCenterIntegrationToggleResponse(context, dependencies);
+  });
+  app.post("/cc/v1/users/:userId/permissions", async (context) => {
+    return commandCenterUserPermissionUpdateResponse(context, dependencies);
+  });
+}
 function createErrorPayload(code, message2, context) {
   return {
     error: {
@@ -16959,6 +17005,17 @@ function requirePathParam(context, key) {
     ]);
   }
   return value;
+}
+function assertPathBodyMatch(context, key, pathValue, bodyValue) {
+  if (pathValue === bodyValue) {
+    return;
+  }
+  throw new ApiRouteError(400, "path_body_mismatch", "Path parameter and request body value must match.", [
+    `path=${context.req.path}`,
+    `key=${key}`,
+    `pathValue=${pathValue}`,
+    `bodyValue=${bodyValue}`
+  ]);
 }
 function nullableQuery(context, key) {
   const value = context.req.query(key);
@@ -17639,12 +17696,209 @@ async function distributionSuspenseResolveResponse(context, dependencies) {
   });
   return context.json(result.body, result.status);
 }
+async function commandCenterSettingUpdateResponse(context, dependencies) {
+  const request = await readZodBody(context, commandCenterSettingUpdateSchema);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const targetId = `${request.workspaceId}:setting:${request.key}`;
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "command_center_settings_update",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `command-center:settings:${request.workspaceId}:${request.key}`);
+      await persistCommandCenterSettingUpdate(tx, request, actor.userId);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "command_center_settings_update",
+        targetType: "command_center_setting",
+        targetId,
+        before: {},
+        after: {
+          workspaceId: request.workspaceId,
+          key: request.key,
+          value: request.value,
+          status: request.status
+        },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      return mutationReceipt(targetId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+async function commandCenterIntegrationToggleResponse(context, dependencies) {
+  const integrationId = requirePathParam(context, "integrationId");
+  const request = await readZodBody(context, commandCenterIntegrationToggleSchema);
+  assertPathBodyMatch(context, "integrationId", integrationId, request.integrationId);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const targetId = `${request.workspaceId}:integration:${request.integrationId}`;
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "command_center_integration_toggle",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `command-center:integration:${request.workspaceId}:${request.integrationId}`);
+      await persistCommandCenterIntegrationToggle(tx, request, actor.userId);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "command_center_integration_toggle",
+        targetType: "command_center_integration",
+        targetId,
+        before: {},
+        after: {
+          workspaceId: request.workspaceId,
+          integrationId: request.integrationId,
+          enabled: request.enabled,
+          status: request.status
+        },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      return mutationReceipt(targetId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+async function commandCenterUserPermissionUpdateResponse(context, dependencies) {
+  const userId = requirePathParam(context, "userId");
+  const request = await readZodBody(context, commandCenterUserPermissionUpdateSchema);
+  assertPathBodyMatch(context, "userId", userId, request.userId);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const targetId = `${request.workspaceId}:user:${request.userId}`;
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "command_center_user_permission_update",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `command-center:user:${request.workspaceId}:${request.userId}`);
+      await persistCommandCenterUserPermissionUpdate(tx, request, actor.userId);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "command_center_user_permission_update",
+        targetType: "command_center_user_permission",
+        targetId,
+        before: {},
+        after: {
+          workspaceId: request.workspaceId,
+          userId: request.userId,
+          email: request.email,
+          role: request.role,
+          permissions: request.permissions
+        },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      return mutationReceipt(targetId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
 function mutationReceipt(id, auditEventId) {
   return {
     id,
     status: "completed",
     auditEventId
   };
+}
+async function persistCommandCenterSettingUpdate(tx, request, actorUserId) {
+  if (tx.kind === "memory") {
+    return;
+  }
+  await tx.executor.execute(sql`
+    insert into command_center_settings (
+      workspace_id,
+      key,
+      value_json,
+      status,
+      updated_by_user_id,
+      updated_at
+    )
+    values (
+      ${request.workspaceId},
+      ${request.key},
+      ${JSON.stringify(request.value)}::jsonb,
+      ${request.status},
+      ${actorUserId},
+      now()
+    )
+    on conflict (workspace_id, key) do update
+    set
+      value_json = excluded.value_json,
+      status = excluded.status,
+      updated_by_user_id = excluded.updated_by_user_id,
+      updated_at = now()
+  `);
+}
+async function persistCommandCenterIntegrationToggle(tx, request, actorUserId) {
+  if (tx.kind === "memory") {
+    return;
+  }
+  await tx.executor.execute(sql`
+    insert into command_center_integration_states (
+      workspace_id,
+      integration_id,
+      enabled,
+      status,
+      updated_by_user_id,
+      updated_at
+    )
+    values (
+      ${request.workspaceId},
+      ${request.integrationId},
+      ${request.enabled},
+      ${request.status},
+      ${actorUserId},
+      now()
+    )
+    on conflict (workspace_id, integration_id) do update
+    set
+      enabled = excluded.enabled,
+      status = excluded.status,
+      updated_by_user_id = excluded.updated_by_user_id,
+      updated_at = now()
+  `);
+}
+async function persistCommandCenterUserPermissionUpdate(tx, request, actorUserId) {
+  if (tx.kind === "memory") {
+    return;
+  }
+  await tx.executor.execute(sql`
+    insert into command_center_user_permissions (
+      workspace_id,
+      user_id,
+      email,
+      role,
+      permissions_json,
+      updated_by_user_id,
+      updated_at
+    )
+    values (
+      ${request.workspaceId},
+      ${request.userId},
+      ${request.email},
+      ${request.role},
+      ${JSON.stringify(request.permissions)}::jsonb,
+      ${actorUserId},
+      now()
+    )
+    on conflict (workspace_id, user_id) do update
+    set
+      email = excluded.email,
+      role = excluded.role,
+      permissions_json = excluded.permissions_json,
+      updated_by_user_id = excluded.updated_by_user_id,
+      updated_at = now()
+  `);
 }
 function normalizeEofAmountField(context, value, field) {
   try {

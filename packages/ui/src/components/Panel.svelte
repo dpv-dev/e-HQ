@@ -10,6 +10,8 @@
     readonly state: SurfaceState;
     readonly primaryAction: string;
     readonly secondaryAction: string;
+    readonly onPrimaryAction?: (() => void) | null;
+    readonly onSecondaryAction?: (() => void) | null;
   }
 
   const props: Props = $props();
@@ -27,10 +29,10 @@
     <div class="body">{props.body}</div>
     <footer>
       {#if props.secondaryAction.length > 0}
-        <Button label={props.secondaryAction} variant="secondary" size="small" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel={props.secondaryAction} />
+        <Button label={props.secondaryAction} variant="secondary" size="small" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel={props.secondaryAction} onclick={props.onSecondaryAction ?? null} />
       {/if}
       {#if props.primaryAction.length > 0}
-        <Button label={props.primaryAction} variant={props.state === "error" ? "danger" : "primary"} size="small" type="button" disabled={props.state === "empty"} loading={false} locked={props.state === "locked"} focus={false} ariaLabel={props.primaryAction} />
+        <Button label={props.primaryAction} variant={props.state === "error" ? "danger" : "primary"} size="small" type="button" disabled={props.state === "empty"} loading={false} locked={props.state === "locked"} focus={false} ariaLabel={props.primaryAction} onclick={props.onPrimaryAction ?? null} />
       {/if}
     </footer>
   {/if}

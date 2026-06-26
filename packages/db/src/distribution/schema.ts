@@ -82,6 +82,58 @@ export const apiImportPreviews = pgTable(
   ]
 );
 
+export const commandCenterSettings = pgTable(
+  "command_center_settings",
+  {
+    workspaceId: text("workspace_id").notNull(),
+    key: text("key").notNull(),
+    valueJson: jsonb("value_json").$type<Readonly<Record<string, unknown>>>().notNull(),
+    status: text("status").notNull(),
+    updatedByUserId: text("updated_by_user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("command_center_settings_pk").on(table.workspaceId, table.key),
+    index("command_center_settings_workspace_idx").on(table.workspaceId)
+  ]
+);
+
+export const commandCenterIntegrationStates = pgTable(
+  "command_center_integration_states",
+  {
+    workspaceId: text("workspace_id").notNull(),
+    integrationId: text("integration_id").notNull(),
+    enabled: boolean("enabled").notNull(),
+    status: text("status").notNull(),
+    updatedByUserId: text("updated_by_user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("command_center_integration_states_pk").on(table.workspaceId, table.integrationId),
+    index("command_center_integration_states_workspace_idx").on(table.workspaceId)
+  ]
+);
+
+export const commandCenterUserPermissions = pgTable(
+  "command_center_user_permissions",
+  {
+    workspaceId: text("workspace_id").notNull(),
+    userId: text("user_id").notNull(),
+    email: text("email").notNull(),
+    role: text("role").notNull(),
+    permissionsJson: jsonb("permissions_json").$type<Readonly<Record<string, unknown>>>().notNull(),
+    updatedByUserId: text("updated_by_user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("command_center_user_permissions_pk").on(table.workspaceId, table.userId),
+    index("command_center_user_permissions_workspace_idx").on(table.workspaceId)
+  ]
+);
+
 function createdAtColumn() {
   return timestamp("created_at", { withTimezone: true, mode: "string" }).notNull().defaultNow();
 }

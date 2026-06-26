@@ -1,4 +1,4 @@
-export type LegacyNamespace = "eof/v1" | "erh/v1";
+export type LegacyNamespace = "eof/v1" | "erh/v1" | "cc/v1";
 export type HttpMethod = "GET" | "POST" | "PATCH";
 export type IsoDateString = string;
 export type IsoDateTimeString = string;
@@ -66,6 +66,54 @@ export interface ApiMutationReceipt {
   readonly id: EntityId;
   readonly status: "accepted" | "queued" | "completed";
   readonly auditEventId: EntityId | null;
+}
+
+export interface CommandCenterWorkspaceQuery {
+  readonly workspaceId: EntityId;
+}
+
+export interface CommandCenterSettingUpdateRequest {
+  readonly workspaceId: EntityId;
+  readonly key: string;
+  readonly value: Readonly<Record<string, unknown>>;
+  readonly status: string;
+}
+
+export interface CommandCenterIntegrationToggleRequest {
+  readonly workspaceId: EntityId;
+  readonly integrationId: EntityId;
+  readonly enabled: boolean;
+  readonly status: string;
+}
+
+export interface CommandCenterUserPermissionUpdateRequest {
+  readonly workspaceId: EntityId;
+  readonly userId: EntityId;
+  readonly email: string;
+  readonly role: string;
+  readonly permissions: Readonly<Record<string, unknown>>;
+}
+
+export interface CommandCenterSettingRow {
+  readonly key: string;
+  readonly value: Readonly<Record<string, unknown>>;
+  readonly status: string;
+  readonly updatedAt: IsoDateTimeString;
+}
+
+export interface CommandCenterIntegrationState {
+  readonly integrationId: EntityId;
+  readonly enabled: boolean;
+  readonly status: string;
+  readonly updatedAt: IsoDateTimeString;
+}
+
+export interface CommandCenterUserPermission {
+  readonly userId: EntityId;
+  readonly email: string;
+  readonly role: string;
+  readonly permissions: Readonly<Record<string, unknown>>;
+  readonly updatedAt: IsoDateTimeString;
 }
 
 export interface ApiRunReceipt {

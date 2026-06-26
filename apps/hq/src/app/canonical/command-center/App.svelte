@@ -240,6 +240,7 @@
   let inviteEmail = $state("new.user@eeee.mu");
   let workspaceName = $state("ë • Entreprise");
   let commandNotice = $state("");
+  let commandBusy = $state(false);
   let officeDashboardState = $state<ApiRequestState<OfficeDashboardResponse>>(createIdleState<OfficeDashboardResponse>());
   let distributionDashboardState = $state<ApiRequestState<DistributionDashboardResponse>>(
     createIdleState<DistributionDashboardResponse>()
@@ -464,7 +465,7 @@
       { label: "Connectors", value: String(rows.length), detail: "status only", tone: "info", accent: true },
       { label: "WordPress", value: "Connected", detail: "REST / MCP", tone: "success", accent: false },
       { label: "Banks", value: "2", detail: "Office import scope", tone: "info", accent: false },
-      { label: "Remote writes", value: "Off", detail: "no deployment action", tone: "success", accent: false }
+      { label: "Remote writes", value: "On", detail: "guarded by API audit", tone: "success", accent: false }
     ];
   }
 
@@ -634,12 +635,89 @@
     return resolvedTarget.href === window.location.href;
   }
 
-  function requestAccessReview(): void {
-    commandNotice = "Access review prepared. Persisting this change belongs to the API layer.";
+  async function requestAccessReview(): Promise<void> {
+    commandBusy = true;
+    try {
+      const receipt = await client.commandCenter.updateUserPermission(
+        {
+          workspaceId,
+          userId: inviteEmail,
+          email: inviteEmail,
+          role: selectedRole,
+          permissions: {
+            commandCenter: selectedRole === "administrator" || selectedRole === "operator",
+            office: selectedRole === "administrator" || selectedRole === "office" || selectedRole === "operator",
+            distribution: selectedRole === "administrator" || selectedRole === "distribution" || selectedRole === "operator"
+          }
+        },
+        {
+          idempotencyKey: createCommandIdempotencyKey("command-center-user-permission")
+        }
+      );
+      commandNotice = `Permission review persisted · audit ${receipt.auditEventId ?? "missing"}.`;
+    } catch (error: unknown) {
+      commandNotice = `Permission write failed · ${errorMessage(error)}.`;
+    } finally {
+      commandBusy = false;
+    }
   }
 
-  function saveSettingsReview(): void {
-    commandNotice = "Settings checked locally. No deployment or remote write was triggered.";
+  async function saveSettingsReview(): Promise<void> {
+    commandBusy = true;
+    try {
+      const receipt = await client.commandCenter.updateSetting(
+        {
+          workspaceId,
+          key: "workspace_name",
+          value: {
+            name: workspaceName
+          },
+          status: "reviewed"
+        },
+        {
+          idempotencyKey: createCommandIdempotencyKey("command-center-setting")
+        }
+      );
+      commandNotice = `Workspace setting persisted · audit ${receipt.auditEventId ?? "missing"}.`;
+    } catch (error: unknown) {
+      commandNotice = `Settings write failed · ${errorMessage(error)}.`;
+    } finally {
+      commandBusy = false;
+    }
+  }
+
+  async function persistIntegrationStatus(integrationId: string, enabled: boolean, status: string): Promise<void> {
+    commandBusy = true;
+    try {
+      const receipt = await client.commandCenter.toggleIntegration(
+        {
+          workspaceId,
+          integrationId,
+          enabled,
+          status
+        },
+        {
+          idempotencyKey: createCommandIdempotencyKey(`command-center-integration-${integrationId}`)
+        }
+      );
+      commandNotice = `${integrationId} status persisted · audit ${receipt.auditEventId ?? "missing"}.`;
+    } catch (error: unknown) {
+      commandNotice = `${integrationId} write failed · ${errorMessage(error)}.`;
+    } finally {
+      commandBusy = false;
+    }
+  }
+
+  function createCommandIdempotencyKey(action: string): string {
+    return `${action}:${session.userId}:${crypto.randomUUID()}`;
+  }
+
+  function errorMessage(error: unknown): string {
+    if (error instanceof Error) {
+      return error.message;
+    }
+
+    return "unknown error";
   }
 
   function updateSelectedRole(event: Event): void {
@@ -788,7 +866,7 @@
                 {/each}
               </select>
             </label>
-            <button class="command-action" type="button" onclick={requestAccessReview}>Prepare review</button>
+            <button class="command-action" type="button" disabled={commandBusy} onclick={requestAccessReview}>Prepare review</button>
           </section>
 
           <section class="locked-card-reference ehq-edge-surface" aria-label="Locked card rule">
@@ -825,6 +903,7 @@
             state="default"
             primaryAction="Inspect"
             secondaryAction=""
+            onPrimaryAction={() => persistIntegrationStatus("wordpress", true, "connected")}
           />
           <Panel
             title="MCP"
@@ -833,6 +912,7 @@
             state="default"
             primaryAction="View scope"
             secondaryAction=""
+            onPrimaryAction={() => persistIntegrationStatus("mcp", true, "connected")}
           />
           <Panel
             title="Bank connectors"
@@ -841,6 +921,7 @@
             state="default"
             primaryAction="Open status"
             secondaryAction=""
+            onPrimaryAction={() => persistIntegrationStatus("bank-connectors", true, "reviewed")}
           />
         </section>
 
@@ -857,12 +938,12 @@
         <section class="settings-grid">
           <section class="form-panel ehq-edge-surface" aria-label="Workspace settings">
             <h2>Workspace settings</h2>
-            <p>Local controls only; saving here does not deploy or write remotely.</p>
+            <p>Saved through the Command Center API. Deployments remain manual.</p>
             <label class="field" for="workspace-name">
               <span>Workspace name</span>
               <input id="workspace-name" value={workspaceName} placeholder="Workspace" type="text" oninput={updateWorkspaceName} />
             </label>
-            <button class="command-action" type="button" onclick={saveSettingsReview}>Save review</button>
+            <button class="command-action" type="button" disabled={commandBusy} onclick={saveSettingsReview}>Save review</button>
           </section>
 
           <Panel
@@ -872,6 +953,7 @@
             state="default"
             primaryAction="Verified"
             secondaryAction=""
+            onPrimaryAction={saveSettingsReview}
           />
         </section>
 

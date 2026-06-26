@@ -11,6 +11,7 @@
     readonly locked: boolean;
     readonly focus: boolean;
     readonly ariaLabel: string | null;
+    readonly onclick?: (() => void) | null;
   }
 
   const props: Props = $props();
@@ -26,6 +27,7 @@
   type={props.type}
   disabled={isDisabled}
   aria-label={accessibleLabel}
+  onclick={props.onclick ?? undefined}
 >
   {#if props.loading}
     <span class="spinner" aria-hidden="true"></span>

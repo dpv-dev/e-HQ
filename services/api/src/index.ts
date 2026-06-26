@@ -449,6 +449,23 @@ const moneyStringPattern = /^-?\d+(?:\.\d+)?$/u;
 
 const nullableStringSchema = z.string().min(1).nullable();
 const workspaceBodySchema = z.object({ workspaceId: z.string().min(1) });
+const jsonRecordSchema = z.record(z.string(), z.unknown());
+const commandCenterSettingUpdateSchema = workspaceBodySchema.extend({
+  key: z.string().min(1),
+  value: jsonRecordSchema,
+  status: z.string().min(1)
+});
+const commandCenterIntegrationToggleSchema = workspaceBodySchema.extend({
+  integrationId: z.string().min(1),
+  enabled: z.boolean(),
+  status: z.string().min(1)
+});
+const commandCenterUserPermissionUpdateSchema = workspaceBodySchema.extend({
+  userId: z.string().min(1),
+  email: z.string().email(),
+  role: z.string().min(1),
+  permissions: jsonRecordSchema
+});
 const officeTransactionWriteSchema = workspaceBodySchema.extend({
   occurredOn: z.string().regex(isoDatePattern),
   accountId: z.string().min(1),
@@ -546,6 +563,9 @@ type DistributionContractExpenseUpdateRequest = z.infer<typeof distributionContr
 type DistributionPayeeUpsertRequest = z.infer<typeof distributionPayeeUpsertSchema>;
 type DistributionReleaseUpsertRequest = z.infer<typeof distributionReleaseUpsertSchema>;
 type DistributionTrackUpsertRequest = z.infer<typeof distributionTrackUpsertSchema>;
+type CommandCenterSettingUpdateRequest = z.infer<typeof commandCenterSettingUpdateSchema>;
+type CommandCenterIntegrationToggleRequest = z.infer<typeof commandCenterIntegrationToggleSchema>;
+type CommandCenterUserPermissionUpdateRequest = z.infer<typeof commandCenterUserPermissionUpdateSchema>;
 
 export const legacyRestSurfaces: readonly LegacyRestSurface[] = [
   {
@@ -673,9 +693,18 @@ export function createApiService(dependencies: ApiServiceDependencies): Hono<Api
 
     return authMiddleware(context, next);
   });
+  app.use("/cc/v1/*", async (context, next) => {
+    if (context.req.method === "OPTIONS") {
+      await next();
+      return;
+    }
+
+    return authMiddleware(context, next);
+  });
 
   registerOfficeRoutes(app, dependencies);
   registerDistributionRoutes(app, dependencies);
+  registerCommandCenterRoutes(app, dependencies);
 
   return app;
 }
@@ -1350,6 +1379,28 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
   });
 }
 
+function registerCommandCenterRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServiceDependencies): void {
+  app.get("/cc/v1/status", (context) => {
+    resolveWorkspaceId(context);
+    assertNonBotRouteAccess(context, "command_center_status_read");
+    return context.json({
+      writesEnabled: dependencies.persistence.writesEnabled
+    });
+  });
+
+  app.post("/cc/v1/settings", async (context) => {
+    return commandCenterSettingUpdateResponse(context, dependencies);
+  });
+
+  app.post("/cc/v1/integrations/:integrationId/toggle", async (context) => {
+    return commandCenterIntegrationToggleResponse(context, dependencies);
+  });
+
+  app.post("/cc/v1/users/:userId/permissions", async (context) => {
+    return commandCenterUserPermissionUpdateResponse(context, dependencies);
+  });
+}
+
 function createErrorPayload(code: string, message: string, context: readonly string[]): ApiErrorPayload {
   return {
     error: {
@@ -1396,6 +1447,19 @@ function requirePathParam(context: ApiContext, key: string): string {
   }
 
   return value;
+}
+
+function assertPathBodyMatch(context: ApiContext, key: string, pathValue: string, bodyValue: string): void {
+  if (pathValue === bodyValue) {
+    return;
+  }
+
+  throw new ApiRouteError(400, "path_body_mismatch", "Path parameter and request body value must match.", [
+    `path=${context.req.path}`,
+    `key=${key}`,
+    `pathValue=${pathValue}`,
+    `bodyValue=${bodyValue}`
+  ]);
 }
 
 function nullableQuery(context: ApiContext, key: string): string | null {
@@ -2113,12 +2177,230 @@ async function distributionSuspenseResolveResponse(context: ApiContext, dependen
   return context.json(result.body, result.status);
 }
 
+async function commandCenterSettingUpdateResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const request = await readZodBody<CommandCenterSettingUpdateRequest>(context, commandCenterSettingUpdateSchema);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const targetId = `${request.workspaceId}:setting:${request.key}`;
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "command_center_settings_update",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `command-center:settings:${request.workspaceId}:${request.key}`);
+      await persistCommandCenterSettingUpdate(tx, request, actor.userId);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "command_center_settings_update",
+        targetType: "command_center_setting",
+        targetId,
+        before: {},
+        after: {
+          workspaceId: request.workspaceId,
+          key: request.key,
+          value: request.value,
+          status: request.status
+        },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      return mutationReceipt(targetId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function commandCenterIntegrationToggleResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const integrationId = requirePathParam(context, "integrationId");
+  const request = await readZodBody<CommandCenterIntegrationToggleRequest>(context, commandCenterIntegrationToggleSchema);
+  assertPathBodyMatch(context, "integrationId", integrationId, request.integrationId);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const targetId = `${request.workspaceId}:integration:${request.integrationId}`;
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "command_center_integration_toggle",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `command-center:integration:${request.workspaceId}:${request.integrationId}`);
+      await persistCommandCenterIntegrationToggle(tx, request, actor.userId);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "command_center_integration_toggle",
+        targetType: "command_center_integration",
+        targetId,
+        before: {},
+        after: {
+          workspaceId: request.workspaceId,
+          integrationId: request.integrationId,
+          enabled: request.enabled,
+          status: request.status
+        },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      return mutationReceipt(targetId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function commandCenterUserPermissionUpdateResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const userId = requirePathParam(context, "userId");
+  const request = await readZodBody<CommandCenterUserPermissionUpdateRequest>(context, commandCenterUserPermissionUpdateSchema);
+  assertPathBodyMatch(context, "userId", userId, request.userId);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const targetId = `${request.workspaceId}:user:${request.userId}`;
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "command_center_user_permission_update",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `command-center:user:${request.workspaceId}:${request.userId}`);
+      await persistCommandCenterUserPermissionUpdate(tx, request, actor.userId);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "command_center_user_permission_update",
+        targetType: "command_center_user_permission",
+        targetId,
+        before: {},
+        after: {
+          workspaceId: request.workspaceId,
+          userId: request.userId,
+          email: request.email,
+          role: request.role,
+          permissions: request.permissions
+        },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      return mutationReceipt(targetId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
 function mutationReceipt(id: string, auditEventId: string): ApiMutationReceipt & ApiMutationResponse {
   return {
     id,
     status: "completed",
     auditEventId
   };
+}
+
+async function persistCommandCenterSettingUpdate(
+  tx: ApiWriteTransaction,
+  request: CommandCenterSettingUpdateRequest,
+  actorUserId: string
+): Promise<void> {
+  if (tx.kind === "memory") {
+    return;
+  }
+
+  await tx.executor.execute(sql`
+    insert into command_center_settings (
+      workspace_id,
+      key,
+      value_json,
+      status,
+      updated_by_user_id,
+      updated_at
+    )
+    values (
+      ${request.workspaceId},
+      ${request.key},
+      ${JSON.stringify(request.value)}::jsonb,
+      ${request.status},
+      ${actorUserId},
+      now()
+    )
+    on conflict (workspace_id, key) do update
+    set
+      value_json = excluded.value_json,
+      status = excluded.status,
+      updated_by_user_id = excluded.updated_by_user_id,
+      updated_at = now()
+  `);
+}
+
+async function persistCommandCenterIntegrationToggle(
+  tx: ApiWriteTransaction,
+  request: CommandCenterIntegrationToggleRequest,
+  actorUserId: string
+): Promise<void> {
+  if (tx.kind === "memory") {
+    return;
+  }
+
+  await tx.executor.execute(sql`
+    insert into command_center_integration_states (
+      workspace_id,
+      integration_id,
+      enabled,
+      status,
+      updated_by_user_id,
+      updated_at
+    )
+    values (
+      ${request.workspaceId},
+      ${request.integrationId},
+      ${request.enabled},
+      ${request.status},
+      ${actorUserId},
+      now()
+    )
+    on conflict (workspace_id, integration_id) do update
+    set
+      enabled = excluded.enabled,
+      status = excluded.status,
+      updated_by_user_id = excluded.updated_by_user_id,
+      updated_at = now()
+  `);
+}
+
+async function persistCommandCenterUserPermissionUpdate(
+  tx: ApiWriteTransaction,
+  request: CommandCenterUserPermissionUpdateRequest,
+  actorUserId: string
+): Promise<void> {
+  if (tx.kind === "memory") {
+    return;
+  }
+
+  await tx.executor.execute(sql`
+    insert into command_center_user_permissions (
+      workspace_id,
+      user_id,
+      email,
+      role,
+      permissions_json,
+      updated_by_user_id,
+      updated_at
+    )
+    values (
+      ${request.workspaceId},
+      ${request.userId},
+      ${request.email},
+      ${request.role},
+      ${JSON.stringify(request.permissions)}::jsonb,
+      ${actorUserId},
+      now()
+    )
+    on conflict (workspace_id, user_id) do update
+    set
+      email = excluded.email,
+      role = excluded.role,
+      permissions_json = excluded.permissions_json,
+      updated_by_user_id = excluded.updated_by_user_id,
+      updated_at = now()
+  `);
 }
 
 function normalizeEofAmountField(context: ApiContext, value: string, field: string): bigint {

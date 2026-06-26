@@ -298,6 +298,9 @@ interface PersistenceState {
 type ImportPreviewKind = "distribution_import" | "office_bank_import";
 
 const SENSITIVE_ACTIONS = new Set<string>([
+  "command_center_integration_toggle",
+  "command_center_settings_update",
+  "command_center_user_permission_update",
   "distribution_allocations_preview",
   "distribution_allocations_run",
   "distribution_allocations_unpost",
