@@ -27,8 +27,12 @@
     type BankImportPreviewResponse,
     type CashflowBucket,
     type OfficeDashboardResponse,
+    type OfficeDepartmentPnl,
+    type OfficeDivisionPnl,
+    type OfficeGlobalPnl,
     type OfficePlanComptableNode,
     type OfficePnlProjectionRow,
+    type OfficePnlLine,
     type OfficeReconciliationCandidate,
     type OfficeTransaction,
     type BankImportConfirmResponse,
@@ -39,7 +43,9 @@
     type OfficeCategoryType
   } from "@ehq/api-client";
   import { createShellApiClient } from "../../app-shell-data.js";
-  import { formatMoneyValue, formatSignedMoneyValue, moneyToneForValue } from "../../money-format.js";
+  import { formatDateOnly } from "../../date-format.js";
+  import { apiMoneyToMicroUnits, formatMoneyValue, formatSignedMoneyValue, moneyToneForValue } from "../../money-format.js";
+  import { createPeriodOptions, getLatestDataPeriod, periodLabel, rangeForScope, type PeriodScope } from "../../period-controls.js";
   import BankView from "./BankView.svelte";
   import CeoView from "./CeoView.svelte";
   import MonitoringView from "./MonitoringView.svelte";
@@ -112,8 +118,9 @@
   const { session, onLogout }: Props = $props();
   const client = createShellApiClient();
   const officeWorkspaceId = "eeee-mu";
-  const period = "2026-05";
+  const writesEnabled = false;
   const allValue = "all";
+  const periodOptions = createPeriodOptions();
   const officeNavItems: readonly OfficeNavItem[] = [
     {
       id: "dashboard",
@@ -131,7 +138,7 @@
       id: "pnl",
       label: "P&L",
       title: "P&L · income statement",
-      subtitle: "Validated projections · all departments · May 2026."
+      subtitle: "Validated projections · departments, divisions, and categories."
     },
     {
       id: "coa",
@@ -258,9 +265,12 @@
   ];
 
   let activePageId = $state<OfficePageId>("dashboard");
+  let periodScope = $state<PeriodScope>("month");
+  let selectedPeriod = $state(getLatestDataPeriod());
   let dashboardState = $state<ApiRequestState<OfficeDashboardResponse>>(createIdleState<OfficeDashboardResponse>());
-  let pnlState = $state<ApiRequestState<readonly OfficePnlProjectionRow[]>>(
-    createIdleState<readonly OfficePnlProjectionRow[]>()
+  let pnlState = $state<ApiRequestState<OfficeGlobalPnl | OfficeDepartmentPnl>>(createIdleState<OfficeGlobalPnl | OfficeDepartmentPnl>());
+  let divisionPnlState = $state<ApiRequestState<PageResult<OfficeDivisionPnl>>>(
+    createIdleState<PageResult<OfficeDivisionPnl>>()
   );
   let planState = $state<ApiRequestState<readonly OfficePlanComptableNode[]>>(
     createIdleState<readonly OfficePlanComptableNode[]>()
@@ -308,6 +318,9 @@
   });
 
   const activePage = $derived(getOfficeNavItem(activePageId));
+  const period = $derived(selectedPeriod);
+  const activeRange = $derived(rangeForScope(periodScope, selectedPeriod));
+  const periodControlVisible = $derived(pageUsesPeriodControl(activePageId));
   const planNodes = $derived(readArrayState(planState));
   const transactionRows = $derived(readPageItems(transactionsState));
   const pendingRows = $derived(readPageItems(pendingState));
@@ -315,15 +328,21 @@
   const cashflowRows = $derived(readArrayState(cashflowState));
   const auditRows = $derived(readPageItems(auditState));
   const auditTableRows = $derived(createAuditTableRows(auditRows));
-  const pnlRows = $derived(readArrayState(pnlState));
+  const pnlResult = $derived(readPnlResult(pnlState));
+  const pnlRows = $derived(pnlResult?.projectionRows ?? []);
+  const pnlLineRows = $derived(pnlResult?.lines ?? []);
+  const divisionPnlRows = $derived(readPageItems(divisionPnlState));
   const departmentOptions = $derived(createPlanOptions(planNodes, "department", "All departments"));
   const divisionOptions = $derived(createPlanOptions(planNodes, "division", "All divisions"));
   const categoryOptions = $derived(createPlanOptions(planNodes, "category", "All categories"));
   const parentOptions = $derived(createParentOptions(planNodes));
   const projectOptions = $derived(createProjectOptions(transactionRows));
   const dashboardKpis = $derived(createDashboardKpis(dashboardState));
+  const pnlKpis = $derived(createPnlKpis(pnlState));
   const pnlChartPoints = $derived(createPnlChartPoints(pnlRows));
   const pnlTableRows = $derived(createPnlTableRows(pnlRows));
+  const pnlLineTableRows = $derived(createPnlLineTableRows(pnlLineRows));
+  const divisionPnlTableRows = $derived(createDivisionPnlTableRows(divisionPnlRows));
   const planTableRows = $derived(createPlanTableRows(planNodes));
   const transactionTableRows = $derived(createTransactionTableRows(transactionRows));
   const pendingTableRows = $derived(createPendingTableRows(pendingRows, selectedPendingIds));
@@ -363,8 +382,8 @@
     try {
       const page = await client.office.listAuditLog({
         workspaceId: officeWorkspaceId,
-        from: null,
-        to: null,
+        from: activeRange.from,
+        to: activeRange.to,
         actorId: null,
         entityType: null,
         cursor: null,
@@ -391,17 +410,31 @@
   }
 
   async function loadPnlProjection(): Promise<void> {
-    pnlState = createLoadingState<readonly OfficePnlProjectionRow[]>();
+    pnlState = createLoadingState<OfficeGlobalPnl | OfficeDepartmentPnl>();
+    divisionPnlState = createLoadingState<PageResult<OfficeDivisionPnl>>();
 
     try {
-      const rows = await client.office.getPnlProjection({
-        workspaceId: officeWorkspaceId,
-        period,
-        departmentId: toNullableFilter(departmentFilter)
-      });
-      pnlState = createSuccessState<readonly OfficePnlProjectionRow[]>(rows);
+      const departmentId = toNullableFilter(departmentFilter);
+      const [pnl, divisions] = await Promise.all([
+        departmentId === null
+          ? client.office.getGlobalPnl({
+              workspaceId: officeWorkspaceId,
+              period
+            })
+          : client.office.getDepartmentPnl(departmentId, {
+              workspaceId: officeWorkspaceId,
+              period
+            }),
+        client.office.getDivisionPnl({
+          workspaceId: officeWorkspaceId,
+          period
+        })
+      ]);
+      pnlState = createSuccessState<OfficeGlobalPnl | OfficeDepartmentPnl>(pnl);
+      divisionPnlState = createSuccessState<PageResult<OfficeDivisionPnl>>(divisions);
     } catch (error: unknown) {
-      pnlState = createErrorState<readonly OfficePnlProjectionRow[]>(error);
+      pnlState = createErrorState<OfficeGlobalPnl | OfficeDepartmentPnl>(error);
+      divisionPnlState = createErrorState<PageResult<OfficeDivisionPnl>>(error);
     }
   }
 
@@ -490,8 +523,8 @@
     try {
       const rows = await client.office.getCashflow({
         workspaceId: officeWorkspaceId,
-        from: "2026-01-01",
-        to: "2026-06-30",
+        from: activeRange.from,
+        to: activeRange.to,
         accountId: toNullableFilter(accountFilter)
       });
       cashflowState = createSuccessState<readonly CashflowBucket[]>(rows);
@@ -566,6 +599,10 @@
 
     if (pathname.endsWith("/console/office/transactions")) {
       return "transactions";
+    }
+
+    if (pathname.endsWith("/console/office/pl")) {
+      return "pnl";
     }
 
     if (pathname.endsWith("/console/office/imports")) {
@@ -699,6 +736,11 @@
     reconciliationStatusFilter = readSelectValue(event);
   }
 
+  function updatePeriodScope(event: Event): void {
+    periodScope = readSelectValue(event) as PeriodScope;
+    void reloadPeriodScopedData();
+  }
+
   function updateImportSource(event: Event): void {
     const source = readSelectValue(event) as ImportSource;
 
@@ -771,6 +813,17 @@
 
   async function applyCashflowFilters(): Promise<void> {
     await loadCashflow();
+  }
+
+  async function reloadPeriodScopedData(): Promise<void> {
+    await Promise.all([
+      loadDashboard(),
+      loadPnlProjection(),
+      loadTransactions(),
+      loadPendingTransactions(),
+      loadReconciliations(),
+      loadCashflow()
+    ]);
   }
 
   async function previewImport(): Promise<void> {
@@ -921,7 +974,7 @@
   async function createTransactionDraft(): Promise<void> {
     const request: OfficeTransactionWriteRequest = {
       workspaceId: officeWorkspaceId,
-      occurredOn: "2026-05-14",
+      occurredOn: `${period}-14`,
       accountId: "mcb-main",
       categoryId: "cat_print",
       projectId: "project_album_posters",
@@ -1058,6 +1111,14 @@
     return [];
   }
 
+  function readPnlResult(state: ApiRequestState<OfficeGlobalPnl | OfficeDepartmentPnl>): OfficeGlobalPnl | OfficeDepartmentPnl | null {
+    if (state.status === "success") {
+      return state.data;
+    }
+
+    return null;
+  }
+
   function createDashboardKpis(state: ApiRequestState<OfficeDashboardResponse>): readonly OfficeKpi[] {
     if (state.status !== "success") {
       return [
@@ -1108,6 +1169,48 @@
     }));
   }
 
+  function createPnlKpis(state: ApiRequestState<OfficeGlobalPnl | OfficeDepartmentPnl>): readonly OfficeKpi[] {
+    if (state.status !== "success") {
+      return [
+        { label: "Revenue", value: "-", detail: stateLabel(state), tone: "muted", accent: true },
+        { label: "Expenses", value: "-", detail: "validated", tone: "muted", accent: false },
+        { label: "Net", value: "-", detail: "validated", tone: "muted", accent: false },
+        { label: "Margin", value: "-", detail: "net / revenue", tone: "muted", accent: false }
+      ];
+    }
+
+    return [
+      {
+        label: "Revenue",
+        value: formatMicro(state.data.incomeMicro),
+        detail: periodLabel(state.data.period),
+        tone: "success",
+        accent: true
+      },
+      {
+        label: "Expenses",
+        value: formatMicro(state.data.expenseMicro),
+        detail: "validated categories",
+        tone: "warning",
+        accent: false
+      },
+      {
+        label: "Net",
+        value: formatSignedMicro(state.data.netMicro),
+        detail: state.data.completeness,
+        tone: moneyTone(state.data.netMicro),
+        accent: false
+      },
+      {
+        label: "Margin",
+        value: formatMargin(state.data.netMicro, state.data.incomeMicro),
+        detail: "net / revenue",
+        tone: moneyTone(state.data.netMicro),
+        accent: false
+      }
+    ];
+  }
+
   function createPnlTableRows(rows: readonly OfficePnlProjectionRow[]): readonly TableRow[] {
     return rows.map((row: OfficePnlProjectionRow): TableRow => ({
       id: row.id,
@@ -1116,7 +1219,31 @@
         { kind: "money", value: formatMicro(row.revenueMicro), tone: "success" },
         { kind: "money", value: formatMicro(row.expenseMicro), tone: "error" },
         { kind: "money", value: formatSignedMicro(row.netMicro), tone: row.netTone === "positive" ? "success" : "error" },
-        { kind: "badge", value: row.validatedProjectionId, tone: "info" }
+        { kind: "badge", value: formatDateOnly(row.validatedAt), tone: "info" }
+      ]
+    }));
+  }
+
+  function createDivisionPnlTableRows(rows: readonly OfficeDivisionPnl[]): readonly TableRow[] {
+    return rows.map((row: OfficeDivisionPnl): TableRow => ({
+      id: row.id,
+      cells: [
+        { kind: "text", value: row.label, strong: true },
+        { kind: "money", value: formatMicro(row.incomeMicro), tone: "success" },
+        { kind: "money", value: formatMicro(row.expenseMicro), tone: "error" },
+        { kind: "money", value: formatSignedMicro(row.netMicro), tone: moneyTone(row.netMicro) }
+      ]
+    }));
+  }
+
+  function createPnlLineTableRows(rows: readonly OfficePnlLine[]): readonly TableRow[] {
+    return rows.map((row: OfficePnlLine): TableRow => ({
+      id: row.id,
+      cells: [
+        { kind: "text", value: row.label, strong: true },
+        { kind: "money", value: formatMicro(row.incomeMicro), tone: "success" },
+        { kind: "money", value: formatMicro(row.expenseMicro), tone: "error" },
+        { kind: "money", value: formatSignedMicro(row.netMicro), tone: moneyTone(row.netMicro) }
       ]
     }));
   }
@@ -1258,7 +1385,7 @@
     return rows.map((transaction: OfficeTransaction): TableRow => ({
       id: transaction.id,
       cells: [
-        { kind: "text", value: transaction.occurredOn, strong: false },
+        { kind: "text", value: formatDateOnly(transaction.occurredOn), strong: false },
         { kind: "text", value: transaction.description, strong: true },
         { kind: "text", value: transactionPathLabel(transaction), strong: false },
         { kind: "badge", value: transaction.type ?? "unvalidated", tone: transaction.type === "income" ? "success" : transaction.type === "expense" ? "warning" : "muted" },
@@ -1287,7 +1414,7 @@
       id: candidate.id,
       cells: [
         { kind: "text", value: candidate.bankDescription, strong: true },
-        { kind: "text", value: candidate.occurredOn, strong: false },
+        { kind: "text", value: formatDateOnly(candidate.occurredOn), strong: false },
         { kind: "money", value: formatSignedMicro(candidate.amountMicro), tone: moneyTone(candidate.amountMicro) },
         { kind: "text", value: candidate.ledgerDescription, strong: false },
         { kind: "badge", value: formatConfidence(candidate.confidenceBp), tone: confidenceTone(candidate.confidenceBp) },
@@ -1307,7 +1434,7 @@
     return rows.map((row: CashflowBucket): TableRow => ({
       id: row.period,
       cells: [
-        { kind: "text", value: row.period, strong: true },
+        { kind: "text", value: periodLabel(row.period), strong: true },
         { kind: "money", value: formatMicro(row.inflowMicro), tone: "success" },
         { kind: "money", value: formatMicro(row.outflowMicro), tone: "error" },
         { kind: "money", value: formatMicro(row.closingMicro), tone: "info" }
@@ -1319,7 +1446,7 @@
     return rows.map((entry: AuditLogEntry): TableRow => ({
       id: entry.id,
       cells: [
-        { kind: "text", value: entry.occurredAt, strong: false },
+        { kind: "text", value: formatDateOnly(entry.occurredAt), strong: false },
         { kind: "text", value: entry.action, strong: true },
         { kind: "text", value: entry.entityType, strong: false },
         { kind: "text", value: entry.entityReference, strong: false },
@@ -1482,6 +1609,41 @@
     return moneyToneForValue(amountMicro);
   }
 
+  function formatMargin(netMicro: string, incomeMicro: string): string {
+    const income = apiMoneyToMicroUnits(incomeMicro);
+    if (income === 0n) {
+      return "0.00%";
+    }
+
+    const net = apiMoneyToMicroUnits(netMicro);
+    const basisPoints = (net * 10_000n) / income;
+    const sign = basisPoints < 0n ? "-" : "";
+    const absolute = basisPoints < 0n ? -basisPoints : basisPoints;
+    const whole = absolute / 100n;
+    const fraction = absolute % 100n;
+    return `${sign}${whole.toString()}.${fraction.toString().padStart(2, "0")}%`;
+  }
+
+  function pageUsesPeriodControl(pageId: OfficePageId): boolean {
+    return pageId === "dashboard" ||
+      pageId === "ceo" ||
+      pageId === "pnl" ||
+      pageId === "transactions" ||
+      pageId === "reconciliation" ||
+      pageId === "pending" ||
+      pageId === "cashflow" ||
+      pageId === "clients" ||
+      pageId === "suppliers" ||
+      pageId === "projects" ||
+      pageId === "monitoring" ||
+      pageId === "bank" ||
+      pageId === "vat";
+  }
+
+  function writeDisabledTitle(): string {
+    return writesEnabled ? "" : "enable writes";
+  }
+
   function planKindTone(kind: "department" | "division" | "category"): Tone {
     if (kind === "department") {
       return "active";
@@ -1625,8 +1787,22 @@
         <span class="ehq-type-body">{activePage.subtitle}</span>
       </section>
 
+      {#if periodControlVisible}
+        <section class="period-control ehq-edge-surface" aria-label="Period control">
+          <label>
+            <span class="ehq-type-label-mono">Period</span>
+            <select value={periodScope} onchange={updatePeriodScope}>
+              {#each periodOptions as option (option.value)}
+                <option value={option.value}>{option.label} · {option.detail}</option>
+              {/each}
+            </select>
+          </label>
+          <p class="ehq-type-label-mono">{periodLabel(period)} · {activeRange.from} → {activeRange.to}</p>
+        </section>
+      {/if}
+
       {#if actionReceipt !== null}
-        <p class="receipt ehq-type-label-mono" role="status">Action accepted · {actionReceipt.id} · audit {actionReceipt.auditEventId}</p>
+        <p class="receipt ehq-type-label-mono" role="status">Action accepted · audit recorded</p>
       {/if}
 
       {#if activePageId === "dashboard"}
@@ -1656,8 +1832,8 @@
         </section>
       {:else if activePageId === "pnl"}
         <section class="kpi-grid" aria-label="P&L indicators">
-          {#each dashboardKpis as kpi (kpi.label)}
-            <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state={dashboardState.status === "loading" ? "loading" : "default"} accent={kpi.accent} />
+          {#each pnlKpis as kpi (kpi.label)}
+            <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state={pnlState.status === "loading" ? "loading" : "default"} accent={kpi.accent} />
           {/each}
         </section>
 
@@ -1678,8 +1854,10 @@
         {:else}
           <section class="dashboard-grid">
             <DivergeChart title="Revenue and expenses by department" points={pnlChartPoints} />
-            <Table title="Result by department" columns={pnlColumns} rows={pnlTableRows} state={pnlState.status === "error" ? "error" : "default"} actionLabel="" />
+            <Table title="Result by department" columns={pnlColumns} rows={pnlTableRows} state={pnlState.status === "error" ? "error" : pnlTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
           </section>
+          <Table title="Result by division" columns={divisionPnlColumns} rows={divisionPnlTableRows} state={divisionPnlState.status === "loading" ? "loading" : divisionPnlState.status === "error" ? "error" : divisionPnlTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
+          <Table title="Result by category" columns={pnlLineColumns} rows={pnlLineTableRows} state={pnlLineTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
         {/if}
       {:else if activePageId === "coa"}
         <section class="form-panel ehq-edge-surface" aria-label="Chart of accounts editor">
@@ -1716,8 +1894,8 @@
               </select>
             </label>
           {/if}
-          <button class="office-action ehq-type-heading primary" type="button" onclick={createPlanNode}>Create</button>
-          <button class="office-action ehq-type-heading" type="button" onclick={deactivateFirstCategory}>Deactivate a category</button>
+          <button class="office-action ehq-type-heading primary" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={createPlanNode}>Create</button>
+          <button class="office-action ehq-type-heading" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={deactivateFirstCategory}>Deactivate a category</button>
         </section>
 
         <Table title="Department → Division → Category" columns={planColumns} rows={planTableRows} state={planState.status === "loading" ? "loading" : planState.status === "error" ? "error" : "default"} actionLabel="" />
@@ -1780,7 +1958,7 @@
             </select>
           </label>
           <button class="office-action ehq-type-heading primary" type="button" onclick={applyTransactionFilters}>Filter</button>
-          <button class="office-action ehq-type-heading" type="button" onclick={createTransactionDraft}>New entry</button>
+          <button class="office-action ehq-type-heading" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={createTransactionDraft}>New entry</button>
         </section>
 
         <Table title="Ledger · May 2026" columns={transactionColumns} rows={transactionTableRows} state={transactionsState.status === "loading" ? "loading" : transactionsState.status === "error" ? "error" : transactionRows.length === 0 ? "empty" : "default"} actionLabel="" />
@@ -1821,15 +1999,15 @@
             <input value={importState.fileName} oninput={updateImportFileName} />
           </label>
           <button class="office-action ehq-type-heading" type="button" onclick={previewImport}>Preview</button>
-          <button class="office-action ehq-type-heading primary" type="button" disabled={!canConfirmImport} onclick={confirmImport}>Confirm</button>
+          <button class="office-action ehq-type-heading primary" type="button" disabled={!canConfirmImport || !writesEnabled} title={writeDisabledTitle()} onclick={confirmImport}>Confirm</button>
         </section>
 
         <section class="import-result ehq-type-label-mono" class:error={importState.status === "error"} aria-live="polite">
           <strong>{importState.message}</strong>
           {#if importState.preview !== null}
-            <span>Preview {importState.preview.previewId} · {importState.preview.detectedFormat} · {importState.preview.periodLabel}</span>
+            <span>Preview ready · {importState.preview.detectedFormat} · {importState.preview.periodLabel}</span>
             <span>{importState.preview.acceptedRowCount} rows · {importState.preview.rejectedRowCount} rejected · {importState.preview.duplicateRowCount} duplicates · {importState.preview.currencyCodes.join(" / ")}</span>
-            <span>{importState.preview.accountReference ?? "Account to confirm"} · fingerprint {importState.preview.idempotencyFingerprint}</span>
+            <span>{importState.preview.accountReference ?? "Account to confirm"}</span>
             {#if importState.preview.openingBalanceMicro !== null && importState.preview.closingBalanceMicro !== null}
               <span>Opening {formatMoney(importState.preview.openingBalanceMicro, importState.preview.currencyCodes[0] ?? "MUR")} · closing {formatMoney(importState.preview.closingBalanceMicro, importState.preview.currencyCodes[0] ?? "MUR")}</span>
             {/if}
@@ -1841,7 +2019,7 @@
             {/each}
           {/if}
           {#if importState.confirm !== null}
-            <span>Confirm {importState.confirm.id} · {importState.confirm.importedTransactionCount} imported transactions</span>
+            <span>Confirm complete · {importState.confirm.importedTransactionCount} imported transactions</span>
           {/if}
         </section>
 
@@ -1865,13 +2043,13 @@
             </select>
           </label>
           <button class="office-action ehq-type-heading" type="button" onclick={applyReconciliationFilters}>Filter</button>
-          <button class="office-action ehq-type-heading primary" type="button" onclick={approveSuggestedReconciliations}>Approve batch</button>
+          <button class="office-action ehq-type-heading primary" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={approveSuggestedReconciliations}>Approve batch</button>
         </section>
 
         <Table title="Bank ↔ ledger matching" columns={reconciliationColumns} rows={reconciliationTableRows} state={reconciliationState.status === "loading" ? "loading" : reconciliationState.status === "error" ? "error" : reconciliationRows.length === 0 ? "empty" : "default"} actionLabel="" />
       {:else if activePageId === "pending"}
         <section class="pending-actions ehq-edge-surface" aria-label="Actions pending">
-          <button class="office-action ehq-type-heading primary" type="button" onclick={bulkValidatePending}>Validate selection</button>
+          <button class="office-action ehq-type-heading primary" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={bulkValidatePending}>Validate selection</button>
           <span class="ehq-type-label-mono">{selectedPendingIds.length} selected</span>
         </section>
 
@@ -1937,7 +2115,19 @@
     { label: "Revenue", align: "right", sortable: true },
     { label: "Expenses", align: "right", sortable: true },
     { label: "Net", align: "right", sortable: true },
-    { label: "Projection", align: "left", sortable: false }
+    { label: "Validated", align: "left", sortable: false }
+  ];
+  const divisionPnlColumns: readonly TableColumn[] = [
+    { label: "Division", align: "left", sortable: true },
+    { label: "Revenue", align: "right", sortable: true },
+    { label: "Expenses", align: "right", sortable: true },
+    { label: "Net", align: "right", sortable: true }
+  ];
+  const pnlLineColumns: readonly TableColumn[] = [
+    { label: "Category", align: "left", sortable: true },
+    { label: "Revenue", align: "right", sortable: true },
+    { label: "Expenses", align: "right", sortable: true },
+    { label: "Net", align: "right", sortable: true }
   ];
   const planColumns: readonly TableColumn[] = [
     { label: "Label", align: "left", sortable: true },
@@ -2295,6 +2485,27 @@
     font-size: 11px;
   }
 
+  .period-control {
+    padding: var(--ehq-space-3);
+    border: 0;
+    border-radius: var(--ehq-radius-sm);
+    background: transparent;
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    gap: var(--ehq-space-3);
+  }
+
+  .period-control label {
+    width: min(360px, 100%);
+  }
+
+  .period-control p {
+    margin: 0;
+    color: var(--ehq-text-muted);
+    font-size: 11px;
+  }
+
   .kpi-grid {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -2378,6 +2589,8 @@
   }
 
   .office-action:disabled {
+    border-color: var(--ehq-border);
+    background: transparent;
     color: var(--ehq-text-disabled);
     cursor: not-allowed;
   }

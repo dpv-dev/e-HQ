@@ -18,6 +18,7 @@
     type OfficePartnerWriteRequest,
     type PageResult
   } from "@ehq/api-client";
+  import { formatDateOnly } from "../../date-format.js";
   import { formatMoneyValue, moneySignForValue, moneyToneForValue } from "../../money-format.js";
 
   type DrawerMode = "closed" | "detail" | "create" | "edit";
@@ -54,6 +55,7 @@
 
   const props: Props = $props();
   const currency = "MUR";
+  const writesEnabled = false;
   const emptyFormState: PartnerFormState = {
     name: "",
     email: "",
@@ -394,7 +396,7 @@
       return "No activity";
     }
 
-    return side.lastActivityOn;
+    return formatDateOnly(side.lastActivityOn);
   }
 
   function hasAlsoActivity(partner: OfficePartnerListItem): boolean {
@@ -461,6 +463,10 @@
 
     return "Partner action failed.";
   }
+
+  function writeDisabledTitle(): string {
+    return writesEnabled ? "" : "enable writes";
+  }
 </script>
 
 <section class="partners-view">
@@ -470,7 +476,7 @@
       <h2>{copy.title}</h2>
       <span>{copy.subtitle}</span>
     </div>
-    <button class="head-action" type="button" onclick={openCreateDrawer}>Create partner</button>
+    <button class="head-action" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={openCreateDrawer}>Create partner</button>
   </header>
 
   <div class="partners-layout">
@@ -595,15 +601,15 @@
               <input value={linkPayeeId} oninput={updateLinkPayeeId} placeholder="payee_..." />
             </label>
             <div class="drawer-actions">
-              <button type="button" disabled={linkStatus === "loading"} onclick={linkPartnerPayee}>Idempotent link</button>
-              <button type="button" disabled={linkStatus === "loading"} onclick={unlinkPartnerPayee}>Idempotent unlink</button>
+              <button type="button" disabled={linkStatus === "loading" || !writesEnabled} title={writeDisabledTitle()} onclick={linkPartnerPayee}>Idempotent link</button>
+              <button type="button" disabled={linkStatus === "loading" || !writesEnabled} title={writeDisabledTitle()} onclick={unlinkPartnerPayee}>Idempotent unlink</button>
             </div>
           </section>
         {/if}
 
         {#if drawerMode === "detail" && selectedPartner !== null}
           <div class="drawer-actions">
-            <button type="button" onclick={openEditDrawer}>Edit partner</button>
+            <button type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={openEditDrawer}>Edit partner</button>
           </div>
         {/if}
 
@@ -638,7 +644,7 @@
               <span>Active partner</span>
             </label>
             <div class="drawer-actions">
-              <button type="submit" disabled={linkStatus === "loading"}>{drawerMode === "create" ? "Create partner" : "Save partner"}</button>
+              <button type="submit" disabled={linkStatus === "loading" || !writesEnabled} title={writeDisabledTitle()}>{drawerMode === "create" ? "Create partner" : "Save partner"}</button>
             </div>
           </form>
         {/if}

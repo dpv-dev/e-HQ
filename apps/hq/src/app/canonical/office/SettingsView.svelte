@@ -16,6 +16,7 @@
     type OfficeBankAccountSummary,
     type PageResult
   } from "@ehq/api-client";
+  import { formatDateOnly } from "../../date-format.js";
   import { formatMoneyValue } from "../../money-format.js";
 
   interface Props {
@@ -72,7 +73,7 @@
           { kind: "badge", value: account.currency, tone: "info" },
           { kind: "text", value: account.currentBalanceMurMicro === null ? "Reference currency" : "Converted to MUR", strong: false },
           { kind: "money", value: account.currentBalanceMurMicro === null ? "—" : formatMoneyValue(account.currentBalanceMurMicro, "MUR"), tone: "muted" },
-          { kind: "text", value: account.balanceAsOf ?? "—", strong: false }
+          { kind: "text", value: formatDateOnly(account.balanceAsOf), strong: false }
         ]
       });
     }

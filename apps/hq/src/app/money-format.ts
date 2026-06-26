@@ -2,14 +2,13 @@ import type { Tone } from "@ehq/ui";
 
 export const formatMoneyValue = (amountValue: string, currency: string): string => {
   const value = amountValue.trim();
-  const prefix = currencyPrefix(currency);
 
   if (/^[+-]?\d+$/u.test(value)) {
-    return formatMicroUnits(BigInt(value), prefix);
+    return formatMicroUnits(BigInt(value), currency);
   }
 
   if (/^[+-]?\d+(?:\.\d+)?$/u.test(value)) {
-    return formatDecimalAmount(value, prefix);
+    return formatDecimalAmount(value, currency);
   }
 
   throw new Error(`Invalid API money value: ${amountValue}.`);
@@ -73,46 +72,54 @@ export const apiMoneyToMicroUnits = (amountValue: string): bigint => {
   return sign * (BigInt(wholeText) * 1_000_000n + BigInt(fractionText));
 };
 
-const formatDecimalAmount = (amountValue: string, prefix: string): string => {
+const formatDecimalAmount = (amountValue: string, currency: string): string => {
   const sign = amountValue.startsWith("-") ? "-" : "";
   const unsigned = amountValue.replace(/^[+-]/u, "");
   const [whole = "0", fraction = ""] = unsigned.split(".");
-  const wholeText = whole.replace(/\B(?=(\d{3})+(?!\d))/gu, ",");
-  const fractionText = fraction.replace(/0+$/u, "");
+  const rounded = roundDecimalToCents(whole, fraction);
+  const wholeText = rounded.whole.replace(/\B(?=(\d{3})+(?!\d))/gu, ",");
+  const fractionText = rounded.fraction;
 
-  if (fractionText.length === 0) {
-    return `${sign}${prefix}${wholeText}`;
-  }
-
-  return `${sign}${prefix}${wholeText}.${fractionText}`;
+  return formatCurrencyText(`${sign}${wholeText}.${fractionText}`, currency);
 };
 
-const formatMicroUnits = (amount: bigint, prefix: string): string => {
+const formatMicroUnits = (amount: bigint, currency: string): string => {
   const sign = amount < 0n ? "-" : "";
   const absolute = amount < 0n ? -amount : amount;
-  const units = absolute / 1_000_000n;
-  const micros = absolute % 1_000_000n;
+  const cents = (absolute + 5_000n) / 10_000n;
+  const units = cents / 100n;
+  const fraction = cents % 100n;
   const unitText = units.toString().replace(/\B(?=(\d{3})+(?!\d))/gu, ",");
 
-  if (micros === 0n) {
-    return `${sign}${prefix}${unitText}`;
-  }
-
-  return `${sign}${prefix}${unitText}.${micros.toString().padStart(6, "0")}`;
+  return formatCurrencyText(`${sign}${unitText}.${fraction.toString().padStart(2, "0")}`, currency);
 };
 
-const currencyPrefix = (currency: string): string => {
+const roundDecimalToCents = (whole: string, fraction: string): { readonly whole: string; readonly fraction: string } => {
+  const normalizedFraction = fraction.padEnd(3, "0");
+  const cents = BigInt(whole) * 100n +
+    BigInt(normalizedFraction.slice(0, 2)) +
+    (Number.parseInt(normalizedFraction.slice(2, 3), 10) >= 5 ? 1n : 0n);
+  const roundedWhole = cents / 100n;
+  const roundedFraction = cents % 100n;
+
+  return {
+    whole: roundedWhole.toString(),
+    fraction: roundedFraction.toString().padStart(2, "0")
+  };
+};
+
+const formatCurrencyText = (amountText: string, currency: string): string => {
   if (currency === "MUR") {
-    return "Rs ";
+    return `${amountText} Rs`;
   }
 
   if (currency === "USD") {
-    return "US$ ";
+    return `US$ ${amountText}`;
   }
 
   if (currency === "EUR") {
-    return "€ ";
+    return `€ ${amountText}`;
   }
 
-  return `${currency} `;
+  return `${amountText} ${currency}`;
 };

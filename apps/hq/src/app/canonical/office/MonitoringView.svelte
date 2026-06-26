@@ -25,6 +25,7 @@
     type OfficeTransaction,
     type PageResult
   } from "@ehq/api-client";
+  import { formatDateOnly } from "../../date-format.js";
   import { formatMoneyValue, moneyToneForValue } from "../../money-format.js";
 
   interface Props {
@@ -249,7 +250,7 @@
     return rows.map((transaction: OfficeTransaction): TableRow => ({
       id: transaction.id,
       cells: [
-        { kind: "text", value: transaction.occurredOn, strong: false },
+        { kind: "text", value: formatDateOnly(transaction.occurredOn), strong: false },
         { kind: "text", value: transaction.description, strong: true },
         { kind: "text", value: transaction.departmentLabel ?? "to classify", strong: false },
         { kind: "text", value: transaction.categoryLabel ?? "to classify", strong: false },
@@ -263,7 +264,7 @@
     return rows.map((entry: AuditLogEntry): TableRow => ({
       id: entry.id,
       cells: [
-        { kind: "text", value: entry.occurredAt, strong: false },
+        { kind: "text", value: formatDateOnly(entry.occurredAt), strong: false },
         { kind: "text", value: entry.action, strong: true },
         { kind: "text", value: entry.entityType, strong: false },
         { kind: "text", value: entry.entityReference, strong: false },

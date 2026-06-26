@@ -20,6 +20,7 @@
     type OfficeReconciliationCandidate,
     type PageResult
   } from "@ehq/api-client";
+  import { formatDateOnly } from "../../date-format.js";
   import { formatMoneyValue, formatSignedMoneyValue, moneyToneForValue } from "../../money-format.js";
 
   interface Props {
@@ -159,7 +160,7 @@
         { kind: "badge", value: account.currency, tone: "info" },
         { kind: "money", value: formatMoney(account.currentBalanceMicro, account.currency), tone: moneyTone(account.currentBalanceMicro) },
         { kind: "money", value: account.currentBalanceMurMicro === null ? "—" : formatMoney(account.currentBalanceMurMicro, "MUR"), tone: "muted" },
-        { kind: "text", value: account.balanceAsOf ?? "—", strong: false },
+        { kind: "text", value: formatDateOnly(account.balanceAsOf), strong: false },
         { kind: "badge", value: account.isActive ? "active" : "inactive", tone: account.isActive ? "success" : "muted" }
       ]
     }));
@@ -169,7 +170,7 @@
     return rows.map((line: OfficeBankRawLine): TableRow => ({
       id: line.id,
       cells: [
-        { kind: "text", value: line.occurredOn, strong: false },
+        { kind: "text", value: formatDateOnly(line.occurredOn), strong: false },
         { kind: "text", value: line.description, strong: true },
         { kind: "text", value: line.reference === "" ? "—" : line.reference, strong: false },
         { kind: "badge", value: line.direction, tone: line.direction === "credit" ? "success" : "warning" },
@@ -186,7 +187,7 @@
       id: candidate.id,
       cells: [
         { kind: "text", value: candidate.bankDescription, strong: true },
-        { kind: "text", value: candidate.occurredOn, strong: false },
+        { kind: "text", value: formatDateOnly(candidate.occurredOn), strong: false },
         { kind: "money", value: formatSignedMoney(candidate.amountMicro, "MUR"), tone: moneyTone(candidate.amountMicro) },
         { kind: "text", value: candidate.ledgerDescription, strong: false },
         { kind: "badge", value: candidate.status, tone: reconciliationTone(candidate.status) }

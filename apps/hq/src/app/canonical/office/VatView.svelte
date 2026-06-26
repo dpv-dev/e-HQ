@@ -165,10 +165,7 @@
       <span class="ehq-type-body">{getErrorMessage(vatState.error)}</span>
     </div>
   {:else if !hasVatSource}
-    <div class="state-copy">
-      <strong class="ehq-type-heading">No VAT source configured</strong>
-      <span class="ehq-type-body">The Office data layer carries no VAT or tax-rate source for this period, so no VAT figures can be reported. This screen will populate once a VAT source is connected.</span>
-    </div>
+    <Table title="VAT by rate" columns={vatColumns} rows={[]} state="empty" actionLabel="" />
   {:else}
     <Table title="VAT by rate" columns={vatColumns} rows={vatTableRows} state={vatTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
   {/if}

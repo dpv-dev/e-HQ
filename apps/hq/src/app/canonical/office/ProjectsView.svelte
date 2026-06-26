@@ -24,6 +24,7 @@
     type OfficeProjectSummary,
     type PageResult
   } from "@ehq/api-client";
+  import { formatDateOnly } from "../../date-format.js";
   import { formatMoneyValue, moneyToneForValue } from "../../money-format.js";
 
   interface Props {
@@ -153,7 +154,7 @@
       {
         label: "Income",
         value: formatMoneyMicro(state.data.incomeMicro),
-        detail: state.data.validatedProjectionId,
+        detail: state.data.period,
         tone: "success",
         accent: true
       },
@@ -224,7 +225,7 @@
         { kind: "text", value: violation.rule, strong: true },
         { kind: "text", value: violation.message, strong: false },
         { kind: "badge", value: violation.exactFixPath, tone: "info" },
-        { kind: "text", value: violation.relatedEntityId ?? "—", strong: false }
+        { kind: "text", value: violation.exactFixPath, strong: false }
       ]
     }));
   }
@@ -297,7 +298,7 @@
             >
               <strong>{project.label}</strong>
               <span>{project.code} · {project.ownerLabel}</span>
-              <small>{project.lastActivityOn ?? "No activity"} · {project.openViolationCount} open checks</small>
+              <small>{formatDateOnly(project.lastActivityOn)} · {project.openViolationCount} open checks</small>
             </button>
           {/each}
         </div>
@@ -357,7 +358,7 @@
     { label: "Rule", align: "left", sortable: true },
     { label: "Message", align: "left", sortable: false },
     { label: "Fix path", align: "left", sortable: true },
-    { label: "Entity", align: "left", sortable: true }
+    { label: "Route", align: "left", sortable: true }
   ];
 </script>
 
