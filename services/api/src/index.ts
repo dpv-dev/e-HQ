@@ -1503,8 +1503,8 @@ async function officeTransactionUpdateResponse(context: ApiContext, dependencies
         action: "office_transaction_update",
         targetType: "office_transaction",
         targetId: transactionId,
-        before: { transaction: before },
-        after: { transaction: after },
+        before: { transaction: officeTransactionAuditSnapshot(before) },
+        after: { transaction: officeTransactionAuditSnapshot(after) },
         idempotencyKey: resolvedIdempotencyKey
       });
       upsertOfficeTransactionFixture(dependencies.fixtures, after);
@@ -1916,6 +1916,23 @@ function transactionFromOfficeRequest(
   };
 }
 
+function officeTransactionAuditSnapshot(transaction: OfficeTransactionRow): Readonly<Record<string, unknown>> {
+  return {
+    id: transaction.id,
+    transactionDate: transaction.transactionDate,
+    type: transaction.type,
+    status: transaction.status,
+    isActive: transaction.isActive,
+    description: transaction.description,
+    categoryId: transaction.categoryId,
+    partnerId: transaction.partnerId,
+    projectId: transaction.projectId,
+    amountMinor: transaction.amountMinor.toString(),
+    originalCurrency: transaction.originalCurrency,
+    exchangeRateE10: transaction.exchangeRateE10 === null ? null : transaction.exchangeRateE10.toString()
+  };
+}
+
 function upsertOfficeTransactionFixture(fixtures: ApiFixtureStore, transaction: OfficeTransactionRow): void {
   const mutableOffice = fixtures.office as Mutable<OfficeAnalyticsDataset>;
   const exists = fixtures.office.transactions.some((candidate) => candidate.id === transaction.id);
@@ -2308,10 +2325,15 @@ async function persistDistributionMappingApplyRules(tx: ApiWriteTransaction, row
       where id = ${row.id}
     `);
     await tx.executor.execute(sql`
+      with updated as (
+        update earning_track_matches
+        set confidence = ${(row.confidenceBp / 100).toFixed(6)}, status = 'matched'
+        where earning_id = ${row.id} and track_id = ${row.suggestedTrackId}
+        returning id
+      )
       insert into earning_track_matches (id, earning_id, track_id, confidence, status)
-      values (${randomUUID()}, ${row.id}, ${row.suggestedTrackId}, ${(row.confidenceBp / 100).toFixed(6)}, 'matched')
-      on conflict (earning_id, track_id) do update
-      set confidence = excluded.confidence, status = 'matched'
+      select ${randomUUID()}, ${row.id}, ${row.suggestedTrackId}, ${(row.confidenceBp / 100).toFixed(6)}, 'matched'
+      where not exists (select 1 from updated)
     `);
   }
 }
