@@ -189,7 +189,7 @@
     return rows.map((project: OfficeProjectSummary): TableRow => ({
       id: project.id,
       cells: [
-        { kind: "text", value: `${project.code} · ${project.label}`, strong: true },
+        { kind: "text", value: projectReferenceLabel(project), strong: true },
         { kind: "text", value: project.ownerLabel, strong: false },
         { kind: "money", value: formatMoneyMicro(project.periodIncomeMicro), tone: "success" },
         { kind: "money", value: formatMoneyMicro(project.periodExpenseMicro), tone: "warning" },
@@ -297,7 +297,7 @@
               onclick={() => selectProject(project.id)}
             >
               <strong>{project.label}</strong>
-              <span>{project.code} · {project.ownerLabel}</span>
+              <span>{projectReferenceLabel(project)} · {project.ownerLabel}</span>
               <small>{formatDateOnly(project.lastActivityOn)} · {project.openViolationCount} open checks</small>
             </button>
           {/each}
@@ -360,6 +360,20 @@
     { label: "Fix path", align: "left", sortable: true },
     { label: "Route", align: "left", sortable: true }
   ];
+
+  function projectReferenceLabel(project: OfficeProjectSummary): string {
+    const code = project.code.trim();
+
+    if (code.length === 0 || code === project.id || isUuidLike(code)) {
+      return project.label;
+    }
+
+    return `${code} · ${project.label}`;
+  }
+
+  function isUuidLike(value: string): boolean {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+  }
 </script>
 
 <style>

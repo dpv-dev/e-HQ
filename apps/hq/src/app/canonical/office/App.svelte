@@ -1254,7 +1254,7 @@
       cells: [
         { kind: "text", value: indentPlanLabel(node, nodes), strong: node.kind === "department" },
         { kind: "badge", value: node.kind, tone: planKindTone(node.kind) },
-        { kind: "text", value: node.code, strong: false },
+        { kind: "text", value: planReferenceLabel(node), strong: false },
         { kind: "badge", value: categoryTypeLabel(node), tone: categoryTypeTone(node) },
         { kind: "text", value: planPathLabel(node), strong: false },
         { kind: "badge", value: node.active ? "active" : "inactive", tone: node.active ? "success" : "muted" }
@@ -1607,6 +1607,20 @@
 
   function moneyTone(amountMicro: string): Tone {
     return moneyToneForValue(amountMicro);
+  }
+
+  function planReferenceLabel(node: OfficePlanComptableNode): string {
+    const code = node.code.trim();
+
+    if (code.length === 0 || code === node.id || isUuidLike(code)) {
+      return node.label;
+    }
+
+    return code;
+  }
+
+  function isUuidLike(value: string): boolean {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
   }
 
   function formatMargin(netMicro: string, incomeMicro: string): string {
@@ -2132,7 +2146,7 @@
   const planColumns: readonly TableColumn[] = [
     { label: "Label", align: "left", sortable: true },
     { label: "Node", align: "left", sortable: true },
-    { label: "Code", align: "left", sortable: true },
+    { label: "Reference", align: "left", sortable: true },
     { label: "Category type", align: "left", sortable: true },
     { label: "Path", align: "left", sortable: false },
     { label: "Status", align: "left", sortable: true }
