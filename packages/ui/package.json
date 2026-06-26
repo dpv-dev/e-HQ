@@ -15,7 +15,8 @@
       "types": "./dist/tokens/tokens.d.ts",
       "default": "./dist/tokens/tokens.js"
     },
-    "./tokens/visual-tokens.css": "./tokens/visual-tokens.css"
+    "./tokens/visual-tokens.css": "./tokens/visual-tokens.css",
+    "./assets/*": "./assets/*"
   },
   "style": "tokens/visual-tokens.css",
   "scripts": {

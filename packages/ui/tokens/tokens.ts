@@ -56,6 +56,33 @@ export const tokens = {
     navHighlightOpacity: "1",
     navHighlightHairlineOpacity: "0.55",
   },
+  workspace: {
+    office: { accent: "var(--ehq-workspace-office)", background: "var(--ehq-workspace-office-bg)" },
+    distribution: {
+      accent: "var(--ehq-workspace-distribution)",
+      background: "var(--ehq-workspace-distribution-bg)",
+    },
+    commandCenter: {
+      accent: "var(--ehq-workspace-command)",
+      background: "var(--ehq-workspace-command-bg)",
+    },
+  },
+  layout: {
+    sidebarWidth: "264px",
+    sidebarCollapsedWidth: "76px",
+    topbarHeight: "72px",
+    contentMax: "1480px",
+    pageGap: "24px",
+    sectionGap: "16px",
+    tableMinWidth: "760px",
+  },
+  stateSurface: {
+    emptyBackground: "var(--ehq-state-empty-bg)",
+    loadingBackground: "var(--ehq-state-loading-bg)",
+    disabledBackground: "var(--ehq-state-disabled-bg)",
+    disabledBorder: "var(--ehq-state-disabled-border)",
+    disabledText: "var(--ehq-state-disabled-text)",
+  },
   motion: { fast: "120ms ease", normal: "180ms ease" },
 } as const;
 

@@ -2,7 +2,7 @@
    Source of truth for the whole platform UI layer (all apps consume this).
    Brand accent locked to #FFB800 (per David, 2026-06).
    Fonts aligned to the live brand site eeee.mu: Inter (UI + display) + Space Mono
-   (labels / technical / editorial). Open Sans & Fönt are archived, not active.
+   (labels / technical / editorial). Legacy fonts are archived, not active.
    Do NOT hardcode hex in apps — import these variables.
    Scope: UI/CSS layer only. Never touches financial logic, allocations,
    migrations, DB, payments, or statement formulas.
@@ -89,6 +89,30 @@
   --ehq-transition-fast:120ms ease;
   --ehq-transition-normal:180ms ease;
   --ehq-ease:cubic-bezier(.19,1,.22,1);
+
+  /* Operator workspace semantics */
+  --ehq-workspace-office:var(--ehq-info);
+  --ehq-workspace-distribution:var(--ehq-yellow);
+  --ehq-workspace-command:var(--ehq-purple);
+  --ehq-workspace-office-bg:rgba(59,130,246,.10);
+  --ehq-workspace-distribution-bg:rgba(255,184,0,.10);
+  --ehq-workspace-command-bg:rgba(168,85,247,.10);
+
+  /* Operator layout */
+  --ehq-shell-sidebar-width:264px;
+  --ehq-shell-sidebar-collapsed-width:76px;
+  --ehq-shell-topbar-height:72px;
+  --ehq-shell-content-max:1480px;
+  --ehq-page-gap:24px;
+  --ehq-section-gap:16px;
+  --ehq-table-min-width:760px;
+
+  /* Reusable state surfaces */
+  --ehq-state-empty-bg:rgba(255,255,255,.035);
+  --ehq-state-loading-bg:rgba(255,184,0,.075);
+  --ehq-state-disabled-bg:rgba(255,255,255,.045);
+  --ehq-state-disabled-border:rgba(255,255,255,.10);
+  --ehq-state-disabled-text:rgba(255,255,255,.42);
 }
 
 /* ---- Base component classes (apps may extend, not redefine colors) ---- */
@@ -240,3 +264,24 @@
 .ehq-badge-warning{ color:var(--ehq-text-soft); background:var(--ehq-surface-high); border:1px solid var(--ehq-border); }
 .ehq-badge-error{ color:var(--ehq-error); background:var(--ehq-error-bg); border:1px solid rgba(255,59,48,.40); }
 .ehq-badge-active{ color:var(--ehq-text-soft); background:var(--ehq-surface-high); border:1px solid var(--ehq-border); }
+
+.ehq-workspace-office{ --ehq-workspace-accent:var(--ehq-workspace-office); --ehq-workspace-accent-bg:var(--ehq-workspace-office-bg); }
+.ehq-workspace-distribution{ --ehq-workspace-accent:var(--ehq-workspace-distribution); --ehq-workspace-accent-bg:var(--ehq-workspace-distribution-bg); }
+.ehq-workspace-command-center{ --ehq-workspace-accent:var(--ehq-workspace-command); --ehq-workspace-accent-bg:var(--ehq-workspace-command-bg); }
+.ehq-operator-page{
+  width:min(100%,var(--ehq-shell-content-max));
+  margin:0 auto;
+  display:grid;
+  gap:var(--ehq-page-gap);
+}
+.ehq-operator-section{
+  display:grid;
+  gap:var(--ehq-section-gap);
+}
+.ehq-scroll-table{
+  width:100%;
+  overflow-x:auto;
+}
+.ehq-scroll-table > table{
+  min-width:var(--ehq-table-min-width);
+}

@@ -1,10 +1,13 @@
 export type Tone = "success" | "warning" | "error" | "info" | "muted" | "active";
+export type WorkspaceKind = "office" | "distribution" | "command-center";
 export type ButtonVariant = "primary" | "secondary" | "danger";
 export type ButtonSize = "small" | "medium";
 export type FieldState = "default" | "focus" | "error" | "disabled";
 export type SurfaceState = "default" | "hover" | "empty" | "error" | "locked" | "loading";
 export type TableState = "default" | "loading" | "empty" | "error" | "locked";
 export type DrawerState = "default" | "error" | "locked";
+export type OperatorState = "ready" | "loading" | "empty" | "error" | "disabled";
+export type OperatorActionVariant = "primary" | "secondary" | "danger";
 
 export interface SelectOption {
   readonly label: string;
@@ -16,6 +19,44 @@ export interface ToolbarFilter {
   readonly value: string;
   readonly active: boolean;
   readonly disabled: boolean;
+}
+
+export interface WorkspaceNavItem {
+  readonly label: string;
+  readonly href: string;
+  readonly icon: string;
+  readonly active: boolean;
+  readonly disabled: boolean;
+  readonly badge: string | null;
+}
+
+export interface OperatorMetric {
+  readonly label: string;
+  readonly value: string;
+  readonly detail: string;
+  readonly tone: Tone;
+}
+
+export interface OperatorAction {
+  readonly label: string;
+  readonly detail: string;
+  readonly status: string;
+  readonly href: string | null;
+  readonly disabled: boolean;
+  readonly variant: OperatorActionVariant;
+}
+
+export interface PeriodOption {
+  readonly label: string;
+  readonly value: string;
+  readonly active: boolean;
+  readonly disabled: boolean;
+}
+
+export interface StatusItem {
+  readonly label: string;
+  readonly value: string;
+  readonly tone: Tone;
 }
 
 export type TableCell =

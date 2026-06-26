@@ -18,26 +18,15 @@ Do not modify:
 - mapping engine
 
 ## Typography
-Official font direction: Open Sans.
+Active font direction: Inter for body/display and Space Mono for technical
+labels. Legacy fonts remain archived only.
 
-Font files included for Distribution UI:
-
-- Fönt/Fönt-Regular.otf
-- Fönt/Fönt-Regular.ttf
-- Open Sans/open-sans.regular.ttf
-- Open Sans/open-sans.semibold.ttf
-- Open Sans/open-sans.bold.ttf
-
-Active usage:
-
-- Open Sans for Distribution UI readability.
-- Open Sans for brand accents and short identity labels.
-- Fönt remains bundled as an inactive legacy/fallback font.
-
-Fallback stack:
+Use the token variables from `packages/ui/tokens/visual-tokens.css`:
 
 ```css
-font-family: "Open Sans", "Fönt", "Aeonik", "Inter", "Helvetica Neue", Arial, sans-serif;
+font-family: var(--ehq-font);
+font-family: var(--ehq-display);
+font-family: var(--ehq-mono);
 ```
 
 ## Yellow usage

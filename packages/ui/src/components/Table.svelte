@@ -51,7 +51,7 @@
   {:else if props.state === "empty"}
     <div class="state-card">
       <strong>No rows</strong>
-      <span>Nothing matches the current filters.</span>
+      <span>Aucune donnée ne correspond aux filtres actuels.</span>
     </div>
   {:else if props.state === "error"}
     <div class="state-card error-copy">
