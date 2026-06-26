@@ -323,6 +323,7 @@ function createOfficeAuditLogFixture(): readonly AuditLogEntry[] {
       action: "office.import.confirmed",
       entityType: "office_bank_import_batch",
       entityId: "office_import_mcb_feb",
+      entityReference: "fixture-mcb-feb.csv",
       idempotencyKey: "fixture-office-import",
       context: { source: "mcb", workspaceId: "workspace_1" }
     }

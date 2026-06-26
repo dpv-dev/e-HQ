@@ -82,6 +82,7 @@ export interface AuditLogEntry {
   readonly action: string;
   readonly entityType: string;
   readonly entityId: EntityId;
+  readonly entityReference: string;
   readonly idempotencyKey: IdempotencyKey | null;
   readonly context: Readonly<Record<string, string>>;
 }
@@ -813,6 +814,7 @@ export interface AllocationRunQuery extends PageQuery {
 
 export interface AllocationRunSummary {
   readonly id: EntityId;
+  readonly runReference: string;
   readonly period: IsoMonthString;
   readonly status: "queued" | "running" | "completed" | "failed";
   readonly lockKey: string;
@@ -896,6 +898,11 @@ export interface StatementGenerateRequest {
   readonly lockKey: string;
 }
 
+export interface StatementVoidRequest {
+  readonly workspaceId: EntityId;
+  readonly reason: string;
+}
+
 export interface PaymentsQuery extends PageQuery {
   readonly workspaceId: EntityId;
   readonly period: IsoMonthString | null;
@@ -975,6 +982,7 @@ export interface DistributionReconciliationKpi {
 
 export interface DistributionReconciliationStatementGap {
   readonly id: EntityId;
+  readonly statementReference: string;
   readonly payee: string;
   readonly periodStart: IsoDateString;
   readonly periodEnd: IsoDateString;
@@ -984,6 +992,7 @@ export interface DistributionReconciliationStatementGap {
 
 export interface DistributionReconciliationExpenseGap {
   readonly id: EntityId;
+  readonly expenseReference: string;
   readonly contract: string;
   readonly description: string;
   readonly amountMicro: MoneyMicroString;
@@ -993,6 +1002,7 @@ export interface DistributionReconciliationExpenseGap {
 
 export interface DistributionReconciliationMatchedUnallocated {
   readonly id: EntityId;
+  readonly sourceReference: string;
   readonly batch: string;
   readonly track: string;
   readonly currency: CurrencyCode;
@@ -1006,6 +1016,8 @@ export interface DistributionReconciliationPayeeBalance {
   readonly rows: number;
   readonly firstId: EntityId | null;
   readonly lastId: EntityId | null;
+  readonly firstReference: string | null;
+  readonly lastReference: string | null;
   readonly latestClosingMicro: MoneyMicroString;
 }
 
@@ -1038,6 +1050,7 @@ export interface DistributionDuplicate {
   readonly kind: string;
   readonly count: number;
   readonly sampleIds: readonly EntityId[];
+  readonly sampleLabels: readonly string[];
 }
 
 export interface DistributionSettingsResponse {

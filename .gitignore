@@ -4,6 +4,7 @@ node_modules/
 .pnpm-store/
 .corepack/
 dist/
+dist-verify/
 .svelte-kit/
 build/
 coverage/
@@ -14,3 +15,5 @@ data/dumps/*.sql
 .env
 .env.*
 !.env.example
+data/
+reference/

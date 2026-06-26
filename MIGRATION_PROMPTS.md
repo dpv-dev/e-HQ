@@ -1767,3 +1767,89 @@ Phase 2 / action 2 = **allocation preview/run** — reuse this infrastructure; w
 (split + recoupment) → persist `earning_allocations` + `expense_applications` + `contract_cost_terms`
 updates + `suspense_items`, wrapped in a `calculation_runs` row, behind the same gate, with the
 concurrency lock. Separate prompt, one action per run.
+
+Deploy consolidated HQ to app.eeee.mu — ship the new screens (front only)
+Front-only deploy. Does NOT touch api.eeee.mu, the live DB, or
+WRITES_ENABLED. Distribution screens are committed (5cc3389); Office
+screens are on disk but UNCOMMITTED. The repair/write actions on the new
+screens are intentionally DISABLED — leave them inert.
+
+Step 1 — Commit the Office work FIRST (restore point):
+- The repo has uncommitted Office changes (CEO view, bank, audit, vat,
+  settings + Wave placeholder). A stale .git/index.lock may be present.
+    rm -f .git/index.lock
+    git add -A
+    git commit -m "feat(office): add CEO view, bank, audit, vat, settings (read-only)"
+- Report the commit hash. This + 5cc3389 are the rollback points.
+
+Step 2 — Build (must be green):
+- npx tsc -b --pretty false        # must exit 0
+- corepack pnpm --filter @ehq/hq build
+  (If vite fails ONLY on EPERM unlinking apps/hq/dist/* stale files,
+  clear dist and rebuild: rm -rf apps/hq/dist && corepack pnpm
+  --filter @ehq/hq build. The compile itself must succeed — 231+ modules
+  transformed.)
+
+Step 3 — Deploy app.eeee.mu (front only):
+- Deploy the freshly built apps/hq output to app.eeee.mu via the repo's
+  existing deploy path (build:deploy / adapter bundle).
+- Do NOT deploy to office/distribution/command-center subdomains.
+- Do NOT touch api.eeee.mu, the live DB, or WRITES_ENABLED.
+
+Step 4 — Confirm the NEW bundle is live (before smoking):
+- Fetch app.eeee.mu and confirm it serves the consolidated bundle, then,
+  signed in via Supabase, confirm the new sidebar entries are present:
+    Distribution: Financial Reconciliation, Aliases, Duplicates,
+      Audit log, Settings
+    Office: CEO View, Bank, Audit, VAT, Settings (+ "Wave invoices —
+      coming" placeholder)
+- If the old bundle is still served (cache/wrong target), STOP and report;
+  do not re-smoke a stale bundle.
+
+Step 5 — Smoke (auto-enumerate from routes.ts), one table:
+  workspace | page | route | renders? | real data / empty-state / disabled
+- All new routes must render (real data OR a proper empty state — empty is
+  expected for VAT, Aliases, Duplicates, Audit until sources are wired).
+- Financial Reconciliation: 12 tiles + sample tables render; all 7 repair
+  actions visible but DISABLED (no wiring).
+- No console errors, no framework overlay.
+
+Report:
+- Office
+
+Build the Bots Bureau write door — Sophie (Office) & Théo (Distribution)
+One guarded door over the NEW Hono API (NOT WordPress, NOT raw SQL). Build
+only — no enabling writes in prod, no real bot credentials committed.
+WRITES_ENABLED and the bot service accounts stay David's hand. Behavioral
+spec = BOTS_BUREAU_ACCESS.md, but the ENTRANCE is the new API, not eof/erh
+REST. Money integer/exact (no floats). audit_event on every mutation.
+
+1. Per-bot service identities (least privilege):
+   - Two roles: bot_office (Sophie) → Office write abilities only;
+     bot_distribution (Théo) → Distribution write abilities only.
+   - Scoped to their workspace; NEVER admin. The API auth middleware
+     resolves the bot identity from its token and authorizes per endpoint.
+     No bot can call the other workspace, settings, maintenance, or any
+     destructive/reset route.
+
+2. MCP server exposing SCOPED abilities (one ability = one screen-specific
+   guarded write endpoint on the Hono API):
+   - Sophie (Office): bank.import.preview, bank.import.confirm,
+     bank.line.classify, transaction.upsert (draft),
+     transaction.category.set, transaction.validate.
+   - Théo (Distribution): contract.upsert, contract.split.set,
+     contract.expense.add/update, payee/artist/release/track upsert,
+     mapping.apply-rules, suspense.resolve, payment.record/reconcile,
+     statement.generate.
+   - Plus READ abilities for context (list/dashboard) so a bot fetches
+     real IDs before writing and never guesses an id.
+
+3. Guardrails — enforced SERVER-SIDE in shared bot middleware (so a
+   misbehaving bot cannot crash the Hostinger Node box):
+   - Concurrency = 1 in-flight write per bot.
+   - Global single-writer lock on financial runs (Postgres advisory lock
+     per scope/key); concurrent run → 423/back-off, never parallel.
+   - Rate limit per bot (~60/min, burst 10) → 429 + Retry-After.
+   - Payload cap (≤ 50 rows/call); larger work MUST go preview→confirm
+     chunked, or through an async run — never one big synchronous INSERT.
+   -

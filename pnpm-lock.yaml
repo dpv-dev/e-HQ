@@ -21,24 +21,6 @@ importers:
         specifier: ^7.3.5
         version: 7.3.5(@types/node@26.0.0)(tsx@4.22.4)
 
-  apps/command-center:
-    dependencies:
-      '@ehq/auth':
-        specifier: workspace:*
-        version: link:../../packages/auth
-      '@ehq/ui':
-        specifier: workspace:*
-        version: link:../../packages/ui
-
-  apps/distribution:
-    dependencies:
-      '@ehq/api-client':
-        specifier: workspace:*
-        version: link:../../packages/api-client
-      '@ehq/ui':
-        specifier: workspace:*
-        version: link:../../packages/ui
-
   apps/hq:
     dependencies:
       '@ehq/api-client':
@@ -57,15 +39,6 @@ importers:
       '@types/node':
         specifier: ^26.0.0
         version: 26.0.0
-
-  apps/office:
-    dependencies:
-      '@ehq/api-client':
-        specifier: workspace:*
-        version: link:../../packages/api-client
-      '@ehq/ui':
-        specifier: workspace:*
-        version: link:../../packages/ui
 
   packages/api-client: {}
 
@@ -175,6 +148,9 @@ importers:
       pg:
         specifier: ^8.22.0
         version: 8.22.0
+      zod:
+        specifier: ^3.25.76
+        version: 3.25.76
     devDependencies:
       '@electric-sql/pglite':
         specifier: ^0.5.3

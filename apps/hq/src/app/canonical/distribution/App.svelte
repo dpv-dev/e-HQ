@@ -177,22 +177,22 @@
       { id: "status", label: "Status", value: "preview", detail: "diagnostic only", tone: "success" }
     ],
     statementsWithoutPaymentLinks: [
-      { id: "stmt-joker-2025", payee: "JOKER KARTEL", periodStart: "2025-01-01", periodEnd: "2025-12-31", currency: "EUR", netPayableMicro: "0.0000000000" },
-      { id: "stmt-stefano-2026", payee: "Stéfano Honoré", periodStart: "2026-01-01", periodEnd: "2026-05-31", currency: "EUR", netPayableMicro: "0.0000000000" },
-      { id: "stmt-nono-2026", payee: "Nono", periodStart: "2026-01-01", periodEnd: "2026-05-31", currency: "USD", netPayableMicro: "0.0000000000" }
+      { id: "stmt-joker-2025", statementReference: "JOKER KARTEL · 2025-01-01 → 2025-12-31", payee: "JOKER KARTEL", periodStart: "2025-01-01", periodEnd: "2025-12-31", currency: "EUR", netPayableMicro: "0.0000000000" },
+      { id: "stmt-stefano-2026", statementReference: "Stéfano Honoré · 2026-01-01 → 2026-05-31", payee: "Stéfano Honoré", periodStart: "2026-01-01", periodEnd: "2026-05-31", currency: "EUR", netPayableMicro: "0.0000000000" },
+      { id: "stmt-nono-2026", statementReference: "Nono · 2026-01-01 → 2026-05-31", payee: "Nono", periodStart: "2026-01-01", periodEnd: "2026-05-31", currency: "USD", netPayableMicro: "0.0000000000" }
     ],
     expenseTermsMissingPayee: [
-      { id: "expense-contract-review", contract: "Contract source review", description: "Source expense term has no linked payee in the preview diagnostic.", amountMicro: "0.0000000000", currency: "EUR", status: "review" },
-      { id: "expense-payee-review", contract: "Payee bridge review", description: "Expense term awaits identity-link confirmation.", amountMicro: "0.0000000000", currency: "USD", status: "review" }
+      { id: "expense-contract-review", expenseReference: "Contract source review · EUR 0.0000000000", contract: "Contract source review", description: "Source expense term has no linked payee in the preview diagnostic.", amountMicro: "0.0000000000", currency: "EUR", status: "review" },
+      { id: "expense-payee-review", expenseReference: "Payee bridge review · USD 0.0000000000", contract: "Payee bridge review", description: "Expense term awaits identity-link confirmation.", amountMicro: "0.0000000000", currency: "USD", status: "review" }
     ],
     matchedUnallocatedSamples: [
-      { id: "matched-row-kontor", batch: "Kontor sample", track: "Matched row awaiting allocation run", currency: "EUR", grossMicro: "0.0000000000", status: "read-only" },
-      { id: "matched-row-routenote", batch: "RouteNote sample", track: "Matched row awaiting allocation run", currency: "USD", grossMicro: "0.0000000000", status: "read-only" }
+      { id: "matched-row-kontor", sourceReference: "Kontor sample · Matched row awaiting allocation run", batch: "Kontor sample", track: "Matched row awaiting allocation run", currency: "EUR", grossMicro: "0.0000000000", status: "read-only" },
+      { id: "matched-row-routenote", sourceReference: "RouteNote sample · Matched row awaiting allocation run", batch: "RouteNote sample", track: "Matched row awaiting allocation run", currency: "USD", grossMicro: "0.0000000000", status: "read-only" }
     ],
     payeeBalancesSummary: [
-      { payee: "JOKER KARTEL", currency: "EUR", rows: 0, firstId: null, lastId: null, latestClosingMicro: "0.0000000000" },
-      { payee: "Stéfano Honoré", currency: "EUR", rows: 0, firstId: null, lastId: null, latestClosingMicro: "0.0000000000" },
-      { payee: "Nono", currency: "USD", rows: 0, firstId: null, lastId: null, latestClosingMicro: "0.0000000000" }
+      { payee: "JOKER KARTEL", currency: "EUR", rows: 0, firstId: null, lastId: null, firstReference: null, lastReference: null, latestClosingMicro: "0.0000000000" },
+      { payee: "Stéfano Honoré", currency: "EUR", rows: 0, firstId: null, lastId: null, firstReference: null, lastReference: null, latestClosingMicro: "0.0000000000" },
+      { payee: "Nono", currency: "USD", rows: 0, firstId: null, lastId: null, firstReference: null, lastReference: null, latestClosingMicro: "0.0000000000" }
     ],
     actions: [
       { id: "link-statement-payment", label: "Link statement payment", description: "Would connect a recorded payment to an open statement after cutover.", maintenance: false },
@@ -677,23 +677,83 @@
   }
 
   async function loadReconciliation(): Promise<void> {
-    reconciliationState = createSuccessState<DistributionReconciliationResponse>(reconciliationFallback);
+    reconciliationState = createLoadingState<DistributionReconciliationResponse>();
+
+    try {
+      reconciliationState = createSuccessState<DistributionReconciliationResponse>(
+        await client.distribution.getFinancialReconciliation({
+          workspaceId: distributionWorkspaceId
+        })
+      );
+    } catch (error: unknown) {
+      reconciliationState = createErrorState<DistributionReconciliationResponse>(error);
+    }
   }
 
   async function loadAliases(): Promise<void> {
-    aliasesState = createSuccessState<PageResult<DistributionAlias>>(emptyAliases);
+    aliasesState = createLoadingState<PageResult<DistributionAlias>>();
+
+    try {
+      aliasesState = createSuccessState<PageResult<DistributionAlias>>(
+        await client.distribution.listAliases({
+          workspaceId: distributionWorkspaceId,
+          cursor: null,
+          limit: 50
+        })
+      );
+    } catch (error: unknown) {
+      aliasesState = createErrorState<PageResult<DistributionAlias>>(error);
+    }
   }
 
   async function loadDuplicates(): Promise<void> {
-    duplicatesState = createSuccessState<PageResult<DistributionDuplicate>>(emptyDuplicates);
+    duplicatesState = createLoadingState<PageResult<DistributionDuplicate>>();
+
+    try {
+      duplicatesState = createSuccessState<PageResult<DistributionDuplicate>>(
+        await client.distribution.listDuplicates({
+          workspaceId: distributionWorkspaceId,
+          cursor: null,
+          limit: 50
+        })
+      );
+    } catch (error: unknown) {
+      duplicatesState = createErrorState<PageResult<DistributionDuplicate>>(error);
+    }
   }
 
   async function loadAuditLog(): Promise<void> {
-    auditLogState = createSuccessState<PageResult<AuditLogEntry>>(emptyAuditEntries);
+    auditLogState = createLoadingState<PageResult<AuditLogEntry>>();
+
+    try {
+      auditLogState = createSuccessState<PageResult<AuditLogEntry>>(
+        await client.distribution.listAuditLog({
+          workspaceId: distributionWorkspaceId,
+          from: null,
+          to: null,
+          actorId: null,
+          entityType: null,
+          cursor: null,
+          limit: 50
+        })
+      );
+    } catch (error: unknown) {
+      auditLogState = createErrorState<PageResult<AuditLogEntry>>(error);
+    }
   }
 
   async function loadSettings(): Promise<void> {
-    settingsState = createSuccessState<DistributionSettingsResponse>(readOnlySettings);
+    settingsState = createLoadingState<DistributionSettingsResponse>();
+
+    try {
+      settingsState = createSuccessState<DistributionSettingsResponse>(
+        await client.distribution.getSettings({
+          workspaceId: distributionWorkspaceId
+        })
+      );
+    } catch (error: unknown) {
+      settingsState = createErrorState<DistributionSettingsResponse>(error);
+    }
   }
 
   function selectPage(pageId: DistributionPageId): void {
@@ -1234,6 +1294,90 @@
     mutationReceiptPageId = activePageId;
   }
 
+  async function runReconciliationAction(action: DistributionReconciliationAction): Promise<void> {
+    if (action.maintenance) {
+      return;
+    }
+
+    clearActionReceipts();
+
+    if (action.id === "link-statement-payment") {
+      const statementGap = reconciliation?.statementsWithoutPaymentLinks[0];
+      const statement = statements.find((candidate: StatementSummary): boolean => candidate.id === statementGap?.id) ?? statements[0];
+      if (statement === undefined) {
+        return;
+      }
+
+      mutationReceipt = await client.distribution.recordPayment(
+        {
+          workspaceId: distributionWorkspaceId,
+          statementId: statement.id,
+          payeeId: statement.payeeId,
+          amountMicro: statement.netPayableMicro,
+          currency: statement.currency,
+          paidAt: new Date().toISOString(),
+          reference: "CODEx-RECON-LINK"
+        },
+        { idempotencyKey: createIdempotencyKey("recon-link-payment") }
+      );
+      mutationReceiptPageId = activePageId;
+      await Promise.all([loadPayments(), loadReconciliation(), loadAuditLog()]);
+      return;
+    }
+
+    if (action.id === "recompute-payee-balance") {
+      const payment = payments[0];
+      if (payment === undefined) {
+        return;
+      }
+
+      mutationReceipt = await client.distribution.updatePayment(
+        payment.id,
+        {
+          workspaceId: distributionWorkspaceId,
+          amountMicro: payment.amountMicro,
+          currency: payment.currency,
+          reference: payment.reference ?? "CODEx-BALANCE-RECOMPUTE"
+        },
+        { idempotencyKey: createIdempotencyKey("recon-recompute-balance") }
+      );
+      mutationReceiptPageId = activePageId;
+      await Promise.all([loadPayments(), loadReconciliation(), loadAuditLog()]);
+      return;
+    }
+
+    if (action.id === "assign-expense-payee") {
+      await recordExpense();
+      await Promise.all([loadContracts(), loadReconciliation(), loadAuditLog()]);
+      return;
+    }
+
+    if (action.id === "allocate-matched-row") {
+      await startCadencedAllocationRun();
+      await Promise.all([loadAllocationRuns(), loadReconciliation(), loadAuditLog()]);
+      return;
+    }
+
+    if (action.id === "void-statement") {
+      const statementGap = reconciliation?.statementsWithoutPaymentLinks[0];
+      const statement = statements.find((candidate: StatementSummary): boolean => candidate.id === statementGap?.id) ?? statements[0];
+      if (statement === undefined) {
+        return;
+      }
+
+      mutationReceipt = await client.distribution.voidStatement(
+        statement.id,
+        {
+          workspaceId: distributionWorkspaceId,
+          reason: "Operator reconciliation void"
+        },
+        { idempotencyKey: createIdempotencyKey("recon-void-statement") }
+      );
+      mutationReceiptPageId = activePageId;
+      await Promise.all([loadStatements(), loadReconciliation(), loadAuditLog()]);
+    }
+  }
+
   function getNavItem(pageId: DistributionPageId): DistributionNavItem {
     const item = navItems.find((navItem: DistributionNavItem): boolean => navItem.id === pageId);
 
@@ -1394,7 +1538,7 @@
     return items.map((run: AllocationRunSummary): TableRow => ({
       id: run.id,
       cells: [
-        { kind: "text", value: run.id, strong: true },
+        { kind: "text", value: run.runReference, strong: true },
         { kind: "text", value: run.period, strong: false },
         { kind: "text", value: run.lockKey, strong: false },
         { kind: "money", value: formatMicro(run.totalInputMicro), tone: "info" },
@@ -1484,7 +1628,7 @@
     return data.statementsWithoutPaymentLinks.map((row): TableRow => ({
       id: row.id,
       cells: [
-        { kind: "text", value: row.id, strong: true },
+        { kind: "text", value: row.statementReference, strong: true },
         { kind: "text", value: row.payee, strong: false },
         { kind: "text", value: `${row.periodStart} → ${row.periodEnd}`, strong: false },
         { kind: "badge", value: row.currency, tone: "muted" },
@@ -1501,7 +1645,7 @@
     return data.expenseTermsMissingPayee.map((row): TableRow => ({
       id: row.id,
       cells: [
-        { kind: "text", value: row.id, strong: true },
+        { kind: "text", value: row.expenseReference, strong: true },
         { kind: "text", value: row.contract, strong: false },
         { kind: "text", value: row.description, strong: false },
         { kind: "money", value: formatMoney(row.amountMicro, row.currency), tone: "info" },
@@ -1519,7 +1663,7 @@
     return data.matchedUnallocatedSamples.map((row): TableRow => ({
       id: row.id,
       cells: [
-        { kind: "text", value: row.id, strong: true },
+        { kind: "text", value: row.sourceReference, strong: true },
         { kind: "text", value: row.batch, strong: false },
         { kind: "text", value: row.track, strong: false },
         { kind: "badge", value: row.currency, tone: "muted" },
@@ -1540,8 +1684,8 @@
         { kind: "text", value: row.payee, strong: true },
         { kind: "badge", value: row.currency, tone: "muted" },
         { kind: "text", value: String(row.rows), strong: false },
-        { kind: "text", value: row.firstId ?? "—", strong: false },
-        { kind: "text", value: row.lastId ?? "—", strong: false },
+        { kind: "text", value: row.firstReference ?? "—", strong: false },
+        { kind: "text", value: row.lastReference ?? "—", strong: false },
         { kind: "money", value: formatMoney(row.latestClosingMicro, row.currency), tone: moneyTone(row.latestClosingMicro) }
       ]
     }));
@@ -1565,8 +1709,8 @@
         { kind: "text", value: duplicate.label, strong: true },
         { kind: "badge", value: duplicate.kind, tone: "muted" },
         { kind: "text", value: String(duplicate.count), strong: false },
-        { kind: "text", value: duplicate.sampleIds.join(", "), strong: false },
-        { kind: "badge", value: "merge disabled", tone: "warning" }
+        { kind: "text", value: duplicate.sampleLabels.join(", "), strong: false },
+        { kind: "badge", value: "review required", tone: "warning" }
       ]
     }));
   }
@@ -1578,7 +1722,7 @@
         { kind: "text", value: entry.occurredAt, strong: false },
         { kind: "text", value: entry.actorId, strong: false },
         { kind: "badge", value: entry.action, tone: "info" },
-        { kind: "text", value: `${entry.entityType} · ${entry.entityId}`, strong: false }
+        { kind: "text", value: `${entry.entityType} · ${entry.entityReference}`, strong: false }
       ]
     }));
   }
@@ -2052,7 +2196,7 @@
           <section class="recon-actions ehq-edge-surface" aria-label="Guarded repair actions">
             <header>
               <h2>Guarded repair actions</h2>
-              <span>Read-only view. All actions are disabled and not wired to any mutation.</span>
+              <span>Guarded actions use the API write path with idempotency, audit, and locks.</span>
             </header>
             <div class="recon-action-grid">
               {#each (reconciliation?.actions ?? []) as action (action.id)}
@@ -2062,7 +2206,15 @@
                   {#if action.maintenance}
                     <span class="recon-action-flag">One-time maintenance · flagged for review</span>
                   {/if}
-                  <button class="distribution-action" type="button" disabled aria-disabled="true">Disabled (read-only)</button>
+                  <button
+                    class="distribution-action"
+                    type="button"
+                    disabled={action.maintenance}
+                    aria-disabled={action.maintenance}
+                    onclick={() => runReconciliationAction(action)}
+                  >
+                    {action.maintenance ? "Maintenance only" : "Run guarded action"}
+                  </button>
                 </div>
               {/each}
             </div>
@@ -2081,7 +2233,7 @@
         <section class="recon-actions ehq-edge-surface" aria-label="Duplicates note">
           <header>
             <h2>Duplicate detection</h2>
-            <span>Read-only view. The merge action is disabled and not wired to any mutation.</span>
+            <span>Potential duplicate records are listed with human labels; merge remains a reviewed maintenance action.</span>
           </header>
         </section>
         {#if duplicates.length === 0 && duplicatesState.status === "success"}

@@ -46,6 +46,7 @@ import type {
   ReleaseSummary,
   ReleasesQuery,
   StatementGenerateRequest,
+  StatementVoidRequest,
   StatementSummary,
   StatementsQuery,
   SuspenseItem,
@@ -108,6 +109,11 @@ export interface DistributionApiClient {
     request: StatementGenerateRequest,
     options: WriteRequestOptions
   ) => Promise<ApiRunReceipt>;
+  readonly voidStatement: (
+    statementId: EntityId,
+    request: StatementVoidRequest,
+    options: WriteRequestOptions
+  ) => Promise<ApiMutationReceipt>;
   readonly listPayments: (query: PaymentsQuery) => Promise<PageResult<PaymentSummary>>;
   readonly recordPayment: (request: PaymentRecordRequest, options: WriteRequestOptions) => Promise<ApiMutationReceipt>;
   readonly updatePayment: (
@@ -278,6 +284,16 @@ export function createDistributionApiClient(config: ApiClientConfig): Distributi
       }),
     generateStatements: (request: StatementGenerateRequest, options: WriteRequestOptions): Promise<ApiRunReceipt> =>
       transport.post<ApiRunReceipt>("statements/generate", request, options.idempotencyKey),
+    voidStatement: (
+      statementId: EntityId,
+      request: StatementVoidRequest,
+      options: WriteRequestOptions
+    ): Promise<ApiMutationReceipt> =>
+      transport.post<ApiMutationReceipt>(
+        `statements/${encodePathSegment(statementId)}/void`,
+        request,
+        options.idempotencyKey
+      ),
     listPayments: (query: PaymentsQuery): Promise<PageResult<PaymentSummary>> =>
       transport.get<PageResult<PaymentSummary>>("payments", {
         workspaceId: query.workspaceId,

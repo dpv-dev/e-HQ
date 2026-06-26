@@ -3786,257 +3786,2256 @@ var cors = (options) => {
   };
 };
 
-// ../../packages/domain-finance/src/errors.ts
-function createFinanceDomainError(code, message2, context) {
-  const error = new Error(message2);
-  Object.defineProperty(error, "name", { value: "FinanceDomainError", enumerable: true });
-  Object.defineProperty(error, "code", { value: code, enumerable: true });
-  Object.defineProperty(error, "context", { value: context, enumerable: true });
-  return error;
-}
-function raiseFinanceDomainError(code, message2, context) {
-  throw createFinanceDomainError(code, message2, context);
+// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/entity.js
+var entityKind = /* @__PURE__ */ Symbol.for("drizzle:entityKind");
+function is(value, type) {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  if (value instanceof type) {
+    return true;
+  }
+  if (!Object.prototype.hasOwnProperty.call(type, entityKind)) {
+    throw new Error(
+      `Class "${type.name ?? "<unknown>"}" doesn't look like a Drizzle entity. If this is incorrect and the class is provided by Drizzle, please report this as a bug.`
+    );
+  }
+  let cls = Object.getPrototypeOf(value).constructor;
+  if (cls) {
+    while (cls) {
+      if (entityKind in cls && cls[entityKind] === type[entityKind]) {
+        return true;
+      }
+      cls = Object.getPrototypeOf(cls);
+    }
+  }
+  return false;
 }
 
-// ../../packages/domain-finance/src/money.ts
-var EOF_MONEY_SCALE = 2;
-var ERH_MONEY_SCALE = 10;
-var eofMoney = {
-  scale: EOF_MONEY_SCALE,
-  roundingMode: "HALF_UP",
-  parse: parseEofMoney,
-  format: formatEofMoney,
-  add,
-  sub,
-  mulByRatio: mulByRatioEof,
-  applyDecimalFactor: applyDecimalFactorEof,
-  percentage: percentageEof,
-  mulScaled: mulScaledEof,
-  divScaled: divScaledEof
+// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/column.js
+var Column = class {
+  constructor(table, config) {
+    this.table = table;
+    this.config = config;
+    this.name = config.name;
+    this.keyAsName = config.keyAsName;
+    this.notNull = config.notNull;
+    this.default = config.default;
+    this.defaultFn = config.defaultFn;
+    this.onUpdateFn = config.onUpdateFn;
+    this.hasDefault = config.hasDefault;
+    this.primary = config.primaryKey;
+    this.isUnique = config.isUnique;
+    this.uniqueName = config.uniqueName;
+    this.uniqueType = config.uniqueType;
+    this.dataType = config.dataType;
+    this.columnType = config.columnType;
+    this.generated = config.generated;
+    this.generatedIdentity = config.generatedIdentity;
+  }
+  static [entityKind] = "Column";
+  name;
+  keyAsName;
+  primary;
+  notNull;
+  default;
+  defaultFn;
+  onUpdateFn;
+  hasDefault;
+  isUnique;
+  uniqueName;
+  uniqueType;
+  dataType;
+  columnType;
+  enumValues = void 0;
+  generated = void 0;
+  generatedIdentity = void 0;
+  config;
+  mapFromDriverValue(value) {
+    return value;
+  }
+  mapToDriverValue(value) {
+    return value;
+  }
+  // ** @internal */
+  shouldDisableInsert() {
+    return this.config.generated !== void 0 && this.config.generated.type !== "byDefault";
+  }
 };
-var erhMoney = {
-  scale: ERH_MONEY_SCALE,
-  roundingMode: "TRUNCATE",
-  parse: parseErhMoney,
-  format: formatErhMoney,
-  add,
-  sub,
-  mulByRatio: mulByRatioErh,
-  applyDecimalFactor: applyDecimalFactorErh,
-  percentage: percentageErh,
-  mulScaled: mulScaledErh,
-  divScaled: divScaledErh
+
+// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/column-builder.js
+var ColumnBuilder = class {
+  static [entityKind] = "ColumnBuilder";
+  config;
+  constructor(name, dataType, columnType) {
+    this.config = {
+      name,
+      keyAsName: name === "",
+      notNull: false,
+      default: void 0,
+      hasDefault: false,
+      primaryKey: false,
+      isUnique: false,
+      uniqueName: void 0,
+      uniqueType: void 0,
+      dataType,
+      columnType,
+      generated: void 0
+    };
+  }
+  /**
+   * Changes the data type of the column. Commonly used with `json` columns. Also, useful for branded types.
+   *
+   * @example
+   * ```ts
+   * const users = pgTable('users', {
+   * 	id: integer('id').$type<UserId>().primaryKey(),
+   * 	details: json('details').$type<UserDetails>().notNull(),
+   * });
+   * ```
+   */
+  $type() {
+    return this;
+  }
+  /**
+   * Adds a `not null` clause to the column definition.
+   *
+   * Affects the `select` model of the table - columns *without* `not null` will be nullable on select.
+   */
+  notNull() {
+    this.config.notNull = true;
+    return this;
+  }
+  /**
+   * Adds a `default <value>` clause to the column definition.
+   *
+   * Affects the `insert` model of the table - columns *with* `default` are optional on insert.
+   *
+   * If you need to set a dynamic default value, use {@link $defaultFn} instead.
+   */
+  default(value) {
+    this.config.default = value;
+    this.config.hasDefault = true;
+    return this;
+  }
+  /**
+   * Adds a dynamic default value to the column.
+   * The function will be called when the row is inserted, and the returned value will be used as the column value.
+   *
+   * **Note:** This value does not affect the `drizzle-kit` behavior, it is only used at runtime in `drizzle-orm`.
+   */
+  $defaultFn(fn) {
+    this.config.defaultFn = fn;
+    this.config.hasDefault = true;
+    return this;
+  }
+  /**
+   * Alias for {@link $defaultFn}.
+   */
+  $default = this.$defaultFn;
+  /**
+   * Adds a dynamic update value to the column.
+   * The function will be called when the row is updated, and the returned value will be used as the column value if none is provided.
+   * If no `default` (or `$defaultFn`) value is provided, the function will be called when the row is inserted as well, and the returned value will be used as the column value.
+   *
+   * **Note:** This value does not affect the `drizzle-kit` behavior, it is only used at runtime in `drizzle-orm`.
+   */
+  $onUpdateFn(fn) {
+    this.config.onUpdateFn = fn;
+    this.config.hasDefault = true;
+    return this;
+  }
+  /**
+   * Alias for {@link $onUpdateFn}.
+   */
+  $onUpdate = this.$onUpdateFn;
+  /**
+   * Adds a `primary key` clause to the column definition. This implicitly makes the column `not null`.
+   *
+   * In SQLite, `integer primary key` implicitly makes the column auto-incrementing.
+   */
+  primaryKey() {
+    this.config.primaryKey = true;
+    this.config.notNull = true;
+    return this;
+  }
+  /** @internal Sets the name of the column to the key within the table definition if a name was not given. */
+  setName(name) {
+    if (this.config.name !== "") return;
+    this.config.name = name;
+  }
 };
-function parse(value, scale, mode) {
-  return parseDecimalToUnits(value, {
-    scale,
-    roundingMode: mode,
-    maximumFractionDigits: null,
-    invalidCode: "decimal_invalid"
+
+// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/table.utils.js
+var TableName = /* @__PURE__ */ Symbol.for("drizzle:Name");
+
+// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/pg-core/foreign-keys.js
+var ForeignKeyBuilder = class {
+  static [entityKind] = "PgForeignKeyBuilder";
+  /** @internal */
+  reference;
+  /** @internal */
+  _onUpdate = "no action";
+  /** @internal */
+  _onDelete = "no action";
+  constructor(config, actions) {
+    this.reference = () => {
+      const { name, columns, foreignColumns } = config();
+      return { name, columns, foreignTable: foreignColumns[0].table, foreignColumns };
+    };
+    if (actions) {
+      this._onUpdate = actions.onUpdate;
+      this._onDelete = actions.onDelete;
+    }
+  }
+  onUpdate(action) {
+    this._onUpdate = action === void 0 ? "no action" : action;
+    return this;
+  }
+  onDelete(action) {
+    this._onDelete = action === void 0 ? "no action" : action;
+    return this;
+  }
+  /** @internal */
+  build(table) {
+    return new ForeignKey(table, this);
+  }
+};
+var ForeignKey = class {
+  constructor(table, builder) {
+    this.table = table;
+    this.reference = builder.reference;
+    this.onUpdate = builder._onUpdate;
+    this.onDelete = builder._onDelete;
+  }
+  static [entityKind] = "PgForeignKey";
+  reference;
+  onUpdate;
+  onDelete;
+  getName() {
+    const { name, columns, foreignColumns } = this.reference();
+    const columnNames = columns.map((column) => column.name);
+    const foreignColumnNames = foreignColumns.map((column) => column.name);
+    const chunks = [
+      this.table[TableName],
+      ...columnNames,
+      foreignColumns[0].table[TableName],
+      ...foreignColumnNames
+    ];
+    return name ?? `${chunks.join("_")}_fk`;
+  }
+};
+
+// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/tracing-utils.js
+function iife(fn, ...args) {
+  return fn(...args);
+}
+
+// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/pg-core/unique-constraint.js
+function uniqueKeyName(table, columns) {
+  return `${table[TableName]}_${columns.join("_")}_unique`;
+}
+var UniqueConstraintBuilder = class {
+  constructor(columns, name) {
+    this.name = name;
+    this.columns = columns;
+  }
+  static [entityKind] = "PgUniqueConstraintBuilder";
+  /** @internal */
+  columns;
+  /** @internal */
+  nullsNotDistinctConfig = false;
+  nullsNotDistinct() {
+    this.nullsNotDistinctConfig = true;
+    return this;
+  }
+  /** @internal */
+  build(table) {
+    return new UniqueConstraint(table, this.columns, this.nullsNotDistinctConfig, this.name);
+  }
+};
+var UniqueOnConstraintBuilder = class {
+  static [entityKind] = "PgUniqueOnConstraintBuilder";
+  /** @internal */
+  name;
+  constructor(name) {
+    this.name = name;
+  }
+  on(...columns) {
+    return new UniqueConstraintBuilder(columns, this.name);
+  }
+};
+var UniqueConstraint = class {
+  constructor(table, columns, nullsNotDistinct, name) {
+    this.table = table;
+    this.columns = columns;
+    this.name = name ?? uniqueKeyName(this.table, this.columns.map((column) => column.name));
+    this.nullsNotDistinct = nullsNotDistinct;
+  }
+  static [entityKind] = "PgUniqueConstraint";
+  columns;
+  name;
+  nullsNotDistinct = false;
+  getName() {
+    return this.name;
+  }
+};
+
+// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/pg-core/utils/array.js
+function parsePgArrayValue(arrayString, startFrom, inQuotes) {
+  for (let i = startFrom; i < arrayString.length; i++) {
+    const char = arrayString[i];
+    if (char === "\\") {
+      i++;
+      continue;
+    }
+    if (char === '"') {
+      return [arrayString.slice(startFrom, i).replace(/\\/g, ""), i + 1];
+    }
+    if (inQuotes) {
+      continue;
+    }
+    if (char === "," || char === "}") {
+      return [arrayString.slice(startFrom, i).replace(/\\/g, ""), i];
+    }
+  }
+  return [arrayString.slice(startFrom).replace(/\\/g, ""), arrayString.length];
+}
+function parsePgNestedArray(arrayString, startFrom = 0) {
+  const result = [];
+  let i = startFrom;
+  let lastCharIsComma = false;
+  while (i < arrayString.length) {
+    const char = arrayString[i];
+    if (char === ",") {
+      if (lastCharIsComma || i === startFrom) {
+        result.push("");
+      }
+      lastCharIsComma = true;
+      i++;
+      continue;
+    }
+    lastCharIsComma = false;
+    if (char === "\\") {
+      i += 2;
+      continue;
+    }
+    if (char === '"') {
+      const [value2, startFrom2] = parsePgArrayValue(arrayString, i + 1, true);
+      result.push(value2);
+      i = startFrom2;
+      continue;
+    }
+    if (char === "}") {
+      return [result, i + 1];
+    }
+    if (char === "{") {
+      const [value2, startFrom2] = parsePgNestedArray(arrayString, i + 1);
+      result.push(value2);
+      i = startFrom2;
+      continue;
+    }
+    const [value, newStartFrom] = parsePgArrayValue(arrayString, i, false);
+    result.push(value);
+    i = newStartFrom;
+  }
+  return [result, i];
+}
+function parsePgArray(arrayString) {
+  const [result] = parsePgNestedArray(arrayString, 1);
+  return result;
+}
+function makePgArray(array) {
+  return `{${array.map((item) => {
+    if (Array.isArray(item)) {
+      return makePgArray(item);
+    }
+    if (typeof item === "string") {
+      return `"${item.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+    }
+    return `${item}`;
+  }).join(",")}}`;
+}
+
+// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/pg-core/columns/common.js
+var PgColumnBuilder = class extends ColumnBuilder {
+  foreignKeyConfigs = [];
+  static [entityKind] = "PgColumnBuilder";
+  array(size) {
+    return new PgArrayBuilder(this.config.name, this, size);
+  }
+  references(ref, actions = {}) {
+    this.foreignKeyConfigs.push({ ref, actions });
+    return this;
+  }
+  unique(name, config) {
+    this.config.isUnique = true;
+    this.config.uniqueName = name;
+    this.config.uniqueType = config?.nulls;
+    return this;
+  }
+  generatedAlwaysAs(as) {
+    this.config.generated = {
+      as,
+      type: "always",
+      mode: "stored"
+    };
+    return this;
+  }
+  /** @internal */
+  buildForeignKeys(column, table) {
+    return this.foreignKeyConfigs.map(({ ref, actions }) => {
+      return iife(
+        (ref2, actions2) => {
+          const builder = new ForeignKeyBuilder(() => {
+            const foreignColumn = ref2();
+            return { columns: [column], foreignColumns: [foreignColumn] };
+          });
+          if (actions2.onUpdate) {
+            builder.onUpdate(actions2.onUpdate);
+          }
+          if (actions2.onDelete) {
+            builder.onDelete(actions2.onDelete);
+          }
+          return builder.build(table);
+        },
+        ref,
+        actions
+      );
+    });
+  }
+  /** @internal */
+  buildExtraConfigColumn(table) {
+    return new ExtraConfigColumn(table, this.config);
+  }
+};
+var PgColumn = class extends Column {
+  constructor(table, config) {
+    if (!config.uniqueName) {
+      config.uniqueName = uniqueKeyName(table, [config.name]);
+    }
+    super(table, config);
+    this.table = table;
+  }
+  static [entityKind] = "PgColumn";
+};
+var ExtraConfigColumn = class extends PgColumn {
+  static [entityKind] = "ExtraConfigColumn";
+  getSQLType() {
+    return this.getSQLType();
+  }
+  indexConfig = {
+    order: this.config.order ?? "asc",
+    nulls: this.config.nulls ?? "last",
+    opClass: this.config.opClass
+  };
+  defaultConfig = {
+    order: "asc",
+    nulls: "last",
+    opClass: void 0
+  };
+  asc() {
+    this.indexConfig.order = "asc";
+    return this;
+  }
+  desc() {
+    this.indexConfig.order = "desc";
+    return this;
+  }
+  nullsFirst() {
+    this.indexConfig.nulls = "first";
+    return this;
+  }
+  nullsLast() {
+    this.indexConfig.nulls = "last";
+    return this;
+  }
+  /**
+   * ### PostgreSQL documentation quote
+   *
+   * > An operator class with optional parameters can be specified for each column of an index.
+   * The operator class identifies the operators to be used by the index for that column.
+   * For example, a B-tree index on four-byte integers would use the int4_ops class;
+   * this operator class includes comparison functions for four-byte integers.
+   * In practice the default operator class for the column's data type is usually sufficient.
+   * The main point of having operator classes is that for some data types, there could be more than one meaningful ordering.
+   * For example, we might want to sort a complex-number data type either by absolute value or by real part.
+   * We could do this by defining two operator classes for the data type and then selecting the proper class when creating an index.
+   * More information about operator classes check:
+   *
+   * ### Useful links
+   * https://www.postgresql.org/docs/current/sql-createindex.html
+   *
+   * https://www.postgresql.org/docs/current/indexes-opclass.html
+   *
+   * https://www.postgresql.org/docs/current/xindex.html
+   *
+   * ### Additional types
+   * If you have the `pg_vector` extension installed in your database, you can use the
+   * `vector_l2_ops`, `vector_ip_ops`, `vector_cosine_ops`, `vector_l1_ops`, `bit_hamming_ops`, `bit_jaccard_ops`, `halfvec_l2_ops`, `sparsevec_l2_ops` options, which are predefined types.
+   *
+   * **You can always specify any string you want in the operator class, in case Drizzle doesn't have it natively in its types**
+   *
+   * @param opClass
+   * @returns
+   */
+  op(opClass) {
+    this.indexConfig.opClass = opClass;
+    return this;
+  }
+};
+var IndexedColumn = class {
+  static [entityKind] = "IndexedColumn";
+  constructor(name, keyAsName, type, indexConfig) {
+    this.name = name;
+    this.keyAsName = keyAsName;
+    this.type = type;
+    this.indexConfig = indexConfig;
+  }
+  name;
+  keyAsName;
+  type;
+  indexConfig;
+};
+var PgArrayBuilder = class extends PgColumnBuilder {
+  static [entityKind] = "PgArrayBuilder";
+  constructor(name, baseBuilder, size) {
+    super(name, "array", "PgArray");
+    this.config.baseBuilder = baseBuilder;
+    this.config.size = size;
+  }
+  /** @internal */
+  build(table) {
+    const baseColumn = this.config.baseBuilder.build(table);
+    return new PgArray(
+      table,
+      this.config,
+      baseColumn
+    );
+  }
+};
+var PgArray = class _PgArray extends PgColumn {
+  constructor(table, config, baseColumn, range) {
+    super(table, config);
+    this.baseColumn = baseColumn;
+    this.range = range;
+    this.size = config.size;
+  }
+  size;
+  static [entityKind] = "PgArray";
+  getSQLType() {
+    return `${this.baseColumn.getSQLType()}[${typeof this.size === "number" ? this.size : ""}]`;
+  }
+  mapFromDriverValue(value) {
+    if (typeof value === "string") {
+      value = parsePgArray(value);
+    }
+    return value.map((v) => this.baseColumn.mapFromDriverValue(v));
+  }
+  mapToDriverValue(value, isNestedArray = false) {
+    const a = value.map(
+      (v) => v === null ? null : is(this.baseColumn, _PgArray) ? this.baseColumn.mapToDriverValue(v, true) : this.baseColumn.mapToDriverValue(v)
+    );
+    if (isNestedArray) return a;
+    return makePgArray(a);
+  }
+};
+
+// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/pg-core/columns/enum.js
+var PgEnumObjectColumnBuilder = class extends PgColumnBuilder {
+  static [entityKind] = "PgEnumObjectColumnBuilder";
+  constructor(name, enumInstance) {
+    super(name, "string", "PgEnumObjectColumn");
+    this.config.enum = enumInstance;
+  }
+  /** @internal */
+  build(table) {
+    return new PgEnumObjectColumn(
+      table,
+      this.config
+    );
+  }
+};
+var PgEnumObjectColumn = class extends PgColumn {
+  static [entityKind] = "PgEnumObjectColumn";
+  enum;
+  enumValues = this.config.enum.enumValues;
+  constructor(table, config) {
+    super(table, config);
+    this.enum = config.enum;
+  }
+  getSQLType() {
+    return this.enum.enumName;
+  }
+};
+var isPgEnumSym = /* @__PURE__ */ Symbol.for("drizzle:isPgEnum");
+function isPgEnum(obj) {
+  return !!obj && typeof obj === "function" && isPgEnumSym in obj && obj[isPgEnumSym] === true;
+}
+var PgEnumColumnBuilder = class extends PgColumnBuilder {
+  static [entityKind] = "PgEnumColumnBuilder";
+  constructor(name, enumInstance) {
+    super(name, "string", "PgEnumColumn");
+    this.config.enum = enumInstance;
+  }
+  /** @internal */
+  build(table) {
+    return new PgEnumColumn(
+      table,
+      this.config
+    );
+  }
+};
+var PgEnumColumn = class extends PgColumn {
+  static [entityKind] = "PgEnumColumn";
+  enum = this.config.enum;
+  enumValues = this.config.enum.enumValues;
+  constructor(table, config) {
+    super(table, config);
+    this.enum = config.enum;
+  }
+  getSQLType() {
+    return this.enum.enumName;
+  }
+};
+
+// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/subquery.js
+var Subquery = class {
+  static [entityKind] = "Subquery";
+  constructor(sql2, fields, alias, isWith = false, usedTables = []) {
+    this._ = {
+      brand: "Subquery",
+      sql: sql2,
+      selectedFields: fields,
+      alias,
+      isWith,
+      usedTables
+    };
+  }
+  // getSQL(): SQL<unknown> {
+  // 	return new SQL([this]);
+  // }
+};
+var WithSubquery = class extends Subquery {
+  static [entityKind] = "WithSubquery";
+};
+
+// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/version.js
+var version = "0.45.2";
+
+// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/tracing.js
+var otel;
+var rawTracer;
+var tracer = {
+  startActiveSpan(name, fn) {
+    if (!otel) {
+      return fn();
+    }
+    if (!rawTracer) {
+      rawTracer = otel.trace.getTracer("drizzle-orm", version);
+    }
+    return iife(
+      (otel2, rawTracer2) => rawTracer2.startActiveSpan(
+        name,
+        (span) => {
+          try {
+            return fn(span);
+          } catch (e) {
+            span.setStatus({
+              code: otel2.SpanStatusCode.ERROR,
+              message: e instanceof Error ? e.message : "Unknown error"
+              // eslint-disable-line no-instanceof/no-instanceof
+            });
+            throw e;
+          } finally {
+            span.end();
+          }
+        }
+      ),
+      otel,
+      rawTracer
+    );
+  }
+};
+
+// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/view-common.js
+var ViewBaseConfig = /* @__PURE__ */ Symbol.for("drizzle:ViewBaseConfig");
+
+// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/table.js
+var Schema = /* @__PURE__ */ Symbol.for("drizzle:Schema");
+var Columns = /* @__PURE__ */ Symbol.for("drizzle:Columns");
+var ExtraConfigColumns = /* @__PURE__ */ Symbol.for("drizzle:ExtraConfigColumns");
+var OriginalName = /* @__PURE__ */ Symbol.for("drizzle:OriginalName");
+var BaseName = /* @__PURE__ */ Symbol.for("drizzle:BaseName");
+var IsAlias = /* @__PURE__ */ Symbol.for("drizzle:IsAlias");
+var ExtraConfigBuilder = /* @__PURE__ */ Symbol.for("drizzle:ExtraConfigBuilder");
+var IsDrizzleTable = /* @__PURE__ */ Symbol.for("drizzle:IsDrizzleTable");
+var Table = class {
+  static [entityKind] = "Table";
+  /** @internal */
+  static Symbol = {
+    Name: TableName,
+    Schema,
+    OriginalName,
+    Columns,
+    ExtraConfigColumns,
+    BaseName,
+    IsAlias,
+    ExtraConfigBuilder
+  };
+  /**
+   * @internal
+   * Can be changed if the table is aliased.
+   */
+  [TableName];
+  /**
+   * @internal
+   * Used to store the original name of the table, before any aliasing.
+   */
+  [OriginalName];
+  /** @internal */
+  [Schema];
+  /** @internal */
+  [Columns];
+  /** @internal */
+  [ExtraConfigColumns];
+  /**
+   *  @internal
+   * Used to store the table name before the transformation via the `tableCreator` functions.
+   */
+  [BaseName];
+  /** @internal */
+  [IsAlias] = false;
+  /** @internal */
+  [IsDrizzleTable] = true;
+  /** @internal */
+  [ExtraConfigBuilder] = void 0;
+  constructor(name, schema, baseName) {
+    this[TableName] = this[OriginalName] = name;
+    this[Schema] = schema;
+    this[BaseName] = baseName;
+  }
+};
+function getTableName(table) {
+  return table[TableName];
+}
+function getTableUniqueName(table) {
+  return `${table[Schema] ?? "public"}.${table[TableName]}`;
+}
+
+// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/sql/sql.js
+var FakePrimitiveParam = class {
+  static [entityKind] = "FakePrimitiveParam";
+};
+function isSQLWrapper(value) {
+  return value !== null && value !== void 0 && typeof value.getSQL === "function";
+}
+function mergeQueries(queries) {
+  const result = { sql: "", params: [] };
+  for (const query of queries) {
+    result.sql += query.sql;
+    result.params.push(...query.params);
+    if (query.typings?.length) {
+      if (!result.typings) {
+        result.typings = [];
+      }
+      result.typings.push(...query.typings);
+    }
+  }
+  return result;
+}
+var StringChunk = class {
+  static [entityKind] = "StringChunk";
+  value;
+  constructor(value) {
+    this.value = Array.isArray(value) ? value : [value];
+  }
+  getSQL() {
+    return new SQL([this]);
+  }
+};
+var SQL = class _SQL {
+  constructor(queryChunks) {
+    this.queryChunks = queryChunks;
+    for (const chunk of queryChunks) {
+      if (is(chunk, Table)) {
+        const schemaName = chunk[Table.Symbol.Schema];
+        this.usedTables.push(
+          schemaName === void 0 ? chunk[Table.Symbol.Name] : schemaName + "." + chunk[Table.Symbol.Name]
+        );
+      }
+    }
+  }
+  static [entityKind] = "SQL";
+  /** @internal */
+  decoder = noopDecoder;
+  shouldInlineParams = false;
+  /** @internal */
+  usedTables = [];
+  append(query) {
+    this.queryChunks.push(...query.queryChunks);
+    return this;
+  }
+  toQuery(config) {
+    return tracer.startActiveSpan("drizzle.buildSQL", (span) => {
+      const query = this.buildQueryFromSourceParams(this.queryChunks, config);
+      span?.setAttributes({
+        "drizzle.query.text": query.sql,
+        "drizzle.query.params": JSON.stringify(query.params)
+      });
+      return query;
+    });
+  }
+  buildQueryFromSourceParams(chunks, _config) {
+    const config = Object.assign({}, _config, {
+      inlineParams: _config.inlineParams || this.shouldInlineParams,
+      paramStartIndex: _config.paramStartIndex || { value: 0 }
+    });
+    const {
+      casing,
+      escapeName,
+      escapeParam,
+      prepareTyping,
+      inlineParams,
+      paramStartIndex
+    } = config;
+    return mergeQueries(chunks.map((chunk) => {
+      if (is(chunk, StringChunk)) {
+        return { sql: chunk.value.join(""), params: [] };
+      }
+      if (is(chunk, Name)) {
+        return { sql: escapeName(chunk.value), params: [] };
+      }
+      if (chunk === void 0) {
+        return { sql: "", params: [] };
+      }
+      if (Array.isArray(chunk)) {
+        const result = [new StringChunk("(")];
+        for (const [i, p] of chunk.entries()) {
+          result.push(p);
+          if (i < chunk.length - 1) {
+            result.push(new StringChunk(", "));
+          }
+        }
+        result.push(new StringChunk(")"));
+        return this.buildQueryFromSourceParams(result, config);
+      }
+      if (is(chunk, _SQL)) {
+        return this.buildQueryFromSourceParams(chunk.queryChunks, {
+          ...config,
+          inlineParams: inlineParams || chunk.shouldInlineParams
+        });
+      }
+      if (is(chunk, Table)) {
+        const schemaName = chunk[Table.Symbol.Schema];
+        const tableName = chunk[Table.Symbol.Name];
+        return {
+          sql: schemaName === void 0 || chunk[IsAlias] ? escapeName(tableName) : escapeName(schemaName) + "." + escapeName(tableName),
+          params: []
+        };
+      }
+      if (is(chunk, Column)) {
+        const columnName = casing.getColumnCasing(chunk);
+        if (_config.invokeSource === "indexes") {
+          return { sql: escapeName(columnName), params: [] };
+        }
+        const schemaName = chunk.table[Table.Symbol.Schema];
+        return {
+          sql: chunk.table[IsAlias] || schemaName === void 0 ? escapeName(chunk.table[Table.Symbol.Name]) + "." + escapeName(columnName) : escapeName(schemaName) + "." + escapeName(chunk.table[Table.Symbol.Name]) + "." + escapeName(columnName),
+          params: []
+        };
+      }
+      if (is(chunk, View)) {
+        const schemaName = chunk[ViewBaseConfig].schema;
+        const viewName = chunk[ViewBaseConfig].name;
+        return {
+          sql: schemaName === void 0 || chunk[ViewBaseConfig].isAlias ? escapeName(viewName) : escapeName(schemaName) + "." + escapeName(viewName),
+          params: []
+        };
+      }
+      if (is(chunk, Param)) {
+        if (is(chunk.value, Placeholder)) {
+          return { sql: escapeParam(paramStartIndex.value++, chunk), params: [chunk], typings: ["none"] };
+        }
+        const mappedValue = chunk.value === null ? null : chunk.encoder.mapToDriverValue(chunk.value);
+        if (is(mappedValue, _SQL)) {
+          return this.buildQueryFromSourceParams([mappedValue], config);
+        }
+        if (inlineParams) {
+          return { sql: this.mapInlineParam(mappedValue, config), params: [] };
+        }
+        let typings = ["none"];
+        if (prepareTyping) {
+          typings = [prepareTyping(chunk.encoder)];
+        }
+        return { sql: escapeParam(paramStartIndex.value++, mappedValue), params: [mappedValue], typings };
+      }
+      if (is(chunk, Placeholder)) {
+        return { sql: escapeParam(paramStartIndex.value++, chunk), params: [chunk], typings: ["none"] };
+      }
+      if (is(chunk, _SQL.Aliased) && chunk.fieldAlias !== void 0) {
+        return { sql: escapeName(chunk.fieldAlias), params: [] };
+      }
+      if (is(chunk, Subquery)) {
+        if (chunk._.isWith) {
+          return { sql: escapeName(chunk._.alias), params: [] };
+        }
+        return this.buildQueryFromSourceParams([
+          new StringChunk("("),
+          chunk._.sql,
+          new StringChunk(") "),
+          new Name(chunk._.alias)
+        ], config);
+      }
+      if (isPgEnum(chunk)) {
+        if (chunk.schema) {
+          return { sql: escapeName(chunk.schema) + "." + escapeName(chunk.enumName), params: [] };
+        }
+        return { sql: escapeName(chunk.enumName), params: [] };
+      }
+      if (isSQLWrapper(chunk)) {
+        if (chunk.shouldOmitSQLParens?.()) {
+          return this.buildQueryFromSourceParams([chunk.getSQL()], config);
+        }
+        return this.buildQueryFromSourceParams([
+          new StringChunk("("),
+          chunk.getSQL(),
+          new StringChunk(")")
+        ], config);
+      }
+      if (inlineParams) {
+        return { sql: this.mapInlineParam(chunk, config), params: [] };
+      }
+      return { sql: escapeParam(paramStartIndex.value++, chunk), params: [chunk], typings: ["none"] };
+    }));
+  }
+  mapInlineParam(chunk, { escapeString }) {
+    if (chunk === null) {
+      return "null";
+    }
+    if (typeof chunk === "number" || typeof chunk === "boolean") {
+      return chunk.toString();
+    }
+    if (typeof chunk === "string") {
+      return escapeString(chunk);
+    }
+    if (typeof chunk === "object") {
+      const mappedValueAsString = chunk.toString();
+      if (mappedValueAsString === "[object Object]") {
+        return escapeString(JSON.stringify(chunk));
+      }
+      return escapeString(mappedValueAsString);
+    }
+    throw new Error("Unexpected param value: " + chunk);
+  }
+  getSQL() {
+    return this;
+  }
+  as(alias) {
+    if (alias === void 0) {
+      return this;
+    }
+    return new _SQL.Aliased(this, alias);
+  }
+  mapWith(decoder2) {
+    this.decoder = typeof decoder2 === "function" ? { mapFromDriverValue: decoder2 } : decoder2;
+    return this;
+  }
+  inlineParams() {
+    this.shouldInlineParams = true;
+    return this;
+  }
+  /**
+   * This method is used to conditionally include a part of the query.
+   *
+   * @param condition - Condition to check
+   * @returns itself if the condition is `true`, otherwise `undefined`
+   */
+  if(condition) {
+    return condition ? this : void 0;
+  }
+};
+var Name = class {
+  constructor(value) {
+    this.value = value;
+  }
+  static [entityKind] = "Name";
+  brand;
+  getSQL() {
+    return new SQL([this]);
+  }
+};
+function isDriverValueEncoder(value) {
+  return typeof value === "object" && value !== null && "mapToDriverValue" in value && typeof value.mapToDriverValue === "function";
+}
+var noopDecoder = {
+  mapFromDriverValue: (value) => value
+};
+var noopEncoder = {
+  mapToDriverValue: (value) => value
+};
+var noopMapper = {
+  ...noopDecoder,
+  ...noopEncoder
+};
+var Param = class {
+  /**
+   * @param value - Parameter value
+   * @param encoder - Encoder to convert the value to a driver parameter
+   */
+  constructor(value, encoder2 = noopEncoder) {
+    this.value = value;
+    this.encoder = encoder2;
+  }
+  static [entityKind] = "Param";
+  brand;
+  getSQL() {
+    return new SQL([this]);
+  }
+};
+function sql(strings, ...params) {
+  const queryChunks = [];
+  if (params.length > 0 || strings.length > 0 && strings[0] !== "") {
+    queryChunks.push(new StringChunk(strings[0]));
+  }
+  for (const [paramIndex, param2] of params.entries()) {
+    queryChunks.push(param2, new StringChunk(strings[paramIndex + 1]));
+  }
+  return new SQL(queryChunks);
+}
+((sql2) => {
+  function empty() {
+    return new SQL([]);
+  }
+  sql2.empty = empty;
+  function fromList(list) {
+    return new SQL(list);
+  }
+  sql2.fromList = fromList;
+  function raw2(str) {
+    return new SQL([new StringChunk(str)]);
+  }
+  sql2.raw = raw2;
+  function join(chunks, separator) {
+    const result = [];
+    for (const [i, chunk] of chunks.entries()) {
+      if (i > 0 && separator !== void 0) {
+        result.push(separator);
+      }
+      result.push(chunk);
+    }
+    return new SQL(result);
+  }
+  sql2.join = join;
+  function identifier(value) {
+    return new Name(value);
+  }
+  sql2.identifier = identifier;
+  function placeholder2(name2) {
+    return new Placeholder(name2);
+  }
+  sql2.placeholder = placeholder2;
+  function param2(value, encoder2) {
+    return new Param(value, encoder2);
+  }
+  sql2.param = param2;
+})(sql || (sql = {}));
+((SQL2) => {
+  class Aliased {
+    constructor(sql2, fieldAlias) {
+      this.sql = sql2;
+      this.fieldAlias = fieldAlias;
+    }
+    static [entityKind] = "SQL.Aliased";
+    /** @internal */
+    isSelectionField = false;
+    getSQL() {
+      return this.sql;
+    }
+    /** @internal */
+    clone() {
+      return new Aliased(this.sql, this.fieldAlias);
+    }
+  }
+  SQL2.Aliased = Aliased;
+})(SQL || (SQL = {}));
+var Placeholder = class {
+  constructor(name2) {
+    this.name = name2;
+  }
+  static [entityKind] = "Placeholder";
+  getSQL() {
+    return new SQL([this]);
+  }
+};
+function fillPlaceholders(params, values) {
+  return params.map((p) => {
+    if (is(p, Placeholder)) {
+      if (!(p.name in values)) {
+        throw new Error(`No value for placeholder "${p.name}" was provided`);
+      }
+      return values[p.name];
+    }
+    if (is(p, Param) && is(p.value, Placeholder)) {
+      if (!(p.value.name in values)) {
+        throw new Error(`No value for placeholder "${p.value.name}" was provided`);
+      }
+      return p.encoder.mapToDriverValue(values[p.value.name]);
+    }
+    return p;
   });
 }
-function format(units, scale) {
-  return formatScaledUnits(units, scale);
+var IsDrizzleView = /* @__PURE__ */ Symbol.for("drizzle:IsDrizzleView");
+var View = class {
+  static [entityKind] = "View";
+  /** @internal */
+  [ViewBaseConfig];
+  /** @internal */
+  [IsDrizzleView] = true;
+  constructor({ name: name2, schema, selectedFields, query }) {
+    this[ViewBaseConfig] = {
+      name: name2,
+      originalName: name2,
+      schema,
+      selectedFields,
+      query,
+      isExisting: !query,
+      isAlias: false
+    };
+  }
+  getSQL() {
+    return new SQL([this]);
+  }
+};
+Column.prototype.getSQL = function() {
+  return new SQL([this]);
+};
+Table.prototype.getSQL = function() {
+  return new SQL([this]);
+};
+Subquery.prototype.getSQL = function() {
+  return new SQL([this]);
+};
+
+// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/alias.js
+var ColumnAliasProxyHandler = class {
+  constructor(table) {
+    this.table = table;
+  }
+  static [entityKind] = "ColumnAliasProxyHandler";
+  get(columnObj, prop) {
+    if (prop === "table") {
+      return this.table;
+    }
+    return columnObj[prop];
+  }
+};
+var TableAliasProxyHandler = class {
+  constructor(alias, replaceOriginalName) {
+    this.alias = alias;
+    this.replaceOriginalName = replaceOriginalName;
+  }
+  static [entityKind] = "TableAliasProxyHandler";
+  get(target, prop) {
+    if (prop === Table.Symbol.IsAlias) {
+      return true;
+    }
+    if (prop === Table.Symbol.Name) {
+      return this.alias;
+    }
+    if (this.replaceOriginalName && prop === Table.Symbol.OriginalName) {
+      return this.alias;
+    }
+    if (prop === ViewBaseConfig) {
+      return {
+        ...target[ViewBaseConfig],
+        name: this.alias,
+        isAlias: true
+      };
+    }
+    if (prop === Table.Symbol.Columns) {
+      const columns = target[Table.Symbol.Columns];
+      if (!columns) {
+        return columns;
+      }
+      const proxiedColumns = {};
+      Object.keys(columns).map((key) => {
+        proxiedColumns[key] = new Proxy(
+          columns[key],
+          new ColumnAliasProxyHandler(new Proxy(target, this))
+        );
+      });
+      return proxiedColumns;
+    }
+    const value = target[prop];
+    if (is(value, Column)) {
+      return new Proxy(value, new ColumnAliasProxyHandler(new Proxy(target, this)));
+    }
+    return value;
+  }
+};
+var RelationTableAliasProxyHandler = class {
+  constructor(alias) {
+    this.alias = alias;
+  }
+  static [entityKind] = "RelationTableAliasProxyHandler";
+  get(target, prop) {
+    if (prop === "sourceTable") {
+      return aliasedTable(target.sourceTable, this.alias);
+    }
+    return target[prop];
+  }
+};
+function aliasedTable(table, tableAlias) {
+  return new Proxy(table, new TableAliasProxyHandler(tableAlias, false));
 }
-function add(left, right) {
-  return left + right;
+function aliasedTableColumn(column, tableAlias) {
+  return new Proxy(
+    column,
+    new ColumnAliasProxyHandler(new Proxy(column.table, new TableAliasProxyHandler(tableAlias, false)))
+  );
 }
-function sub(left, right) {
-  return left - right;
+function mapColumnsInAliasedSQLToAlias(query, alias) {
+  return new SQL.Aliased(mapColumnsInSQLToAlias(query.sql, alias), query.fieldAlias);
 }
-function roundRatioHalfUp(numerator, denominator) {
-  assertPositiveDenominator(denominator);
-  const sign = numerator < 0n ? -1n : 1n;
-  const absoluteNumerator = numerator < 0n ? -numerator : numerator;
-  return sign * ((absoluteNumerator + denominator / 2n) / denominator);
+function mapColumnsInSQLToAlias(query, alias) {
+  return sql.join(query.queryChunks.map((c) => {
+    if (is(c, Column)) {
+      return aliasedTableColumn(c, alias);
+    }
+    if (is(c, SQL)) {
+      return mapColumnsInSQLToAlias(c, alias);
+    }
+    if (is(c, SQL.Aliased)) {
+      return mapColumnsInAliasedSQLToAlias(c, alias);
+    }
+    return c;
+  }));
 }
-function mulByRatio(units, numerator, denominator, mode) {
-  assertPositiveDenominator(denominator);
-  return roundQuotient(units * numerator, denominator, mode);
-}
-function applyDecimalFactor(units, factorText, mode) {
-  const factor = parseDecimalFactor(factorText, 12, "decimal_invalid");
-  return mulByRatio(units, factor.units, factor.scale, mode);
-}
-function percentage(units, percentageText, mode) {
-  const factor = parseDecimalFactor(percentageText, 12, "decimal_invalid");
-  return mulByRatio(units, factor.units, factor.scale * 100n, mode);
-}
-function mulScaled(left, right, scale, mode) {
-  return mulByRatio(left, right, scaleFactor(scale), mode);
-}
-function divScaled(left, right, scale, mode) {
-  if (right === 0n) {
-    raiseFinanceDomainError("money_ratio_invalid", "Scaled division denominator must not be zero.", {
-      left: left.toString(),
-      right: right.toString(),
-      scale: String(scale)
+
+// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/errors.js
+var DrizzleError = class extends Error {
+  static [entityKind] = "DrizzleError";
+  constructor({ message: message2, cause }) {
+    super(message2);
+    this.name = "DrizzleError";
+    this.cause = cause;
+  }
+};
+var DrizzleQueryError = class _DrizzleQueryError extends Error {
+  constructor(query, params, cause) {
+    super(`Failed query: ${query}
+params: ${params}`);
+    this.query = query;
+    this.params = params;
+    this.cause = cause;
+    Error.captureStackTrace(this, _DrizzleQueryError);
+    if (cause) this.cause = cause;
+  }
+};
+var TransactionRollbackError = class extends DrizzleError {
+  static [entityKind] = "TransactionRollbackError";
+  constructor() {
+    super({ message: "Rollback" });
+  }
+};
+
+// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/logger.js
+var ConsoleLogWriter = class {
+  static [entityKind] = "ConsoleLogWriter";
+  write(message2) {
+    console.log(message2);
+  }
+};
+var DefaultLogger = class {
+  static [entityKind] = "DefaultLogger";
+  writer;
+  constructor(config) {
+    this.writer = config?.writer ?? new ConsoleLogWriter();
+  }
+  logQuery(query, params) {
+    const stringifiedParams = params.map((p) => {
+      try {
+        return JSON.stringify(p);
+      } catch {
+        return String(p);
+      }
     });
+    const paramsStr = stringifiedParams.length ? ` -- params: [${stringifiedParams.join(", ")}]` : "";
+    this.writer.write(`Query: ${query}${paramsStr}`);
   }
-  const scaleMultiplier = scaleFactor(scale);
-  if (right < 0n) {
-    return roundQuotient(-(left * scaleMultiplier), -right, mode);
+};
+var NoopLogger = class {
+  static [entityKind] = "NoopLogger";
+  logQuery() {
   }
-  return roundQuotient(left * scaleMultiplier, right, mode);
+};
+
+// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/query-promise.js
+var QueryPromise = class {
+  static [entityKind] = "QueryPromise";
+  [Symbol.toStringTag] = "QueryPromise";
+  catch(onRejected) {
+    return this.then(void 0, onRejected);
+  }
+  finally(onFinally) {
+    return this.then(
+      (value) => {
+        onFinally?.();
+        return value;
+      },
+      (reason) => {
+        onFinally?.();
+        throw reason;
+      }
+    );
+  }
+  then(onFulfilled, onRejected) {
+    return this.execute().then(onFulfilled, onRejected);
+  }
+};
+
+// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/utils.js
+function mapResultRow(columns, row, joinsNotNullableMap) {
+  const nullifyMap = {};
+  const result = columns.reduce(
+    (result2, { path, field }, columnIndex) => {
+      let decoder2;
+      if (is(field, Column)) {
+        decoder2 = field;
+      } else if (is(field, SQL)) {
+        decoder2 = field.decoder;
+      } else if (is(field, Subquery)) {
+        decoder2 = field._.sql.decoder;
+      } else {
+        decoder2 = field.sql.decoder;
+      }
+      let node = result2;
+      for (const [pathChunkIndex, pathChunk] of path.entries()) {
+        if (pathChunkIndex < path.length - 1) {
+          if (!(pathChunk in node)) {
+            node[pathChunk] = {};
+          }
+          node = node[pathChunk];
+        } else {
+          const rawValue = row[columnIndex];
+          const value = node[pathChunk] = rawValue === null ? null : decoder2.mapFromDriverValue(rawValue);
+          if (joinsNotNullableMap && is(field, Column) && path.length === 2) {
+            const objectName = path[0];
+            if (!(objectName in nullifyMap)) {
+              nullifyMap[objectName] = value === null ? getTableName(field.table) : false;
+            } else if (typeof nullifyMap[objectName] === "string" && nullifyMap[objectName] !== getTableName(field.table)) {
+              nullifyMap[objectName] = false;
+            }
+          }
+        }
+      }
+      return result2;
+    },
+    {}
+  );
+  if (joinsNotNullableMap && Object.keys(nullifyMap).length > 0) {
+    for (const [objectName, tableName] of Object.entries(nullifyMap)) {
+      if (typeof tableName === "string" && !joinsNotNullableMap[tableName]) {
+        result[objectName] = null;
+      }
+    }
+  }
+  return result;
 }
-function formatScaledUnits(units, scale) {
-  if (!Number.isSafeInteger(scale) || scale < 0) {
-    raiseFinanceDomainError("decimal_scale_invalid", "Decimal format scale must be a non-negative safe integer.", {
-      scale: String(scale)
-    });
-  }
-  if (scale === 0) {
-    return units.toString();
-  }
-  const negative = units < 0n;
-  const absoluteText = (negative ? -units : units).toString().padStart(scale + 1, "0");
-  const wholeText = absoluteText.slice(0, absoluteText.length - scale);
-  const fractionText = absoluteText.slice(absoluteText.length - scale);
-  return `${negative ? "-" : ""}${wholeText}.${fractionText}`;
+function orderSelectedFields(fields, pathPrefix) {
+  return Object.entries(fields).reduce((result, [name, field]) => {
+    if (typeof name !== "string") {
+      return result;
+    }
+    const newPath = pathPrefix ? [...pathPrefix, name] : [name];
+    if (is(field, Column) || is(field, SQL) || is(field, SQL.Aliased) || is(field, Subquery)) {
+      result.push({ path: newPath, field });
+    } else if (is(field, Table)) {
+      result.push(...orderSelectedFields(field[Table.Symbol.Columns], newPath));
+    } else {
+      result.push(...orderSelectedFields(field, newPath));
+    }
+    return result;
+  }, []);
 }
-function parseEofMoney(value) {
-  return parseDecimalToUnits(value, {
-    scale: EOF_MONEY_SCALE,
-    roundingMode: "HALF_UP",
-    maximumFractionDigits: 12,
-    invalidCode: "decimal_invalid"
+function haveSameKeys(left, right) {
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  if (leftKeys.length !== rightKeys.length) {
+    return false;
+  }
+  for (const [index, key] of leftKeys.entries()) {
+    if (key !== rightKeys[index]) {
+      return false;
+    }
+  }
+  return true;
+}
+function mapUpdateSet(table, values) {
+  const entries = Object.entries(values).filter(([, value]) => value !== void 0).map(([key, value]) => {
+    if (is(value, SQL) || is(value, Column)) {
+      return [key, value];
+    } else {
+      return [key, new Param(value, table[Table.Symbol.Columns][key])];
+    }
   });
+  if (entries.length === 0) {
+    throw new Error("No values to set");
+  }
+  return Object.fromEntries(entries);
 }
-function parseErhMoney(value) {
-  return parseDecimalToUnits(value, {
-    scale: ERH_MONEY_SCALE,
-    roundingMode: "TRUNCATE",
-    maximumFractionDigits: null,
-    invalidCode: "decimal_invalid"
+function applyMixins(baseClass, extendedClasses) {
+  for (const extendedClass of extendedClasses) {
+    for (const name of Object.getOwnPropertyNames(extendedClass.prototype)) {
+      if (name === "constructor") continue;
+      Object.defineProperty(
+        baseClass.prototype,
+        name,
+        Object.getOwnPropertyDescriptor(extendedClass.prototype, name) || /* @__PURE__ */ Object.create(null)
+      );
+    }
+  }
+}
+function getTableColumns(table) {
+  return table[Table.Symbol.Columns];
+}
+function getTableLikeName(table) {
+  return is(table, Subquery) ? table._.alias : is(table, View) ? table[ViewBaseConfig].name : is(table, SQL) ? void 0 : table[Table.Symbol.IsAlias] ? table[Table.Symbol.Name] : table[Table.Symbol.BaseName];
+}
+function isConfig(data) {
+  if (typeof data !== "object" || data === null) return false;
+  if (data.constructor.name !== "Object") return false;
+  if ("logger" in data) {
+    const type = typeof data["logger"];
+    if (type !== "boolean" && (type !== "object" || typeof data["logger"]["logQuery"] !== "function") && type !== "undefined") return false;
+    return true;
+  }
+  if ("schema" in data) {
+    const type = typeof data["schema"];
+    if (type !== "object" && type !== "undefined") return false;
+    return true;
+  }
+  if ("casing" in data) {
+    const type = typeof data["casing"];
+    if (type !== "string" && type !== "undefined") return false;
+    return true;
+  }
+  if ("mode" in data) {
+    if (data["mode"] !== "default" || data["mode"] !== "planetscale" || data["mode"] !== void 0) return false;
+    return true;
+  }
+  if ("connection" in data) {
+    const type = typeof data["connection"];
+    if (type !== "string" && type !== "object" && type !== "undefined") return false;
+    return true;
+  }
+  if ("client" in data) {
+    const type = typeof data["client"];
+    if (type !== "object" && type !== "function" && type !== "undefined") return false;
+    return true;
+  }
+  if (Object.keys(data).length === 0) return true;
+  return false;
+}
+var textDecoder = typeof TextDecoder === "undefined" ? null : new TextDecoder();
+
+// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/pg-core/columns/date.common.js
+var PgDateColumnBaseBuilder = class extends PgColumnBuilder {
+  static [entityKind] = "PgDateColumnBaseBuilder";
+  defaultNow() {
+    return this.default(sql`now()`);
+  }
+};
+
+// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/pg-core/columns/date.js
+var PgDateBuilder = class extends PgDateColumnBaseBuilder {
+  static [entityKind] = "PgDateBuilder";
+  constructor(name) {
+    super(name, "date", "PgDate");
+  }
+  /** @internal */
+  build(table) {
+    return new PgDate(table, this.config);
+  }
+};
+var PgDate = class extends PgColumn {
+  static [entityKind] = "PgDate";
+  getSQLType() {
+    return "date";
+  }
+  mapFromDriverValue(value) {
+    if (typeof value === "string") return new Date(value);
+    return value;
+  }
+  mapToDriverValue(value) {
+    return value.toISOString();
+  }
+};
+var PgDateStringBuilder = class extends PgDateColumnBaseBuilder {
+  static [entityKind] = "PgDateStringBuilder";
+  constructor(name) {
+    super(name, "string", "PgDateString");
+  }
+  /** @internal */
+  build(table) {
+    return new PgDateString(
+      table,
+      this.config
+    );
+  }
+};
+var PgDateString = class extends PgColumn {
+  static [entityKind] = "PgDateString";
+  getSQLType() {
+    return "date";
+  }
+  mapFromDriverValue(value) {
+    if (typeof value === "string") return value;
+    return value.toISOString().slice(0, -14);
+  }
+};
+
+// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/pg-core/columns/json.js
+var PgJsonBuilder = class extends PgColumnBuilder {
+  static [entityKind] = "PgJsonBuilder";
+  constructor(name) {
+    super(name, "json", "PgJson");
+  }
+  /** @internal */
+  build(table) {
+    return new PgJson(table, this.config);
+  }
+};
+var PgJson = class extends PgColumn {
+  static [entityKind] = "PgJson";
+  constructor(table, config) {
+    super(table, config);
+  }
+  getSQLType() {
+    return "json";
+  }
+  mapToDriverValue(value) {
+    return JSON.stringify(value);
+  }
+  mapFromDriverValue(value) {
+    if (typeof value === "string") {
+      try {
+        return JSON.parse(value);
+      } catch {
+        return value;
+      }
+    }
+    return value;
+  }
+};
+
+// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/pg-core/columns/jsonb.js
+var PgJsonbBuilder = class extends PgColumnBuilder {
+  static [entityKind] = "PgJsonbBuilder";
+  constructor(name) {
+    super(name, "json", "PgJsonb");
+  }
+  /** @internal */
+  build(table) {
+    return new PgJsonb(table, this.config);
+  }
+};
+var PgJsonb = class extends PgColumn {
+  static [entityKind] = "PgJsonb";
+  constructor(table, config) {
+    super(table, config);
+  }
+  getSQLType() {
+    return "jsonb";
+  }
+  mapToDriverValue(value) {
+    return JSON.stringify(value);
+  }
+  mapFromDriverValue(value) {
+    if (typeof value === "string") {
+      try {
+        return JSON.parse(value);
+      } catch {
+        return value;
+      }
+    }
+    return value;
+  }
+};
+
+// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/pg-core/columns/numeric.js
+var PgNumericBuilder = class extends PgColumnBuilder {
+  static [entityKind] = "PgNumericBuilder";
+  constructor(name, precision, scale) {
+    super(name, "string", "PgNumeric");
+    this.config.precision = precision;
+    this.config.scale = scale;
+  }
+  /** @internal */
+  build(table) {
+    return new PgNumeric(table, this.config);
+  }
+};
+var PgNumeric = class extends PgColumn {
+  static [entityKind] = "PgNumeric";
+  precision;
+  scale;
+  constructor(table, config) {
+    super(table, config);
+    this.precision = config.precision;
+    this.scale = config.scale;
+  }
+  mapFromDriverValue(value) {
+    if (typeof value === "string") return value;
+    return String(value);
+  }
+  getSQLType() {
+    if (this.precision !== void 0 && this.scale !== void 0) {
+      return `numeric(${this.precision}, ${this.scale})`;
+    } else if (this.precision === void 0) {
+      return "numeric";
+    } else {
+      return `numeric(${this.precision})`;
+    }
+  }
+};
+var PgNumericNumberBuilder = class extends PgColumnBuilder {
+  static [entityKind] = "PgNumericNumberBuilder";
+  constructor(name, precision, scale) {
+    super(name, "number", "PgNumericNumber");
+    this.config.precision = precision;
+    this.config.scale = scale;
+  }
+  /** @internal */
+  build(table) {
+    return new PgNumericNumber(
+      table,
+      this.config
+    );
+  }
+};
+var PgNumericNumber = class extends PgColumn {
+  static [entityKind] = "PgNumericNumber";
+  precision;
+  scale;
+  constructor(table, config) {
+    super(table, config);
+    this.precision = config.precision;
+    this.scale = config.scale;
+  }
+  mapFromDriverValue(value) {
+    if (typeof value === "number") return value;
+    return Number(value);
+  }
+  mapToDriverValue = String;
+  getSQLType() {
+    if (this.precision !== void 0 && this.scale !== void 0) {
+      return `numeric(${this.precision}, ${this.scale})`;
+    } else if (this.precision === void 0) {
+      return "numeric";
+    } else {
+      return `numeric(${this.precision})`;
+    }
+  }
+};
+var PgNumericBigIntBuilder = class extends PgColumnBuilder {
+  static [entityKind] = "PgNumericBigIntBuilder";
+  constructor(name, precision, scale) {
+    super(name, "bigint", "PgNumericBigInt");
+    this.config.precision = precision;
+    this.config.scale = scale;
+  }
+  /** @internal */
+  build(table) {
+    return new PgNumericBigInt(
+      table,
+      this.config
+    );
+  }
+};
+var PgNumericBigInt = class extends PgColumn {
+  static [entityKind] = "PgNumericBigInt";
+  precision;
+  scale;
+  constructor(table, config) {
+    super(table, config);
+    this.precision = config.precision;
+    this.scale = config.scale;
+  }
+  mapFromDriverValue = BigInt;
+  mapToDriverValue = String;
+  getSQLType() {
+    if (this.precision !== void 0 && this.scale !== void 0) {
+      return `numeric(${this.precision}, ${this.scale})`;
+    } else if (this.precision === void 0) {
+      return "numeric";
+    } else {
+      return `numeric(${this.precision})`;
+    }
+  }
+};
+
+// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/pg-core/columns/time.js
+var PgTimeBuilder = class extends PgDateColumnBaseBuilder {
+  constructor(name, withTimezone, precision) {
+    super(name, "string", "PgTime");
+    this.withTimezone = withTimezone;
+    this.precision = precision;
+    this.config.withTimezone = withTimezone;
+    this.config.precision = precision;
+  }
+  static [entityKind] = "PgTimeBuilder";
+  /** @internal */
+  build(table) {
+    return new PgTime(table, this.config);
+  }
+};
+var PgTime = class extends PgColumn {
+  static [entityKind] = "PgTime";
+  withTimezone;
+  precision;
+  constructor(table, config) {
+    super(table, config);
+    this.withTimezone = config.withTimezone;
+    this.precision = config.precision;
+  }
+  getSQLType() {
+    const precision = this.precision === void 0 ? "" : `(${this.precision})`;
+    return `time${precision}${this.withTimezone ? " with time zone" : ""}`;
+  }
+};
+
+// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/pg-core/columns/timestamp.js
+var PgTimestampBuilder = class extends PgDateColumnBaseBuilder {
+  static [entityKind] = "PgTimestampBuilder";
+  constructor(name, withTimezone, precision) {
+    super(name, "date", "PgTimestamp");
+    this.config.withTimezone = withTimezone;
+    this.config.precision = precision;
+  }
+  /** @internal */
+  build(table) {
+    return new PgTimestamp(table, this.config);
+  }
+};
+var PgTimestamp = class extends PgColumn {
+  static [entityKind] = "PgTimestamp";
+  withTimezone;
+  precision;
+  constructor(table, config) {
+    super(table, config);
+    this.withTimezone = config.withTimezone;
+    this.precision = config.precision;
+  }
+  getSQLType() {
+    const precision = this.precision === void 0 ? "" : ` (${this.precision})`;
+    return `timestamp${precision}${this.withTimezone ? " with time zone" : ""}`;
+  }
+  mapFromDriverValue(value) {
+    if (typeof value === "string") return new Date(this.withTimezone ? value : value + "+0000");
+    return value;
+  }
+  mapToDriverValue = (value) => {
+    return value.toISOString();
+  };
+};
+var PgTimestampStringBuilder = class extends PgDateColumnBaseBuilder {
+  static [entityKind] = "PgTimestampStringBuilder";
+  constructor(name, withTimezone, precision) {
+    super(name, "string", "PgTimestampString");
+    this.config.withTimezone = withTimezone;
+    this.config.precision = precision;
+  }
+  /** @internal */
+  build(table) {
+    return new PgTimestampString(
+      table,
+      this.config
+    );
+  }
+};
+var PgTimestampString = class extends PgColumn {
+  static [entityKind] = "PgTimestampString";
+  withTimezone;
+  precision;
+  constructor(table, config) {
+    super(table, config);
+    this.withTimezone = config.withTimezone;
+    this.precision = config.precision;
+  }
+  getSQLType() {
+    const precision = this.precision === void 0 ? "" : `(${this.precision})`;
+    return `timestamp${precision}${this.withTimezone ? " with time zone" : ""}`;
+  }
+  mapFromDriverValue(value) {
+    if (typeof value === "string") return value;
+    const shortened = value.toISOString().slice(0, -1).replace("T", " ");
+    if (this.withTimezone) {
+      const offset = value.getTimezoneOffset();
+      const sign = offset <= 0 ? "+" : "-";
+      return `${shortened}${sign}${Math.floor(Math.abs(offset) / 60).toString().padStart(2, "0")}`;
+    }
+    return shortened;
+  }
+};
+
+// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/pg-core/columns/uuid.js
+var PgUUIDBuilder = class extends PgColumnBuilder {
+  static [entityKind] = "PgUUIDBuilder";
+  constructor(name) {
+    super(name, "string", "PgUUID");
+  }
+  /**
+   * Adds `default gen_random_uuid()` to the column definition.
+   */
+  defaultRandom() {
+    return this.default(sql`gen_random_uuid()`);
+  }
+  /** @internal */
+  build(table) {
+    return new PgUUID(table, this.config);
+  }
+};
+var PgUUID = class extends PgColumn {
+  static [entityKind] = "PgUUID";
+  getSQLType() {
+    return "uuid";
+  }
+};
+
+// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/pg-core/table.js
+var InlineForeignKeys = /* @__PURE__ */ Symbol.for("drizzle:PgInlineForeignKeys");
+var EnableRLS = /* @__PURE__ */ Symbol.for("drizzle:EnableRLS");
+var PgTable = class extends Table {
+  static [entityKind] = "PgTable";
+  /** @internal */
+  static Symbol = Object.assign({}, Table.Symbol, {
+    InlineForeignKeys,
+    EnableRLS
   });
-}
-function formatEofMoney(units) {
-  return formatScaledUnits(units, EOF_MONEY_SCALE);
-}
-function formatErhMoney(units) {
-  return formatScaledUnits(units, ERH_MONEY_SCALE);
-}
-function mulByRatioEof(units, numerator, denominator) {
-  return mulByRatio(units, numerator, denominator, "HALF_UP");
-}
-function mulByRatioErh(units, numerator, denominator) {
-  return mulByRatio(units, numerator, denominator, "TRUNCATE");
-}
-function applyDecimalFactorEof(units, factor) {
-  return applyDecimalFactor(units, factor, "HALF_UP");
-}
-function applyDecimalFactorErh(units, factor) {
-  return applyDecimalFactor(units, factor, "TRUNCATE");
-}
-function percentageEof(units, percentageText) {
-  return percentage(units, percentageText, "HALF_UP");
-}
-function percentageErh(units, percentageText) {
-  return percentage(units, percentageText, "TRUNCATE");
-}
-function mulScaledEof(left, right) {
-  return mulScaled(left, right, EOF_MONEY_SCALE, "HALF_UP");
-}
-function mulScaledErh(left, right) {
-  return mulScaled(left, right, ERH_MONEY_SCALE, "TRUNCATE");
-}
-function divScaledEof(left, right) {
-  return divScaled(left, right, EOF_MONEY_SCALE, "HALF_UP");
-}
-function divScaledErh(left, right) {
-  return divScaled(left, right, ERH_MONEY_SCALE, "TRUNCATE");
-}
-function parseDecimalToUnits(value, options) {
-  const parsed = parseDecimalText(value, options.invalidCode);
-  if (options.maximumFractionDigits !== null && parsed.fractionText.length > options.maximumFractionDigits) {
-    raiseFinanceDomainError("decimal_scale_invalid", "Decimal value has more fractional digits than this boundary allows.", {
-      decimalValue: value,
-      maximumFractionDigits: String(options.maximumFractionDigits),
-      actualFractionDigits: String(parsed.fractionText.length)
-    });
+  /**@internal */
+  [InlineForeignKeys] = [];
+  /** @internal */
+  [EnableRLS] = false;
+  /** @internal */
+  [Table.Symbol.ExtraConfigBuilder] = void 0;
+  /** @internal */
+  [Table.Symbol.ExtraConfigColumns] = {};
+};
+
+// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/pg-core/primary-keys.js
+var PrimaryKeyBuilder = class {
+  static [entityKind] = "PgPrimaryKeyBuilder";
+  /** @internal */
+  columns;
+  /** @internal */
+  name;
+  constructor(columns, name) {
+    this.columns = columns;
+    this.name = name;
   }
-  assertScale(options.scale);
-  if (parsed.fractionText.length <= options.scale) {
-    const paddedFraction = parsed.fractionText.padEnd(options.scale, "0");
-    return parsed.sign * BigInt(`${parsed.wholeText}${paddedFraction}`);
+  /** @internal */
+  build(table) {
+    return new PrimaryKey(table, this.columns, this.name);
   }
-  const rawUnits = parsed.sign * BigInt(`${parsed.wholeText}${parsed.fractionText}`);
-  const excessScale = parsed.fractionText.length - options.scale;
-  return roundQuotient(rawUnits, scaleFactor(excessScale), options.roundingMode);
+};
+var PrimaryKey = class {
+  constructor(table, columns, name) {
+    this.table = table;
+    this.columns = columns;
+    this.name = name;
+  }
+  static [entityKind] = "PgPrimaryKey";
+  columns;
+  name;
+  getName() {
+    return this.name ?? `${this.table[PgTable.Symbol.Name]}_${this.columns.map((column) => column.name).join("_")}_pk`;
+  }
+};
+
+// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/sql/expressions/conditions.js
+function bindIfParam(value, column) {
+  if (isDriverValueEncoder(column) && !isSQLWrapper(value) && !is(value, Param) && !is(value, Placeholder) && !is(value, Column) && !is(value, Table) && !is(value, View)) {
+    return new Param(value, column);
+  }
+  return value;
 }
-function parseDecimalFactor(value, maximumFractionDigits, invalidCode) {
-  const parsed = parseDecimalText(value, invalidCode);
-  if (parsed.fractionText.length > maximumFractionDigits) {
-    raiseFinanceDomainError("decimal_scale_invalid", "Decimal factor has more fractional digits than this boundary allows.", {
-      decimalValue: value,
-      maximumFractionDigits: String(maximumFractionDigits),
-      actualFractionDigits: String(parsed.fractionText.length)
-    });
+var eq = (left, right) => {
+  return sql`${left} = ${bindIfParam(right, left)}`;
+};
+var ne = (left, right) => {
+  return sql`${left} <> ${bindIfParam(right, left)}`;
+};
+function and(...unfilteredConditions) {
+  const conditions = unfilteredConditions.filter(
+    (c) => c !== void 0
+  );
+  if (conditions.length === 0) {
+    return void 0;
   }
-  const units = parsed.sign * BigInt(`${parsed.wholeText}${parsed.fractionText}`);
-  const denominator = parsed.fractionText.length === 0 ? 1n : scaleFactor(parsed.fractionText.length);
+  if (conditions.length === 1) {
+    return new SQL(conditions);
+  }
+  return new SQL([
+    new StringChunk("("),
+    sql.join(conditions, new StringChunk(" and ")),
+    new StringChunk(")")
+  ]);
+}
+function or(...unfilteredConditions) {
+  const conditions = unfilteredConditions.filter(
+    (c) => c !== void 0
+  );
+  if (conditions.length === 0) {
+    return void 0;
+  }
+  if (conditions.length === 1) {
+    return new SQL(conditions);
+  }
+  return new SQL([
+    new StringChunk("("),
+    sql.join(conditions, new StringChunk(" or ")),
+    new StringChunk(")")
+  ]);
+}
+function not(condition) {
+  return sql`not ${condition}`;
+}
+var gt = (left, right) => {
+  return sql`${left} > ${bindIfParam(right, left)}`;
+};
+var gte = (left, right) => {
+  return sql`${left} >= ${bindIfParam(right, left)}`;
+};
+var lt = (left, right) => {
+  return sql`${left} < ${bindIfParam(right, left)}`;
+};
+var lte = (left, right) => {
+  return sql`${left} <= ${bindIfParam(right, left)}`;
+};
+function inArray(column, values) {
+  if (Array.isArray(values)) {
+    if (values.length === 0) {
+      return sql`false`;
+    }
+    return sql`${column} in ${values.map((v) => bindIfParam(v, column))}`;
+  }
+  return sql`${column} in ${bindIfParam(values, column)}`;
+}
+function notInArray(column, values) {
+  if (Array.isArray(values)) {
+    if (values.length === 0) {
+      return sql`true`;
+    }
+    return sql`${column} not in ${values.map((v) => bindIfParam(v, column))}`;
+  }
+  return sql`${column} not in ${bindIfParam(values, column)}`;
+}
+function isNull(value) {
+  return sql`${value} is null`;
+}
+function isNotNull(value) {
+  return sql`${value} is not null`;
+}
+function exists(subquery) {
+  return sql`exists ${subquery}`;
+}
+function notExists(subquery) {
+  return sql`not exists ${subquery}`;
+}
+function between(column, min, max) {
+  return sql`${column} between ${bindIfParam(min, column)} and ${bindIfParam(
+    max,
+    column
+  )}`;
+}
+function notBetween(column, min, max) {
+  return sql`${column} not between ${bindIfParam(
+    min,
+    column
+  )} and ${bindIfParam(max, column)}`;
+}
+function like(column, value) {
+  return sql`${column} like ${value}`;
+}
+function notLike(column, value) {
+  return sql`${column} not like ${value}`;
+}
+function ilike(column, value) {
+  return sql`${column} ilike ${value}`;
+}
+function notIlike(column, value) {
+  return sql`${column} not ilike ${value}`;
+}
+
+// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/sql/expressions/select.js
+function asc(column) {
+  return sql`${column} asc`;
+}
+function desc(column) {
+  return sql`${column} desc`;
+}
+
+// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/relations.js
+var Relation = class {
+  constructor(sourceTable, referencedTable, relationName) {
+    this.sourceTable = sourceTable;
+    this.referencedTable = referencedTable;
+    this.relationName = relationName;
+    this.referencedTableName = referencedTable[Table.Symbol.Name];
+  }
+  static [entityKind] = "Relation";
+  referencedTableName;
+  fieldName;
+};
+var Relations = class {
+  constructor(table, config) {
+    this.table = table;
+    this.config = config;
+  }
+  static [entityKind] = "Relations";
+};
+var One = class _One extends Relation {
+  constructor(sourceTable, referencedTable, config, isNullable) {
+    super(sourceTable, referencedTable, config?.relationName);
+    this.config = config;
+    this.isNullable = isNullable;
+  }
+  static [entityKind] = "One";
+  withFieldName(fieldName) {
+    const relation = new _One(
+      this.sourceTable,
+      this.referencedTable,
+      this.config,
+      this.isNullable
+    );
+    relation.fieldName = fieldName;
+    return relation;
+  }
+};
+var Many = class _Many extends Relation {
+  constructor(sourceTable, referencedTable, config) {
+    super(sourceTable, referencedTable, config?.relationName);
+    this.config = config;
+  }
+  static [entityKind] = "Many";
+  withFieldName(fieldName) {
+    const relation = new _Many(
+      this.sourceTable,
+      this.referencedTable,
+      this.config
+    );
+    relation.fieldName = fieldName;
+    return relation;
+  }
+};
+function getOperators() {
   return {
-    units,
-    scale: denominator,
-    normalized: parsed.normalized
+    and,
+    between,
+    eq,
+    exists,
+    gt,
+    gte,
+    ilike,
+    inArray,
+    isNull,
+    isNotNull,
+    like,
+    lt,
+    lte,
+    ne,
+    not,
+    notBetween,
+    notExists,
+    notLike,
+    notIlike,
+    notInArray,
+    or,
+    sql
   };
 }
-function parseDecimalText(value, invalidCode) {
-  if (typeof value !== "string") {
-    raiseFinanceDomainError(invalidCode, "Decimal value must be provided as a string.", {
-      valueType: typeof value
-    });
-  }
-  const sanitized = value.replaceAll(",", "");
-  const match2 = /^([+-]?)(\d+)(?:\.(\d+))?$/.exec(sanitized);
-  if (match2 === null) {
-    raiseFinanceDomainError(invalidCode, "Decimal value must be a plain decimal string.", {
-      decimalValue: value
-    });
-  }
-  const signText = match2[1] ?? "";
-  const wholeText = match2[2] ?? "";
-  const fractionText = match2[3] ?? "";
-  const sign = signText === "-" ? -1n : 1n;
-  const normalized = `${signText === "-" ? "-" : ""}${wholeText}${fractionText.length === 0 ? "" : `.${fractionText}`}`;
+function getOrderByOperators() {
   return {
-    sign,
-    wholeText,
-    fractionText,
-    normalized
+    sql,
+    asc,
+    desc
   };
 }
-function roundQuotient(numerator, denominator, mode) {
-  assertPositiveDenominator(denominator);
-  if (mode === "HALF_UP") {
-    return roundRatioHalfUp(numerator, denominator);
+function extractTablesRelationalConfig(schema, configHelpers) {
+  if (Object.keys(schema).length === 1 && "default" in schema && !is(schema["default"], Table)) {
+    schema = schema["default"];
   }
-  if (mode === "TRUNCATE") {
-    const sign = numerator < 0n ? -1n : 1n;
-    const absoluteNumerator = numerator < 0n ? -numerator : numerator;
-    return sign * (absoluteNumerator / denominator);
+  const tableNamesMap = {};
+  const relationsBuffer = {};
+  const tablesConfig = {};
+  for (const [key, value] of Object.entries(schema)) {
+    if (is(value, Table)) {
+      const dbName = getTableUniqueName(value);
+      const bufferedRelations = relationsBuffer[dbName];
+      tableNamesMap[dbName] = key;
+      tablesConfig[key] = {
+        tsName: key,
+        dbName: value[Table.Symbol.Name],
+        schema: value[Table.Symbol.Schema],
+        columns: value[Table.Symbol.Columns],
+        relations: bufferedRelations?.relations ?? {},
+        primaryKey: bufferedRelations?.primaryKey ?? []
+      };
+      for (const column of Object.values(
+        value[Table.Symbol.Columns]
+      )) {
+        if (column.primary) {
+          tablesConfig[key].primaryKey.push(column);
+        }
+      }
+      const extraConfig = value[Table.Symbol.ExtraConfigBuilder]?.(value[Table.Symbol.ExtraConfigColumns]);
+      if (extraConfig) {
+        for (const configEntry of Object.values(extraConfig)) {
+          if (is(configEntry, PrimaryKeyBuilder)) {
+            tablesConfig[key].primaryKey.push(...configEntry.columns);
+          }
+        }
+      }
+    } else if (is(value, Relations)) {
+      const dbName = getTableUniqueName(value.table);
+      const tableName = tableNamesMap[dbName];
+      const relations2 = value.config(
+        configHelpers(value.table)
+      );
+      let primaryKey;
+      for (const [relationName, relation] of Object.entries(relations2)) {
+        if (tableName) {
+          const tableConfig = tablesConfig[tableName];
+          tableConfig.relations[relationName] = relation;
+          if (primaryKey) {
+            tableConfig.primaryKey.push(...primaryKey);
+          }
+        } else {
+          if (!(dbName in relationsBuffer)) {
+            relationsBuffer[dbName] = {
+              relations: {},
+              primaryKey
+            };
+          }
+          relationsBuffer[dbName].relations[relationName] = relation;
+        }
+      }
+    }
   }
-  raiseFinanceDomainError("money_ratio_invalid", "Unknown money rounding mode.", {
-    mode
-  });
+  return { tables: tablesConfig, tableNamesMap };
 }
-function assertPositiveDenominator(denominator) {
-  if (denominator <= 0n) {
-    raiseFinanceDomainError("money_ratio_invalid", "Ratio denominator must be greater than zero.", {
-      denominator: denominator.toString()
-    });
-  }
+function createOne(sourceTable) {
+  return function one(table, config) {
+    return new One(
+      sourceTable,
+      table,
+      config,
+      config?.fields.reduce((res, f) => res && f.notNull, true) ?? false
+    );
+  };
 }
-function assertScale(scale) {
-  if (!Number.isSafeInteger(scale) || scale < 0) {
-    raiseFinanceDomainError("decimal_scale_invalid", "Money scale must be a non-negative safe integer.", {
-      scale: String(scale)
-    });
-  }
+function createMany(sourceTable) {
+  return function many(referencedTable, config) {
+    return new Many(sourceTable, referencedTable, config);
+  };
 }
-function scaleFactor(scale) {
-  assertScale(scale);
-  return 10n ** BigInt(scale);
+function normalizeRelation(schema, tableNamesMap, relation) {
+  if (is(relation, One) && relation.config) {
+    return {
+      fields: relation.config.fields,
+      references: relation.config.references
+    };
+  }
+  const referencedTableTsName = tableNamesMap[getTableUniqueName(relation.referencedTable)];
+  if (!referencedTableTsName) {
+    throw new Error(
+      `Table "${relation.referencedTable[Table.Symbol.Name]}" not found in schema`
+    );
+  }
+  const referencedTableConfig = schema[referencedTableTsName];
+  if (!referencedTableConfig) {
+    throw new Error(`Table "${referencedTableTsName}" not found in schema`);
+  }
+  const sourceTable = relation.sourceTable;
+  const sourceTableTsName = tableNamesMap[getTableUniqueName(sourceTable)];
+  if (!sourceTableTsName) {
+    throw new Error(
+      `Table "${sourceTable[Table.Symbol.Name]}" not found in schema`
+    );
+  }
+  const reverseRelations = [];
+  for (const referencedTableRelation of Object.values(
+    referencedTableConfig.relations
+  )) {
+    if (relation.relationName && relation !== referencedTableRelation && referencedTableRelation.relationName === relation.relationName || !relation.relationName && referencedTableRelation.referencedTable === relation.sourceTable) {
+      reverseRelations.push(referencedTableRelation);
+    }
+  }
+  if (reverseRelations.length > 1) {
+    throw relation.relationName ? new Error(
+      `There are multiple relations with name "${relation.relationName}" in table "${referencedTableTsName}"`
+    ) : new Error(
+      `There are multiple relations between "${referencedTableTsName}" and "${relation.sourceTable[Table.Symbol.Name]}". Please specify relation name`
+    );
+  }
+  if (reverseRelations[0] && is(reverseRelations[0], One) && reverseRelations[0].config) {
+    return {
+      fields: reverseRelations[0].config.references,
+      references: reverseRelations[0].config.fields
+    };
+  }
+  throw new Error(
+    `There is not enough information to infer relation "${sourceTableTsName}.${relation.fieldName}"`
+  );
+}
+function createTableRelationsHelpers(sourceTable) {
+  return {
+    one: createOne(sourceTable),
+    many: createMany(sourceTable)
+  };
+}
+function mapRelationalRow(tablesConfig, tableConfig, row, buildQueryResultSelection, mapColumnValue = (value) => value) {
+  const result = {};
+  for (const [
+    selectionItemIndex,
+    selectionItem
+  ] of buildQueryResultSelection.entries()) {
+    if (selectionItem.isJson) {
+      const relation = tableConfig.relations[selectionItem.tsKey];
+      const rawSubRows = row[selectionItemIndex];
+      const subRows = typeof rawSubRows === "string" ? JSON.parse(rawSubRows) : rawSubRows;
+      result[selectionItem.tsKey] = is(relation, One) ? subRows && mapRelationalRow(
+        tablesConfig,
+        tablesConfig[selectionItem.relationTableTsKey],
+        subRows,
+        selectionItem.selection,
+        mapColumnValue
+      ) : subRows.map(
+        (subRow) => mapRelationalRow(
+          tablesConfig,
+          tablesConfig[selectionItem.relationTableTsKey],
+          subRow,
+          selectionItem.selection,
+          mapColumnValue
+        )
+      );
+    } else {
+      const value = mapColumnValue(row[selectionItemIndex]);
+      const field = selectionItem.field;
+      let decoder2;
+      if (is(field, Column)) {
+        decoder2 = field;
+      } else if (is(field, SQL)) {
+        decoder2 = field.decoder;
+      } else {
+        decoder2 = field.sql.decoder;
+      }
+      result[selectionItem.tsKey] = value === null ? null : decoder2.mapFromDriverValue(value);
+    }
+  }
+  return result;
 }
 
 // ../../node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/external.js
@@ -8080,6 +10079,259 @@ var coerce = {
 };
 var NEVER = INVALID;
 
+// ../../packages/domain-finance/src/errors.ts
+function createFinanceDomainError(code, message2, context) {
+  const error = new Error(message2);
+  Object.defineProperty(error, "name", { value: "FinanceDomainError", enumerable: true });
+  Object.defineProperty(error, "code", { value: code, enumerable: true });
+  Object.defineProperty(error, "context", { value: context, enumerable: true });
+  return error;
+}
+function raiseFinanceDomainError(code, message2, context) {
+  throw createFinanceDomainError(code, message2, context);
+}
+
+// ../../packages/domain-finance/src/money.ts
+var EOF_MONEY_SCALE = 2;
+var ERH_MONEY_SCALE = 10;
+var eofMoney = {
+  scale: EOF_MONEY_SCALE,
+  roundingMode: "HALF_UP",
+  parse: parseEofMoney,
+  format: formatEofMoney,
+  add,
+  sub,
+  mulByRatio: mulByRatioEof,
+  applyDecimalFactor: applyDecimalFactorEof,
+  percentage: percentageEof,
+  mulScaled: mulScaledEof,
+  divScaled: divScaledEof
+};
+var erhMoney = {
+  scale: ERH_MONEY_SCALE,
+  roundingMode: "TRUNCATE",
+  parse: parseErhMoney,
+  format: formatErhMoney,
+  add,
+  sub,
+  mulByRatio: mulByRatioErh,
+  applyDecimalFactor: applyDecimalFactorErh,
+  percentage: percentageErh,
+  mulScaled: mulScaledErh,
+  divScaled: divScaledErh
+};
+function parse(value, scale, mode) {
+  return parseDecimalToUnits(value, {
+    scale,
+    roundingMode: mode,
+    maximumFractionDigits: null,
+    invalidCode: "decimal_invalid"
+  });
+}
+function format(units, scale) {
+  return formatScaledUnits(units, scale);
+}
+function add(left, right) {
+  return left + right;
+}
+function sub(left, right) {
+  return left - right;
+}
+function roundRatioHalfUp(numerator, denominator) {
+  assertPositiveDenominator(denominator);
+  const sign = numerator < 0n ? -1n : 1n;
+  const absoluteNumerator = numerator < 0n ? -numerator : numerator;
+  return sign * ((absoluteNumerator + denominator / 2n) / denominator);
+}
+function mulByRatio(units, numerator, denominator, mode) {
+  assertPositiveDenominator(denominator);
+  return roundQuotient(units * numerator, denominator, mode);
+}
+function applyDecimalFactor(units, factorText, mode) {
+  const factor = parseDecimalFactor(factorText, 12, "decimal_invalid");
+  return mulByRatio(units, factor.units, factor.scale, mode);
+}
+function percentage(units, percentageText, mode) {
+  const factor = parseDecimalFactor(percentageText, 12, "decimal_invalid");
+  return mulByRatio(units, factor.units, factor.scale * 100n, mode);
+}
+function mulScaled(left, right, scale, mode) {
+  return mulByRatio(left, right, scaleFactor(scale), mode);
+}
+function divScaled(left, right, scale, mode) {
+  if (right === 0n) {
+    raiseFinanceDomainError("money_ratio_invalid", "Scaled division denominator must not be zero.", {
+      left: left.toString(),
+      right: right.toString(),
+      scale: String(scale)
+    });
+  }
+  const scaleMultiplier = scaleFactor(scale);
+  if (right < 0n) {
+    return roundQuotient(-(left * scaleMultiplier), -right, mode);
+  }
+  return roundQuotient(left * scaleMultiplier, right, mode);
+}
+function formatScaledUnits(units, scale) {
+  if (!Number.isSafeInteger(scale) || scale < 0) {
+    raiseFinanceDomainError("decimal_scale_invalid", "Decimal format scale must be a non-negative safe integer.", {
+      scale: String(scale)
+    });
+  }
+  if (scale === 0) {
+    return units.toString();
+  }
+  const negative = units < 0n;
+  const absoluteText = (negative ? -units : units).toString().padStart(scale + 1, "0");
+  const wholeText = absoluteText.slice(0, absoluteText.length - scale);
+  const fractionText = absoluteText.slice(absoluteText.length - scale);
+  return `${negative ? "-" : ""}${wholeText}.${fractionText}`;
+}
+function parseEofMoney(value) {
+  return parseDecimalToUnits(value, {
+    scale: EOF_MONEY_SCALE,
+    roundingMode: "HALF_UP",
+    maximumFractionDigits: 12,
+    invalidCode: "decimal_invalid"
+  });
+}
+function parseErhMoney(value) {
+  return parseDecimalToUnits(value, {
+    scale: ERH_MONEY_SCALE,
+    roundingMode: "TRUNCATE",
+    maximumFractionDigits: null,
+    invalidCode: "decimal_invalid"
+  });
+}
+function formatEofMoney(units) {
+  return formatScaledUnits(units, EOF_MONEY_SCALE);
+}
+function formatErhMoney(units) {
+  return formatScaledUnits(units, ERH_MONEY_SCALE);
+}
+function mulByRatioEof(units, numerator, denominator) {
+  return mulByRatio(units, numerator, denominator, "HALF_UP");
+}
+function mulByRatioErh(units, numerator, denominator) {
+  return mulByRatio(units, numerator, denominator, "TRUNCATE");
+}
+function applyDecimalFactorEof(units, factor) {
+  return applyDecimalFactor(units, factor, "HALF_UP");
+}
+function applyDecimalFactorErh(units, factor) {
+  return applyDecimalFactor(units, factor, "TRUNCATE");
+}
+function percentageEof(units, percentageText) {
+  return percentage(units, percentageText, "HALF_UP");
+}
+function percentageErh(units, percentageText) {
+  return percentage(units, percentageText, "TRUNCATE");
+}
+function mulScaledEof(left, right) {
+  return mulScaled(left, right, EOF_MONEY_SCALE, "HALF_UP");
+}
+function mulScaledErh(left, right) {
+  return mulScaled(left, right, ERH_MONEY_SCALE, "TRUNCATE");
+}
+function divScaledEof(left, right) {
+  return divScaled(left, right, EOF_MONEY_SCALE, "HALF_UP");
+}
+function divScaledErh(left, right) {
+  return divScaled(left, right, ERH_MONEY_SCALE, "TRUNCATE");
+}
+function parseDecimalToUnits(value, options) {
+  const parsed = parseDecimalText(value, options.invalidCode);
+  if (options.maximumFractionDigits !== null && parsed.fractionText.length > options.maximumFractionDigits) {
+    raiseFinanceDomainError("decimal_scale_invalid", "Decimal value has more fractional digits than this boundary allows.", {
+      decimalValue: value,
+      maximumFractionDigits: String(options.maximumFractionDigits),
+      actualFractionDigits: String(parsed.fractionText.length)
+    });
+  }
+  assertScale(options.scale);
+  if (parsed.fractionText.length <= options.scale) {
+    const paddedFraction = parsed.fractionText.padEnd(options.scale, "0");
+    return parsed.sign * BigInt(`${parsed.wholeText}${paddedFraction}`);
+  }
+  const rawUnits = parsed.sign * BigInt(`${parsed.wholeText}${parsed.fractionText}`);
+  const excessScale = parsed.fractionText.length - options.scale;
+  return roundQuotient(rawUnits, scaleFactor(excessScale), options.roundingMode);
+}
+function parseDecimalFactor(value, maximumFractionDigits, invalidCode) {
+  const parsed = parseDecimalText(value, invalidCode);
+  if (parsed.fractionText.length > maximumFractionDigits) {
+    raiseFinanceDomainError("decimal_scale_invalid", "Decimal factor has more fractional digits than this boundary allows.", {
+      decimalValue: value,
+      maximumFractionDigits: String(maximumFractionDigits),
+      actualFractionDigits: String(parsed.fractionText.length)
+    });
+  }
+  const units = parsed.sign * BigInt(`${parsed.wholeText}${parsed.fractionText}`);
+  const denominator = parsed.fractionText.length === 0 ? 1n : scaleFactor(parsed.fractionText.length);
+  return {
+    units,
+    scale: denominator,
+    normalized: parsed.normalized
+  };
+}
+function parseDecimalText(value, invalidCode) {
+  if (typeof value !== "string") {
+    raiseFinanceDomainError(invalidCode, "Decimal value must be provided as a string.", {
+      valueType: typeof value
+    });
+  }
+  const sanitized = value.replaceAll(",", "");
+  const match2 = /^([+-]?)(\d+)(?:\.(\d+))?$/.exec(sanitized);
+  if (match2 === null) {
+    raiseFinanceDomainError(invalidCode, "Decimal value must be a plain decimal string.", {
+      decimalValue: value
+    });
+  }
+  const signText = match2[1] ?? "";
+  const wholeText = match2[2] ?? "";
+  const fractionText = match2[3] ?? "";
+  const sign = signText === "-" ? -1n : 1n;
+  const normalized = `${signText === "-" ? "-" : ""}${wholeText}${fractionText.length === 0 ? "" : `.${fractionText}`}`;
+  return {
+    sign,
+    wholeText,
+    fractionText,
+    normalized
+  };
+}
+function roundQuotient(numerator, denominator, mode) {
+  assertPositiveDenominator(denominator);
+  if (mode === "HALF_UP") {
+    return roundRatioHalfUp(numerator, denominator);
+  }
+  if (mode === "TRUNCATE") {
+    const sign = numerator < 0n ? -1n : 1n;
+    const absoluteNumerator = numerator < 0n ? -numerator : numerator;
+    return sign * (absoluteNumerator / denominator);
+  }
+  raiseFinanceDomainError("money_ratio_invalid", "Unknown money rounding mode.", {
+    mode
+  });
+}
+function assertPositiveDenominator(denominator) {
+  if (denominator <= 0n) {
+    raiseFinanceDomainError("money_ratio_invalid", "Ratio denominator must be greater than zero.", {
+      denominator: denominator.toString()
+    });
+  }
+}
+function assertScale(scale) {
+  if (!Number.isSafeInteger(scale) || scale < 0) {
+    raiseFinanceDomainError("decimal_scale_invalid", "Money scale must be a non-negative safe integer.", {
+      scale: String(scale)
+    });
+  }
+}
+function scaleFactor(scale) {
+  assertScale(scale);
+  return 10n ** BigInt(scale);
+}
+
 // ../../packages/domain-finance/src/schemas.ts
 var todoMessage = "TODO(domain-finance): replace Zod placeholder after schema approval.";
 var moneyAmountSchema = external_exports.custom((input) => {
@@ -9180,2258 +11432,6 @@ function toBasisPointValue(value) {
 
 // src/persistence.ts
 import { createHash, randomUUID } from "node:crypto";
-
-// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/entity.js
-var entityKind = /* @__PURE__ */ Symbol.for("drizzle:entityKind");
-function is(value, type) {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-  if (value instanceof type) {
-    return true;
-  }
-  if (!Object.prototype.hasOwnProperty.call(type, entityKind)) {
-    throw new Error(
-      `Class "${type.name ?? "<unknown>"}" doesn't look like a Drizzle entity. If this is incorrect and the class is provided by Drizzle, please report this as a bug.`
-    );
-  }
-  let cls = Object.getPrototypeOf(value).constructor;
-  if (cls) {
-    while (cls) {
-      if (entityKind in cls && cls[entityKind] === type[entityKind]) {
-        return true;
-      }
-      cls = Object.getPrototypeOf(cls);
-    }
-  }
-  return false;
-}
-
-// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/column.js
-var Column = class {
-  constructor(table, config) {
-    this.table = table;
-    this.config = config;
-    this.name = config.name;
-    this.keyAsName = config.keyAsName;
-    this.notNull = config.notNull;
-    this.default = config.default;
-    this.defaultFn = config.defaultFn;
-    this.onUpdateFn = config.onUpdateFn;
-    this.hasDefault = config.hasDefault;
-    this.primary = config.primaryKey;
-    this.isUnique = config.isUnique;
-    this.uniqueName = config.uniqueName;
-    this.uniqueType = config.uniqueType;
-    this.dataType = config.dataType;
-    this.columnType = config.columnType;
-    this.generated = config.generated;
-    this.generatedIdentity = config.generatedIdentity;
-  }
-  static [entityKind] = "Column";
-  name;
-  keyAsName;
-  primary;
-  notNull;
-  default;
-  defaultFn;
-  onUpdateFn;
-  hasDefault;
-  isUnique;
-  uniqueName;
-  uniqueType;
-  dataType;
-  columnType;
-  enumValues = void 0;
-  generated = void 0;
-  generatedIdentity = void 0;
-  config;
-  mapFromDriverValue(value) {
-    return value;
-  }
-  mapToDriverValue(value) {
-    return value;
-  }
-  // ** @internal */
-  shouldDisableInsert() {
-    return this.config.generated !== void 0 && this.config.generated.type !== "byDefault";
-  }
-};
-
-// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/column-builder.js
-var ColumnBuilder = class {
-  static [entityKind] = "ColumnBuilder";
-  config;
-  constructor(name, dataType, columnType) {
-    this.config = {
-      name,
-      keyAsName: name === "",
-      notNull: false,
-      default: void 0,
-      hasDefault: false,
-      primaryKey: false,
-      isUnique: false,
-      uniqueName: void 0,
-      uniqueType: void 0,
-      dataType,
-      columnType,
-      generated: void 0
-    };
-  }
-  /**
-   * Changes the data type of the column. Commonly used with `json` columns. Also, useful for branded types.
-   *
-   * @example
-   * ```ts
-   * const users = pgTable('users', {
-   * 	id: integer('id').$type<UserId>().primaryKey(),
-   * 	details: json('details').$type<UserDetails>().notNull(),
-   * });
-   * ```
-   */
-  $type() {
-    return this;
-  }
-  /**
-   * Adds a `not null` clause to the column definition.
-   *
-   * Affects the `select` model of the table - columns *without* `not null` will be nullable on select.
-   */
-  notNull() {
-    this.config.notNull = true;
-    return this;
-  }
-  /**
-   * Adds a `default <value>` clause to the column definition.
-   *
-   * Affects the `insert` model of the table - columns *with* `default` are optional on insert.
-   *
-   * If you need to set a dynamic default value, use {@link $defaultFn} instead.
-   */
-  default(value) {
-    this.config.default = value;
-    this.config.hasDefault = true;
-    return this;
-  }
-  /**
-   * Adds a dynamic default value to the column.
-   * The function will be called when the row is inserted, and the returned value will be used as the column value.
-   *
-   * **Note:** This value does not affect the `drizzle-kit` behavior, it is only used at runtime in `drizzle-orm`.
-   */
-  $defaultFn(fn) {
-    this.config.defaultFn = fn;
-    this.config.hasDefault = true;
-    return this;
-  }
-  /**
-   * Alias for {@link $defaultFn}.
-   */
-  $default = this.$defaultFn;
-  /**
-   * Adds a dynamic update value to the column.
-   * The function will be called when the row is updated, and the returned value will be used as the column value if none is provided.
-   * If no `default` (or `$defaultFn`) value is provided, the function will be called when the row is inserted as well, and the returned value will be used as the column value.
-   *
-   * **Note:** This value does not affect the `drizzle-kit` behavior, it is only used at runtime in `drizzle-orm`.
-   */
-  $onUpdateFn(fn) {
-    this.config.onUpdateFn = fn;
-    this.config.hasDefault = true;
-    return this;
-  }
-  /**
-   * Alias for {@link $onUpdateFn}.
-   */
-  $onUpdate = this.$onUpdateFn;
-  /**
-   * Adds a `primary key` clause to the column definition. This implicitly makes the column `not null`.
-   *
-   * In SQLite, `integer primary key` implicitly makes the column auto-incrementing.
-   */
-  primaryKey() {
-    this.config.primaryKey = true;
-    this.config.notNull = true;
-    return this;
-  }
-  /** @internal Sets the name of the column to the key within the table definition if a name was not given. */
-  setName(name) {
-    if (this.config.name !== "") return;
-    this.config.name = name;
-  }
-};
-
-// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/table.utils.js
-var TableName = /* @__PURE__ */ Symbol.for("drizzle:Name");
-
-// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/pg-core/foreign-keys.js
-var ForeignKeyBuilder = class {
-  static [entityKind] = "PgForeignKeyBuilder";
-  /** @internal */
-  reference;
-  /** @internal */
-  _onUpdate = "no action";
-  /** @internal */
-  _onDelete = "no action";
-  constructor(config, actions) {
-    this.reference = () => {
-      const { name, columns, foreignColumns } = config();
-      return { name, columns, foreignTable: foreignColumns[0].table, foreignColumns };
-    };
-    if (actions) {
-      this._onUpdate = actions.onUpdate;
-      this._onDelete = actions.onDelete;
-    }
-  }
-  onUpdate(action) {
-    this._onUpdate = action === void 0 ? "no action" : action;
-    return this;
-  }
-  onDelete(action) {
-    this._onDelete = action === void 0 ? "no action" : action;
-    return this;
-  }
-  /** @internal */
-  build(table) {
-    return new ForeignKey(table, this);
-  }
-};
-var ForeignKey = class {
-  constructor(table, builder) {
-    this.table = table;
-    this.reference = builder.reference;
-    this.onUpdate = builder._onUpdate;
-    this.onDelete = builder._onDelete;
-  }
-  static [entityKind] = "PgForeignKey";
-  reference;
-  onUpdate;
-  onDelete;
-  getName() {
-    const { name, columns, foreignColumns } = this.reference();
-    const columnNames = columns.map((column) => column.name);
-    const foreignColumnNames = foreignColumns.map((column) => column.name);
-    const chunks = [
-      this.table[TableName],
-      ...columnNames,
-      foreignColumns[0].table[TableName],
-      ...foreignColumnNames
-    ];
-    return name ?? `${chunks.join("_")}_fk`;
-  }
-};
-
-// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/tracing-utils.js
-function iife(fn, ...args) {
-  return fn(...args);
-}
-
-// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/pg-core/unique-constraint.js
-function uniqueKeyName(table, columns) {
-  return `${table[TableName]}_${columns.join("_")}_unique`;
-}
-var UniqueConstraintBuilder = class {
-  constructor(columns, name) {
-    this.name = name;
-    this.columns = columns;
-  }
-  static [entityKind] = "PgUniqueConstraintBuilder";
-  /** @internal */
-  columns;
-  /** @internal */
-  nullsNotDistinctConfig = false;
-  nullsNotDistinct() {
-    this.nullsNotDistinctConfig = true;
-    return this;
-  }
-  /** @internal */
-  build(table) {
-    return new UniqueConstraint(table, this.columns, this.nullsNotDistinctConfig, this.name);
-  }
-};
-var UniqueOnConstraintBuilder = class {
-  static [entityKind] = "PgUniqueOnConstraintBuilder";
-  /** @internal */
-  name;
-  constructor(name) {
-    this.name = name;
-  }
-  on(...columns) {
-    return new UniqueConstraintBuilder(columns, this.name);
-  }
-};
-var UniqueConstraint = class {
-  constructor(table, columns, nullsNotDistinct, name) {
-    this.table = table;
-    this.columns = columns;
-    this.name = name ?? uniqueKeyName(this.table, this.columns.map((column) => column.name));
-    this.nullsNotDistinct = nullsNotDistinct;
-  }
-  static [entityKind] = "PgUniqueConstraint";
-  columns;
-  name;
-  nullsNotDistinct = false;
-  getName() {
-    return this.name;
-  }
-};
-
-// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/pg-core/utils/array.js
-function parsePgArrayValue(arrayString, startFrom, inQuotes) {
-  for (let i = startFrom; i < arrayString.length; i++) {
-    const char = arrayString[i];
-    if (char === "\\") {
-      i++;
-      continue;
-    }
-    if (char === '"') {
-      return [arrayString.slice(startFrom, i).replace(/\\/g, ""), i + 1];
-    }
-    if (inQuotes) {
-      continue;
-    }
-    if (char === "," || char === "}") {
-      return [arrayString.slice(startFrom, i).replace(/\\/g, ""), i];
-    }
-  }
-  return [arrayString.slice(startFrom).replace(/\\/g, ""), arrayString.length];
-}
-function parsePgNestedArray(arrayString, startFrom = 0) {
-  const result = [];
-  let i = startFrom;
-  let lastCharIsComma = false;
-  while (i < arrayString.length) {
-    const char = arrayString[i];
-    if (char === ",") {
-      if (lastCharIsComma || i === startFrom) {
-        result.push("");
-      }
-      lastCharIsComma = true;
-      i++;
-      continue;
-    }
-    lastCharIsComma = false;
-    if (char === "\\") {
-      i += 2;
-      continue;
-    }
-    if (char === '"') {
-      const [value2, startFrom2] = parsePgArrayValue(arrayString, i + 1, true);
-      result.push(value2);
-      i = startFrom2;
-      continue;
-    }
-    if (char === "}") {
-      return [result, i + 1];
-    }
-    if (char === "{") {
-      const [value2, startFrom2] = parsePgNestedArray(arrayString, i + 1);
-      result.push(value2);
-      i = startFrom2;
-      continue;
-    }
-    const [value, newStartFrom] = parsePgArrayValue(arrayString, i, false);
-    result.push(value);
-    i = newStartFrom;
-  }
-  return [result, i];
-}
-function parsePgArray(arrayString) {
-  const [result] = parsePgNestedArray(arrayString, 1);
-  return result;
-}
-function makePgArray(array) {
-  return `{${array.map((item) => {
-    if (Array.isArray(item)) {
-      return makePgArray(item);
-    }
-    if (typeof item === "string") {
-      return `"${item.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
-    }
-    return `${item}`;
-  }).join(",")}}`;
-}
-
-// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/pg-core/columns/common.js
-var PgColumnBuilder = class extends ColumnBuilder {
-  foreignKeyConfigs = [];
-  static [entityKind] = "PgColumnBuilder";
-  array(size) {
-    return new PgArrayBuilder(this.config.name, this, size);
-  }
-  references(ref, actions = {}) {
-    this.foreignKeyConfigs.push({ ref, actions });
-    return this;
-  }
-  unique(name, config) {
-    this.config.isUnique = true;
-    this.config.uniqueName = name;
-    this.config.uniqueType = config?.nulls;
-    return this;
-  }
-  generatedAlwaysAs(as) {
-    this.config.generated = {
-      as,
-      type: "always",
-      mode: "stored"
-    };
-    return this;
-  }
-  /** @internal */
-  buildForeignKeys(column, table) {
-    return this.foreignKeyConfigs.map(({ ref, actions }) => {
-      return iife(
-        (ref2, actions2) => {
-          const builder = new ForeignKeyBuilder(() => {
-            const foreignColumn = ref2();
-            return { columns: [column], foreignColumns: [foreignColumn] };
-          });
-          if (actions2.onUpdate) {
-            builder.onUpdate(actions2.onUpdate);
-          }
-          if (actions2.onDelete) {
-            builder.onDelete(actions2.onDelete);
-          }
-          return builder.build(table);
-        },
-        ref,
-        actions
-      );
-    });
-  }
-  /** @internal */
-  buildExtraConfigColumn(table) {
-    return new ExtraConfigColumn(table, this.config);
-  }
-};
-var PgColumn = class extends Column {
-  constructor(table, config) {
-    if (!config.uniqueName) {
-      config.uniqueName = uniqueKeyName(table, [config.name]);
-    }
-    super(table, config);
-    this.table = table;
-  }
-  static [entityKind] = "PgColumn";
-};
-var ExtraConfigColumn = class extends PgColumn {
-  static [entityKind] = "ExtraConfigColumn";
-  getSQLType() {
-    return this.getSQLType();
-  }
-  indexConfig = {
-    order: this.config.order ?? "asc",
-    nulls: this.config.nulls ?? "last",
-    opClass: this.config.opClass
-  };
-  defaultConfig = {
-    order: "asc",
-    nulls: "last",
-    opClass: void 0
-  };
-  asc() {
-    this.indexConfig.order = "asc";
-    return this;
-  }
-  desc() {
-    this.indexConfig.order = "desc";
-    return this;
-  }
-  nullsFirst() {
-    this.indexConfig.nulls = "first";
-    return this;
-  }
-  nullsLast() {
-    this.indexConfig.nulls = "last";
-    return this;
-  }
-  /**
-   * ### PostgreSQL documentation quote
-   *
-   * > An operator class with optional parameters can be specified for each column of an index.
-   * The operator class identifies the operators to be used by the index for that column.
-   * For example, a B-tree index on four-byte integers would use the int4_ops class;
-   * this operator class includes comparison functions for four-byte integers.
-   * In practice the default operator class for the column's data type is usually sufficient.
-   * The main point of having operator classes is that for some data types, there could be more than one meaningful ordering.
-   * For example, we might want to sort a complex-number data type either by absolute value or by real part.
-   * We could do this by defining two operator classes for the data type and then selecting the proper class when creating an index.
-   * More information about operator classes check:
-   *
-   * ### Useful links
-   * https://www.postgresql.org/docs/current/sql-createindex.html
-   *
-   * https://www.postgresql.org/docs/current/indexes-opclass.html
-   *
-   * https://www.postgresql.org/docs/current/xindex.html
-   *
-   * ### Additional types
-   * If you have the `pg_vector` extension installed in your database, you can use the
-   * `vector_l2_ops`, `vector_ip_ops`, `vector_cosine_ops`, `vector_l1_ops`, `bit_hamming_ops`, `bit_jaccard_ops`, `halfvec_l2_ops`, `sparsevec_l2_ops` options, which are predefined types.
-   *
-   * **You can always specify any string you want in the operator class, in case Drizzle doesn't have it natively in its types**
-   *
-   * @param opClass
-   * @returns
-   */
-  op(opClass) {
-    this.indexConfig.opClass = opClass;
-    return this;
-  }
-};
-var IndexedColumn = class {
-  static [entityKind] = "IndexedColumn";
-  constructor(name, keyAsName, type, indexConfig) {
-    this.name = name;
-    this.keyAsName = keyAsName;
-    this.type = type;
-    this.indexConfig = indexConfig;
-  }
-  name;
-  keyAsName;
-  type;
-  indexConfig;
-};
-var PgArrayBuilder = class extends PgColumnBuilder {
-  static [entityKind] = "PgArrayBuilder";
-  constructor(name, baseBuilder, size) {
-    super(name, "array", "PgArray");
-    this.config.baseBuilder = baseBuilder;
-    this.config.size = size;
-  }
-  /** @internal */
-  build(table) {
-    const baseColumn = this.config.baseBuilder.build(table);
-    return new PgArray(
-      table,
-      this.config,
-      baseColumn
-    );
-  }
-};
-var PgArray = class _PgArray extends PgColumn {
-  constructor(table, config, baseColumn, range) {
-    super(table, config);
-    this.baseColumn = baseColumn;
-    this.range = range;
-    this.size = config.size;
-  }
-  size;
-  static [entityKind] = "PgArray";
-  getSQLType() {
-    return `${this.baseColumn.getSQLType()}[${typeof this.size === "number" ? this.size : ""}]`;
-  }
-  mapFromDriverValue(value) {
-    if (typeof value === "string") {
-      value = parsePgArray(value);
-    }
-    return value.map((v) => this.baseColumn.mapFromDriverValue(v));
-  }
-  mapToDriverValue(value, isNestedArray = false) {
-    const a = value.map(
-      (v) => v === null ? null : is(this.baseColumn, _PgArray) ? this.baseColumn.mapToDriverValue(v, true) : this.baseColumn.mapToDriverValue(v)
-    );
-    if (isNestedArray) return a;
-    return makePgArray(a);
-  }
-};
-
-// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/pg-core/columns/enum.js
-var PgEnumObjectColumnBuilder = class extends PgColumnBuilder {
-  static [entityKind] = "PgEnumObjectColumnBuilder";
-  constructor(name, enumInstance) {
-    super(name, "string", "PgEnumObjectColumn");
-    this.config.enum = enumInstance;
-  }
-  /** @internal */
-  build(table) {
-    return new PgEnumObjectColumn(
-      table,
-      this.config
-    );
-  }
-};
-var PgEnumObjectColumn = class extends PgColumn {
-  static [entityKind] = "PgEnumObjectColumn";
-  enum;
-  enumValues = this.config.enum.enumValues;
-  constructor(table, config) {
-    super(table, config);
-    this.enum = config.enum;
-  }
-  getSQLType() {
-    return this.enum.enumName;
-  }
-};
-var isPgEnumSym = /* @__PURE__ */ Symbol.for("drizzle:isPgEnum");
-function isPgEnum(obj) {
-  return !!obj && typeof obj === "function" && isPgEnumSym in obj && obj[isPgEnumSym] === true;
-}
-var PgEnumColumnBuilder = class extends PgColumnBuilder {
-  static [entityKind] = "PgEnumColumnBuilder";
-  constructor(name, enumInstance) {
-    super(name, "string", "PgEnumColumn");
-    this.config.enum = enumInstance;
-  }
-  /** @internal */
-  build(table) {
-    return new PgEnumColumn(
-      table,
-      this.config
-    );
-  }
-};
-var PgEnumColumn = class extends PgColumn {
-  static [entityKind] = "PgEnumColumn";
-  enum = this.config.enum;
-  enumValues = this.config.enum.enumValues;
-  constructor(table, config) {
-    super(table, config);
-    this.enum = config.enum;
-  }
-  getSQLType() {
-    return this.enum.enumName;
-  }
-};
-
-// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/subquery.js
-var Subquery = class {
-  static [entityKind] = "Subquery";
-  constructor(sql2, fields, alias, isWith = false, usedTables = []) {
-    this._ = {
-      brand: "Subquery",
-      sql: sql2,
-      selectedFields: fields,
-      alias,
-      isWith,
-      usedTables
-    };
-  }
-  // getSQL(): SQL<unknown> {
-  // 	return new SQL([this]);
-  // }
-};
-var WithSubquery = class extends Subquery {
-  static [entityKind] = "WithSubquery";
-};
-
-// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/version.js
-var version = "0.45.2";
-
-// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/tracing.js
-var otel;
-var rawTracer;
-var tracer = {
-  startActiveSpan(name, fn) {
-    if (!otel) {
-      return fn();
-    }
-    if (!rawTracer) {
-      rawTracer = otel.trace.getTracer("drizzle-orm", version);
-    }
-    return iife(
-      (otel2, rawTracer2) => rawTracer2.startActiveSpan(
-        name,
-        (span) => {
-          try {
-            return fn(span);
-          } catch (e) {
-            span.setStatus({
-              code: otel2.SpanStatusCode.ERROR,
-              message: e instanceof Error ? e.message : "Unknown error"
-              // eslint-disable-line no-instanceof/no-instanceof
-            });
-            throw e;
-          } finally {
-            span.end();
-          }
-        }
-      ),
-      otel,
-      rawTracer
-    );
-  }
-};
-
-// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/view-common.js
-var ViewBaseConfig = /* @__PURE__ */ Symbol.for("drizzle:ViewBaseConfig");
-
-// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/table.js
-var Schema = /* @__PURE__ */ Symbol.for("drizzle:Schema");
-var Columns = /* @__PURE__ */ Symbol.for("drizzle:Columns");
-var ExtraConfigColumns = /* @__PURE__ */ Symbol.for("drizzle:ExtraConfigColumns");
-var OriginalName = /* @__PURE__ */ Symbol.for("drizzle:OriginalName");
-var BaseName = /* @__PURE__ */ Symbol.for("drizzle:BaseName");
-var IsAlias = /* @__PURE__ */ Symbol.for("drizzle:IsAlias");
-var ExtraConfigBuilder = /* @__PURE__ */ Symbol.for("drizzle:ExtraConfigBuilder");
-var IsDrizzleTable = /* @__PURE__ */ Symbol.for("drizzle:IsDrizzleTable");
-var Table = class {
-  static [entityKind] = "Table";
-  /** @internal */
-  static Symbol = {
-    Name: TableName,
-    Schema,
-    OriginalName,
-    Columns,
-    ExtraConfigColumns,
-    BaseName,
-    IsAlias,
-    ExtraConfigBuilder
-  };
-  /**
-   * @internal
-   * Can be changed if the table is aliased.
-   */
-  [TableName];
-  /**
-   * @internal
-   * Used to store the original name of the table, before any aliasing.
-   */
-  [OriginalName];
-  /** @internal */
-  [Schema];
-  /** @internal */
-  [Columns];
-  /** @internal */
-  [ExtraConfigColumns];
-  /**
-   *  @internal
-   * Used to store the table name before the transformation via the `tableCreator` functions.
-   */
-  [BaseName];
-  /** @internal */
-  [IsAlias] = false;
-  /** @internal */
-  [IsDrizzleTable] = true;
-  /** @internal */
-  [ExtraConfigBuilder] = void 0;
-  constructor(name, schema, baseName) {
-    this[TableName] = this[OriginalName] = name;
-    this[Schema] = schema;
-    this[BaseName] = baseName;
-  }
-};
-function getTableName(table) {
-  return table[TableName];
-}
-function getTableUniqueName(table) {
-  return `${table[Schema] ?? "public"}.${table[TableName]}`;
-}
-
-// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/sql/sql.js
-var FakePrimitiveParam = class {
-  static [entityKind] = "FakePrimitiveParam";
-};
-function isSQLWrapper(value) {
-  return value !== null && value !== void 0 && typeof value.getSQL === "function";
-}
-function mergeQueries(queries) {
-  const result = { sql: "", params: [] };
-  for (const query of queries) {
-    result.sql += query.sql;
-    result.params.push(...query.params);
-    if (query.typings?.length) {
-      if (!result.typings) {
-        result.typings = [];
-      }
-      result.typings.push(...query.typings);
-    }
-  }
-  return result;
-}
-var StringChunk = class {
-  static [entityKind] = "StringChunk";
-  value;
-  constructor(value) {
-    this.value = Array.isArray(value) ? value : [value];
-  }
-  getSQL() {
-    return new SQL([this]);
-  }
-};
-var SQL = class _SQL {
-  constructor(queryChunks) {
-    this.queryChunks = queryChunks;
-    for (const chunk of queryChunks) {
-      if (is(chunk, Table)) {
-        const schemaName = chunk[Table.Symbol.Schema];
-        this.usedTables.push(
-          schemaName === void 0 ? chunk[Table.Symbol.Name] : schemaName + "." + chunk[Table.Symbol.Name]
-        );
-      }
-    }
-  }
-  static [entityKind] = "SQL";
-  /** @internal */
-  decoder = noopDecoder;
-  shouldInlineParams = false;
-  /** @internal */
-  usedTables = [];
-  append(query) {
-    this.queryChunks.push(...query.queryChunks);
-    return this;
-  }
-  toQuery(config) {
-    return tracer.startActiveSpan("drizzle.buildSQL", (span) => {
-      const query = this.buildQueryFromSourceParams(this.queryChunks, config);
-      span?.setAttributes({
-        "drizzle.query.text": query.sql,
-        "drizzle.query.params": JSON.stringify(query.params)
-      });
-      return query;
-    });
-  }
-  buildQueryFromSourceParams(chunks, _config) {
-    const config = Object.assign({}, _config, {
-      inlineParams: _config.inlineParams || this.shouldInlineParams,
-      paramStartIndex: _config.paramStartIndex || { value: 0 }
-    });
-    const {
-      casing,
-      escapeName,
-      escapeParam,
-      prepareTyping,
-      inlineParams,
-      paramStartIndex
-    } = config;
-    return mergeQueries(chunks.map((chunk) => {
-      if (is(chunk, StringChunk)) {
-        return { sql: chunk.value.join(""), params: [] };
-      }
-      if (is(chunk, Name)) {
-        return { sql: escapeName(chunk.value), params: [] };
-      }
-      if (chunk === void 0) {
-        return { sql: "", params: [] };
-      }
-      if (Array.isArray(chunk)) {
-        const result = [new StringChunk("(")];
-        for (const [i, p] of chunk.entries()) {
-          result.push(p);
-          if (i < chunk.length - 1) {
-            result.push(new StringChunk(", "));
-          }
-        }
-        result.push(new StringChunk(")"));
-        return this.buildQueryFromSourceParams(result, config);
-      }
-      if (is(chunk, _SQL)) {
-        return this.buildQueryFromSourceParams(chunk.queryChunks, {
-          ...config,
-          inlineParams: inlineParams || chunk.shouldInlineParams
-        });
-      }
-      if (is(chunk, Table)) {
-        const schemaName = chunk[Table.Symbol.Schema];
-        const tableName = chunk[Table.Symbol.Name];
-        return {
-          sql: schemaName === void 0 || chunk[IsAlias] ? escapeName(tableName) : escapeName(schemaName) + "." + escapeName(tableName),
-          params: []
-        };
-      }
-      if (is(chunk, Column)) {
-        const columnName = casing.getColumnCasing(chunk);
-        if (_config.invokeSource === "indexes") {
-          return { sql: escapeName(columnName), params: [] };
-        }
-        const schemaName = chunk.table[Table.Symbol.Schema];
-        return {
-          sql: chunk.table[IsAlias] || schemaName === void 0 ? escapeName(chunk.table[Table.Symbol.Name]) + "." + escapeName(columnName) : escapeName(schemaName) + "." + escapeName(chunk.table[Table.Symbol.Name]) + "." + escapeName(columnName),
-          params: []
-        };
-      }
-      if (is(chunk, View)) {
-        const schemaName = chunk[ViewBaseConfig].schema;
-        const viewName = chunk[ViewBaseConfig].name;
-        return {
-          sql: schemaName === void 0 || chunk[ViewBaseConfig].isAlias ? escapeName(viewName) : escapeName(schemaName) + "." + escapeName(viewName),
-          params: []
-        };
-      }
-      if (is(chunk, Param)) {
-        if (is(chunk.value, Placeholder)) {
-          return { sql: escapeParam(paramStartIndex.value++, chunk), params: [chunk], typings: ["none"] };
-        }
-        const mappedValue = chunk.value === null ? null : chunk.encoder.mapToDriverValue(chunk.value);
-        if (is(mappedValue, _SQL)) {
-          return this.buildQueryFromSourceParams([mappedValue], config);
-        }
-        if (inlineParams) {
-          return { sql: this.mapInlineParam(mappedValue, config), params: [] };
-        }
-        let typings = ["none"];
-        if (prepareTyping) {
-          typings = [prepareTyping(chunk.encoder)];
-        }
-        return { sql: escapeParam(paramStartIndex.value++, mappedValue), params: [mappedValue], typings };
-      }
-      if (is(chunk, Placeholder)) {
-        return { sql: escapeParam(paramStartIndex.value++, chunk), params: [chunk], typings: ["none"] };
-      }
-      if (is(chunk, _SQL.Aliased) && chunk.fieldAlias !== void 0) {
-        return { sql: escapeName(chunk.fieldAlias), params: [] };
-      }
-      if (is(chunk, Subquery)) {
-        if (chunk._.isWith) {
-          return { sql: escapeName(chunk._.alias), params: [] };
-        }
-        return this.buildQueryFromSourceParams([
-          new StringChunk("("),
-          chunk._.sql,
-          new StringChunk(") "),
-          new Name(chunk._.alias)
-        ], config);
-      }
-      if (isPgEnum(chunk)) {
-        if (chunk.schema) {
-          return { sql: escapeName(chunk.schema) + "." + escapeName(chunk.enumName), params: [] };
-        }
-        return { sql: escapeName(chunk.enumName), params: [] };
-      }
-      if (isSQLWrapper(chunk)) {
-        if (chunk.shouldOmitSQLParens?.()) {
-          return this.buildQueryFromSourceParams([chunk.getSQL()], config);
-        }
-        return this.buildQueryFromSourceParams([
-          new StringChunk("("),
-          chunk.getSQL(),
-          new StringChunk(")")
-        ], config);
-      }
-      if (inlineParams) {
-        return { sql: this.mapInlineParam(chunk, config), params: [] };
-      }
-      return { sql: escapeParam(paramStartIndex.value++, chunk), params: [chunk], typings: ["none"] };
-    }));
-  }
-  mapInlineParam(chunk, { escapeString }) {
-    if (chunk === null) {
-      return "null";
-    }
-    if (typeof chunk === "number" || typeof chunk === "boolean") {
-      return chunk.toString();
-    }
-    if (typeof chunk === "string") {
-      return escapeString(chunk);
-    }
-    if (typeof chunk === "object") {
-      const mappedValueAsString = chunk.toString();
-      if (mappedValueAsString === "[object Object]") {
-        return escapeString(JSON.stringify(chunk));
-      }
-      return escapeString(mappedValueAsString);
-    }
-    throw new Error("Unexpected param value: " + chunk);
-  }
-  getSQL() {
-    return this;
-  }
-  as(alias) {
-    if (alias === void 0) {
-      return this;
-    }
-    return new _SQL.Aliased(this, alias);
-  }
-  mapWith(decoder2) {
-    this.decoder = typeof decoder2 === "function" ? { mapFromDriverValue: decoder2 } : decoder2;
-    return this;
-  }
-  inlineParams() {
-    this.shouldInlineParams = true;
-    return this;
-  }
-  /**
-   * This method is used to conditionally include a part of the query.
-   *
-   * @param condition - Condition to check
-   * @returns itself if the condition is `true`, otherwise `undefined`
-   */
-  if(condition) {
-    return condition ? this : void 0;
-  }
-};
-var Name = class {
-  constructor(value) {
-    this.value = value;
-  }
-  static [entityKind] = "Name";
-  brand;
-  getSQL() {
-    return new SQL([this]);
-  }
-};
-function isDriverValueEncoder(value) {
-  return typeof value === "object" && value !== null && "mapToDriverValue" in value && typeof value.mapToDriverValue === "function";
-}
-var noopDecoder = {
-  mapFromDriverValue: (value) => value
-};
-var noopEncoder = {
-  mapToDriverValue: (value) => value
-};
-var noopMapper = {
-  ...noopDecoder,
-  ...noopEncoder
-};
-var Param = class {
-  /**
-   * @param value - Parameter value
-   * @param encoder - Encoder to convert the value to a driver parameter
-   */
-  constructor(value, encoder2 = noopEncoder) {
-    this.value = value;
-    this.encoder = encoder2;
-  }
-  static [entityKind] = "Param";
-  brand;
-  getSQL() {
-    return new SQL([this]);
-  }
-};
-function sql(strings, ...params) {
-  const queryChunks = [];
-  if (params.length > 0 || strings.length > 0 && strings[0] !== "") {
-    queryChunks.push(new StringChunk(strings[0]));
-  }
-  for (const [paramIndex, param2] of params.entries()) {
-    queryChunks.push(param2, new StringChunk(strings[paramIndex + 1]));
-  }
-  return new SQL(queryChunks);
-}
-((sql2) => {
-  function empty() {
-    return new SQL([]);
-  }
-  sql2.empty = empty;
-  function fromList(list) {
-    return new SQL(list);
-  }
-  sql2.fromList = fromList;
-  function raw2(str) {
-    return new SQL([new StringChunk(str)]);
-  }
-  sql2.raw = raw2;
-  function join(chunks, separator) {
-    const result = [];
-    for (const [i, chunk] of chunks.entries()) {
-      if (i > 0 && separator !== void 0) {
-        result.push(separator);
-      }
-      result.push(chunk);
-    }
-    return new SQL(result);
-  }
-  sql2.join = join;
-  function identifier(value) {
-    return new Name(value);
-  }
-  sql2.identifier = identifier;
-  function placeholder2(name2) {
-    return new Placeholder(name2);
-  }
-  sql2.placeholder = placeholder2;
-  function param2(value, encoder2) {
-    return new Param(value, encoder2);
-  }
-  sql2.param = param2;
-})(sql || (sql = {}));
-((SQL2) => {
-  class Aliased {
-    constructor(sql2, fieldAlias) {
-      this.sql = sql2;
-      this.fieldAlias = fieldAlias;
-    }
-    static [entityKind] = "SQL.Aliased";
-    /** @internal */
-    isSelectionField = false;
-    getSQL() {
-      return this.sql;
-    }
-    /** @internal */
-    clone() {
-      return new Aliased(this.sql, this.fieldAlias);
-    }
-  }
-  SQL2.Aliased = Aliased;
-})(SQL || (SQL = {}));
-var Placeholder = class {
-  constructor(name2) {
-    this.name = name2;
-  }
-  static [entityKind] = "Placeholder";
-  getSQL() {
-    return new SQL([this]);
-  }
-};
-function fillPlaceholders(params, values) {
-  return params.map((p) => {
-    if (is(p, Placeholder)) {
-      if (!(p.name in values)) {
-        throw new Error(`No value for placeholder "${p.name}" was provided`);
-      }
-      return values[p.name];
-    }
-    if (is(p, Param) && is(p.value, Placeholder)) {
-      if (!(p.value.name in values)) {
-        throw new Error(`No value for placeholder "${p.value.name}" was provided`);
-      }
-      return p.encoder.mapToDriverValue(values[p.value.name]);
-    }
-    return p;
-  });
-}
-var IsDrizzleView = /* @__PURE__ */ Symbol.for("drizzle:IsDrizzleView");
-var View = class {
-  static [entityKind] = "View";
-  /** @internal */
-  [ViewBaseConfig];
-  /** @internal */
-  [IsDrizzleView] = true;
-  constructor({ name: name2, schema, selectedFields, query }) {
-    this[ViewBaseConfig] = {
-      name: name2,
-      originalName: name2,
-      schema,
-      selectedFields,
-      query,
-      isExisting: !query,
-      isAlias: false
-    };
-  }
-  getSQL() {
-    return new SQL([this]);
-  }
-};
-Column.prototype.getSQL = function() {
-  return new SQL([this]);
-};
-Table.prototype.getSQL = function() {
-  return new SQL([this]);
-};
-Subquery.prototype.getSQL = function() {
-  return new SQL([this]);
-};
-
-// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/alias.js
-var ColumnAliasProxyHandler = class {
-  constructor(table) {
-    this.table = table;
-  }
-  static [entityKind] = "ColumnAliasProxyHandler";
-  get(columnObj, prop) {
-    if (prop === "table") {
-      return this.table;
-    }
-    return columnObj[prop];
-  }
-};
-var TableAliasProxyHandler = class {
-  constructor(alias, replaceOriginalName) {
-    this.alias = alias;
-    this.replaceOriginalName = replaceOriginalName;
-  }
-  static [entityKind] = "TableAliasProxyHandler";
-  get(target, prop) {
-    if (prop === Table.Symbol.IsAlias) {
-      return true;
-    }
-    if (prop === Table.Symbol.Name) {
-      return this.alias;
-    }
-    if (this.replaceOriginalName && prop === Table.Symbol.OriginalName) {
-      return this.alias;
-    }
-    if (prop === ViewBaseConfig) {
-      return {
-        ...target[ViewBaseConfig],
-        name: this.alias,
-        isAlias: true
-      };
-    }
-    if (prop === Table.Symbol.Columns) {
-      const columns = target[Table.Symbol.Columns];
-      if (!columns) {
-        return columns;
-      }
-      const proxiedColumns = {};
-      Object.keys(columns).map((key) => {
-        proxiedColumns[key] = new Proxy(
-          columns[key],
-          new ColumnAliasProxyHandler(new Proxy(target, this))
-        );
-      });
-      return proxiedColumns;
-    }
-    const value = target[prop];
-    if (is(value, Column)) {
-      return new Proxy(value, new ColumnAliasProxyHandler(new Proxy(target, this)));
-    }
-    return value;
-  }
-};
-var RelationTableAliasProxyHandler = class {
-  constructor(alias) {
-    this.alias = alias;
-  }
-  static [entityKind] = "RelationTableAliasProxyHandler";
-  get(target, prop) {
-    if (prop === "sourceTable") {
-      return aliasedTable(target.sourceTable, this.alias);
-    }
-    return target[prop];
-  }
-};
-function aliasedTable(table, tableAlias) {
-  return new Proxy(table, new TableAliasProxyHandler(tableAlias, false));
-}
-function aliasedTableColumn(column, tableAlias) {
-  return new Proxy(
-    column,
-    new ColumnAliasProxyHandler(new Proxy(column.table, new TableAliasProxyHandler(tableAlias, false)))
-  );
-}
-function mapColumnsInAliasedSQLToAlias(query, alias) {
-  return new SQL.Aliased(mapColumnsInSQLToAlias(query.sql, alias), query.fieldAlias);
-}
-function mapColumnsInSQLToAlias(query, alias) {
-  return sql.join(query.queryChunks.map((c) => {
-    if (is(c, Column)) {
-      return aliasedTableColumn(c, alias);
-    }
-    if (is(c, SQL)) {
-      return mapColumnsInSQLToAlias(c, alias);
-    }
-    if (is(c, SQL.Aliased)) {
-      return mapColumnsInAliasedSQLToAlias(c, alias);
-    }
-    return c;
-  }));
-}
-
-// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/errors.js
-var DrizzleError = class extends Error {
-  static [entityKind] = "DrizzleError";
-  constructor({ message: message2, cause }) {
-    super(message2);
-    this.name = "DrizzleError";
-    this.cause = cause;
-  }
-};
-var DrizzleQueryError = class _DrizzleQueryError extends Error {
-  constructor(query, params, cause) {
-    super(`Failed query: ${query}
-params: ${params}`);
-    this.query = query;
-    this.params = params;
-    this.cause = cause;
-    Error.captureStackTrace(this, _DrizzleQueryError);
-    if (cause) this.cause = cause;
-  }
-};
-var TransactionRollbackError = class extends DrizzleError {
-  static [entityKind] = "TransactionRollbackError";
-  constructor() {
-    super({ message: "Rollback" });
-  }
-};
-
-// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/logger.js
-var ConsoleLogWriter = class {
-  static [entityKind] = "ConsoleLogWriter";
-  write(message2) {
-    console.log(message2);
-  }
-};
-var DefaultLogger = class {
-  static [entityKind] = "DefaultLogger";
-  writer;
-  constructor(config) {
-    this.writer = config?.writer ?? new ConsoleLogWriter();
-  }
-  logQuery(query, params) {
-    const stringifiedParams = params.map((p) => {
-      try {
-        return JSON.stringify(p);
-      } catch {
-        return String(p);
-      }
-    });
-    const paramsStr = stringifiedParams.length ? ` -- params: [${stringifiedParams.join(", ")}]` : "";
-    this.writer.write(`Query: ${query}${paramsStr}`);
-  }
-};
-var NoopLogger = class {
-  static [entityKind] = "NoopLogger";
-  logQuery() {
-  }
-};
-
-// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/query-promise.js
-var QueryPromise = class {
-  static [entityKind] = "QueryPromise";
-  [Symbol.toStringTag] = "QueryPromise";
-  catch(onRejected) {
-    return this.then(void 0, onRejected);
-  }
-  finally(onFinally) {
-    return this.then(
-      (value) => {
-        onFinally?.();
-        return value;
-      },
-      (reason) => {
-        onFinally?.();
-        throw reason;
-      }
-    );
-  }
-  then(onFulfilled, onRejected) {
-    return this.execute().then(onFulfilled, onRejected);
-  }
-};
-
-// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/utils.js
-function mapResultRow(columns, row, joinsNotNullableMap) {
-  const nullifyMap = {};
-  const result = columns.reduce(
-    (result2, { path, field }, columnIndex) => {
-      let decoder2;
-      if (is(field, Column)) {
-        decoder2 = field;
-      } else if (is(field, SQL)) {
-        decoder2 = field.decoder;
-      } else if (is(field, Subquery)) {
-        decoder2 = field._.sql.decoder;
-      } else {
-        decoder2 = field.sql.decoder;
-      }
-      let node = result2;
-      for (const [pathChunkIndex, pathChunk] of path.entries()) {
-        if (pathChunkIndex < path.length - 1) {
-          if (!(pathChunk in node)) {
-            node[pathChunk] = {};
-          }
-          node = node[pathChunk];
-        } else {
-          const rawValue = row[columnIndex];
-          const value = node[pathChunk] = rawValue === null ? null : decoder2.mapFromDriverValue(rawValue);
-          if (joinsNotNullableMap && is(field, Column) && path.length === 2) {
-            const objectName = path[0];
-            if (!(objectName in nullifyMap)) {
-              nullifyMap[objectName] = value === null ? getTableName(field.table) : false;
-            } else if (typeof nullifyMap[objectName] === "string" && nullifyMap[objectName] !== getTableName(field.table)) {
-              nullifyMap[objectName] = false;
-            }
-          }
-        }
-      }
-      return result2;
-    },
-    {}
-  );
-  if (joinsNotNullableMap && Object.keys(nullifyMap).length > 0) {
-    for (const [objectName, tableName] of Object.entries(nullifyMap)) {
-      if (typeof tableName === "string" && !joinsNotNullableMap[tableName]) {
-        result[objectName] = null;
-      }
-    }
-  }
-  return result;
-}
-function orderSelectedFields(fields, pathPrefix) {
-  return Object.entries(fields).reduce((result, [name, field]) => {
-    if (typeof name !== "string") {
-      return result;
-    }
-    const newPath = pathPrefix ? [...pathPrefix, name] : [name];
-    if (is(field, Column) || is(field, SQL) || is(field, SQL.Aliased) || is(field, Subquery)) {
-      result.push({ path: newPath, field });
-    } else if (is(field, Table)) {
-      result.push(...orderSelectedFields(field[Table.Symbol.Columns], newPath));
-    } else {
-      result.push(...orderSelectedFields(field, newPath));
-    }
-    return result;
-  }, []);
-}
-function haveSameKeys(left, right) {
-  const leftKeys = Object.keys(left);
-  const rightKeys = Object.keys(right);
-  if (leftKeys.length !== rightKeys.length) {
-    return false;
-  }
-  for (const [index, key] of leftKeys.entries()) {
-    if (key !== rightKeys[index]) {
-      return false;
-    }
-  }
-  return true;
-}
-function mapUpdateSet(table, values) {
-  const entries = Object.entries(values).filter(([, value]) => value !== void 0).map(([key, value]) => {
-    if (is(value, SQL) || is(value, Column)) {
-      return [key, value];
-    } else {
-      return [key, new Param(value, table[Table.Symbol.Columns][key])];
-    }
-  });
-  if (entries.length === 0) {
-    throw new Error("No values to set");
-  }
-  return Object.fromEntries(entries);
-}
-function applyMixins(baseClass, extendedClasses) {
-  for (const extendedClass of extendedClasses) {
-    for (const name of Object.getOwnPropertyNames(extendedClass.prototype)) {
-      if (name === "constructor") continue;
-      Object.defineProperty(
-        baseClass.prototype,
-        name,
-        Object.getOwnPropertyDescriptor(extendedClass.prototype, name) || /* @__PURE__ */ Object.create(null)
-      );
-    }
-  }
-}
-function getTableColumns(table) {
-  return table[Table.Symbol.Columns];
-}
-function getTableLikeName(table) {
-  return is(table, Subquery) ? table._.alias : is(table, View) ? table[ViewBaseConfig].name : is(table, SQL) ? void 0 : table[Table.Symbol.IsAlias] ? table[Table.Symbol.Name] : table[Table.Symbol.BaseName];
-}
-function isConfig(data) {
-  if (typeof data !== "object" || data === null) return false;
-  if (data.constructor.name !== "Object") return false;
-  if ("logger" in data) {
-    const type = typeof data["logger"];
-    if (type !== "boolean" && (type !== "object" || typeof data["logger"]["logQuery"] !== "function") && type !== "undefined") return false;
-    return true;
-  }
-  if ("schema" in data) {
-    const type = typeof data["schema"];
-    if (type !== "object" && type !== "undefined") return false;
-    return true;
-  }
-  if ("casing" in data) {
-    const type = typeof data["casing"];
-    if (type !== "string" && type !== "undefined") return false;
-    return true;
-  }
-  if ("mode" in data) {
-    if (data["mode"] !== "default" || data["mode"] !== "planetscale" || data["mode"] !== void 0) return false;
-    return true;
-  }
-  if ("connection" in data) {
-    const type = typeof data["connection"];
-    if (type !== "string" && type !== "object" && type !== "undefined") return false;
-    return true;
-  }
-  if ("client" in data) {
-    const type = typeof data["client"];
-    if (type !== "object" && type !== "function" && type !== "undefined") return false;
-    return true;
-  }
-  if (Object.keys(data).length === 0) return true;
-  return false;
-}
-var textDecoder = typeof TextDecoder === "undefined" ? null : new TextDecoder();
-
-// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/pg-core/columns/date.common.js
-var PgDateColumnBaseBuilder = class extends PgColumnBuilder {
-  static [entityKind] = "PgDateColumnBaseBuilder";
-  defaultNow() {
-    return this.default(sql`now()`);
-  }
-};
-
-// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/pg-core/columns/date.js
-var PgDateBuilder = class extends PgDateColumnBaseBuilder {
-  static [entityKind] = "PgDateBuilder";
-  constructor(name) {
-    super(name, "date", "PgDate");
-  }
-  /** @internal */
-  build(table) {
-    return new PgDate(table, this.config);
-  }
-};
-var PgDate = class extends PgColumn {
-  static [entityKind] = "PgDate";
-  getSQLType() {
-    return "date";
-  }
-  mapFromDriverValue(value) {
-    if (typeof value === "string") return new Date(value);
-    return value;
-  }
-  mapToDriverValue(value) {
-    return value.toISOString();
-  }
-};
-var PgDateStringBuilder = class extends PgDateColumnBaseBuilder {
-  static [entityKind] = "PgDateStringBuilder";
-  constructor(name) {
-    super(name, "string", "PgDateString");
-  }
-  /** @internal */
-  build(table) {
-    return new PgDateString(
-      table,
-      this.config
-    );
-  }
-};
-var PgDateString = class extends PgColumn {
-  static [entityKind] = "PgDateString";
-  getSQLType() {
-    return "date";
-  }
-  mapFromDriverValue(value) {
-    if (typeof value === "string") return value;
-    return value.toISOString().slice(0, -14);
-  }
-};
-
-// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/pg-core/columns/json.js
-var PgJsonBuilder = class extends PgColumnBuilder {
-  static [entityKind] = "PgJsonBuilder";
-  constructor(name) {
-    super(name, "json", "PgJson");
-  }
-  /** @internal */
-  build(table) {
-    return new PgJson(table, this.config);
-  }
-};
-var PgJson = class extends PgColumn {
-  static [entityKind] = "PgJson";
-  constructor(table, config) {
-    super(table, config);
-  }
-  getSQLType() {
-    return "json";
-  }
-  mapToDriverValue(value) {
-    return JSON.stringify(value);
-  }
-  mapFromDriverValue(value) {
-    if (typeof value === "string") {
-      try {
-        return JSON.parse(value);
-      } catch {
-        return value;
-      }
-    }
-    return value;
-  }
-};
-
-// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/pg-core/columns/jsonb.js
-var PgJsonbBuilder = class extends PgColumnBuilder {
-  static [entityKind] = "PgJsonbBuilder";
-  constructor(name) {
-    super(name, "json", "PgJsonb");
-  }
-  /** @internal */
-  build(table) {
-    return new PgJsonb(table, this.config);
-  }
-};
-var PgJsonb = class extends PgColumn {
-  static [entityKind] = "PgJsonb";
-  constructor(table, config) {
-    super(table, config);
-  }
-  getSQLType() {
-    return "jsonb";
-  }
-  mapToDriverValue(value) {
-    return JSON.stringify(value);
-  }
-  mapFromDriverValue(value) {
-    if (typeof value === "string") {
-      try {
-        return JSON.parse(value);
-      } catch {
-        return value;
-      }
-    }
-    return value;
-  }
-};
-
-// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/pg-core/columns/numeric.js
-var PgNumericBuilder = class extends PgColumnBuilder {
-  static [entityKind] = "PgNumericBuilder";
-  constructor(name, precision, scale) {
-    super(name, "string", "PgNumeric");
-    this.config.precision = precision;
-    this.config.scale = scale;
-  }
-  /** @internal */
-  build(table) {
-    return new PgNumeric(table, this.config);
-  }
-};
-var PgNumeric = class extends PgColumn {
-  static [entityKind] = "PgNumeric";
-  precision;
-  scale;
-  constructor(table, config) {
-    super(table, config);
-    this.precision = config.precision;
-    this.scale = config.scale;
-  }
-  mapFromDriverValue(value) {
-    if (typeof value === "string") return value;
-    return String(value);
-  }
-  getSQLType() {
-    if (this.precision !== void 0 && this.scale !== void 0) {
-      return `numeric(${this.precision}, ${this.scale})`;
-    } else if (this.precision === void 0) {
-      return "numeric";
-    } else {
-      return `numeric(${this.precision})`;
-    }
-  }
-};
-var PgNumericNumberBuilder = class extends PgColumnBuilder {
-  static [entityKind] = "PgNumericNumberBuilder";
-  constructor(name, precision, scale) {
-    super(name, "number", "PgNumericNumber");
-    this.config.precision = precision;
-    this.config.scale = scale;
-  }
-  /** @internal */
-  build(table) {
-    return new PgNumericNumber(
-      table,
-      this.config
-    );
-  }
-};
-var PgNumericNumber = class extends PgColumn {
-  static [entityKind] = "PgNumericNumber";
-  precision;
-  scale;
-  constructor(table, config) {
-    super(table, config);
-    this.precision = config.precision;
-    this.scale = config.scale;
-  }
-  mapFromDriverValue(value) {
-    if (typeof value === "number") return value;
-    return Number(value);
-  }
-  mapToDriverValue = String;
-  getSQLType() {
-    if (this.precision !== void 0 && this.scale !== void 0) {
-      return `numeric(${this.precision}, ${this.scale})`;
-    } else if (this.precision === void 0) {
-      return "numeric";
-    } else {
-      return `numeric(${this.precision})`;
-    }
-  }
-};
-var PgNumericBigIntBuilder = class extends PgColumnBuilder {
-  static [entityKind] = "PgNumericBigIntBuilder";
-  constructor(name, precision, scale) {
-    super(name, "bigint", "PgNumericBigInt");
-    this.config.precision = precision;
-    this.config.scale = scale;
-  }
-  /** @internal */
-  build(table) {
-    return new PgNumericBigInt(
-      table,
-      this.config
-    );
-  }
-};
-var PgNumericBigInt = class extends PgColumn {
-  static [entityKind] = "PgNumericBigInt";
-  precision;
-  scale;
-  constructor(table, config) {
-    super(table, config);
-    this.precision = config.precision;
-    this.scale = config.scale;
-  }
-  mapFromDriverValue = BigInt;
-  mapToDriverValue = String;
-  getSQLType() {
-    if (this.precision !== void 0 && this.scale !== void 0) {
-      return `numeric(${this.precision}, ${this.scale})`;
-    } else if (this.precision === void 0) {
-      return "numeric";
-    } else {
-      return `numeric(${this.precision})`;
-    }
-  }
-};
-
-// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/pg-core/columns/time.js
-var PgTimeBuilder = class extends PgDateColumnBaseBuilder {
-  constructor(name, withTimezone, precision) {
-    super(name, "string", "PgTime");
-    this.withTimezone = withTimezone;
-    this.precision = precision;
-    this.config.withTimezone = withTimezone;
-    this.config.precision = precision;
-  }
-  static [entityKind] = "PgTimeBuilder";
-  /** @internal */
-  build(table) {
-    return new PgTime(table, this.config);
-  }
-};
-var PgTime = class extends PgColumn {
-  static [entityKind] = "PgTime";
-  withTimezone;
-  precision;
-  constructor(table, config) {
-    super(table, config);
-    this.withTimezone = config.withTimezone;
-    this.precision = config.precision;
-  }
-  getSQLType() {
-    const precision = this.precision === void 0 ? "" : `(${this.precision})`;
-    return `time${precision}${this.withTimezone ? " with time zone" : ""}`;
-  }
-};
-
-// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/pg-core/columns/timestamp.js
-var PgTimestampBuilder = class extends PgDateColumnBaseBuilder {
-  static [entityKind] = "PgTimestampBuilder";
-  constructor(name, withTimezone, precision) {
-    super(name, "date", "PgTimestamp");
-    this.config.withTimezone = withTimezone;
-    this.config.precision = precision;
-  }
-  /** @internal */
-  build(table) {
-    return new PgTimestamp(table, this.config);
-  }
-};
-var PgTimestamp = class extends PgColumn {
-  static [entityKind] = "PgTimestamp";
-  withTimezone;
-  precision;
-  constructor(table, config) {
-    super(table, config);
-    this.withTimezone = config.withTimezone;
-    this.precision = config.precision;
-  }
-  getSQLType() {
-    const precision = this.precision === void 0 ? "" : ` (${this.precision})`;
-    return `timestamp${precision}${this.withTimezone ? " with time zone" : ""}`;
-  }
-  mapFromDriverValue(value) {
-    if (typeof value === "string") return new Date(this.withTimezone ? value : value + "+0000");
-    return value;
-  }
-  mapToDriverValue = (value) => {
-    return value.toISOString();
-  };
-};
-var PgTimestampStringBuilder = class extends PgDateColumnBaseBuilder {
-  static [entityKind] = "PgTimestampStringBuilder";
-  constructor(name, withTimezone, precision) {
-    super(name, "string", "PgTimestampString");
-    this.config.withTimezone = withTimezone;
-    this.config.precision = precision;
-  }
-  /** @internal */
-  build(table) {
-    return new PgTimestampString(
-      table,
-      this.config
-    );
-  }
-};
-var PgTimestampString = class extends PgColumn {
-  static [entityKind] = "PgTimestampString";
-  withTimezone;
-  precision;
-  constructor(table, config) {
-    super(table, config);
-    this.withTimezone = config.withTimezone;
-    this.precision = config.precision;
-  }
-  getSQLType() {
-    const precision = this.precision === void 0 ? "" : `(${this.precision})`;
-    return `timestamp${precision}${this.withTimezone ? " with time zone" : ""}`;
-  }
-  mapFromDriverValue(value) {
-    if (typeof value === "string") return value;
-    const shortened = value.toISOString().slice(0, -1).replace("T", " ");
-    if (this.withTimezone) {
-      const offset = value.getTimezoneOffset();
-      const sign = offset <= 0 ? "+" : "-";
-      return `${shortened}${sign}${Math.floor(Math.abs(offset) / 60).toString().padStart(2, "0")}`;
-    }
-    return shortened;
-  }
-};
-
-// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/pg-core/columns/uuid.js
-var PgUUIDBuilder = class extends PgColumnBuilder {
-  static [entityKind] = "PgUUIDBuilder";
-  constructor(name) {
-    super(name, "string", "PgUUID");
-  }
-  /**
-   * Adds `default gen_random_uuid()` to the column definition.
-   */
-  defaultRandom() {
-    return this.default(sql`gen_random_uuid()`);
-  }
-  /** @internal */
-  build(table) {
-    return new PgUUID(table, this.config);
-  }
-};
-var PgUUID = class extends PgColumn {
-  static [entityKind] = "PgUUID";
-  getSQLType() {
-    return "uuid";
-  }
-};
-
-// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/pg-core/table.js
-var InlineForeignKeys = /* @__PURE__ */ Symbol.for("drizzle:PgInlineForeignKeys");
-var EnableRLS = /* @__PURE__ */ Symbol.for("drizzle:EnableRLS");
-var PgTable = class extends Table {
-  static [entityKind] = "PgTable";
-  /** @internal */
-  static Symbol = Object.assign({}, Table.Symbol, {
-    InlineForeignKeys,
-    EnableRLS
-  });
-  /**@internal */
-  [InlineForeignKeys] = [];
-  /** @internal */
-  [EnableRLS] = false;
-  /** @internal */
-  [Table.Symbol.ExtraConfigBuilder] = void 0;
-  /** @internal */
-  [Table.Symbol.ExtraConfigColumns] = {};
-};
-
-// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/pg-core/primary-keys.js
-var PrimaryKeyBuilder = class {
-  static [entityKind] = "PgPrimaryKeyBuilder";
-  /** @internal */
-  columns;
-  /** @internal */
-  name;
-  constructor(columns, name) {
-    this.columns = columns;
-    this.name = name;
-  }
-  /** @internal */
-  build(table) {
-    return new PrimaryKey(table, this.columns, this.name);
-  }
-};
-var PrimaryKey = class {
-  constructor(table, columns, name) {
-    this.table = table;
-    this.columns = columns;
-    this.name = name;
-  }
-  static [entityKind] = "PgPrimaryKey";
-  columns;
-  name;
-  getName() {
-    return this.name ?? `${this.table[PgTable.Symbol.Name]}_${this.columns.map((column) => column.name).join("_")}_pk`;
-  }
-};
-
-// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/sql/expressions/conditions.js
-function bindIfParam(value, column) {
-  if (isDriverValueEncoder(column) && !isSQLWrapper(value) && !is(value, Param) && !is(value, Placeholder) && !is(value, Column) && !is(value, Table) && !is(value, View)) {
-    return new Param(value, column);
-  }
-  return value;
-}
-var eq = (left, right) => {
-  return sql`${left} = ${bindIfParam(right, left)}`;
-};
-var ne = (left, right) => {
-  return sql`${left} <> ${bindIfParam(right, left)}`;
-};
-function and(...unfilteredConditions) {
-  const conditions = unfilteredConditions.filter(
-    (c) => c !== void 0
-  );
-  if (conditions.length === 0) {
-    return void 0;
-  }
-  if (conditions.length === 1) {
-    return new SQL(conditions);
-  }
-  return new SQL([
-    new StringChunk("("),
-    sql.join(conditions, new StringChunk(" and ")),
-    new StringChunk(")")
-  ]);
-}
-function or(...unfilteredConditions) {
-  const conditions = unfilteredConditions.filter(
-    (c) => c !== void 0
-  );
-  if (conditions.length === 0) {
-    return void 0;
-  }
-  if (conditions.length === 1) {
-    return new SQL(conditions);
-  }
-  return new SQL([
-    new StringChunk("("),
-    sql.join(conditions, new StringChunk(" or ")),
-    new StringChunk(")")
-  ]);
-}
-function not(condition) {
-  return sql`not ${condition}`;
-}
-var gt = (left, right) => {
-  return sql`${left} > ${bindIfParam(right, left)}`;
-};
-var gte = (left, right) => {
-  return sql`${left} >= ${bindIfParam(right, left)}`;
-};
-var lt = (left, right) => {
-  return sql`${left} < ${bindIfParam(right, left)}`;
-};
-var lte = (left, right) => {
-  return sql`${left} <= ${bindIfParam(right, left)}`;
-};
-function inArray(column, values) {
-  if (Array.isArray(values)) {
-    if (values.length === 0) {
-      return sql`false`;
-    }
-    return sql`${column} in ${values.map((v) => bindIfParam(v, column))}`;
-  }
-  return sql`${column} in ${bindIfParam(values, column)}`;
-}
-function notInArray(column, values) {
-  if (Array.isArray(values)) {
-    if (values.length === 0) {
-      return sql`true`;
-    }
-    return sql`${column} not in ${values.map((v) => bindIfParam(v, column))}`;
-  }
-  return sql`${column} not in ${bindIfParam(values, column)}`;
-}
-function isNull(value) {
-  return sql`${value} is null`;
-}
-function isNotNull(value) {
-  return sql`${value} is not null`;
-}
-function exists(subquery) {
-  return sql`exists ${subquery}`;
-}
-function notExists(subquery) {
-  return sql`not exists ${subquery}`;
-}
-function between(column, min, max) {
-  return sql`${column} between ${bindIfParam(min, column)} and ${bindIfParam(
-    max,
-    column
-  )}`;
-}
-function notBetween(column, min, max) {
-  return sql`${column} not between ${bindIfParam(
-    min,
-    column
-  )} and ${bindIfParam(max, column)}`;
-}
-function like(column, value) {
-  return sql`${column} like ${value}`;
-}
-function notLike(column, value) {
-  return sql`${column} not like ${value}`;
-}
-function ilike(column, value) {
-  return sql`${column} ilike ${value}`;
-}
-function notIlike(column, value) {
-  return sql`${column} not ilike ${value}`;
-}
-
-// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/sql/expressions/select.js
-function asc(column) {
-  return sql`${column} asc`;
-}
-function desc(column) {
-  return sql`${column} desc`;
-}
-
-// ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/relations.js
-var Relation = class {
-  constructor(sourceTable, referencedTable, relationName) {
-    this.sourceTable = sourceTable;
-    this.referencedTable = referencedTable;
-    this.relationName = relationName;
-    this.referencedTableName = referencedTable[Table.Symbol.Name];
-  }
-  static [entityKind] = "Relation";
-  referencedTableName;
-  fieldName;
-};
-var Relations = class {
-  constructor(table, config) {
-    this.table = table;
-    this.config = config;
-  }
-  static [entityKind] = "Relations";
-};
-var One = class _One extends Relation {
-  constructor(sourceTable, referencedTable, config, isNullable) {
-    super(sourceTable, referencedTable, config?.relationName);
-    this.config = config;
-    this.isNullable = isNullable;
-  }
-  static [entityKind] = "One";
-  withFieldName(fieldName) {
-    const relation = new _One(
-      this.sourceTable,
-      this.referencedTable,
-      this.config,
-      this.isNullable
-    );
-    relation.fieldName = fieldName;
-    return relation;
-  }
-};
-var Many = class _Many extends Relation {
-  constructor(sourceTable, referencedTable, config) {
-    super(sourceTable, referencedTable, config?.relationName);
-    this.config = config;
-  }
-  static [entityKind] = "Many";
-  withFieldName(fieldName) {
-    const relation = new _Many(
-      this.sourceTable,
-      this.referencedTable,
-      this.config
-    );
-    relation.fieldName = fieldName;
-    return relation;
-  }
-};
-function getOperators() {
-  return {
-    and,
-    between,
-    eq,
-    exists,
-    gt,
-    gte,
-    ilike,
-    inArray,
-    isNull,
-    isNotNull,
-    like,
-    lt,
-    lte,
-    ne,
-    not,
-    notBetween,
-    notExists,
-    notLike,
-    notIlike,
-    notInArray,
-    or,
-    sql
-  };
-}
-function getOrderByOperators() {
-  return {
-    sql,
-    asc,
-    desc
-  };
-}
-function extractTablesRelationalConfig(schema, configHelpers) {
-  if (Object.keys(schema).length === 1 && "default" in schema && !is(schema["default"], Table)) {
-    schema = schema["default"];
-  }
-  const tableNamesMap = {};
-  const relationsBuffer = {};
-  const tablesConfig = {};
-  for (const [key, value] of Object.entries(schema)) {
-    if (is(value, Table)) {
-      const dbName = getTableUniqueName(value);
-      const bufferedRelations = relationsBuffer[dbName];
-      tableNamesMap[dbName] = key;
-      tablesConfig[key] = {
-        tsName: key,
-        dbName: value[Table.Symbol.Name],
-        schema: value[Table.Symbol.Schema],
-        columns: value[Table.Symbol.Columns],
-        relations: bufferedRelations?.relations ?? {},
-        primaryKey: bufferedRelations?.primaryKey ?? []
-      };
-      for (const column of Object.values(
-        value[Table.Symbol.Columns]
-      )) {
-        if (column.primary) {
-          tablesConfig[key].primaryKey.push(column);
-        }
-      }
-      const extraConfig = value[Table.Symbol.ExtraConfigBuilder]?.(value[Table.Symbol.ExtraConfigColumns]);
-      if (extraConfig) {
-        for (const configEntry of Object.values(extraConfig)) {
-          if (is(configEntry, PrimaryKeyBuilder)) {
-            tablesConfig[key].primaryKey.push(...configEntry.columns);
-          }
-        }
-      }
-    } else if (is(value, Relations)) {
-      const dbName = getTableUniqueName(value.table);
-      const tableName = tableNamesMap[dbName];
-      const relations2 = value.config(
-        configHelpers(value.table)
-      );
-      let primaryKey;
-      for (const [relationName, relation] of Object.entries(relations2)) {
-        if (tableName) {
-          const tableConfig = tablesConfig[tableName];
-          tableConfig.relations[relationName] = relation;
-          if (primaryKey) {
-            tableConfig.primaryKey.push(...primaryKey);
-          }
-        } else {
-          if (!(dbName in relationsBuffer)) {
-            relationsBuffer[dbName] = {
-              relations: {},
-              primaryKey
-            };
-          }
-          relationsBuffer[dbName].relations[relationName] = relation;
-        }
-      }
-    }
-  }
-  return { tables: tablesConfig, tableNamesMap };
-}
-function createOne(sourceTable) {
-  return function one(table, config) {
-    return new One(
-      sourceTable,
-      table,
-      config,
-      config?.fields.reduce((res, f) => res && f.notNull, true) ?? false
-    );
-  };
-}
-function createMany(sourceTable) {
-  return function many(referencedTable, config) {
-    return new Many(sourceTable, referencedTable, config);
-  };
-}
-function normalizeRelation(schema, tableNamesMap, relation) {
-  if (is(relation, One) && relation.config) {
-    return {
-      fields: relation.config.fields,
-      references: relation.config.references
-    };
-  }
-  const referencedTableTsName = tableNamesMap[getTableUniqueName(relation.referencedTable)];
-  if (!referencedTableTsName) {
-    throw new Error(
-      `Table "${relation.referencedTable[Table.Symbol.Name]}" not found in schema`
-    );
-  }
-  const referencedTableConfig = schema[referencedTableTsName];
-  if (!referencedTableConfig) {
-    throw new Error(`Table "${referencedTableTsName}" not found in schema`);
-  }
-  const sourceTable = relation.sourceTable;
-  const sourceTableTsName = tableNamesMap[getTableUniqueName(sourceTable)];
-  if (!sourceTableTsName) {
-    throw new Error(
-      `Table "${sourceTable[Table.Symbol.Name]}" not found in schema`
-    );
-  }
-  const reverseRelations = [];
-  for (const referencedTableRelation of Object.values(
-    referencedTableConfig.relations
-  )) {
-    if (relation.relationName && relation !== referencedTableRelation && referencedTableRelation.relationName === relation.relationName || !relation.relationName && referencedTableRelation.referencedTable === relation.sourceTable) {
-      reverseRelations.push(referencedTableRelation);
-    }
-  }
-  if (reverseRelations.length > 1) {
-    throw relation.relationName ? new Error(
-      `There are multiple relations with name "${relation.relationName}" in table "${referencedTableTsName}"`
-    ) : new Error(
-      `There are multiple relations between "${referencedTableTsName}" and "${relation.sourceTable[Table.Symbol.Name]}". Please specify relation name`
-    );
-  }
-  if (reverseRelations[0] && is(reverseRelations[0], One) && reverseRelations[0].config) {
-    return {
-      fields: reverseRelations[0].config.references,
-      references: reverseRelations[0].config.fields
-    };
-  }
-  throw new Error(
-    `There is not enough information to infer relation "${sourceTableTsName}.${relation.fieldName}"`
-  );
-}
-function createTableRelationsHelpers(sourceTable) {
-  return {
-    one: createOne(sourceTable),
-    many: createMany(sourceTable)
-  };
-}
-function mapRelationalRow(tablesConfig, tableConfig, row, buildQueryResultSelection, mapColumnValue = (value) => value) {
-  const result = {};
-  for (const [
-    selectionItemIndex,
-    selectionItem
-  ] of buildQueryResultSelection.entries()) {
-    if (selectionItem.isJson) {
-      const relation = tableConfig.relations[selectionItem.tsKey];
-      const rawSubRows = row[selectionItemIndex];
-      const subRows = typeof rawSubRows === "string" ? JSON.parse(rawSubRows) : rawSubRows;
-      result[selectionItem.tsKey] = is(relation, One) ? subRows && mapRelationalRow(
-        tablesConfig,
-        tablesConfig[selectionItem.relationTableTsKey],
-        subRows,
-        selectionItem.selection,
-        mapColumnValue
-      ) : subRows.map(
-        (subRow) => mapRelationalRow(
-          tablesConfig,
-          tablesConfig[selectionItem.relationTableTsKey],
-          subRow,
-          selectionItem.selection,
-          mapColumnValue
-        )
-      );
-    } else {
-      const value = mapColumnValue(row[selectionItemIndex]);
-      const field = selectionItem.field;
-      let decoder2;
-      if (is(field, Column)) {
-        decoder2 = field;
-      } else if (is(field, SQL)) {
-        decoder2 = field.decoder;
-      } else {
-        decoder2 = field.sql.decoder;
-      }
-      result[selectionItem.tsKey] = value === null ? null : decoder2.mapFromDriverValue(value);
-    }
-  }
-  return result;
-}
 
 // ../../node_modules/.pnpm/drizzle-orm@0.45.2_@electric-sql+pglite@0.5.3_pg@8.22.0/node_modules/drizzle-orm/node-postgres/driver.js
 import pg2 from "pg";
@@ -15208,29 +15208,6 @@ async function runIdempotentMutation(input) {
     };
   });
 }
-async function runDisabledMutation(input) {
-  requirePermission(input.actor, input.action);
-  const requestHash = hashRequestBody(input.requestBody);
-  return input.runtime.withTx(async (tx) => {
-    const idempotency = await beginIdempotent(tx, {
-      key: input.idempotencyKey,
-      route: input.route,
-      requestHash
-    });
-    if (idempotency.status === "replay") {
-      return {
-        status: statusForStoredResponse(idempotency.responseJson),
-        body: idempotency.responseJson
-      };
-    }
-    const response = disabledWriteBody(input.action);
-    await completeIdempotent(tx, input.idempotencyKey, response);
-    return {
-      status: 501,
-      body: response
-    };
-  });
-}
 async function appendAuditEvent(tx, input) {
   if (tx.kind === "memory") {
     const auditEventId2 = `audit_${randomUUID()}`;
@@ -16067,6 +16044,67 @@ function canonicalJson(value) {
 
 // src/index.ts
 var DEFAULT_WORKSPACE_ID = "eeee-mu";
+var isoDatePattern = /^\d{4}-\d{2}-\d{2}$/u;
+var isoDateTimePattern = /^\d{4}-\d{2}-\d{2}T/u;
+var currencyCodePattern = /^[A-Z]{3}$/u;
+var moneyStringPattern = /^-?\d+(?:\.\d+)?$/u;
+var nullableStringSchema = external_exports.string().min(1).nullable();
+var workspaceBodySchema = external_exports.object({ workspaceId: external_exports.string().min(1) });
+var officeTransactionWriteSchema = workspaceBodySchema.extend({
+  occurredOn: external_exports.string().regex(isoDatePattern),
+  accountId: external_exports.string().min(1),
+  categoryId: nullableStringSchema,
+  projectId: nullableStringSchema,
+  description: external_exports.string().min(1),
+  amountMicro: external_exports.string().regex(moneyStringPattern),
+  currency: external_exports.string().regex(currencyCodePattern)
+});
+var officePlanComptableWriteSchema = workspaceBodySchema.extend({
+  parentId: nullableStringSchema,
+  kind: external_exports.enum(["department", "division", "category"]),
+  code: external_exports.string().min(1),
+  label: external_exports.string().min(1),
+  active: external_exports.boolean(),
+  type: external_exports.enum(["income", "expense"]).nullable()
+});
+var officeReconciliationApproveSchema = workspaceBodySchema.extend({
+  reconciliationIds: external_exports.array(external_exports.string().min(1)).min(1),
+  approvedAt: external_exports.string().regex(isoDateTimePattern)
+});
+var officePartnerWriteSchema = workspaceBodySchema.extend({
+  name: external_exports.string().min(1),
+  email: nullableStringSchema,
+  phone: nullableStringSchema,
+  address: nullableStringSchema,
+  taxId: nullableStringSchema,
+  notes: nullableStringSchema,
+  active: external_exports.boolean()
+});
+var officePartnerPayeeUnlinkSchema = workspaceBodySchema.extend({
+  payeeId: external_exports.null()
+});
+var distributionMappingApplyRulesSchema = workspaceBodySchema.extend({
+  batchId: external_exports.string().min(1),
+  rowIds: external_exports.array(external_exports.string().min(1)).min(1)
+});
+var distributionContractExpenseRecordSchema = workspaceBodySchema.extend({
+  contractId: external_exports.string().min(1),
+  payeeId: external_exports.string().min(1),
+  incurredOn: external_exports.string().regex(isoDatePattern),
+  label: external_exports.string().min(1),
+  amountMicro: external_exports.string().regex(moneyStringPattern),
+  currency: external_exports.string().regex(currencyCodePattern)
+});
+var allocationRunUnpostSchema = workspaceBodySchema.extend({
+  reason: external_exports.string().min(1),
+  lockToken: external_exports.string().min(1)
+});
+var suspenseResolveSchema = workspaceBodySchema.extend({
+  suspenseId: external_exports.string().min(1),
+  resolution: external_exports.enum(["map_to_release", "map_to_track", "hold"]),
+  targetId: nullableStringSchema,
+  note: external_exports.string().min(1)
+});
 var ApiRouteError = class extends Error {
   status;
   code;
@@ -16207,10 +16245,10 @@ function registerOfficeRoutes(app, dependencies) {
     return context.json(pageItems(context, transactions));
   });
   app.post("/eof/v1/transactions", async (context) => {
-    return disabledWriteResponse(context, dependencies, "office_transaction_create");
+    return officeTransactionCreateResponse(context, dependencies);
   });
   app.patch("/eof/v1/transactions/:transactionId", async (context) => {
-    return disabledWriteResponse(context, dependencies, "office_transaction_update");
+    return officeTransactionUpdateResponse(context, dependencies);
   });
   app.get("/eof/v1/plan-comptable", (context) => {
     resolveWorkspaceId(context);
@@ -16218,10 +16256,10 @@ function registerOfficeRoutes(app, dependencies) {
     return context.json(toPlanComptableNodes(dependencies.fixtures.office, includeInactive));
   });
   app.post("/eof/v1/plan-comptable", async (context) => {
-    return disabledWriteResponse(context, dependencies, "office_plan_comptable_create");
+    return officePlanComptableCreateResponse(context, dependencies);
   });
   app.patch("/eof/v1/plan-comptable/:nodeId", async (context) => {
-    return disabledWriteResponse(context, dependencies, "office_plan_comptable_update");
+    return officePlanComptableUpdateResponse(context, dependencies);
   });
   app.post("/eof/v1/bank-import/preview", async (context) => {
     return officeBankImportPreviewResponse(context, dependencies);
@@ -16237,7 +16275,7 @@ function registerOfficeRoutes(app, dependencies) {
     return context.json(pageItems(context, toReconciliationCandidates(dependencies.fixtures.office).filter((candidate) => matchesReconciliationQuery(context, candidate))));
   });
   app.post("/eof/v1/reconciliations/approve", async (context) => {
-    return disabledWriteResponse(context, dependencies, "office_reconciliation_approve");
+    return officeReconciliationApproveResponse(context, dependencies);
   });
   app.get("/eof/v1/cashflow", (context) => {
     const from = requireCompatQuery(context, ["from", "fromDate"], "from");
@@ -16289,16 +16327,16 @@ function registerOfficeRoutes(app, dependencies) {
     return context.json(toPartnerPayeeLink(dependencies.fixtures, partner));
   });
   app.post("/eof/v1/partners", async (context) => {
-    return disabledWriteResponse(context, dependencies, "office_partner_create");
+    return officePartnerCreateResponse(context, dependencies);
   });
   app.patch("/eof/v1/partners/:partnerId", async (context) => {
-    return disabledWriteResponse(context, dependencies, "office_partner_update");
+    return officePartnerUpdateResponse(context, dependencies);
   });
   app.post("/eof/v1/partners/:partnerId/payee-link", async (context) => {
     return officePartnerPayeeLinkResponse(context, dependencies);
   });
   app.patch("/eof/v1/partners/:partnerId/payee-link", async (context) => {
-    return disabledWriteResponse(context, dependencies, "office_partner_payee_unlink");
+    return officePartnerPayeeUnlinkResponse(context, dependencies);
   });
   app.get("/eof/v1/bank/accounts", (context) => {
     const workspaceId = resolveWorkspaceId(context);
@@ -16350,6 +16388,11 @@ function registerOfficeRoutes(app, dependencies) {
     };
     return context.json(response);
   });
+  app.get("/eof/v1/vat", (context) => {
+    const period = requireCompatQuery(context, ["period", "month"], "period");
+    resolveWorkspaceId(context);
+    return context.json(toOfficeVatReport(dependencies.fixtures.office, period));
+  });
 }
 function filterRunwayWindowMonths(monthlyRows, runwayWindowMonths) {
   const availableMonths = new Set(monthlyRows.map((row) => row.month));
@@ -16385,7 +16428,7 @@ function registerDistributionRoutes(app, dependencies) {
     return context.json(pageItems(context, rows));
   });
   app.post("/erh/v1/mapping/apply-rules", async (context) => {
-    return disabledWriteResponse(context, dependencies, "distribution_mapping_apply_rules");
+    return distributionMappingApplyRulesResponse(context, dependencies);
   });
   app.get("/erh/v1/contracts", (context) => {
     requireQuery(context, "workspaceId");
@@ -16417,7 +16460,7 @@ function registerDistributionRoutes(app, dependencies) {
     return context.json(pageItems(context, expenses));
   });
   app.post("/erh/v1/contracts/:contractId/expenses", async (context) => {
-    return disabledWriteResponse(context, dependencies, "distribution_contract_expense_create");
+    return distributionContractExpenseCreateResponse(context, dependencies);
   });
   app.post("/erh/v1/contracts/:contractId/rules", async (context) => {
     return distributionContractRulesUpdateResponse(context, dependencies);
@@ -16517,7 +16560,7 @@ function registerDistributionRoutes(app, dependencies) {
     return distributionAllocationRunResponse(context, dependencies);
   });
   app.post("/erh/v1/allocations/runs/:runId/unpost", async (context) => {
-    return disabledWriteResponse(context, dependencies, "distribution_allocations_unpost");
+    return distributionAllocationUnpostResponse(context, dependencies);
   });
   app.get("/erh/v1/suspense", (context) => {
     requireQuery(context, "workspaceId");
@@ -16530,7 +16573,7 @@ function registerDistributionRoutes(app, dependencies) {
     return context.json(pageItems(context, suspense));
   });
   app.post("/erh/v1/suspense/:suspenseId/resolve", async (context) => {
-    return disabledWriteResponse(context, dependencies, "distribution_suspense_resolve");
+    return distributionSuspenseResolveResponse(context, dependencies);
   });
   app.get("/erh/v1/statements", (context) => {
     requireQuery(context, "workspaceId");
@@ -16628,6 +16671,26 @@ function registerDistributionRoutes(app, dependencies) {
   });
   app.post("/erh/v1/payees/:payeeId/partner-link", async (context) => {
     return distributionPayeePartnerLinkResponse(context, dependencies);
+  });
+  app.get("/erh/v1/financial-reconciliation", (context) => {
+    requireQuery(context, "workspaceId");
+    return context.json(toDistributionReconciliation(dependencies.fixtures));
+  });
+  app.get("/erh/v1/aliases", (context) => {
+    requireQuery(context, "workspaceId");
+    return context.json(pageItems(context, toDistributionAliases(dependencies.fixtures)));
+  });
+  app.get("/erh/v1/duplicates", (context) => {
+    requireQuery(context, "workspaceId");
+    return context.json(pageItems(context, toDistributionDuplicates(dependencies.fixtures)));
+  });
+  app.get("/erh/v1/audit-log", (context) => {
+    requireQuery(context, "workspaceId");
+    return context.json(pageItems(context, toDistributionAuditLog(dependencies.fixtures)));
+  });
+  app.get("/erh/v1/settings", (context) => {
+    requireQuery(context, "workspaceId");
+    return context.json(toDistributionSettings(context, dependencies.fixtures, dependencies.persistence.writesEnabled));
   });
 }
 function createErrorPayload(code, message2, context) {
@@ -16736,6 +16799,944 @@ async function readJsonBody(context) {
       `error=${error instanceof Error ? error.message : "unknown"}`
     ]);
   }
+}
+async function readZodBody(context, schema) {
+  const body = await readJsonBody(context);
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) {
+    throw new ApiRouteError(400, "body_schema_invalid", "Request body failed validation.", [
+      `path=${context.req.path}`,
+      `issues=${parsed.error.issues.map((issue) => `${issue.path.join(".")}:${issue.message}`).join("; ")}`
+    ]);
+  }
+  return parsed.data;
+}
+async function officeTransactionCreateResponse(context, dependencies) {
+  const request = await readZodBody(context, officeTransactionWriteSchema);
+  const amountMinor = normalizeEofAmountField(context, request.amountMicro, "amountMicro");
+  const transactionId = randomUUID2();
+  const transactionType = officeTransactionType(dependencies.fixtures.office, request.categoryId, request.amountMicro);
+  const transactionStatus = request.categoryId === null ? "draft" : "validated";
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_transaction_create",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await persistOfficeTransactionUpsert(tx, {
+        id: transactionId,
+        request,
+        amountMinor,
+        transactionType,
+        transactionStatus,
+        actorUserId: actor.userId,
+        isUpdate: false
+      });
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_transaction_create",
+        targetType: "office_transaction",
+        targetId: transactionId,
+        before: {},
+        after: {
+          transactionId,
+          request,
+          transactionType,
+          transactionStatus,
+          amountMinor: amountMinor.toString()
+        },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      upsertOfficeTransactionFixture(dependencies.fixtures, transactionFromOfficeRequest(transactionId, request, amountMinor, transactionType, transactionStatus));
+      return mutationReceipt(transactionId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+async function officeTransactionUpdateResponse(context, dependencies) {
+  const transactionId = requirePathParam(context, "transactionId");
+  const request = await readZodBody(context, officeTransactionWriteSchema);
+  const before = requireOfficeTransaction(dependencies.fixtures.office, transactionId);
+  const amountMinor = normalizeEofAmountField(context, request.amountMicro, "amountMicro");
+  const transactionType = officeTransactionType(dependencies.fixtures.office, request.categoryId, request.amountMicro);
+  const transactionStatus = request.categoryId === null ? "draft" : "validated";
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_transaction_update",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `office:transaction:${transactionId}`);
+      await persistOfficeTransactionUpsert(tx, {
+        id: transactionId,
+        request,
+        amountMinor,
+        transactionType,
+        transactionStatus,
+        actorUserId: actor.userId,
+        isUpdate: true
+      });
+      const after = transactionFromOfficeRequest(transactionId, request, amountMinor, transactionType, transactionStatus);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_transaction_update",
+        targetType: "office_transaction",
+        targetId: transactionId,
+        before: { transaction: before },
+        after: { transaction: after },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      upsertOfficeTransactionFixture(dependencies.fixtures, after);
+      return mutationReceipt(transactionId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+async function officePlanComptableCreateResponse(context, dependencies) {
+  const request = await readZodBody(context, officePlanComptableWriteSchema);
+  assertPlanComptableRequest(context, dependencies.fixtures.office, request);
+  const nodeId = randomUUID2();
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_plan_comptable_create",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await persistOfficePlanComptableCreate(tx, nodeId, request);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_plan_comptable_create",
+        targetType: "office_chart_node",
+        targetId: nodeId,
+        before: {},
+        after: { nodeId, request },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      upsertOfficePlanComptableFixture(dependencies.fixtures, nodeId, request);
+      return mutationReceipt(nodeId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+async function officePlanComptableUpdateResponse(context, dependencies) {
+  const nodeId = requirePathParam(context, "nodeId");
+  const request = await readZodBody(context, officePlanComptableWriteSchema);
+  const before = requirePlanComptableNode(dependencies.fixtures.office, nodeId);
+  assertPlanComptableRequest(context, dependencies.fixtures.office, request);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_plan_comptable_update",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `office:plan-comptable:${nodeId}`);
+      await persistOfficePlanComptableUpdate(tx, nodeId, request);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_plan_comptable_update",
+        targetType: "office_chart_node",
+        targetId: nodeId,
+        before: { node: before },
+        after: { nodeId, request },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      upsertOfficePlanComptableFixture(dependencies.fixtures, nodeId, request);
+      return mutationReceipt(nodeId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+async function officeReconciliationApproveResponse(context, dependencies) {
+  const request = await readZodBody(context, officeReconciliationApproveSchema);
+  const candidates = request.reconciliationIds.map((id) => requireReconciliationCandidate(dependencies.fixtures.office, id));
+  const primaryReconciliationId = request.reconciliationIds[0];
+  if (primaryReconciliationId === void 0) {
+    throw new ApiRouteError(400, "body_field_required", "At least one reconciliation id is required.", [`path=${context.req.path}`]);
+  }
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_reconciliation_approve",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `office:reconciliation:${request.reconciliationIds.join(":")}`);
+      await persistOfficeReconciliationApproval(tx, request, actor.userId, candidates);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_reconciliation_approve",
+        targetType: "office_reconciliation_match",
+        targetId: primaryReconciliationId,
+        before: { candidates },
+        after: { status: "matched", reconciliationIds: request.reconciliationIds, approvedAt: request.approvedAt },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      approveReconciliationFixture(dependencies.fixtures, candidates, request.approvedAt, actor.userId);
+      return mutationReceipt(primaryReconciliationId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+async function officePartnerCreateResponse(context, dependencies) {
+  const request = await readZodBody(context, officePartnerWriteSchema);
+  const partnerId = randomUUID2();
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_partner_create",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await persistOfficePartnerUpsert(tx, partnerId, request, false);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_partner_create",
+        targetType: "office_partner",
+        targetId: partnerId,
+        before: {},
+        after: { partnerId, request },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      upsertOfficePartnerFixture(dependencies.fixtures, partnerId, request);
+      return mutationReceipt(partnerId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+async function officePartnerUpdateResponse(context, dependencies) {
+  const partnerId = requirePathParam(context, "partnerId");
+  const request = await readZodBody(context, officePartnerWriteSchema);
+  const before = requirePartner2(dependencies.fixtures.office, partnerId);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_partner_update",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `office:partner:${partnerId}`);
+      await persistOfficePartnerUpsert(tx, partnerId, request, true);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_partner_update",
+        targetType: "office_partner",
+        targetId: partnerId,
+        before: { partner: before },
+        after: { partnerId, request },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      upsertOfficePartnerFixture(dependencies.fixtures, partnerId, request);
+      return mutationReceipt(partnerId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+async function officePartnerPayeeUnlinkResponse(context, dependencies) {
+  const partnerId = requirePathParam(context, "partnerId");
+  const request = await readZodBody(context, officePartnerPayeeUnlinkSchema);
+  const before = toPartnerPayeeLink(dependencies.fixtures, requirePartner2(dependencies.fixtures.office, partnerId));
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_partner_payee_unlink",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `identity-link:office:${partnerId}`);
+      await persistOfficePartnerPayeeUnlink(tx, partnerId);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_partner_payee_unlink",
+        targetType: "identity_link",
+        targetId: partnerId,
+        before: { link: before },
+        after: { partnerId, payeeId: null, status: "inactive" },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      unlinkOfficePartnerPayeeFixture(dependencies.fixtures, partnerId);
+      return mutationReceipt(partnerId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+async function distributionMappingApplyRulesResponse(context, dependencies) {
+  const request = await readZodBody(context, distributionMappingApplyRulesSchema);
+  const rows = request.rowIds.map((rowId) => requireDistributionMappingRow(dependencies.fixtures, rowId));
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "distribution_mapping_apply_rules",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `distribution:mapping:${request.batchId}`);
+      await persistDistributionMappingApplyRules(tx, rows);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_mapping_apply_rules",
+        targetType: "distribution_mapping_batch",
+        targetId: request.batchId,
+        before: { rows },
+        after: { rowIds: request.rowIds, status: "mapped" },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      applyDistributionMappingFixture(dependencies.fixtures, request.rowIds);
+      return mutationReceipt(request.batchId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+async function distributionContractExpenseCreateResponse(context, dependencies) {
+  const contractId = requirePathParam(context, "contractId");
+  const request = await readZodBody(context, distributionContractExpenseRecordSchema);
+  if (request.contractId !== contractId) {
+    throw new ApiRouteError(400, "body_path_mismatch", "Contract expense body must match the route contract id.", [
+      `pathContractId=${contractId}`,
+      `bodyContractId=${request.contractId}`
+    ]);
+  }
+  requireDistributionContract(dependencies, contractId);
+  requireDistributionPayee(dependencies.fixtures.distribution, request.payeeId);
+  const amount = normalizeErhAmountField(context, request.amountMicro, "amountMicro");
+  const expenseId = randomUUID2();
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "distribution_contract_expense_create",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `distribution:contract:${contractId}:expenses`);
+      await persistDistributionContractExpenseCreate(tx, expenseId, { ...request, amountMicro: amount });
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_contract_expense_create",
+        targetType: "contract_cost_term",
+        targetId: expenseId,
+        before: {},
+        after: { expenseId, request: { ...request, amountMicro: amount } },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      appendDistributionContractExpenseFixture(dependencies.fixtures, expenseId, { ...request, amountMicro: amount });
+      return mutationReceipt(expenseId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+async function distributionAllocationUnpostResponse(context, dependencies) {
+  const runId = requirePathParam(context, "runId");
+  const request = await readZodBody(context, allocationRunUnpostSchema);
+  const run = requireDistributionAllocationRun(dependencies.fixtures.distribution, runId);
+  const allocations = dependencies.fixtures.distribution.earningAllocations.filter((allocation) => allocation.calculationRunId === runId);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "distribution_allocations_unpost",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `distribution:allocation:${runId}`);
+      await persistDistributionAllocationUnpost(tx, runId);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_allocations_unpost",
+        targetType: "calculation_run",
+        targetId: runId,
+        before: { run, allocationCount: allocations.length },
+        after: { status: "excluded", reason: request.reason, lockToken: request.lockToken },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      unpostDistributionAllocationFixture(dependencies.fixtures, runId);
+      return {
+        runId,
+        status: "completed",
+        lockKey: `distribution:allocation:${runId}`,
+        auditEventId
+      };
+    }
+  });
+  return context.json(result.body, result.status);
+}
+async function distributionSuspenseResolveResponse(context, dependencies) {
+  const suspenseId = requirePathParam(context, "suspenseId");
+  const request = await readZodBody(context, suspenseResolveSchema);
+  if (request.suspenseId !== suspenseId) {
+    throw new ApiRouteError(400, "body_path_mismatch", "Suspense body must match the route suspense id.", [
+      `pathSuspenseId=${suspenseId}`,
+      `bodySuspenseId=${request.suspenseId}`
+    ]);
+  }
+  const suspense = requireDistributionSuspenseItem(dependencies.fixtures.distribution, suspenseId);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "distribution_suspense_resolve",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `distribution:suspense:${suspenseId}`);
+      await persistDistributionSuspenseResolve(tx, suspenseId, dependencies.nowIso());
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_suspense_resolve",
+        targetType: "suspense_item",
+        targetId: suspenseId,
+        before: { suspense },
+        after: { resolution: request.resolution, targetId: request.targetId, note: request.note },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      resolveDistributionSuspenseFixture(dependencies.fixtures, suspenseId, dependencies.nowIso());
+      return mutationReceipt(suspenseId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+function mutationReceipt(id, auditEventId) {
+  return {
+    id,
+    status: "completed",
+    auditEventId
+  };
+}
+function normalizeEofAmountField(context, value, field) {
+  try {
+    return eofMoney.parse(value);
+  } catch (error) {
+    throw new ApiRouteError(400, "body_field_invalid", "A body field must be a valid scale-2 office money string.", [
+      `path=${context.req.path}`,
+      `field=${field}`,
+      `error=${error instanceof Error ? error.message : "unknown"}`
+    ]);
+  }
+}
+function officeTransactionType(dataset, categoryId, amount) {
+  void amount;
+  if (categoryId === null) {
+    return "expense";
+  }
+  return resolveCategoryPath(dataset, categoryId).category.type;
+}
+function requireOfficeTransaction(dataset, transactionId) {
+  const transaction = dataset.transactions.find((candidate) => candidate.id === transactionId);
+  if (transaction === void 0) {
+    throw new ApiRouteError(404, "office_transaction_not_found", "Office transaction was not found.", [`transactionId=${transactionId}`]);
+  }
+  return transaction;
+}
+function transactionFromOfficeRequest(id, request, amountMinor, transactionType, transactionStatus) {
+  return {
+    id,
+    transactionDate: `${request.occurredOn}T00:00:00.000Z`,
+    type: transactionType,
+    status: transactionStatus,
+    isActive: true,
+    description: request.description.trim(),
+    categoryId: request.categoryId,
+    partnerId: null,
+    projectId: request.projectId,
+    amountMinor,
+    originalCurrency: request.currency === "MUR" ? null : request.currency,
+    exchangeRateE10: null
+  };
+}
+function upsertOfficeTransactionFixture(fixtures, transaction) {
+  const mutableOffice = fixtures.office;
+  const exists2 = fixtures.office.transactions.some((candidate) => candidate.id === transaction.id);
+  mutableOffice.transactions = exists2 ? fixtures.office.transactions.map((candidate) => candidate.id === transaction.id ? transaction : candidate) : [transaction, ...fixtures.office.transactions];
+}
+async function persistOfficeTransactionUpsert(tx, input) {
+  if (tx.kind === "memory") {
+    return;
+  }
+  const occurredAt = `${input.request.occurredOn}T00:00:00.000Z`;
+  if (input.isUpdate) {
+    await tx.executor.execute(sql`
+      update transactions
+      set
+        transaction_date = ${occurredAt},
+        type = ${input.transactionType},
+        status = ${input.transactionStatus},
+        description = ${input.request.description.trim()},
+        category_id = ${input.request.categoryId},
+        project_id = ${input.request.projectId},
+        amount_minor = ${input.amountMinor.toString()},
+        original_amount_minor = ${input.amountMinor.toString()},
+        original_currency = ${input.request.currency === "MUR" ? null : input.request.currency},
+        approved_by_user_id = ${input.transactionStatus === "validated" ? input.actorUserId : null},
+        approved_at = ${input.transactionStatus === "validated" ? (/* @__PURE__ */ new Date()).toISOString() : null},
+        updated_at = now()
+      where id = ${input.id}
+    `);
+    return;
+  }
+  await tx.executor.execute(sql`
+    insert into transactions (
+      id,
+      transaction_date,
+      type,
+      status,
+      is_active,
+      description,
+      category_id,
+      project_id,
+      amount_minor,
+      original_amount_minor,
+      original_currency,
+      source,
+      created_by_user_id,
+      approved_by_user_id,
+      approved_at
+    )
+    values (
+      ${input.id},
+      ${occurredAt},
+      ${input.transactionType},
+      ${input.transactionStatus},
+      true,
+      ${input.request.description.trim()},
+      ${input.request.categoryId},
+      ${input.request.projectId},
+      ${input.amountMinor.toString()},
+      ${input.amountMinor.toString()},
+      ${input.request.currency === "MUR" ? null : input.request.currency},
+      'manual',
+      ${input.actorUserId},
+      ${input.transactionStatus === "validated" ? input.actorUserId : null},
+      ${input.transactionStatus === "validated" ? (/* @__PURE__ */ new Date()).toISOString() : null}
+    )
+  `);
+}
+function assertPlanComptableRequest(context, dataset, request) {
+  if (request.kind === "department") {
+    if (request.parentId !== null) {
+      throw new ApiRouteError(400, "body_field_invalid", "Department nodes cannot have a parentId.", [`path=${context.req.path}`, "field=parentId"]);
+    }
+    return;
+  }
+  if (request.parentId === null) {
+    throw new ApiRouteError(400, "body_field_required", "Division and category nodes require a parentId.", [`path=${context.req.path}`, "field=parentId"]);
+  }
+  if (request.kind === "division") {
+    requireDepartment2(dataset, request.parentId);
+    return;
+  }
+  requireDivision2(dataset, request.parentId);
+  if (request.type === null) {
+    throw new ApiRouteError(400, "body_field_required", "Category nodes require an income or expense type.", [`path=${context.req.path}`, "field=type"]);
+  }
+}
+function requireDivision2(dataset, divisionId) {
+  const division = dataset.divisions.find((candidate) => candidate.id === divisionId);
+  if (division === void 0) {
+    throw new ApiRouteError(404, "division_not_found", "Office division was not found.", [`divisionId=${divisionId}`]);
+  }
+  return division;
+}
+function requirePlanComptableNode(dataset, nodeId) {
+  const node = toPlanComptableNodes(dataset, true).find((candidate) => candidate.id === nodeId);
+  if (node === void 0) {
+    throw new ApiRouteError(404, "office_plan_node_not_found", "Office chart node was not found.", [`nodeId=${nodeId}`]);
+  }
+  return node;
+}
+async function persistOfficePlanComptableCreate(tx, nodeId, request) {
+  if (tx.kind === "memory") {
+    return;
+  }
+  const slug = slugify(request.code, request.label);
+  if (request.kind === "department") {
+    await tx.executor.execute(sql`
+      insert into departments (id, name, slug, type, is_active)
+      values (${nodeId}, ${request.label.trim()}, ${slug}, ${request.type ?? "mixed"}, ${request.active})
+    `);
+    return;
+  }
+  if (request.kind === "division") {
+    await tx.executor.execute(sql`
+      insert into divisions (id, department_id, name, slug, is_active)
+      values (${nodeId}, ${request.parentId}, ${request.label.trim()}, ${slug}, ${request.active})
+    `);
+    return;
+  }
+  await tx.executor.execute(sql`
+    insert into categories (id, name, type, division_id, is_active)
+    values (${nodeId}, ${request.label.trim()}, ${request.type}, ${request.parentId}, ${request.active})
+  `);
+}
+async function persistOfficePlanComptableUpdate(tx, nodeId, request) {
+  if (tx.kind === "memory") {
+    return;
+  }
+  const slug = slugify(request.code, request.label);
+  if (request.kind === "department") {
+    await tx.executor.execute(sql`
+      update departments
+      set name = ${request.label.trim()}, slug = ${slug}, type = ${request.type ?? "mixed"}, is_active = ${request.active}
+      where id = ${nodeId}
+    `);
+    return;
+  }
+  if (request.kind === "division") {
+    await tx.executor.execute(sql`
+      update divisions
+      set department_id = ${request.parentId}, name = ${request.label.trim()}, slug = ${slug}, is_active = ${request.active}
+      where id = ${nodeId}
+    `);
+    return;
+  }
+  await tx.executor.execute(sql`
+    update categories
+    set name = ${request.label.trim()}, type = ${request.type}, division_id = ${request.parentId}, is_active = ${request.active}
+    where id = ${nodeId}
+  `);
+}
+function upsertOfficePlanComptableFixture(fixtures, nodeId, request) {
+  const mutableOffice = fixtures.office;
+  if (request.kind === "department") {
+    const department = { id: nodeId, name: request.label.trim(), type: request.type ?? "mixed", color: null, isActive: request.active };
+    mutableOffice.departments = upsertById(fixtures.office.departments, department);
+    return;
+  }
+  if (request.kind === "division") {
+    const division = { id: nodeId, departmentId: request.parentId ?? "", name: request.label.trim(), isActive: request.active };
+    mutableOffice.divisions = upsertById(fixtures.office.divisions, division);
+    return;
+  }
+  const category = { id: nodeId, divisionId: request.parentId, name: request.label.trim(), type: request.type ?? "expense", isActive: request.active };
+  mutableOffice.categories = upsertById(fixtures.office.categories, category);
+}
+function slugify(code, label) {
+  return `${code}-${label}`.toLowerCase().replace(/[^a-z0-9]+/gu, "-").replace(/^-|-$/gu, "");
+}
+function requireReconciliationCandidate(dataset, reconciliationId) {
+  const candidate = toReconciliationCandidates(dataset).find((item) => item.id === reconciliationId);
+  if (candidate === void 0) {
+    throw new ApiRouteError(404, "office_reconciliation_not_found", "Office reconciliation candidate was not found.", [
+      `reconciliationId=${reconciliationId}`
+    ]);
+  }
+  return candidate;
+}
+async function persistOfficeReconciliationApproval(tx, request, actorUserId, candidates) {
+  if (tx.kind === "memory") {
+    return;
+  }
+  for (const candidate of candidates) {
+    if (candidate.id.startsWith("recon_")) {
+      await tx.executor.execute(sql`
+        insert into office_bank_reconciliation_matches (
+          id,
+          bank_statement_line_id,
+          transaction_id,
+          confidence_bp,
+          status,
+          approved_by_user_id,
+          approved_at
+        )
+        values (
+          ${randomUUID2()},
+          ${candidate.statementLineId},
+          ${candidate.transactionId},
+          ${candidate.confidenceBp},
+          'matched',
+          ${actorUserId},
+          ${request.approvedAt}
+        )
+        on conflict (bank_statement_line_id, transaction_id) do update
+        set status = 'matched', approved_by_user_id = excluded.approved_by_user_id, approved_at = excluded.approved_at, updated_at = now()
+      `);
+    } else {
+      await tx.executor.execute(sql`
+        update office_bank_reconciliation_matches
+        set status = 'matched', approved_by_user_id = ${actorUserId}, approved_at = ${request.approvedAt}, updated_at = now()
+        where id = ${candidate.id}
+      `);
+    }
+    await tx.executor.execute(sql`
+      update office_bank_statement_lines
+      set reconciliation_status = 'matched', matched_transaction_id = ${candidate.transactionId}
+      where id = ${candidate.statementLineId}
+    `);
+    await tx.executor.execute(sql`
+      update transactions
+      set status = 'validated', is_fully_reconciled = true, approved_by_user_id = ${actorUserId}, approved_at = ${request.approvedAt}, updated_at = now()
+      where id = ${candidate.transactionId}
+    `);
+  }
+}
+function approveReconciliationFixture(fixtures, candidates, approvedAt, actorUserId) {
+  const mutableOffice = fixtures.office;
+  mutableOffice.bankStatementLines = fixtures.office.bankStatementLines.map((line) => {
+    const candidate = candidates.find((item) => item.statementLineId === line.id);
+    if (candidate === void 0) {
+      return line;
+    }
+    return { ...line, reconciliationStatus: "matched", matchedTransactionId: candidate.transactionId };
+  });
+  mutableOffice.transactions = fixtures.office.transactions.map(
+    (transaction) => candidates.some((candidate) => candidate.transactionId === transaction.id) ? { ...transaction, status: "validated" } : transaction
+  );
+  mutableOffice.bankReconciliationMatches = [
+    ...fixtures.office.bankReconciliationMatches.filter((match2) => !candidates.some((candidate) => candidate.id === match2.id)),
+    ...candidates.map((candidate) => ({
+      id: candidate.id.startsWith("recon_") ? randomUUID2() : candidate.id,
+      bankStatementLineId: candidate.statementLineId,
+      transactionId: candidate.transactionId,
+      confidenceBp: candidate.confidenceBp,
+      status: "matched",
+      approvedByUserId: actorUserId,
+      approvedAt
+    }))
+  ];
+}
+async function persistOfficePartnerUpsert(tx, partnerId, request, isUpdate) {
+  if (tx.kind === "memory") {
+    return;
+  }
+  if (isUpdate) {
+    await tx.executor.execute(sql`
+      update partners
+      set
+        name = ${request.name.trim()},
+        email = ${request.email},
+        phone = ${request.phone},
+        address = ${request.address},
+        tax_id = ${request.taxId},
+        notes = ${request.notes},
+        is_active = ${request.active}
+      where id = ${partnerId}
+    `);
+    return;
+  }
+  await tx.executor.execute(sql`
+    insert into partners (id, name, type, email, phone, address, tax_id, notes, is_active)
+    values (${partnerId}, ${request.name.trim()}, 'both', ${request.email}, ${request.phone}, ${request.address}, ${request.taxId}, ${request.notes}, ${request.active})
+  `);
+}
+function upsertOfficePartnerFixture(fixtures, partnerId, request) {
+  const mutableOffice = fixtures.office;
+  const existing = fixtures.office.partners.find((partner2) => partner2.id === partnerId);
+  const partner = {
+    id: partnerId,
+    name: request.name.trim(),
+    type: existing?.type ?? "both",
+    isActive: request.active
+  };
+  mutableOffice.partners = upsertById(fixtures.office.partners, partner);
+}
+async function persistOfficePartnerPayeeUnlink(tx, partnerId) {
+  if (tx.kind === "memory") {
+    return;
+  }
+  await tx.executor.execute(sql`
+    update identity_link
+    set status = 'archived', updated_at = now()
+    where office_partner_id = ${partnerId}
+      and status <> 'archived'
+  `);
+}
+function unlinkOfficePartnerPayeeFixture(fixtures, partnerId) {
+  const mutableFixtures = fixtures;
+  const entries = Object.entries(fixtures.officePartnerPayeeLinks).filter(([id]) => id !== partnerId);
+  mutableFixtures.officePartnerPayeeLinks = Object.fromEntries(entries);
+}
+function requireDistributionMappingRow(fixtures, rowId) {
+  const row = fixtures.distributionMappingRows.find((candidate) => candidate.id === rowId);
+  if (row === void 0) {
+    throw new ApiRouteError(404, "distribution_mapping_row_not_found", "Distribution mapping row was not found.", [`rowId=${rowId}`]);
+  }
+  if (row.suggestedTrackId === null) {
+    throw new ApiRouteError(422, "distribution_mapping_target_missing", "Mapping row cannot be applied without a suggested track.", [`rowId=${rowId}`]);
+  }
+  return row;
+}
+async function persistDistributionMappingApplyRules(tx, rows) {
+  if (tx.kind === "memory") {
+    return;
+  }
+  for (const row of rows) {
+    await tx.executor.execute(sql`
+      update normalized_earnings
+      set mapping_status = 'matched', calculation_status = 'pending', updated_at = now()
+      where id = ${row.id}
+    `);
+    await tx.executor.execute(sql`
+      insert into earning_track_matches (id, earning_id, track_id, confidence, status)
+      values (${randomUUID2()}, ${row.id}, ${row.suggestedTrackId}, ${(row.confidenceBp / 100).toFixed(6)}, 'matched')
+      on conflict (earning_id, track_id) do update
+      set confidence = excluded.confidence, status = 'matched'
+    `);
+  }
+}
+function applyDistributionMappingFixture(fixtures, rowIds) {
+  const mutableFixtures = fixtures;
+  mutableFixtures.distributionMappingRows = fixtures.distributionMappingRows.map(
+    (row) => rowIds.includes(row.id) ? { ...row, status: "mapped" } : row
+  );
+  const mutableDistribution = fixtures.distribution;
+  mutableDistribution.normalizedEarnings = fixtures.distribution.normalizedEarnings.map(
+    (earning) => rowIds.includes(earning.id) ? { ...earning, mappingStatus: "matched", calculationStatus: "pending" } : earning
+  );
+}
+async function persistDistributionContractExpenseCreate(tx, expenseId, request) {
+  if (tx.kind === "memory") {
+    return;
+  }
+  await tx.executor.execute(sql`
+    insert into contract_cost_terms (
+      id,
+      contract_id,
+      payee_id,
+      amount,
+      currency,
+      recoupable,
+      recovery_method,
+      status,
+      scope_type,
+      scope_id
+    )
+    values (
+      ${expenseId},
+      ${request.contractId},
+      ${request.payeeId},
+      ${request.amountMicro},
+      ${request.currency},
+      true,
+      'statement_recoupment',
+      'open',
+      'operator_expense',
+      ${request.incurredOn}
+    )
+  `);
+}
+function appendDistributionContractExpenseFixture(fixtures, expenseId, request) {
+  const expense = {
+    id: expenseId,
+    contractId: request.contractId,
+    payeeId: request.payeeId,
+    incurredOn: request.incurredOn,
+    label: request.label.trim(),
+    originalAmountMicro: request.amountMicro,
+    openAmountMicro: request.amountMicro,
+    currency: request.currency,
+    status: "open"
+  };
+  const mutableFixtures = fixtures;
+  mutableFixtures.distributionContractExpenses = [expense, ...fixtures.distributionContractExpenses];
+  mutableFixtures.distributionCostTerms = [
+    {
+      id: expenseId,
+      contractId: request.contractId,
+      payeeId: request.payeeId,
+      amount: request.amountMicro,
+      currency: request.currency,
+      recoupable: true,
+      status: "open",
+      expenseDate: request.incurredOn
+    },
+    ...fixtures.distributionCostTerms
+  ];
+}
+function requireDistributionAllocationRun(dataset, runId) {
+  const run = dataset.calculationRuns.find((candidate) => candidate.id === runId);
+  if (run === void 0) {
+    throw new ApiRouteError(404, "allocation_run_not_found", "Distribution allocation run was not found.", [`runId=${runId}`]);
+  }
+  return run;
+}
+async function persistDistributionAllocationUnpost(tx, runId) {
+  if (tx.kind === "memory") {
+    return;
+  }
+  await tx.executor.execute(sql`
+    update calculation_runs
+    set status = 'excluded', finished_at = now()
+    where id = ${runId}
+  `);
+  await tx.executor.execute(sql`
+    update earning_allocations
+    set status = 'void'
+    where calculation_run_id = ${runId}
+  `);
+}
+function unpostDistributionAllocationFixture(fixtures, runId) {
+  const mutableDistribution = fixtures.distribution;
+  mutableDistribution.calculationRuns = fixtures.distribution.calculationRuns.map(
+    (run) => run.id === runId ? { ...run, status: "excluded", finishedAt: run.finishedAt ?? (/* @__PURE__ */ new Date()).toISOString() } : run
+  );
+  mutableDistribution.earningAllocations = fixtures.distribution.earningAllocations.map(
+    (allocation) => allocation.calculationRunId === runId ? { ...allocation, status: "void" } : allocation
+  );
+}
+function requireDistributionSuspenseItem(dataset, suspenseId) {
+  const suspense = dataset.suspenseItems.find((candidate) => candidate.id === suspenseId);
+  if (suspense === void 0) {
+    throw new ApiRouteError(404, "distribution_suspense_not_found", "Distribution suspense item was not found.", [`suspenseId=${suspenseId}`]);
+  }
+  return suspense;
+}
+async function persistDistributionSuspenseResolve(tx, suspenseId, resolvedAt) {
+  if (tx.kind === "memory") {
+    return;
+  }
+  await tx.executor.execute(sql`
+    update suspense_items
+    set resolved = true, resolved_at = ${resolvedAt}
+    where id = ${suspenseId}
+  `);
+}
+function resolveDistributionSuspenseFixture(fixtures, suspenseId, resolvedAt) {
+  const mutableDistribution = fixtures.distribution;
+  mutableDistribution.suspenseItems = fixtures.distribution.suspenseItems.map(
+    (suspense) => suspense.id === suspenseId ? { ...suspense, resolved: true, resolvedAt } : suspense
+  );
+}
+function upsertById(items, item) {
+  const exists2 = items.some((candidate) => candidate.id === item.id);
+  if (!exists2) {
+    return [item, ...items];
+  }
+  return items.map((candidate) => candidate.id === item.id ? item : candidate);
 }
 async function distributionAllocationPreviewResponse(context, dependencies) {
   requirePermission(context.get("authUser"), "distribution_allocations_preview");
@@ -18871,11 +19872,34 @@ function appendOfficeAuditFixture(fixtures, patch) {
       action: patch.action,
       entityType: patch.entityType,
       entityId: patch.entityId,
+      entityReference: auditEntityReference(fixtures, patch.entityType, patch.entityId),
       idempotencyKey: null,
       context: {}
     },
     ...fixtures.officeAuditLog
   ];
+}
+function auditEntityReference(fixtures, entityType, entityId) {
+  if (entityType === "office_bank_import_batch") {
+    return fixtures.office.bankImportBatches.find((batch) => batch.id === entityId)?.fileName ?? entityId;
+  }
+  if (entityType === "office_transaction") {
+    return fixtures.office.transactions.find((transaction) => transaction.id === entityId)?.description ?? entityId;
+  }
+  if (entityType === "office_partner") {
+    return fixtures.office.partners.find((partner) => partner.id === entityId)?.name ?? entityId;
+  }
+  if (entityType === "distribution_statement") {
+    const statement = fixtures.distribution.statements.find((candidate) => candidate.id === entityId);
+    if (statement !== void 0) {
+      const payee = fixtures.distribution.payees.find((candidate) => candidate.id === statement.payeeId);
+      return `${payee?.name ?? statement.payeeId} \xB7 ${statement.periodStart} \u2192 ${statement.periodEnd}`;
+    }
+  }
+  if (entityType === "distribution_payment") {
+    return fixtures.distribution.payments.find((payment) => payment.id === entityId)?.reference ?? entityId;
+  }
+  return entityId;
 }
 async function readOptionalJsonBody(context) {
   const text = await readRequestText(context);
@@ -18950,6 +19974,17 @@ function toApiDivisionPnl(row) {
     netMicro: row.profit
   };
 }
+function toOfficeVatReport(_dataset, period) {
+  const zeroMicro = eofMoney.format(0n);
+  return {
+    period,
+    hasVatSource: false,
+    outputVatMicro: zeroMicro,
+    inputVatMicro: zeroMicro,
+    netVatMicro: zeroMicro,
+    rows: []
+  };
+}
 function buildBatchWorkspaceLookup(batches) {
   const lookup = /* @__PURE__ */ new Map();
   for (const batch of batches) {
@@ -19000,19 +20035,6 @@ function toAllocationStatusFilter(status) {
   throw new ApiRouteError(400, "query_value_invalid", "Allocation status is invalid.", [
     `status=${status}`
   ]);
-}
-async function disabledWriteResponse(context, dependencies, action) {
-  const idempotencyKey = requireIdempotencyKey(context);
-  const requestBody = await readRequestText(context);
-  const result = await runDisabledMutation({
-    runtime: dependencies.persistence,
-    actor: context.get("authUser"),
-    action,
-    route: context.req.path,
-    idempotencyKey,
-    requestBody
-  });
-  return context.json(result.body, result.status);
 }
 function filtersForPeriod(period, departmentId) {
   return {
@@ -19635,9 +20657,11 @@ function toReleaseSummaries(dataset) {
 function toAllocationRunSummary(dataset, run) {
   const allocations = readAllocationList(dataset, { calculationRunId: run.id, payeeId: null, status: null });
   const total = allocations.totals[0];
+  const period = "2026-04";
   return {
     id: run.id,
-    period: "2026-04",
+    runReference: `${period} \xB7 distribution:allocation:${run.id}`,
+    period,
     status: toApiRunStatus(run.status),
     lockKey: `distribution:allocation:${run.id}`,
     startedAt: run.startedAt,
@@ -19804,6 +20828,160 @@ function toDistributionBarLevel(value, maxUnits) {
     return 0;
   }
   return parseInt((value * 100n / maxUnits).toString(), 10);
+}
+var distributionReconciliationSampleLimit = 25;
+function toDistributionReconciliation(store) {
+  const dataset = store.distribution;
+  const payeeName = (payeeId) => dataset.payees.find((candidate) => candidate.id === payeeId)?.name ?? payeeId;
+  const contractTitle = (contractId) => store.distributionContracts.find((candidate) => candidate.id === contractId)?.title ?? contractId;
+  const linkedPaymentIds = new Set(dataset.statementPaymentLinks.map((link) => link.paymentId));
+  const unlinkedPayments = dataset.payments.filter((payment) => !linkedPaymentIds.has(payment.id));
+  const missingPaymentDates = dataset.payments.filter((payment) => payment.paidAt === null);
+  const linkedStatementIds = new Set(dataset.statementPaymentLinks.map((link) => link.statementId));
+  const statementsWithoutLinks = dataset.statements.filter((statement) => !linkedStatementIds.has(statement.id));
+  const allocatedEarningIds = new Set(dataset.earningAllocations.map((allocation) => allocation.earningId));
+  const matchedUnallocated = dataset.normalizedEarnings.filter(
+    (earning) => earning.mappingStatus === "matched" && !allocatedEarningIds.has(earning.id)
+  );
+  const expenseTermsMissingPayee = store.distributionCostTerms.filter((term) => term.payeeId === null);
+  const balanceGroups = /* @__PURE__ */ new Map();
+  for (const balance of store.distributionPayeeBalances) {
+    const key = `${balance.payeeId}:${balance.currency}`;
+    const existing = balanceGroups.get(key);
+    if (existing === void 0) {
+      balanceGroups.set(key, {
+        payeeId: balance.payeeId,
+        currency: balance.currency,
+        ids: [balance.id],
+        latest: balance.closingBalance
+      });
+    } else {
+      existing.ids.push(balance.id);
+      existing.latest = balance.closingBalance;
+    }
+  }
+  const kpis = [
+    { id: "payments_total", label: "Payments", value: String(dataset.payments.length), detail: `${String(unlinkedPayments.length)} unlinked`, tone: "info" },
+    { id: "payments_unlinked", label: "Unlinked payments", value: String(unlinkedPayments.length), detail: "no statement link", tone: unlinkedPayments.length > 0 ? "warning" : "success" },
+    { id: "strict_matches", label: "Strict payment matches", value: String(dataset.statementPaymentLinks.length), detail: "statement \u2194 payment", tone: "info" },
+    { id: "statement_plans", label: "Statement plans", value: String(linkedStatementIds.size), detail: "statements with a payment", tone: "info" },
+    { id: "payment_only_plans", label: "Payment-only plans", value: String(unlinkedPayments.length), detail: "payment without statement", tone: unlinkedPayments.length > 0 ? "warning" : "success" },
+    { id: "missing_payment_dates", label: "Missing payment dates", value: String(missingPaymentDates.length), detail: "paidAt is null", tone: missingPaymentDates.length > 0 ? "warning" : "success" },
+    { id: "statements", label: "Statements", value: String(dataset.statements.length), detail: `${String(dataset.statementLines.length)} statement lines`, tone: "info" },
+    { id: "payee_balances", label: "Payee balances", value: String(store.distributionPayeeBalances.length), detail: `${String(balanceGroups.size)} payee/currency rows`, tone: "info" },
+    { id: "expense_applications", label: "Expense applications", value: String(store.distributionExpenseApplications.length), detail: "applied cost terms", tone: "info" },
+    { id: "missing_expense_payees", label: "Missing expense payees", value: String(expenseTermsMissingPayee.length), detail: "cost terms with null payee", tone: expenseTermsMissingPayee.length > 0 ? "warning" : "success" },
+    { id: "allocations", label: "Allocations", value: String(dataset.earningAllocations.length), detail: "earning allocations", tone: "info" },
+    { id: "matched_unallocated", label: "Matched unallocated", value: String(matchedUnallocated.length), detail: "matched, no allocation", tone: matchedUnallocated.length > 0 ? "warning" : "success" }
+  ];
+  const statementsWithoutPaymentLinks = statementsWithoutLinks.slice(0, distributionReconciliationSampleLimit).map((statement) => ({
+    id: statement.id,
+    statementReference: `${payeeName(statement.payeeId)} \xB7 ${statement.periodStart} \u2192 ${statement.periodEnd}`,
+    payee: payeeName(statement.payeeId),
+    periodStart: statement.periodStart,
+    periodEnd: statement.periodEnd,
+    currency: statement.currency,
+    netPayableMicro: statement.netPayable
+  }));
+  const expenseTermsMissingPayeeRows = expenseTermsMissingPayee.slice(0, distributionReconciliationSampleLimit).map((term) => ({
+    id: term.id,
+    expenseReference: `${contractTitle(term.contractId)} \xB7 ${term.currency} ${term.amount}`,
+    contract: contractTitle(term.contractId),
+    description: term.recoupable ? "recoupable cost term" : "non-recoupable cost term",
+    amountMicro: term.amount,
+    currency: term.currency,
+    status: term.status
+  }));
+  const matchedUnallocatedSamples = matchedUnallocated.slice(0, distributionReconciliationSampleLimit).map((earning) => ({
+    id: earning.id,
+    sourceReference: `${earning.batchId} \xB7 ${earning.rawTitle ?? earning.isrc ?? earning.upc ?? earning.id}`,
+    batch: earning.batchId,
+    track: earning.rawTitle ?? earning.id,
+    currency: earning.currency,
+    grossMicro: earning.grossAmount,
+    status: earning.calculationStatus
+  }));
+  const payeeBalancesSummary = [...balanceGroups.values()].slice(0, distributionReconciliationSampleLimit).map((group) => ({
+    payee: payeeName(group.payeeId),
+    currency: group.currency,
+    rows: group.ids.length,
+    firstId: group.ids[0] ?? null,
+    lastId: group.ids[group.ids.length - 1] ?? null,
+    firstReference: balanceReference(group.payeeId, group.currency, group.ids[0] ?? null),
+    lastReference: balanceReference(group.payeeId, group.currency, group.ids[group.ids.length - 1] ?? null),
+    latestClosingMicro: group.latest
+  }));
+  const actions = [
+    { id: "link-statement-payment", label: "Link statement payment", description: "Records and links a payment to the first open statement gap.", maintenance: false },
+    { id: "recompute-payee-balance", label: "Recompute payee balance", description: "Recomputes statement/payment balances through the payment write path.", maintenance: false },
+    { id: "assign-expense-payee", label: "Assign expense payee", description: "Creates a guarded contract expense with an explicit payee.", maintenance: false },
+    { id: "allocate-matched-row", label: "Allocate matched row", description: "Runs the locked allocation engine for matched rows.", maintenance: false },
+    { id: "void-statement", label: "Void statement", description: "Voids a statement and appends the reversal balance row.", maintenance: false },
+    { id: "repair-identity-link", label: "Repair identity link", description: "One-off backfill; kept as flagged maintenance.", maintenance: true },
+    { id: "refresh-derived-summary", label: "Refresh derived summary", description: "One-off derived summary rebuild; kept as flagged maintenance.", maintenance: true }
+  ];
+  return {
+    kpis,
+    statementsWithoutPaymentLinks,
+    expenseTermsMissingPayee: expenseTermsMissingPayeeRows,
+    matchedUnallocatedSamples,
+    payeeBalancesSummary,
+    actions
+  };
+}
+function toDistributionAliases(store) {
+  void store;
+  return [];
+}
+function toDistributionDuplicates(store) {
+  const dataset = store.distribution;
+  const groups = /* @__PURE__ */ new Map();
+  for (const earning of dataset.normalizedEarnings) {
+    if (earning.isrc === null) {
+      continue;
+    }
+    const label = `${earning.rawTitle ?? earning.isrc} \xB7 ${earning.rawArtist ?? earning.dsp}`;
+    const existing = groups.get(earning.isrc);
+    if (existing === void 0) {
+      groups.set(earning.isrc, { title: earning.rawTitle ?? earning.isrc, ids: [earning.id], labels: [label] });
+    } else {
+      existing.ids.push(earning.id);
+      existing.labels.push(label);
+    }
+  }
+  return [...groups.entries()].filter(([, group]) => group.ids.length > 1).map(([isrc, group]) => ({
+    id: isrc,
+    label: group.title,
+    kind: "normalized_earning_isrc",
+    count: group.ids.length,
+    sampleIds: group.ids.slice(0, distributionReconciliationSampleLimit),
+    sampleLabels: group.labels.slice(0, distributionReconciliationSampleLimit)
+  }));
+}
+function toDistributionAuditLog(store) {
+  return store.officeAuditLog.filter((entry) => entry.action.startsWith("distribution."));
+}
+function toDistributionSettings(context, store, writesEnabled) {
+  const workspaceId = requireQuery(context, "workspaceId");
+  const dataset = store.distribution;
+  const currencies = [...new Set(dataset.payees.map((payee) => payee.preferredCurrency))].sort();
+  return {
+    workspaceId,
+    namespace: "erh/v1",
+    reads: "live",
+    payeeCount: dataset.payees.length,
+    contractCount: store.distributionContracts.length,
+    currencies,
+    fxRateCount: store.distributionFxRates.length,
+    mutationsEnabled: writesEnabled
+  };
+}
+function balanceReference(payeeId, currency, balanceId) {
+  void payeeId;
+  if (balanceId === null) {
+    return null;
+  }
+  return `${currency} balance row`;
 }
 function formatPeriodLabel(start, end) {
   if (start === null && end === null) {

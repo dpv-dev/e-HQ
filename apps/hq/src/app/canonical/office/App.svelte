@@ -1322,7 +1322,7 @@
         { kind: "text", value: entry.occurredAt, strong: false },
         { kind: "text", value: entry.action, strong: true },
         { kind: "text", value: entry.entityType, strong: false },
-        { kind: "text", value: entry.entityId, strong: false },
+        { kind: "text", value: entry.entityReference, strong: false },
         { kind: "badge", value: entry.idempotencyKey === null ? "read" : "idempotent", tone: entry.idempotencyKey === null ? "muted" : "success" }
       ]
     }));

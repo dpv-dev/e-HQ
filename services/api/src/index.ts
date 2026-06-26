@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { cors } from "hono/cors";
+import { sql } from "drizzle-orm";
+import { z } from "zod";
 import { eofMoney, erhMoney, format as formatScaledUnits, parse as parseScaledUnits } from "@ehq/domain-finance";
 import {
   buildAllocationPlan,
@@ -115,6 +117,8 @@ import type {
   OfficePartnerPayeeLink,
   OfficePartnerPayeeLinkRequest,
   OfficePartnerPnl,
+  OfficePartnerWriteRequest,
+  OfficePlanComptableWriteRequest,
   OfficePartnerSideActivity,
   OfficePlanComptableNode,
   OfficePnlProjectionRow,
@@ -123,8 +127,10 @@ import type {
   OfficeProjectPnlLine,
   OfficeProjectSummary,
   OfficeReconciliationCandidate,
+  OfficeReconciliationApproveRequest,
   OfficeTransaction,
   OfficeTransactionStatus,
+  OfficeTransactionWriteRequest,
   PageResult,
   PaymentRecordRequest,
   PaymentReconcileRequest,
@@ -133,6 +139,8 @@ import type {
   ReleaseSummary,
   StatementGenerateRequest,
   StatementSummary,
+  DistributionContractExpenseRecordRequest,
+  SuspenseResolveRequest,
   SuspenseItem,
   TrackSummary
 } from "@ehq/api-client";
@@ -163,7 +171,6 @@ import {
   persistIdentityLink,
   persistOfficeBankImportConfirmation,
   requirePermission,
-  runDisabledMutation,
   runIdempotentMutation,
   type ApiImportPreviewRow,
   type ApiMutationResponse,
@@ -432,6 +439,69 @@ type ApiContext = Context<ApiAuthBindings>;
 
 const DEFAULT_WORKSPACE_ID = "eeee-mu";
 
+const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/u;
+const isoDateTimePattern = /^\d{4}-\d{2}-\d{2}T/u;
+const currencyCodePattern = /^[A-Z]{3}$/u;
+const moneyStringPattern = /^-?\d+(?:\.\d+)?$/u;
+
+const nullableStringSchema = z.string().min(1).nullable();
+const workspaceBodySchema = z.object({ workspaceId: z.string().min(1) });
+const officeTransactionWriteSchema = workspaceBodySchema.extend({
+  occurredOn: z.string().regex(isoDatePattern),
+  accountId: z.string().min(1),
+  categoryId: nullableStringSchema,
+  projectId: nullableStringSchema,
+  description: z.string().min(1),
+  amountMicro: z.string().regex(moneyStringPattern),
+  currency: z.string().regex(currencyCodePattern)
+});
+const officePlanComptableWriteSchema = workspaceBodySchema.extend({
+  parentId: nullableStringSchema,
+  kind: z.enum(["department", "division", "category"]),
+  code: z.string().min(1),
+  label: z.string().min(1),
+  active: z.boolean(),
+  type: z.enum(["income", "expense"]).nullable()
+});
+const officeReconciliationApproveSchema = workspaceBodySchema.extend({
+  reconciliationIds: z.array(z.string().min(1)).min(1),
+  approvedAt: z.string().regex(isoDateTimePattern)
+});
+const officePartnerWriteSchema = workspaceBodySchema.extend({
+  name: z.string().min(1),
+  email: nullableStringSchema,
+  phone: nullableStringSchema,
+  address: nullableStringSchema,
+  taxId: nullableStringSchema,
+  notes: nullableStringSchema,
+  active: z.boolean()
+});
+const officePartnerPayeeUnlinkSchema = workspaceBodySchema.extend({
+  payeeId: z.null()
+});
+const distributionMappingApplyRulesSchema = workspaceBodySchema.extend({
+  batchId: z.string().min(1),
+  rowIds: z.array(z.string().min(1)).min(1)
+});
+const distributionContractExpenseRecordSchema = workspaceBodySchema.extend({
+  contractId: z.string().min(1),
+  payeeId: z.string().min(1),
+  incurredOn: z.string().regex(isoDatePattern),
+  label: z.string().min(1),
+  amountMicro: z.string().regex(moneyStringPattern),
+  currency: z.string().regex(currencyCodePattern)
+});
+const allocationRunUnpostSchema = workspaceBodySchema.extend({
+  reason: z.string().min(1),
+  lockToken: z.string().min(1)
+});
+const suspenseResolveSchema = workspaceBodySchema.extend({
+  suspenseId: z.string().min(1),
+  resolution: z.enum(["map_to_release", "map_to_track", "hold"]),
+  targetId: nullableStringSchema,
+  note: z.string().min(1)
+});
+
 export const legacyRestSurfaces: readonly LegacyRestSurface[] = [
   {
     namespace: "eof/v1",
@@ -653,11 +723,11 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
   });
 
   app.post("/eof/v1/transactions", async (context) => {
-    return disabledWriteResponse(context, dependencies, "office_transaction_create");
+    return officeTransactionCreateResponse(context, dependencies);
   });
 
   app.patch("/eof/v1/transactions/:transactionId", async (context) => {
-    return disabledWriteResponse(context, dependencies, "office_transaction_update");
+    return officeTransactionUpdateResponse(context, dependencies);
   });
 
   app.get("/eof/v1/plan-comptable", (context) => {
@@ -667,11 +737,11 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
   });
 
   app.post("/eof/v1/plan-comptable", async (context) => {
-    return disabledWriteResponse(context, dependencies, "office_plan_comptable_create");
+    return officePlanComptableCreateResponse(context, dependencies);
   });
 
   app.patch("/eof/v1/plan-comptable/:nodeId", async (context) => {
-    return disabledWriteResponse(context, dependencies, "office_plan_comptable_update");
+    return officePlanComptableUpdateResponse(context, dependencies);
   });
 
   app.post("/eof/v1/bank-import/preview", async (context) => {
@@ -692,7 +762,7 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
   });
 
   app.post("/eof/v1/reconciliations/approve", async (context) => {
-    return disabledWriteResponse(context, dependencies, "office_reconciliation_approve");
+    return officeReconciliationApproveResponse(context, dependencies);
   });
 
   app.get("/eof/v1/cashflow", (context) => {
@@ -754,11 +824,11 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
   });
 
   app.post("/eof/v1/partners", async (context) => {
-    return disabledWriteResponse(context, dependencies, "office_partner_create");
+    return officePartnerCreateResponse(context, dependencies);
   });
 
   app.patch("/eof/v1/partners/:partnerId", async (context) => {
-    return disabledWriteResponse(context, dependencies, "office_partner_update");
+    return officePartnerUpdateResponse(context, dependencies);
   });
 
   app.post("/eof/v1/partners/:partnerId/payee-link", async (context) => {
@@ -766,7 +836,7 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
   });
 
   app.patch("/eof/v1/partners/:partnerId/payee-link", async (context) => {
-    return disabledWriteResponse(context, dependencies, "office_partner_payee_unlink");
+    return officePartnerPayeeUnlinkResponse(context, dependencies);
   });
 
   app.get("/eof/v1/bank/accounts", (context) => {
@@ -890,7 +960,7 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
   });
 
   app.post("/erh/v1/mapping/apply-rules", async (context) => {
-    return disabledWriteResponse(context, dependencies, "distribution_mapping_apply_rules");
+    return distributionMappingApplyRulesResponse(context, dependencies);
   });
 
   app.get("/erh/v1/contracts", (context) => {
@@ -931,7 +1001,7 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
   });
 
   app.post("/erh/v1/contracts/:contractId/expenses", async (context) => {
-    return disabledWriteResponse(context, dependencies, "distribution_contract_expense_create");
+    return distributionContractExpenseCreateResponse(context, dependencies);
   });
 
   app.post("/erh/v1/contracts/:contractId/rules", async (context) => {
@@ -1052,7 +1122,7 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
   });
 
   app.post("/erh/v1/allocations/runs/:runId/unpost", async (context) => {
-    return disabledWriteResponse(context, dependencies, "distribution_allocations_unpost");
+    return distributionAllocationUnpostResponse(context, dependencies);
   });
 
   app.get("/erh/v1/suspense", (context) => {
@@ -1067,7 +1137,7 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
   });
 
   app.post("/erh/v1/suspense/:suspenseId/resolve", async (context) => {
-    return disabledWriteResponse(context, dependencies, "distribution_suspense_resolve");
+    return distributionSuspenseResolveResponse(context, dependencies);
   });
 
   app.get("/erh/v1/statements", (context) => {
@@ -1208,7 +1278,7 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
 
   app.get("/erh/v1/settings", (context) => {
     requireQuery(context, "workspaceId");
-    return context.json(toDistributionSettings(context, dependencies.fixtures));
+    return context.json(toDistributionSettings(context, dependencies.fixtures, dependencies.persistence.writesEnabled));
   });
 }
 
@@ -1338,6 +1408,1066 @@ async function readJsonBody<TBody>(context: ApiContext): Promise<TBody> {
       `error=${error instanceof Error ? error.message : "unknown"}`
     ]);
   }
+}
+
+async function readZodBody<TBody>(context: ApiContext, schema: z.ZodType<TBody>): Promise<TBody> {
+  const body = await readJsonBody<unknown>(context);
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) {
+    throw new ApiRouteError(400, "body_schema_invalid", "Request body failed validation.", [
+      `path=${context.req.path}`,
+      `issues=${parsed.error.issues.map((issue: z.ZodIssue): string => `${issue.path.join(".")}:${issue.message}`).join("; ")}`
+    ]);
+  }
+
+  return parsed.data;
+}
+
+async function officeTransactionCreateResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const request = await readZodBody<OfficeTransactionWriteRequest>(context, officeTransactionWriteSchema);
+  const amountMinor = normalizeEofAmountField(context, request.amountMicro, "amountMicro");
+  const transactionId = randomUUID();
+  const transactionType = officeTransactionType(dependencies.fixtures.office, request.categoryId, request.amountMicro);
+  const transactionStatus: OfficeTransactionRow["status"] = request.categoryId === null ? "draft" : "validated";
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_transaction_create",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await persistOfficeTransactionUpsert(tx, {
+        id: transactionId,
+        request,
+        amountMinor,
+        transactionType,
+        transactionStatus,
+        actorUserId: actor.userId,
+        isUpdate: false
+      });
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_transaction_create",
+        targetType: "office_transaction",
+        targetId: transactionId,
+        before: {},
+        after: {
+          transactionId,
+          request,
+          transactionType,
+          transactionStatus,
+          amountMinor: amountMinor.toString()
+        },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      upsertOfficeTransactionFixture(dependencies.fixtures, transactionFromOfficeRequest(transactionId, request, amountMinor, transactionType, transactionStatus));
+      return mutationReceipt(transactionId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function officeTransactionUpdateResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const transactionId = requirePathParam(context, "transactionId");
+  const request = await readZodBody<OfficeTransactionWriteRequest>(context, officeTransactionWriteSchema);
+  const before = requireOfficeTransaction(dependencies.fixtures.office, transactionId);
+  const amountMinor = normalizeEofAmountField(context, request.amountMicro, "amountMicro");
+  const transactionType = officeTransactionType(dependencies.fixtures.office, request.categoryId, request.amountMicro);
+  const transactionStatus: OfficeTransactionRow["status"] = request.categoryId === null ? "draft" : "validated";
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_transaction_update",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `office:transaction:${transactionId}`);
+      await persistOfficeTransactionUpsert(tx, {
+        id: transactionId,
+        request,
+        amountMinor,
+        transactionType,
+        transactionStatus,
+        actorUserId: actor.userId,
+        isUpdate: true
+      });
+      const after = transactionFromOfficeRequest(transactionId, request, amountMinor, transactionType, transactionStatus);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_transaction_update",
+        targetType: "office_transaction",
+        targetId: transactionId,
+        before: { transaction: before },
+        after: { transaction: after },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      upsertOfficeTransactionFixture(dependencies.fixtures, after);
+      return mutationReceipt(transactionId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function officePlanComptableCreateResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const request = await readZodBody<OfficePlanComptableWriteRequest>(context, officePlanComptableWriteSchema);
+  assertPlanComptableRequest(context, dependencies.fixtures.office, request);
+  const nodeId = randomUUID();
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_plan_comptable_create",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await persistOfficePlanComptableCreate(tx, nodeId, request);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_plan_comptable_create",
+        targetType: "office_chart_node",
+        targetId: nodeId,
+        before: {},
+        after: { nodeId, request },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      upsertOfficePlanComptableFixture(dependencies.fixtures, nodeId, request);
+      return mutationReceipt(nodeId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function officePlanComptableUpdateResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const nodeId = requirePathParam(context, "nodeId");
+  const request = await readZodBody<OfficePlanComptableWriteRequest>(context, officePlanComptableWriteSchema);
+  const before = requirePlanComptableNode(dependencies.fixtures.office, nodeId);
+  assertPlanComptableRequest(context, dependencies.fixtures.office, request);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_plan_comptable_update",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `office:plan-comptable:${nodeId}`);
+      await persistOfficePlanComptableUpdate(tx, nodeId, request);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_plan_comptable_update",
+        targetType: "office_chart_node",
+        targetId: nodeId,
+        before: { node: before },
+        after: { nodeId, request },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      upsertOfficePlanComptableFixture(dependencies.fixtures, nodeId, request);
+      return mutationReceipt(nodeId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function officeReconciliationApproveResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const request = await readZodBody<OfficeReconciliationApproveRequest>(context, officeReconciliationApproveSchema);
+  const candidates = request.reconciliationIds.map((id) => requireReconciliationCandidate(dependencies.fixtures.office, id));
+  const primaryReconciliationId = request.reconciliationIds[0];
+  if (primaryReconciliationId === undefined) {
+    throw new ApiRouteError(400, "body_field_required", "At least one reconciliation id is required.", [`path=${context.req.path}`]);
+  }
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_reconciliation_approve",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `office:reconciliation:${request.reconciliationIds.join(":")}`);
+      await persistOfficeReconciliationApproval(tx, request, actor.userId, candidates);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_reconciliation_approve",
+        targetType: "office_reconciliation_match",
+        targetId: primaryReconciliationId,
+        before: { candidates },
+        after: { status: "matched", reconciliationIds: request.reconciliationIds, approvedAt: request.approvedAt },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      approveReconciliationFixture(dependencies.fixtures, candidates, request.approvedAt, actor.userId);
+      return mutationReceipt(primaryReconciliationId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function officePartnerCreateResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const request = await readZodBody<OfficePartnerWriteRequest>(context, officePartnerWriteSchema);
+  const partnerId = randomUUID();
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_partner_create",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await persistOfficePartnerUpsert(tx, partnerId, request, false);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_partner_create",
+        targetType: "office_partner",
+        targetId: partnerId,
+        before: {},
+        after: { partnerId, request },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      upsertOfficePartnerFixture(dependencies.fixtures, partnerId, request);
+      return mutationReceipt(partnerId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function officePartnerUpdateResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const partnerId = requirePathParam(context, "partnerId");
+  const request = await readZodBody<OfficePartnerWriteRequest>(context, officePartnerWriteSchema);
+  const before = requirePartner(dependencies.fixtures.office, partnerId);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_partner_update",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `office:partner:${partnerId}`);
+      await persistOfficePartnerUpsert(tx, partnerId, request, true);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_partner_update",
+        targetType: "office_partner",
+        targetId: partnerId,
+        before: { partner: before },
+        after: { partnerId, request },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      upsertOfficePartnerFixture(dependencies.fixtures, partnerId, request);
+      return mutationReceipt(partnerId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function officePartnerPayeeUnlinkResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const partnerId = requirePathParam(context, "partnerId");
+  const request = await readZodBody<OfficePartnerPayeeLinkRequest>(context, officePartnerPayeeUnlinkSchema);
+  const before = toPartnerPayeeLink(dependencies.fixtures, requirePartner(dependencies.fixtures.office, partnerId));
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_partner_payee_unlink",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `identity-link:office:${partnerId}`);
+      await persistOfficePartnerPayeeUnlink(tx, partnerId);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_partner_payee_unlink",
+        targetType: "identity_link",
+        targetId: partnerId,
+        before: { link: before },
+        after: { partnerId, payeeId: null, status: "inactive" },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      unlinkOfficePartnerPayeeFixture(dependencies.fixtures, partnerId);
+      return mutationReceipt(partnerId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function distributionMappingApplyRulesResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const request = await readZodBody<DistributionMappingApplyRulesRequest>(context, distributionMappingApplyRulesSchema);
+  const rows = request.rowIds.map((rowId) => requireDistributionMappingRow(dependencies.fixtures, rowId));
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "distribution_mapping_apply_rules",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `distribution:mapping:${request.batchId}`);
+      await persistDistributionMappingApplyRules(tx, rows);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_mapping_apply_rules",
+        targetType: "distribution_mapping_batch",
+        targetId: request.batchId,
+        before: { rows },
+        after: { rowIds: request.rowIds, status: "mapped" },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      applyDistributionMappingFixture(dependencies.fixtures, request.rowIds);
+      return mutationReceipt(request.batchId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function distributionContractExpenseCreateResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const contractId = requirePathParam(context, "contractId");
+  const request = await readZodBody<DistributionContractExpenseRecordRequest>(context, distributionContractExpenseRecordSchema);
+  if (request.contractId !== contractId) {
+    throw new ApiRouteError(400, "body_path_mismatch", "Contract expense body must match the route contract id.", [
+      `pathContractId=${contractId}`,
+      `bodyContractId=${request.contractId}`
+    ]);
+  }
+  requireDistributionContract(dependencies, contractId);
+  requireDistributionPayee(dependencies.fixtures.distribution, request.payeeId);
+  const amount = normalizeErhAmountField(context, request.amountMicro, "amountMicro");
+  const expenseId = randomUUID();
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "distribution_contract_expense_create",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `distribution:contract:${contractId}:expenses`);
+      await persistDistributionContractExpenseCreate(tx, expenseId, { ...request, amountMicro: amount });
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_contract_expense_create",
+        targetType: "contract_cost_term",
+        targetId: expenseId,
+        before: {},
+        after: { expenseId, request: { ...request, amountMicro: amount } },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      appendDistributionContractExpenseFixture(dependencies.fixtures, expenseId, { ...request, amountMicro: amount });
+      return mutationReceipt(expenseId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function distributionAllocationUnpostResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const runId = requirePathParam(context, "runId");
+  const request = await readZodBody<AllocationRunUnpostRequest>(context, allocationRunUnpostSchema);
+  const run = requireDistributionAllocationRun(dependencies.fixtures.distribution, runId);
+  const allocations = dependencies.fixtures.distribution.earningAllocations.filter((allocation) => allocation.calculationRunId === runId);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<ApiRunReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "distribution_allocations_unpost",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiRunReceipt & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `distribution:allocation:${runId}`);
+      await persistDistributionAllocationUnpost(tx, runId);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_allocations_unpost",
+        targetType: "calculation_run",
+        targetId: runId,
+        before: { run, allocationCount: allocations.length },
+        after: { status: "excluded", reason: request.reason, lockToken: request.lockToken },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      unpostDistributionAllocationFixture(dependencies.fixtures, runId);
+      return {
+        runId,
+        status: "completed",
+        lockKey: `distribution:allocation:${runId}`,
+        auditEventId
+      };
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function distributionSuspenseResolveResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const suspenseId = requirePathParam(context, "suspenseId");
+  const request = await readZodBody<SuspenseResolveRequest>(context, suspenseResolveSchema);
+  if (request.suspenseId !== suspenseId) {
+    throw new ApiRouteError(400, "body_path_mismatch", "Suspense body must match the route suspense id.", [
+      `pathSuspenseId=${suspenseId}`,
+      `bodySuspenseId=${request.suspenseId}`
+    ]);
+  }
+  const suspense = requireDistributionSuspenseItem(dependencies.fixtures.distribution, suspenseId);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "distribution_suspense_resolve",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `distribution:suspense:${suspenseId}`);
+      await persistDistributionSuspenseResolve(tx, suspenseId, dependencies.nowIso());
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_suspense_resolve",
+        targetType: "suspense_item",
+        targetId: suspenseId,
+        before: { suspense },
+        after: { resolution: request.resolution, targetId: request.targetId, note: request.note },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      resolveDistributionSuspenseFixture(dependencies.fixtures, suspenseId, dependencies.nowIso());
+      return mutationReceipt(suspenseId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+function mutationReceipt(id: string, auditEventId: string): ApiMutationReceipt & ApiMutationResponse {
+  return {
+    id,
+    status: "completed",
+    auditEventId
+  };
+}
+
+function normalizeEofAmountField(context: ApiContext, value: string, field: string): bigint {
+  try {
+    return eofMoney.parse(value);
+  } catch (error: unknown) {
+    throw new ApiRouteError(400, "body_field_invalid", "A body field must be a valid scale-2 office money string.", [
+      `path=${context.req.path}`,
+      `field=${field}`,
+      `error=${error instanceof Error ? error.message : "unknown"}`
+    ]);
+  }
+}
+
+function officeTransactionType(dataset: OfficeAnalyticsDataset, categoryId: string | null, amount: string): OfficeTransactionRow["type"] {
+  void amount;
+  if (categoryId === null) {
+    return "expense";
+  }
+
+  return resolveCategoryPath(dataset, categoryId).category.type;
+}
+
+function requireOfficeTransaction(dataset: OfficeAnalyticsDataset, transactionId: string): OfficeTransactionRow {
+  const transaction = dataset.transactions.find((candidate) => candidate.id === transactionId);
+  if (transaction === undefined) {
+    throw new ApiRouteError(404, "office_transaction_not_found", "Office transaction was not found.", [`transactionId=${transactionId}`]);
+  }
+
+  return transaction;
+}
+
+function transactionFromOfficeRequest(
+  id: string,
+  request: OfficeTransactionWriteRequest,
+  amountMinor: bigint,
+  transactionType: OfficeTransactionRow["type"],
+  transactionStatus: OfficeTransactionRow["status"]
+): OfficeTransactionRow {
+  return {
+    id,
+    transactionDate: `${request.occurredOn}T00:00:00.000Z`,
+    type: transactionType,
+    status: transactionStatus,
+    isActive: true,
+    description: request.description.trim(),
+    categoryId: request.categoryId,
+    partnerId: null,
+    projectId: request.projectId,
+    amountMinor,
+    originalCurrency: request.currency === "MUR" ? null : request.currency,
+    exchangeRateE10: null
+  };
+}
+
+function upsertOfficeTransactionFixture(fixtures: ApiFixtureStore, transaction: OfficeTransactionRow): void {
+  const mutableOffice = fixtures.office as Mutable<OfficeAnalyticsDataset>;
+  const exists = fixtures.office.transactions.some((candidate) => candidate.id === transaction.id);
+  mutableOffice.transactions = exists
+    ? fixtures.office.transactions.map((candidate) => candidate.id === transaction.id ? transaction : candidate)
+    : [transaction, ...fixtures.office.transactions];
+}
+
+async function persistOfficeTransactionUpsert(
+  tx: ApiWriteTransaction,
+  input: {
+    readonly id: string;
+    readonly request: OfficeTransactionWriteRequest;
+    readonly amountMinor: bigint;
+    readonly transactionType: OfficeTransactionRow["type"];
+    readonly transactionStatus: OfficeTransactionRow["status"];
+    readonly actorUserId: string;
+    readonly isUpdate: boolean;
+  }
+): Promise<void> {
+  if (tx.kind === "memory") {
+    return;
+  }
+
+  const occurredAt = `${input.request.occurredOn}T00:00:00.000Z`;
+  if (input.isUpdate) {
+    await tx.executor.execute(sql`
+      update transactions
+      set
+        transaction_date = ${occurredAt},
+        type = ${input.transactionType},
+        status = ${input.transactionStatus},
+        description = ${input.request.description.trim()},
+        category_id = ${input.request.categoryId},
+        project_id = ${input.request.projectId},
+        amount_minor = ${input.amountMinor.toString()},
+        original_amount_minor = ${input.amountMinor.toString()},
+        original_currency = ${input.request.currency === "MUR" ? null : input.request.currency},
+        approved_by_user_id = ${input.transactionStatus === "validated" ? input.actorUserId : null},
+        approved_at = ${input.transactionStatus === "validated" ? new Date().toISOString() : null},
+        updated_at = now()
+      where id = ${input.id}
+    `);
+    return;
+  }
+
+  await tx.executor.execute(sql`
+    insert into transactions (
+      id,
+      transaction_date,
+      type,
+      status,
+      is_active,
+      description,
+      category_id,
+      project_id,
+      amount_minor,
+      original_amount_minor,
+      original_currency,
+      source,
+      created_by_user_id,
+      approved_by_user_id,
+      approved_at
+    )
+    values (
+      ${input.id},
+      ${occurredAt},
+      ${input.transactionType},
+      ${input.transactionStatus},
+      true,
+      ${input.request.description.trim()},
+      ${input.request.categoryId},
+      ${input.request.projectId},
+      ${input.amountMinor.toString()},
+      ${input.amountMinor.toString()},
+      ${input.request.currency === "MUR" ? null : input.request.currency},
+      'manual',
+      ${input.actorUserId},
+      ${input.transactionStatus === "validated" ? input.actorUserId : null},
+      ${input.transactionStatus === "validated" ? new Date().toISOString() : null}
+    )
+  `);
+}
+
+function assertPlanComptableRequest(context: ApiContext, dataset: OfficeAnalyticsDataset, request: OfficePlanComptableWriteRequest): void {
+  if (request.kind === "department") {
+    if (request.parentId !== null) {
+      throw new ApiRouteError(400, "body_field_invalid", "Department nodes cannot have a parentId.", [`path=${context.req.path}`, "field=parentId"]);
+    }
+    return;
+  }
+
+  if (request.parentId === null) {
+    throw new ApiRouteError(400, "body_field_required", "Division and category nodes require a parentId.", [`path=${context.req.path}`, "field=parentId"]);
+  }
+
+  if (request.kind === "division") {
+    requireDepartment(dataset, request.parentId);
+    return;
+  }
+
+  requireDivision(dataset, request.parentId);
+  if (request.type === null) {
+    throw new ApiRouteError(400, "body_field_required", "Category nodes require an income or expense type.", [`path=${context.req.path}`, "field=type"]);
+  }
+}
+
+function requireDivision(dataset: OfficeAnalyticsDataset, divisionId: string): OfficeDivisionRow {
+  const division = dataset.divisions.find((candidate) => candidate.id === divisionId);
+  if (division === undefined) {
+    throw new ApiRouteError(404, "division_not_found", "Office division was not found.", [`divisionId=${divisionId}`]);
+  }
+
+  return division;
+}
+
+function requirePlanComptableNode(dataset: OfficeAnalyticsDataset, nodeId: string): OfficePlanComptableNode {
+  const node = toPlanComptableNodes(dataset, true).find((candidate) => candidate.id === nodeId);
+  if (node === undefined) {
+    throw new ApiRouteError(404, "office_plan_node_not_found", "Office chart node was not found.", [`nodeId=${nodeId}`]);
+  }
+
+  return node;
+}
+
+async function persistOfficePlanComptableCreate(tx: ApiWriteTransaction, nodeId: string, request: OfficePlanComptableWriteRequest): Promise<void> {
+  if (tx.kind === "memory") {
+    return;
+  }
+
+  const slug = slugify(request.code, request.label);
+  if (request.kind === "department") {
+    await tx.executor.execute(sql`
+      insert into departments (id, name, slug, type, is_active)
+      values (${nodeId}, ${request.label.trim()}, ${slug}, ${request.type ?? "mixed"}, ${request.active})
+    `);
+    return;
+  }
+
+  if (request.kind === "division") {
+    await tx.executor.execute(sql`
+      insert into divisions (id, department_id, name, slug, is_active)
+      values (${nodeId}, ${request.parentId}, ${request.label.trim()}, ${slug}, ${request.active})
+    `);
+    return;
+  }
+
+  await tx.executor.execute(sql`
+    insert into categories (id, name, type, division_id, is_active)
+    values (${nodeId}, ${request.label.trim()}, ${request.type}, ${request.parentId}, ${request.active})
+  `);
+}
+
+async function persistOfficePlanComptableUpdate(tx: ApiWriteTransaction, nodeId: string, request: OfficePlanComptableWriteRequest): Promise<void> {
+  if (tx.kind === "memory") {
+    return;
+  }
+
+  const slug = slugify(request.code, request.label);
+  if (request.kind === "department") {
+    await tx.executor.execute(sql`
+      update departments
+      set name = ${request.label.trim()}, slug = ${slug}, type = ${request.type ?? "mixed"}, is_active = ${request.active}
+      where id = ${nodeId}
+    `);
+    return;
+  }
+
+  if (request.kind === "division") {
+    await tx.executor.execute(sql`
+      update divisions
+      set department_id = ${request.parentId}, name = ${request.label.trim()}, slug = ${slug}, is_active = ${request.active}
+      where id = ${nodeId}
+    `);
+    return;
+  }
+
+  await tx.executor.execute(sql`
+    update categories
+    set name = ${request.label.trim()}, type = ${request.type}, division_id = ${request.parentId}, is_active = ${request.active}
+    where id = ${nodeId}
+  `);
+}
+
+function upsertOfficePlanComptableFixture(fixtures: ApiFixtureStore, nodeId: string, request: OfficePlanComptableWriteRequest): void {
+  const mutableOffice = fixtures.office as Mutable<OfficeAnalyticsDataset>;
+  if (request.kind === "department") {
+    const department: OfficeDepartmentRow = { id: nodeId, name: request.label.trim(), type: request.type ?? "mixed", color: null, isActive: request.active };
+    mutableOffice.departments = upsertById(fixtures.office.departments, department);
+    return;
+  }
+
+  if (request.kind === "division") {
+    const division: OfficeDivisionRow = { id: nodeId, departmentId: request.parentId ?? "", name: request.label.trim(), isActive: request.active };
+    mutableOffice.divisions = upsertById(fixtures.office.divisions, division);
+    return;
+  }
+
+  const category: OfficeCategoryRow = { id: nodeId, divisionId: request.parentId, name: request.label.trim(), type: request.type ?? "expense", isActive: request.active };
+  mutableOffice.categories = upsertById(fixtures.office.categories, category);
+}
+
+function slugify(code: string, label: string): string {
+  return `${code}-${label}`
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "-")
+    .replace(/^-|-$/gu, "");
+}
+
+function requireReconciliationCandidate(dataset: OfficeAnalyticsDataset, reconciliationId: string): OfficeReconciliationCandidate {
+  const candidate = toReconciliationCandidates(dataset).find((item) => item.id === reconciliationId);
+  if (candidate === undefined) {
+    throw new ApiRouteError(404, "office_reconciliation_not_found", "Office reconciliation candidate was not found.", [
+      `reconciliationId=${reconciliationId}`
+    ]);
+  }
+
+  return candidate;
+}
+
+async function persistOfficeReconciliationApproval(
+  tx: ApiWriteTransaction,
+  request: OfficeReconciliationApproveRequest,
+  actorUserId: string,
+  candidates: readonly OfficeReconciliationCandidate[]
+): Promise<void> {
+  if (tx.kind === "memory") {
+    return;
+  }
+
+  for (const candidate of candidates) {
+    if (candidate.id.startsWith("recon_")) {
+      await tx.executor.execute(sql`
+        insert into office_bank_reconciliation_matches (
+          id,
+          bank_statement_line_id,
+          transaction_id,
+          confidence_bp,
+          status,
+          approved_by_user_id,
+          approved_at
+        )
+        values (
+          ${randomUUID()},
+          ${candidate.statementLineId},
+          ${candidate.transactionId},
+          ${candidate.confidenceBp},
+          'matched',
+          ${actorUserId},
+          ${request.approvedAt}
+        )
+        on conflict (bank_statement_line_id, transaction_id) do update
+        set status = 'matched', approved_by_user_id = excluded.approved_by_user_id, approved_at = excluded.approved_at, updated_at = now()
+      `);
+    } else {
+      await tx.executor.execute(sql`
+        update office_bank_reconciliation_matches
+        set status = 'matched', approved_by_user_id = ${actorUserId}, approved_at = ${request.approvedAt}, updated_at = now()
+        where id = ${candidate.id}
+      `);
+    }
+
+    await tx.executor.execute(sql`
+      update office_bank_statement_lines
+      set reconciliation_status = 'matched', matched_transaction_id = ${candidate.transactionId}
+      where id = ${candidate.statementLineId}
+    `);
+    await tx.executor.execute(sql`
+      update transactions
+      set status = 'validated', is_fully_reconciled = true, approved_by_user_id = ${actorUserId}, approved_at = ${request.approvedAt}, updated_at = now()
+      where id = ${candidate.transactionId}
+    `);
+  }
+}
+
+function approveReconciliationFixture(
+  fixtures: ApiFixtureStore,
+  candidates: readonly OfficeReconciliationCandidate[],
+  approvedAt: string,
+  actorUserId: string
+): void {
+  const mutableOffice = fixtures.office as Mutable<OfficeAnalyticsDataset>;
+  mutableOffice.bankStatementLines = fixtures.office.bankStatementLines.map((line) => {
+    const candidate = candidates.find((item) => item.statementLineId === line.id);
+    if (candidate === undefined) {
+      return line;
+    }
+
+    return { ...line, reconciliationStatus: "matched", matchedTransactionId: candidate.transactionId };
+  });
+  mutableOffice.transactions = fixtures.office.transactions.map((transaction) =>
+    candidates.some((candidate) => candidate.transactionId === transaction.id)
+      ? { ...transaction, status: "validated" }
+      : transaction
+  );
+  mutableOffice.bankReconciliationMatches = [
+    ...fixtures.office.bankReconciliationMatches.filter((match) => !candidates.some((candidate) => candidate.id === match.id)),
+    ...candidates.map((candidate) => ({
+      id: candidate.id.startsWith("recon_") ? randomUUID() : candidate.id,
+      bankStatementLineId: candidate.statementLineId,
+      transactionId: candidate.transactionId,
+      confidenceBp: candidate.confidenceBp,
+      status: "matched" as const,
+      approvedByUserId: actorUserId,
+      approvedAt
+    }))
+  ];
+}
+
+async function persistOfficePartnerUpsert(tx: ApiWriteTransaction, partnerId: string, request: OfficePartnerWriteRequest, isUpdate: boolean): Promise<void> {
+  if (tx.kind === "memory") {
+    return;
+  }
+
+  if (isUpdate) {
+    await tx.executor.execute(sql`
+      update partners
+      set
+        name = ${request.name.trim()},
+        email = ${request.email},
+        phone = ${request.phone},
+        address = ${request.address},
+        tax_id = ${request.taxId},
+        notes = ${request.notes},
+        is_active = ${request.active}
+      where id = ${partnerId}
+    `);
+    return;
+  }
+
+  await tx.executor.execute(sql`
+    insert into partners (id, name, type, email, phone, address, tax_id, notes, is_active)
+    values (${partnerId}, ${request.name.trim()}, 'both', ${request.email}, ${request.phone}, ${request.address}, ${request.taxId}, ${request.notes}, ${request.active})
+  `);
+}
+
+function upsertOfficePartnerFixture(fixtures: ApiFixtureStore, partnerId: string, request: OfficePartnerWriteRequest): void {
+  const mutableOffice = fixtures.office as Mutable<OfficeAnalyticsDataset>;
+  const existing = fixtures.office.partners.find((partner) => partner.id === partnerId);
+  const partner: OfficePartnerRow = {
+    id: partnerId,
+    name: request.name.trim(),
+    type: existing?.type ?? "both",
+    isActive: request.active
+  };
+  mutableOffice.partners = upsertById(fixtures.office.partners, partner);
+}
+
+async function persistOfficePartnerPayeeUnlink(tx: ApiWriteTransaction, partnerId: string): Promise<void> {
+  if (tx.kind === "memory") {
+    return;
+  }
+
+  await tx.executor.execute(sql`
+    update identity_link
+    set status = 'archived', updated_at = now()
+    where office_partner_id = ${partnerId}
+      and status <> 'archived'
+  `);
+}
+
+function unlinkOfficePartnerPayeeFixture(fixtures: ApiFixtureStore, partnerId: string): void {
+  const mutableFixtures = fixtures as Mutable<ApiFixtureStore>;
+  const entries = Object.entries(fixtures.officePartnerPayeeLinks).filter(([id]) => id !== partnerId);
+  mutableFixtures.officePartnerPayeeLinks = Object.fromEntries(entries);
+}
+
+function requireDistributionMappingRow(fixtures: ApiFixtureStore, rowId: string): DistributionMappingRow {
+  const row = fixtures.distributionMappingRows.find((candidate) => candidate.id === rowId);
+  if (row === undefined) {
+    throw new ApiRouteError(404, "distribution_mapping_row_not_found", "Distribution mapping row was not found.", [`rowId=${rowId}`]);
+  }
+
+  if (row.suggestedTrackId === null) {
+    throw new ApiRouteError(422, "distribution_mapping_target_missing", "Mapping row cannot be applied without a suggested track.", [`rowId=${rowId}`]);
+  }
+
+  return row;
+}
+
+async function persistDistributionMappingApplyRules(tx: ApiWriteTransaction, rows: readonly DistributionMappingRow[]): Promise<void> {
+  if (tx.kind === "memory") {
+    return;
+  }
+
+  for (const row of rows) {
+    await tx.executor.execute(sql`
+      update normalized_earnings
+      set mapping_status = 'matched', calculation_status = 'pending', updated_at = now()
+      where id = ${row.id}
+    `);
+    await tx.executor.execute(sql`
+      insert into earning_track_matches (id, earning_id, track_id, confidence, status)
+      values (${randomUUID()}, ${row.id}, ${row.suggestedTrackId}, ${(row.confidenceBp / 100).toFixed(6)}, 'matched')
+      on conflict (earning_id, track_id) do update
+      set confidence = excluded.confidence, status = 'matched'
+    `);
+  }
+}
+
+function applyDistributionMappingFixture(fixtures: ApiFixtureStore, rowIds: readonly string[]): void {
+  const mutableFixtures = fixtures as Mutable<ApiFixtureStore>;
+  mutableFixtures.distributionMappingRows = fixtures.distributionMappingRows.map((row) =>
+    rowIds.includes(row.id) ? { ...row, status: "mapped" } : row
+  );
+  const mutableDistribution = fixtures.distribution as Mutable<DistributionReadDataset>;
+  mutableDistribution.normalizedEarnings = fixtures.distribution.normalizedEarnings.map((earning) =>
+    rowIds.includes(earning.id) ? { ...earning, mappingStatus: "matched", calculationStatus: "pending" } : earning
+  );
+}
+
+async function persistDistributionContractExpenseCreate(
+  tx: ApiWriteTransaction,
+  expenseId: string,
+  request: DistributionContractExpenseRecordRequest
+): Promise<void> {
+  if (tx.kind === "memory") {
+    return;
+  }
+
+  await tx.executor.execute(sql`
+    insert into contract_cost_terms (
+      id,
+      contract_id,
+      payee_id,
+      amount,
+      currency,
+      recoupable,
+      recovery_method,
+      status,
+      scope_type,
+      scope_id
+    )
+    values (
+      ${expenseId},
+      ${request.contractId},
+      ${request.payeeId},
+      ${request.amountMicro},
+      ${request.currency},
+      true,
+      'statement_recoupment',
+      'open',
+      'operator_expense',
+      ${request.incurredOn}
+    )
+  `);
+}
+
+function appendDistributionContractExpenseFixture(
+  fixtures: ApiFixtureStore,
+  expenseId: string,
+  request: DistributionContractExpenseRecordRequest
+): void {
+  const expense: DistributionContractExpense = {
+    id: expenseId,
+    contractId: request.contractId,
+    payeeId: request.payeeId,
+    incurredOn: request.incurredOn,
+    label: request.label.trim(),
+    originalAmountMicro: request.amountMicro,
+    openAmountMicro: request.amountMicro,
+    currency: request.currency,
+    status: "open"
+  };
+  const mutableFixtures = fixtures as Mutable<ApiFixtureStore>;
+  mutableFixtures.distributionContractExpenses = [expense, ...fixtures.distributionContractExpenses];
+  mutableFixtures.distributionCostTerms = [
+    {
+      id: expenseId,
+      contractId: request.contractId,
+      payeeId: request.payeeId,
+      amount: request.amountMicro,
+      currency: request.currency,
+      recoupable: true,
+      status: "open",
+      expenseDate: request.incurredOn
+    },
+    ...fixtures.distributionCostTerms
+  ];
+}
+
+function requireDistributionAllocationRun(dataset: DistributionReadDataset, runId: string): DistributionCalculationRunRow {
+  const run = dataset.calculationRuns.find((candidate) => candidate.id === runId);
+  if (run === undefined) {
+    throw new ApiRouteError(404, "allocation_run_not_found", "Distribution allocation run was not found.", [`runId=${runId}`]);
+  }
+
+  return run;
+}
+
+async function persistDistributionAllocationUnpost(tx: ApiWriteTransaction, runId: string): Promise<void> {
+  if (tx.kind === "memory") {
+    return;
+  }
+
+  await tx.executor.execute(sql`
+    update calculation_runs
+    set status = 'excluded', finished_at = now()
+    where id = ${runId}
+  `);
+  await tx.executor.execute(sql`
+    update earning_allocations
+    set status = 'void'
+    where calculation_run_id = ${runId}
+  `);
+}
+
+function unpostDistributionAllocationFixture(fixtures: ApiFixtureStore, runId: string): void {
+  const mutableDistribution = fixtures.distribution as Mutable<DistributionReadDataset>;
+  mutableDistribution.calculationRuns = fixtures.distribution.calculationRuns.map((run) =>
+    run.id === runId ? { ...run, status: "excluded", finishedAt: run.finishedAt ?? new Date().toISOString() } : run
+  );
+  mutableDistribution.earningAllocations = fixtures.distribution.earningAllocations.map((allocation) =>
+    allocation.calculationRunId === runId ? { ...allocation, status: "void" } : allocation
+  );
+}
+
+function requireDistributionSuspenseItem(dataset: DistributionReadDataset, suspenseId: string): DistributionReadDataset["suspenseItems"][number] {
+  const suspense = dataset.suspenseItems.find((candidate) => candidate.id === suspenseId);
+  if (suspense === undefined) {
+    throw new ApiRouteError(404, "distribution_suspense_not_found", "Distribution suspense item was not found.", [`suspenseId=${suspenseId}`]);
+  }
+
+  return suspense;
+}
+
+async function persistDistributionSuspenseResolve(tx: ApiWriteTransaction, suspenseId: string, resolvedAt: string): Promise<void> {
+  if (tx.kind === "memory") {
+    return;
+  }
+
+  await tx.executor.execute(sql`
+    update suspense_items
+    set resolved = true, resolved_at = ${resolvedAt}
+    where id = ${suspenseId}
+  `);
+}
+
+function resolveDistributionSuspenseFixture(fixtures: ApiFixtureStore, suspenseId: string, resolvedAt: string): void {
+  const mutableDistribution = fixtures.distribution as Mutable<DistributionReadDataset>;
+  mutableDistribution.suspenseItems = fixtures.distribution.suspenseItems.map((suspense) =>
+    suspense.id === suspenseId ? { ...suspense, resolved: true, resolvedAt } : suspense
+  );
+}
+
+function upsertById<TItem extends { readonly id: string }>(items: readonly TItem[], item: TItem): readonly TItem[] {
+  const exists = items.some((candidate) => candidate.id === item.id);
+  if (!exists) {
+    return [item, ...items];
+  }
+
+  return items.map((candidate) => candidate.id === item.id ? item : candidate);
 }
 
 async function distributionAllocationPreviewResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
@@ -3856,11 +4986,40 @@ function appendOfficeAuditFixture(fixtures: ApiFixtureStore, patch: OfficeAuditF
       action: patch.action,
       entityType: patch.entityType,
       entityId: patch.entityId,
+      entityReference: auditEntityReference(fixtures, patch.entityType, patch.entityId),
       idempotencyKey: null,
       context: {}
     },
     ...fixtures.officeAuditLog
   ];
+}
+
+function auditEntityReference(fixtures: ApiFixtureStore, entityType: string, entityId: string): string {
+  if (entityType === "office_bank_import_batch") {
+    return fixtures.office.bankImportBatches.find((batch) => batch.id === entityId)?.fileName ?? entityId;
+  }
+
+  if (entityType === "office_transaction") {
+    return fixtures.office.transactions.find((transaction) => transaction.id === entityId)?.description ?? entityId;
+  }
+
+  if (entityType === "office_partner") {
+    return fixtures.office.partners.find((partner) => partner.id === entityId)?.name ?? entityId;
+  }
+
+  if (entityType === "distribution_statement") {
+    const statement = fixtures.distribution.statements.find((candidate) => candidate.id === entityId);
+    if (statement !== undefined) {
+      const payee = fixtures.distribution.payees.find((candidate) => candidate.id === statement.payeeId);
+      return `${payee?.name ?? statement.payeeId} · ${statement.periodStart} → ${statement.periodEnd}`;
+    }
+  }
+
+  if (entityType === "distribution_payment") {
+    return fixtures.distribution.payments.find((payment) => payment.id === entityId)?.reference ?? entityId;
+  }
+
+  return entityId;
 }
 
 async function readOptionalJsonBody(context: ApiContext): Promise<JsonRecord> {
@@ -4072,20 +5231,6 @@ function toAllocationStatusFilter(status: string | null): DistributionEarningAll
   throw new ApiRouteError(400, "query_value_invalid", "Allocation status is invalid.", [
     `status=${status}`
   ]);
-}
-
-async function disabledWriteResponse(context: ApiContext, dependencies: ApiServiceDependencies, action: string): Promise<Response> {
-  const idempotencyKey = requireIdempotencyKey(context);
-  const requestBody = await readRequestText(context);
-  const result = await runDisabledMutation({
-    runtime: dependencies.persistence,
-    actor: context.get("authUser"),
-    action,
-    route: context.req.path,
-    idempotencyKey,
-    requestBody
-  });
-  return context.json(result.body, result.status);
 }
 
 function equalNames(left: string, right: string): boolean {
@@ -4809,9 +5954,11 @@ function toReleaseSummaries(dataset: DistributionReadDataset): readonly ReleaseS
 function toAllocationRunSummary(dataset: DistributionReadDataset, run: DistributionCalculationRunRow): AllocationRunSummary {
   const allocations = readAllocationList(dataset, { calculationRunId: run.id, payeeId: null, status: null });
   const total = allocations.totals[0];
+  const period = "2026-04";
   return {
     id: run.id,
-    period: "2026-04",
+    runReference: `${period} · distribution:allocation:${run.id}`,
+    period,
     status: toApiRunStatus(run.status),
     lockKey: `distribution:allocation:${run.id}`,
     startedAt: run.startedAt,
@@ -5070,6 +6217,7 @@ function toDistributionReconciliation(store: ApiFixtureStore): DistributionRecon
     .slice(0, distributionReconciliationSampleLimit)
     .map((statement) => ({
       id: statement.id,
+      statementReference: `${payeeName(statement.payeeId)} · ${statement.periodStart} → ${statement.periodEnd}`,
       payee: payeeName(statement.payeeId),
       periodStart: statement.periodStart,
       periodEnd: statement.periodEnd,
@@ -5081,6 +6229,7 @@ function toDistributionReconciliation(store: ApiFixtureStore): DistributionRecon
     .slice(0, distributionReconciliationSampleLimit)
     .map((term) => ({
       id: term.id,
+      expenseReference: `${contractTitle(term.contractId)} · ${term.currency} ${term.amount}`,
       contract: contractTitle(term.contractId),
       description: term.recoupable ? "recoupable cost term" : "non-recoupable cost term",
       amountMicro: term.amount,
@@ -5092,6 +6241,7 @@ function toDistributionReconciliation(store: ApiFixtureStore): DistributionRecon
     .slice(0, distributionReconciliationSampleLimit)
     .map((earning) => ({
       id: earning.id,
+      sourceReference: `${earning.batchId} · ${earning.rawTitle ?? earning.isrc ?? earning.upc ?? earning.id}`,
       batch: earning.batchId,
       track: earning.rawTitle ?? earning.id,
       currency: earning.currency,
@@ -5107,17 +6257,19 @@ function toDistributionReconciliation(store: ApiFixtureStore): DistributionRecon
       rows: group.ids.length,
       firstId: group.ids[0] ?? null,
       lastId: group.ids[group.ids.length - 1] ?? null,
+      firstReference: balanceReference(group.payeeId, group.currency, group.ids[0] ?? null),
+      lastReference: balanceReference(group.payeeId, group.currency, group.ids[group.ids.length - 1] ?? null),
       latestClosingMicro: group.latest
     }));
 
   const actions: readonly DistributionReconciliationAction[] = [
-    { id: "reset_matched_unallocated", label: "Reset matched unallocated to pending", description: "Reverts matched earnings without allocations back to pending.", maintenance: false },
-    { id: "backfill_known_cost_payees", label: "Backfill known cost payees", description: "One-time maintenance flagged for review, not a permanent product action.", maintenance: true },
-    { id: "backfill_mutecell_cost_payee", label: "Backfill Mutecell cost payee", description: "One-time maintenance flagged for review, not a permanent product action.", maintenance: true },
-    { id: "generate_payment_payee_statements", label: "Generate payment-payee statements", description: "Generates statements for payees that already have payments.", maintenance: false },
-    { id: "generate_payment_only_statements", label: "Generate payment-only statements", description: "Generates statements for payment-only plans.", maintenance: false },
-    { id: "link_strict_matches", label: "Link strict statement/payment matches", description: "Links statements and payments that match exactly.", maintenance: false },
-    { id: "link_period_matches", label: "Link period payment matches", description: "Links payments to statements within the same period.", maintenance: false }
+    { id: "link-statement-payment", label: "Link statement payment", description: "Records and links a payment to the first open statement gap.", maintenance: false },
+    { id: "recompute-payee-balance", label: "Recompute payee balance", description: "Recomputes statement/payment balances through the payment write path.", maintenance: false },
+    { id: "assign-expense-payee", label: "Assign expense payee", description: "Creates a guarded contract expense with an explicit payee.", maintenance: false },
+    { id: "allocate-matched-row", label: "Allocate matched row", description: "Runs the locked allocation engine for matched rows.", maintenance: false },
+    { id: "void-statement", label: "Void statement", description: "Voids a statement and appends the reversal balance row.", maintenance: false },
+    { id: "repair-identity-link", label: "Repair identity link", description: "One-off backfill; kept as flagged maintenance.", maintenance: true },
+    { id: "refresh-derived-summary", label: "Refresh derived summary", description: "One-off derived summary rebuild; kept as flagged maintenance.", maintenance: true }
   ];
 
   return {
@@ -5139,17 +6291,19 @@ function toDistributionAliases(store: ApiFixtureStore): readonly DistributionAli
 
 function toDistributionDuplicates(store: ApiFixtureStore): readonly DistributionDuplicate[] {
   const dataset = store.distribution;
-  const groups = new Map<string, { readonly title: string; ids: string[] }>();
+  const groups = new Map<string, { readonly title: string; ids: string[]; labels: string[] }>();
   for (const earning of dataset.normalizedEarnings) {
     if (earning.isrc === null) {
       continue;
     }
 
+    const label = `${earning.rawTitle ?? earning.isrc} · ${earning.rawArtist ?? earning.dsp}`;
     const existing = groups.get(earning.isrc);
     if (existing === undefined) {
-      groups.set(earning.isrc, { title: earning.rawTitle ?? earning.isrc, ids: [earning.id] });
+      groups.set(earning.isrc, { title: earning.rawTitle ?? earning.isrc, ids: [earning.id], labels: [label] });
     } else {
       existing.ids.push(earning.id);
+      existing.labels.push(label);
     }
   }
 
@@ -5160,7 +6314,8 @@ function toDistributionDuplicates(store: ApiFixtureStore): readonly Distribution
       label: group.title,
       kind: "normalized_earning_isrc",
       count: group.ids.length,
-      sampleIds: group.ids.slice(0, distributionReconciliationSampleLimit)
+      sampleIds: group.ids.slice(0, distributionReconciliationSampleLimit),
+      sampleLabels: group.labels.slice(0, distributionReconciliationSampleLimit)
     }));
 }
 
@@ -5170,7 +6325,7 @@ function toDistributionAuditLog(store: ApiFixtureStore): readonly AuditLogEntry[
   return store.officeAuditLog.filter((entry) => entry.action.startsWith("distribution."));
 }
 
-function toDistributionSettings(context: ApiContext, store: ApiFixtureStore): DistributionSettingsResponse {
+function toDistributionSettings(context: ApiContext, store: ApiFixtureStore, writesEnabled: boolean): DistributionSettingsResponse {
   const workspaceId = requireQuery(context, "workspaceId");
   const dataset = store.distribution;
   const currencies = [...new Set(dataset.payees.map((payee) => payee.preferredCurrency))].sort();
@@ -5182,8 +6337,17 @@ function toDistributionSettings(context: ApiContext, store: ApiFixtureStore): Di
     contractCount: store.distributionContracts.length,
     currencies,
     fxRateCount: store.distributionFxRates.length,
-    mutationsEnabled: false
+    mutationsEnabled: writesEnabled
   };
+}
+
+function balanceReference(payeeId: string, currency: string, balanceId: string | null): string | null {
+  void payeeId;
+  if (balanceId === null) {
+    return null;
+  }
+
+  return `${currency} balance row`;
 }
 
 function createMutationReceipt(entityId: string, idempotencyKey: string): ApiMutationReceipt {
