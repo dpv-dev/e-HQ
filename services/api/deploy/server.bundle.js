@@ -24166,6 +24166,48 @@ function readStatementSummaries(dataset, filters) {
     totals: statementTotalsByCurrency(rows)
   };
 }
+function readAllocationTotals(dataset, filters) {
+  return totalsByCurrency(
+    dataset.earningAllocations.filter((allocation) => filters.calculationRunId === null || allocation.calculationRunId === filters.calculationRunId).filter((allocation) => filters.payeeId === null || allocation.payeeId === filters.payeeId).filter((allocation) => filters.status === null || allocation.status === filters.status).map((allocation) => ({
+      currency: allocation.currency,
+      amount: formatErhAmount3(parseErhAmount3(allocation.netPayable)),
+      grossShare: formatErhAmount3(parseErhAmount3(allocation.grossShare)),
+      recoupmentApplied: formatErhAmount3(parseErhAmount3(allocation.recoupmentApplied))
+    }))
+  ).map((total) => ({
+    currency: total.currency,
+    grossShare: total.grossShare,
+    recoupmentApplied: total.recoupmentApplied,
+    netPayable: total.amount
+  }));
+}
+function countOpenSuspense(dataset, filters) {
+  let count = 0;
+  for (const item of dataset.suspenseItems) {
+    if (!matchesSuspenseStatus(item, filters.status)) {
+      continue;
+    }
+    if (filters.reasonCode !== null && item.reasonCode !== filters.reasonCode) {
+      continue;
+    }
+    count += 1;
+  }
+  return count;
+}
+function countOpenStatements(dataset, period) {
+  let count = 0;
+  for (const statement of dataset.statements) {
+    const matchesPeriod = period === null || statement.periodStart.startsWith(period) || statement.periodEnd.startsWith(period);
+    if (!matchesPeriod) {
+      continue;
+    }
+    if (statement.status === "paid" || statement.status === "void") {
+      continue;
+    }
+    count += 1;
+  }
+  return count;
+}
 function resolveDataset(dataset) {
   return {
     importBatchesById: new Map(dataset.importBatches.map((batch) => [batch.id, batch])),
@@ -45326,17 +45368,15 @@ function requireDepartment2(dataset, departmentId) {
   return department;
 }
 function toDistributionDashboard(dataset, period) {
-  const allocations = readAllocationList(dataset, { calculationRunId: null, payeeId: null, status: "posted" });
-  const total = allocations.totals[0];
-  const suspense = readSuspense(dataset, { status: "open", reasonCode: null });
-  const statements = readStatementSummaries(dataset, { period, payeeId: null, status: null });
+  const totals = readAllocationTotals(dataset, { calculationRunId: null, payeeId: null, status: "posted" });
+  const total = totals[0];
   return {
     period,
     grossRoyaltyMicro: total?.grossShare ?? "0.0000000000",
     recoupedMicro: total?.recoupmentApplied ?? "0.0000000000",
     netPayableMicro: total?.netPayable ?? "0.0000000000",
-    suspenseCount: suspense.rows.length,
-    openStatementCount: statements.rows.filter((statement) => statement.status !== "paid" && statement.status !== "void").length,
+    suspenseCount: countOpenSuspense(dataset, { status: "open", reasonCode: null }),
+    openStatementCount: countOpenStatements(dataset, period),
     lastAuditEventId: null
   };
 }

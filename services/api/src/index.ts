@@ -12,7 +12,10 @@ import {
   computeStatementGroupTotals,
   buildStatementPlan,
   buildVoidPlan,
+  countOpenStatements,
+  countOpenSuspense,
   readAllocationList,
+  readAllocationTotals,
   readEarningsPreview,
   readStatementSummaries,
   readSuspense,
@@ -7770,17 +7773,15 @@ function requireDepartment(dataset: OfficeAnalyticsDataset, departmentId: string
 }
 
 function toDistributionDashboard(dataset: DistributionReadDataset, period: string): DistributionDashboardResponse {
-  const allocations = readAllocationList(dataset, { calculationRunId: null, payeeId: null, status: "posted" });
-  const total = allocations.totals[0];
-  const suspense = readSuspense(dataset, { status: "open", reasonCode: null });
-  const statements = readStatementSummaries(dataset, { period, payeeId: null, status: null });
+  const totals = readAllocationTotals(dataset, { calculationRunId: null, payeeId: null, status: "posted" });
+  const total = totals[0];
   return {
     period,
     grossRoyaltyMicro: total?.grossShare ?? "0.0000000000",
     recoupedMicro: total?.recoupmentApplied ?? "0.0000000000",
     netPayableMicro: total?.netPayable ?? "0.0000000000",
-    suspenseCount: suspense.rows.length,
-    openStatementCount: statements.rows.filter((statement) => statement.status !== "paid" && statement.status !== "void").length,
+    suspenseCount: countOpenSuspense(dataset, { status: "open", reasonCode: null }),
+    openStatementCount: countOpenStatements(dataset, period),
     lastAuditEventId: null
   };
 }

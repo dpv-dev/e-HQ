@@ -328,6 +328,66 @@ export function readStatementSummaries(dataset: DistributionReadDataset, filters
   };
 }
 
+// Dashboard-only fast path: allocation totals without materializing every row or
+// building the resolved-dataset lookup maps. Output matches readAllocationList().totals.
+export function readAllocationTotals(
+  dataset: DistributionReadDataset,
+  filters: DistributionAllocationReadFilters
+): DistributionAllocationReadResponse["totals"] {
+  return totalsByCurrency(
+    dataset.earningAllocations
+      .filter((allocation) => filters.calculationRunId === null || allocation.calculationRunId === filters.calculationRunId)
+      .filter((allocation) => filters.payeeId === null || allocation.payeeId === filters.payeeId)
+      .filter((allocation) => filters.status === null || allocation.status === filters.status)
+      .map((allocation) => ({
+        currency: allocation.currency,
+        amount: formatErhAmount(parseErhAmount(allocation.netPayable)),
+        grossShare: formatErhAmount(parseErhAmount(allocation.grossShare)),
+        recoupmentApplied: formatErhAmount(parseErhAmount(allocation.recoupmentApplied))
+      }))
+  ).map((total) => ({
+    currency: total.currency,
+    grossShare: total.grossShare,
+    recoupmentApplied: total.recoupmentApplied,
+    netPayable: total.amount
+  }));
+}
+
+// Dashboard-only fast path: count of matching suspense items without materializing
+// rows or building lookup maps. Matches readSuspense().rows.length.
+export function countOpenSuspense(dataset: DistributionReadDataset, filters: DistributionSuspenseReadFilters): number {
+  let count = 0;
+  for (const item of dataset.suspenseItems) {
+    if (!matchesSuspenseStatus(item, filters.status)) {
+      continue;
+    }
+    if (filters.reasonCode !== null && item.reasonCode !== filters.reasonCode) {
+      continue;
+    }
+    count += 1;
+  }
+
+  return count;
+}
+
+// Dashboard-only fast path: count of open statements (not paid/void) in a period.
+// Matches readStatementSummaries().rows filtered to non-paid/non-void.
+export function countOpenStatements(dataset: DistributionReadDataset, period: string | null): number {
+  let count = 0;
+  for (const statement of dataset.statements) {
+    const matchesPeriod = period === null || statement.periodStart.startsWith(period) || statement.periodEnd.startsWith(period);
+    if (!matchesPeriod) {
+      continue;
+    }
+    if (statement.status === "paid" || statement.status === "void") {
+      continue;
+    }
+    count += 1;
+  }
+
+  return count;
+}
+
 function resolveDataset(dataset: DistributionReadDataset): DistributionResolvedDataset {
   return {
     importBatchesById: new Map<string, DistributionImportBatchRow>(dataset.importBatches.map((batch) => [batch.id, batch])),
