@@ -137,6 +137,14 @@ export interface PersistOfficeBankImportInput {
   readonly lines: readonly OfficeBankStatementLineInsert[];
 }
 
+export interface ExistingOfficeBankImportBatch {
+  readonly id: string;
+  readonly status: "previewed" | "confirmed" | "failed" | "void";
+  readonly acceptedRowCount: number;
+  readonly rejectedRowCount: number;
+  readonly duplicateRowCount: number;
+}
+
 export interface OfficeBankStatementLineInsert {
   readonly id: string;
   readonly accountId: string;
@@ -817,6 +825,64 @@ export async function persistOfficeBankImportConfirmation(tx: ApiWriteTransactio
       )
     `);
   }
+}
+
+export async function getDistributionImportPreviewInTransaction(
+  tx: ApiWriteTransaction,
+  previewId: string
+): Promise<DistributionImportPreviewRecord | null> {
+  if (tx.kind === "memory") {
+    return null;
+  }
+
+  return readApiImportPreview<DistributionImportPreviewRecord>(tx.executor, "distribution_import", previewId);
+}
+
+export async function getOfficeBankImportPreviewInTransaction(
+  tx: ApiWriteTransaction,
+  previewId: string
+): Promise<OfficeBankImportPreviewRecord | null> {
+  if (tx.kind === "memory") {
+    return null;
+  }
+
+  return readApiImportPreview<OfficeBankImportPreviewRecord>(tx.executor, "office_bank_import", previewId);
+}
+
+export async function findOfficeBankImportBatchByFingerprint(
+  tx: ApiWriteTransaction,
+  workspaceId: string,
+  idempotencyFingerprint: string
+): Promise<ExistingOfficeBankImportBatch | null> {
+  if (tx.kind === "memory") {
+    return null;
+  }
+
+  const rows = rowsFromQueryResult(await tx.executor.execute(sql`
+    select
+      id::text as id,
+      status::text as status,
+      accepted_row_count,
+      rejected_row_count,
+      duplicate_row_count
+    from office_bank_import_batches
+    where workspace_id = ${workspaceId}
+      and idempotency_fingerprint = ${idempotencyFingerprint}
+    limit 1
+  `));
+  const row = rows[0];
+  if (row === undefined) {
+    return null;
+  }
+
+  const status = officeBankImportStatusField(row, "status");
+  return {
+    id: stringField(row, "id"),
+    status,
+    acceptedRowCount: integerField(row, "accepted_row_count"),
+    rejectedRowCount: integerField(row, "rejected_row_count"),
+    duplicateRowCount: integerField(row, "duplicate_row_count")
+  };
 }
 
 export async function acquireAdvisoryLock(tx: ApiWriteTransaction, lockKey: string): Promise<void> {
@@ -1575,6 +1641,28 @@ function stringField(row: JsonRecord | undefined, key: string): string {
 
   const value = row[key];
   return typeof value === "string" ? value : "unknown";
+}
+
+function integerField(row: JsonRecord, key: string): number {
+  const value = row[key];
+  if (typeof value === "number" && Number.isInteger(value)) {
+    return value;
+  }
+
+  if (typeof value === "string" && /^-?\d+$/u.test(value)) {
+    return Number.parseInt(value, 10);
+  }
+
+  throwPersistenceHttpError(500, "integer_field_invalid", "Database row field is not an integer.", [`field=${key}`]);
+}
+
+function officeBankImportStatusField(row: JsonRecord, key: string): ExistingOfficeBankImportBatch["status"] {
+  const value = row[key];
+  if (value === "previewed" || value === "confirmed" || value === "failed" || value === "void") {
+    return value;
+  }
+
+  throwPersistenceHttpError(500, "office_bank_import_status_invalid", "Office bank import batch status is invalid.", [`field=${key}`]);
 }
 
 function jsonRecordOrNull(value: unknown): JsonRecord | null {

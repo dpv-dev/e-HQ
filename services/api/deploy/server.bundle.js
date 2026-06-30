@@ -38426,6 +38426,47 @@ async function persistOfficeBankImportConfirmation(tx, input) {
     `);
   }
 }
+async function getDistributionImportPreviewInTransaction(tx, previewId) {
+  if (tx.kind === "memory") {
+    return null;
+  }
+  return readApiImportPreview(tx.executor, "distribution_import", previewId);
+}
+async function getOfficeBankImportPreviewInTransaction(tx, previewId) {
+  if (tx.kind === "memory") {
+    return null;
+  }
+  return readApiImportPreview(tx.executor, "office_bank_import", previewId);
+}
+async function findOfficeBankImportBatchByFingerprint(tx, workspaceId, idempotencyFingerprint) {
+  if (tx.kind === "memory") {
+    return null;
+  }
+  const rows = rowsFromQueryResult(await tx.executor.execute(sql`
+    select
+      id::text as id,
+      status::text as status,
+      accepted_row_count,
+      rejected_row_count,
+      duplicate_row_count
+    from office_bank_import_batches
+    where workspace_id = ${workspaceId}
+      and idempotency_fingerprint = ${idempotencyFingerprint}
+    limit 1
+  `));
+  const row = rows[0];
+  if (row === void 0) {
+    return null;
+  }
+  const status = officeBankImportStatusField(row, "status");
+  return {
+    id: stringField(row, "id"),
+    status,
+    acceptedRowCount: integerField(row, "accepted_row_count"),
+    rejectedRowCount: integerField(row, "rejected_row_count"),
+    duplicateRowCount: integerField(row, "duplicate_row_count")
+  };
+}
 async function acquireAdvisoryLock(tx, lockKey) {
   if (tx.kind === "memory") {
     return;
@@ -39097,6 +39138,23 @@ function stringField(row, key) {
   }
   const value = row[key];
   return typeof value === "string" ? value : "unknown";
+}
+function integerField(row, key) {
+  const value = row[key];
+  if (typeof value === "number" && Number.isInteger(value)) {
+    return value;
+  }
+  if (typeof value === "string" && /^-?\d+$/u.test(value)) {
+    return Number.parseInt(value, 10);
+  }
+  throwPersistenceHttpError(500, "integer_field_invalid", "Database row field is not an integer.", [`field=${key}`]);
+}
+function officeBankImportStatusField(row, key) {
+  const value = row[key];
+  if (value === "previewed" || value === "confirmed" || value === "failed" || value === "void") {
+    return value;
+  }
+  throwPersistenceHttpError(500, "office_bank_import_status_invalid", "Office bank import batch status is invalid.", [`field=${key}`]);
 }
 function jsonRecordOrNull(value) {
   if (value === null || value === void 0) {
@@ -42868,7 +42926,7 @@ async function distributionImportConfirmResponse(context, dependencies) {
     idempotencyKey,
     requestBody: request,
     write: async (tx, resolvedIdempotencyKey) => {
-      const preview = await requireDistributionPreview(context, dependencies, request.previewId, request.workspaceId);
+      const preview = await requireDistributionPreviewInWrite(context, dependencies, tx, request.previewId, request.workspaceId);
       const batchId = randomUUID2();
       const importedAtIso = dependencies.nowIso();
       await persistDistributionImportConfirmation(tx, {
@@ -43014,7 +43072,49 @@ async function officeBankImportConfirmResponse(context, dependencies) {
     idempotencyKey,
     requestBody: request,
     write: async (tx, resolvedIdempotencyKey) => {
-      const preview = await requireOfficeBankPreview(context, dependencies, request.previewId, request.workspaceId);
+      const preview = await requireOfficeBankPreviewInWrite(context, dependencies, tx, request.previewId, request.workspaceId);
+      const existingBatch = await findOfficeBankImportBatchByFingerprint(tx, request.workspaceId, preview.idempotencyFingerprint);
+      if (existingBatch !== null) {
+        if (existingBatch.status !== "confirmed") {
+          throw new ApiRouteError(409, "bank_import_fingerprint_conflict", "Bank import already exists with a non-confirmed status.", [
+            `path=${context.req.path}`,
+            `previewId=${request.previewId}`,
+            `batchId=${existingBatch.id}`,
+            `status=${existingBatch.status}`
+          ]);
+        }
+        const auditEventId2 = await appendAuditEvent(tx, {
+          actor,
+          action: "office_bank_import_confirm",
+          targetType: "office_bank_import_batch",
+          targetId: existingBatch.id,
+          before: {},
+          after: {
+            previewId: request.previewId,
+            duplicateConfirm: true,
+            importedStatementLineCount: existingBatch.acceptedRowCount,
+            rejectedRowCount: existingBatch.rejectedRowCount,
+            duplicateRowCount: existingBatch.duplicateRowCount,
+            status: existingBatch.status
+          },
+          idempotencyKey: resolvedIdempotencyKey
+        });
+        appendOfficeAuditFixture(dependencies.fixtures, {
+          id: auditEventId2,
+          actorId: actor.userId,
+          action: "office_bank_import_confirm",
+          entityType: "office_bank_import_batch",
+          entityId: existingBatch.id,
+          occurredAt: dependencies.nowIso()
+        });
+        return {
+          id: existingBatch.id,
+          status: "completed",
+          auditEventId: auditEventId2,
+          importedTransactionCount: existingBatch.acceptedRowCount,
+          rejectedRowCount: existingBatch.rejectedRowCount
+        };
+      }
       const acceptedRowIds = new Set(request.acceptedRowIds);
       const parsedRows = preview.rows.filter((row) => acceptedRowIds.has(row.id)).map((row) => parseOfficeBankPreviewRow(row, request.workspaceId, dependencies.fixtures.office.bankAccounts, dependencies.fixtures.office.exchangeRates));
       const lines = parsedRows.map((row) => row.line).filter((line) => line !== null);
@@ -43890,6 +43990,16 @@ function officeDateRange(dates) {
 }
 async function requireDistributionPreview(context, dependencies, previewId, workspaceId) {
   const preview = await dependencies.persistence.getDistributionImportPreview(previewId);
+  return requireDistributionPreviewRecord(context, preview, previewId, workspaceId);
+}
+async function requireDistributionPreviewInWrite(context, dependencies, tx, previewId, workspaceId) {
+  if (tx.kind === "memory") {
+    return requireDistributionPreview(context, dependencies, previewId, workspaceId);
+  }
+  const preview = await getDistributionImportPreviewInTransaction(tx, previewId);
+  return requireDistributionPreviewRecord(context, preview, previewId, workspaceId);
+}
+function requireDistributionPreviewRecord(context, preview, previewId, workspaceId) {
   if (preview === null) {
     throw new ApiRouteError(400, "import_preview_missing", "Import preview was not found or has expired; run preview again before confirm.", [
       `path=${context.req.path}`,
@@ -43908,6 +44018,16 @@ async function requireDistributionPreview(context, dependencies, previewId, work
 }
 async function requireOfficeBankPreview(context, dependencies, previewId, workspaceId) {
   const preview = await dependencies.persistence.getOfficeBankImportPreview(previewId);
+  return requireOfficeBankPreviewRecord(context, preview, previewId, workspaceId);
+}
+async function requireOfficeBankPreviewInWrite(context, dependencies, tx, previewId, workspaceId) {
+  if (tx.kind === "memory") {
+    return requireOfficeBankPreview(context, dependencies, previewId, workspaceId);
+  }
+  const preview = await getOfficeBankImportPreviewInTransaction(tx, previewId);
+  return requireOfficeBankPreviewRecord(context, preview, previewId, workspaceId);
+}
+function requireOfficeBankPreviewRecord(context, preview, previewId, workspaceId) {
   if (preview === null) {
     throw new ApiRouteError(400, "bank_import_preview_missing", "Bank import preview was not found or has expired; run preview again before confirm.", [
       `path=${context.req.path}`,

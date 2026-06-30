@@ -2167,11 +2167,12 @@ test("distribution import confirm persists raw rows and does not fabricate norma
 test("office bank import confirm writes idempotency, audit, batch, and lines in PGlite", async () => {
   const pglite = new PGlite();
   await createPgliteWriteTables(pglite);
+  const testNowIso = new Date(Date.now() + 60_000).toISOString();
   const app = createApiService({
     fixtures: createFixtureStore(),
     persistence: createDrizzlePersistenceRuntime(drizzle(pglite) as Parameters<typeof createDrizzlePersistenceRuntime>[0], { WRITES_ENABLED: "true" }),
     health: null,
-    nowIso: (): string => "2026-06-21T00:00:00.000Z",
+    nowIso: (): string => testNowIso,
     auth: createTestAuthVerifier()
   });
 
@@ -2201,9 +2202,29 @@ test("office bank import confirm writes idempotency, audit, batch, and lines in 
       })
     });
     assert.equal(confirm.status, 200);
+    const originalReceipt = (await confirm.json()) as { readonly id: string };
 
     assert.equal(await pgliteCount(pglite, "api_idempotency_keys"), 1);
     assert.equal(await pgliteCount(pglite, "audit_logs"), 1);
+    assert.equal(await pgliteCount(pglite, "office_bank_import_batches"), 1);
+    assert.equal(await pgliteCount(pglite, "office_bank_statement_lines"), 1);
+
+    const duplicateConfirm = await app.request("/eof/v1/bank-import/confirm", {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "bank-confirm-pglite-2" },
+      body: JSON.stringify({
+        workspaceId: "workspace_1",
+        previewId: previewJson.previewId,
+        acceptedRowIds: ["row_1"],
+        rejectedRowIds: []
+      })
+    });
+    assert.equal(duplicateConfirm.status, 200);
+    const duplicateReceipt = (await duplicateConfirm.json()) as { readonly id: string; readonly importedTransactionCount: number };
+    assert.equal(duplicateReceipt.id, originalReceipt.id);
+    assert.equal(duplicateReceipt.importedTransactionCount, 1);
+    assert.equal(await pgliteCount(pglite, "api_idempotency_keys"), 2);
+    assert.equal(await pgliteCount(pglite, "audit_logs"), 2);
     assert.equal(await pgliteCount(pglite, "office_bank_import_batches"), 1);
     assert.equal(await pgliteCount(pglite, "office_bank_statement_lines"), 1);
   } finally {
@@ -2382,7 +2403,8 @@ async function createPgliteWriteTables(pglite: PGlite): Promise<void> {
       imported_at timestamp with time zone,
       metadata jsonb not null default '{}'::jsonb,
       created_at timestamp with time zone default now() not null,
-      updated_at timestamp with time zone default now() not null
+      updated_at timestamp with time zone default now() not null,
+      unique (workspace_id, idempotency_fingerprint)
     );
 
     create table office_bank_statement_lines (
