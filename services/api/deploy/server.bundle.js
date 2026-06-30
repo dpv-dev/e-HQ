@@ -39873,15 +39873,6 @@ function registerDistributionRoutes(app, dependencies) {
     const runs = dependencies.fixtures.distribution.calculationRuns.map((run) => toAllocationRunSummary(dependencies.fixtures.distribution, run)).filter((run) => status === null || run.status === status);
     return context.json(pageItems(context, runs));
   });
-  app.get("/erh/v1/allocations/runs/:runId", (context) => {
-    requireQuery(context, "workspaceId");
-    const runId = context.req.param("runId");
-    const run = dependencies.fixtures.distribution.calculationRuns.find((candidate) => candidate.id === runId);
-    if (run === void 0) {
-      throw new ApiRouteError(404, "allocation_run_not_found", "Allocation run fixture was not found.", [`runId=${runId}`]);
-    }
-    return context.json(toAllocationRunSummary(dependencies.fixtures.distribution, run));
-  });
   app.post("/erh/v1/allocations/runs/preview", async (context) => {
     return distributionAllocationPreviewResponse(context, dependencies);
   });

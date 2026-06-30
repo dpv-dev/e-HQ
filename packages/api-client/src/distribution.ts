@@ -85,7 +85,6 @@ export interface DistributionApiClient {
   readonly listReleases: (query: ReleasesQuery) => Promise<PageResult<ReleaseSummary>>;
   readonly listTracks: (query: TracksQuery) => Promise<PageResult<TrackSummary>>;
   readonly listAllocationRuns: (query: AllocationRunQuery) => Promise<PageResult<AllocationRunSummary>>;
-  readonly getAllocationRun: (workspaceId: EntityId, runId: EntityId) => Promise<AllocationRunSummary>;
   readonly previewAllocationRun: (
     request: AllocationRunPreviewRequest,
     options: WriteRequestOptions
@@ -234,10 +233,6 @@ export function createDistributionApiClient(config: ApiClientConfig): Distributi
         status: query.status,
         cursor: query.cursor,
         limit: query.limit
-      }),
-    getAllocationRun: (workspaceId: EntityId, runId: EntityId): Promise<AllocationRunSummary> =>
-      transport.get<AllocationRunSummary>(`allocations/runs/${encodePathSegment(runId)}`, {
-        workspaceId
       }),
     previewAllocationRun: (
       request: AllocationRunPreviewRequest,

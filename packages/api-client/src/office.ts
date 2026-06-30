@@ -31,7 +31,6 @@ import type {
   OfficeIntegrityCheckAllResponse,
   OfficeIntegrityCheckQuery,
   OfficePartnerClassificationSuggestion,
-  OfficePartnerDetail,
   OfficePartnerDetailQuery,
   OfficePartnerListItem,
   OfficePartnerPayeeLink,
@@ -44,8 +43,6 @@ import type {
   OfficePlanComptableNode,
   OfficePlanComptableQuery,
   OfficePlanComptableWriteRequest,
-  OfficePnlProjectionQuery,
-  OfficePnlProjectionRow,
   OfficeProjectCoherenceViolation,
   OfficeProjectCoherenceViolationsQuery,
   OfficeProjectPnl,
@@ -73,7 +70,6 @@ export interface OfficeApiClient {
   readonly getGlobalPnl: (query: OfficeGlobalPnlQuery) => Promise<OfficeGlobalPnl>;
   readonly getDepartmentPnl: (departmentId: EntityId, query: OfficeDepartmentPnlQuery) => Promise<OfficeDepartmentPnl>;
   readonly getDivisionPnl: (query: OfficeDivisionPnlQuery) => Promise<PageResult<OfficeDivisionPnl>>;
-  readonly getPnlProjection: (query: OfficePnlProjectionQuery) => Promise<readonly OfficePnlProjectionRow[]>;
   readonly listTransactions: (query: OfficeTransactionsQuery) => Promise<PageResult<OfficeTransaction>>;
   readonly createTransaction: (
     request: OfficeTransactionWriteRequest,
@@ -151,7 +147,6 @@ export interface OfficeApiClient {
     partnerId: EntityId,
     query: OfficePartnerRecordQuery
   ) => Promise<readonly OfficePartnerClassificationSuggestion[]>;
-  readonly getPartner: (partnerId: EntityId, query: OfficePartnerDetailQuery) => Promise<OfficePartnerDetail>;
   readonly createPartner: (
     request: OfficePartnerWriteRequest,
     options: WriteRequestOptions
@@ -221,26 +216,6 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
         dateFrom: query.dateFrom ?? null,
         dateTo: query.dateTo ?? null
       }),
-    getPnlProjection: async (query: OfficePnlProjectionQuery): Promise<readonly OfficePnlProjectionRow[]> => {
-      if (query.departmentId === null) {
-        const globalPnl = await transport.get<OfficeGlobalPnl>("pl/global", {
-          workspaceId: query.workspaceId,
-          period: query.period
-        });
-
-        return globalPnl.projectionRows;
-      }
-
-      const departmentPnl = await transport.get<OfficeDepartmentPnl>(
-        `pl/department/${encodePathSegment(query.departmentId)}`,
-        {
-          workspaceId: query.workspaceId,
-          period: query.period
-        }
-      );
-
-      return departmentPnl.projectionRows;
-    },
     listTransactions: (query: OfficeTransactionsQuery): Promise<PageResult<OfficeTransaction>> =>
       transport.get<PageResult<OfficeTransaction>>("transactions", {
         workspaceId: query.workspaceId,
@@ -422,11 +397,6 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
           workspaceId: query.workspaceId
         }
       ),
-    getPartner: (partnerId: EntityId, query: OfficePartnerDetailQuery): Promise<OfficePartnerDetail> =>
-      transport.get<OfficePartnerDetail>(`pl/partner/${encodePathSegment(partnerId)}`, {
-        workspaceId: query.workspaceId,
-        period: query.period
-      }),
     createPartner: (
       request: OfficePartnerWriteRequest,
       options: WriteRequestOptions
