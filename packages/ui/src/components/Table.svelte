@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Tone, TableCell, TableColumn, TableRow, TableRowAction, TableState } from "./types.js";
+  import type { Tone, TableColumn, TableRow, TableRowAction, TableState } from "./types.js";
   import Badge from "./Badge.svelte";
   import Button from "./Button.svelte";
   import Loader from "./Loader.svelte";

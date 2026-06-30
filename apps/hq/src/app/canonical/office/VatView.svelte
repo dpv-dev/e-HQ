@@ -8,7 +8,9 @@
     type Tone
   } from "@ehq/ui";
   import {
+    createErrorState,
     createIdleState,
+    createLoadingState,
     createSuccessState,
     type ApiRequestState,
     type OfficeApiClient,
@@ -45,14 +47,14 @@
   });
 
   async function loadVat(): Promise<void> {
-    vatState = createSuccessState<OfficeVatReport>({
-      period: props.period,
-      hasVatSource: false,
-      outputVatMicro: "0",
-      inputVatMicro: "0",
-      netVatMicro: "0",
-      rows: []
-    });
+    vatState = createLoadingState<OfficeVatReport>();
+
+    try {
+      const report = await props.client.getVatReport({ workspaceId: props.workspaceId, period: props.period });
+      vatState = createSuccessState<OfficeVatReport>(report);
+    } catch (error: unknown) {
+      vatState = createErrorState<OfficeVatReport>(error);
+    }
   }
 
   function readVatRows(state: ApiRequestState<OfficeVatReport>): readonly OfficeVatRow[] {

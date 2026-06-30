@@ -3,8 +3,7 @@
   import {
     Loader,
     Table,
-    type TableRow,
-    type Tone
+    type TableRow
   } from "@ehq/ui";
   import {
     createErrorState,
