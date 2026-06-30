@@ -1285,34 +1285,42 @@
   async function previewAllocationRun(): Promise<void> {
     clearMutationReceipt();
 
-    runReceipt = await client.distribution.previewAllocationRun(
-      {
-        workspaceId: distributionWorkspaceId,
-        period: distributionPeriod,
-        lockKey: allocationLockKey
-      },
-      {
-        idempotencyKey: createIdempotencyKey("allocation-preview")
-      }
-    );
-    runReceiptPageId = activePageId;
+    try {
+      runReceipt = await client.distribution.previewAllocationRun(
+        {
+          workspaceId: distributionWorkspaceId,
+          period: distributionPeriod,
+          lockKey: allocationLockKey
+        },
+        {
+          idempotencyKey: createIdempotencyKey("allocation-preview")
+        }
+      );
+      runReceiptPageId = activePageId;
+    } catch (error: unknown) {
+      allocationsState = createErrorState<PageResult<AllocationRunSummary>>(error);
+    }
   }
 
   async function startCadencedAllocationRun(): Promise<void> {
     clearMutationReceipt();
 
-    runReceipt = await client.distribution.startCadencedAllocationRun(
-      {
-        workspaceId: distributionWorkspaceId,
-        period: distributionPeriod,
-        lockKey: allocationLockKey,
-        cadence: "manual"
-      },
-      {
-        idempotencyKey: createIdempotencyKey("allocation-cadenced")
-      }
-    );
-    runReceiptPageId = activePageId;
+    try {
+      runReceipt = await client.distribution.startCadencedAllocationRun(
+        {
+          workspaceId: distributionWorkspaceId,
+          period: distributionPeriod,
+          lockKey: allocationLockKey,
+          cadence: "manual"
+        },
+        {
+          idempotencyKey: createIdempotencyKey("allocation-cadenced")
+        }
+      );
+      runReceiptPageId = activePageId;
+    } catch (error: unknown) {
+      allocationsState = createErrorState<PageResult<AllocationRunSummary>>(error);
+    }
   }
 
   async function unpostAllocationRun(): Promise<void> {
@@ -1324,18 +1332,22 @@
 
     clearMutationReceipt();
 
-    runReceipt = await client.distribution.requestAllocationUnpostRun(
-      run.id,
-      {
-        workspaceId: distributionWorkspaceId,
-        reason: "Preview unpost request",
-        lockToken: "preview-lock-token"
-      },
-      {
-        idempotencyKey: createIdempotencyKey("allocation-unpost")
-      }
-    );
-    runReceiptPageId = activePageId;
+    try {
+      runReceipt = await client.distribution.requestAllocationUnpostRun(
+        run.id,
+        {
+          workspaceId: distributionWorkspaceId,
+          reason: "Preview unpost request",
+          lockToken: "preview-lock-token"
+        },
+        {
+          idempotencyKey: createIdempotencyKey("allocation-unpost")
+        }
+      );
+      runReceiptPageId = activePageId;
+    } catch (error: unknown) {
+      allocationsState = createErrorState<PageResult<AllocationRunSummary>>(error);
+    }
   }
 
   async function resolveFirstSuspense(): Promise<void> {
@@ -1347,42 +1359,50 @@
 
     clearRunReceipt();
 
-    mutationReceipt = await client.distribution.resolveSuspense(
-      {
-        workspaceId: distributionWorkspaceId,
-        suspenseId: item.id,
-        resolution: suspenseResolutionFor(item),
-        targetId: "track_alma",
-        note: `Resolved through ${item.exactFixPath}`
-      },
-      {
-        idempotencyKey: createIdempotencyKey("suspense-resolve")
-      }
-    );
-    mutationReceiptPageId = activePageId;
-    suspenseState = createSuccessState<PageResult<SuspenseItem>>({
-      items: suspenseItems.map((candidate: SuspenseItem): SuspenseItem =>
-        candidate.id === item.id ? { ...candidate, status: "resolved" } : candidate
-      ),
-      nextCursor: null
-    });
+    try {
+      mutationReceipt = await client.distribution.resolveSuspense(
+        {
+          workspaceId: distributionWorkspaceId,
+          suspenseId: item.id,
+          resolution: suspenseResolutionFor(item),
+          targetId: "track_alma",
+          note: `Resolved through ${item.exactFixPath}`
+        },
+        {
+          idempotencyKey: createIdempotencyKey("suspense-resolve")
+        }
+      );
+      mutationReceiptPageId = activePageId;
+      suspenseState = createSuccessState<PageResult<SuspenseItem>>({
+        items: suspenseItems.map((candidate: SuspenseItem): SuspenseItem =>
+          candidate.id === item.id ? { ...candidate, status: "resolved" } : candidate
+        ),
+        nextCursor: null
+      });
+    } catch (error: unknown) {
+      suspenseState = createErrorState<PageResult<SuspenseItem>>(error);
+    }
   }
 
   async function generateStatements(): Promise<void> {
     clearMutationReceipt();
 
-    runReceipt = await client.distribution.generateStatements(
-      {
-        workspaceId: distributionWorkspaceId,
-        period: distributionPeriod,
-        payeeIds: payees.map((payee: PayeeSummary): string => payee.id),
-        lockKey: `distribution:statements:${distributionPeriod}`
-      },
-      {
-        idempotencyKey: createIdempotencyKey("statements-generate")
-      }
-    );
-    runReceiptPageId = activePageId;
+    try {
+      runReceipt = await client.distribution.generateStatements(
+        {
+          workspaceId: distributionWorkspaceId,
+          period: distributionPeriod,
+          payeeIds: payees.map((payee: PayeeSummary): string => payee.id),
+          lockKey: `distribution:statements:${distributionPeriod}`
+        },
+        {
+          idempotencyKey: createIdempotencyKey("statements-generate")
+        }
+      );
+      runReceiptPageId = activePageId;
+    } catch (error: unknown) {
+      statementsState = createErrorState<PageResult<StatementSummary>>(error);
+    }
   }
 
   async function recordPayment(): Promise<void> {
@@ -1394,21 +1414,25 @@
 
     clearRunReceipt();
 
-    mutationReceipt = await client.distribution.recordPayment(
-      {
-        workspaceId: distributionWorkspaceId,
-        statementId: statement.id,
-        payeeId: statement.payeeId,
-        amountMicro: statement.netPayableMicro,
-        currency: statement.currency,
-        paidAt: new Date().toISOString(),
-        reference: "MU-PAY-PREVIEW"
-      },
-      {
-        idempotencyKey: createIdempotencyKey("payment-record")
-      }
-    );
-    mutationReceiptPageId = activePageId;
+    try {
+      mutationReceipt = await client.distribution.recordPayment(
+        {
+          workspaceId: distributionWorkspaceId,
+          statementId: statement.id,
+          payeeId: statement.payeeId,
+          amountMicro: statement.netPayableMicro,
+          currency: statement.currency,
+          paidAt: new Date().toISOString(),
+          reference: "MU-PAY-PREVIEW"
+        },
+        {
+          idempotencyKey: createIdempotencyKey("payment-record")
+        }
+      );
+      mutationReceiptPageId = activePageId;
+    } catch (error: unknown) {
+      paymentsState = createErrorState<PageResult<PaymentSummary>>(error);
+    }
   }
 
   async function editPayment(): Promise<void> {
@@ -1420,19 +1444,23 @@
 
     clearRunReceipt();
 
-    mutationReceipt = await client.distribution.updatePayment(
-      payment.id,
-      {
-        workspaceId: distributionWorkspaceId,
-        amountMicro: payment.amountMicro,
-        currency: payment.currency,
-        reference: "MU-PAY-UPDATED"
-      },
-      {
-        idempotencyKey: createIdempotencyKey("payment-edit")
-      }
-    );
-    mutationReceiptPageId = activePageId;
+    try {
+      mutationReceipt = await client.distribution.updatePayment(
+        payment.id,
+        {
+          workspaceId: distributionWorkspaceId,
+          amountMicro: payment.amountMicro,
+          currency: payment.currency,
+          reference: "MU-PAY-UPDATED"
+        },
+        {
+          idempotencyKey: createIdempotencyKey("payment-edit")
+        }
+      );
+      mutationReceiptPageId = activePageId;
+    } catch (error: unknown) {
+      paymentsState = createErrorState<PageResult<PaymentSummary>>(error);
+    }
   }
 
   async function reconcilePayment(): Promise<void> {
@@ -1444,18 +1472,22 @@
 
     clearRunReceipt();
 
-    mutationReceipt = await client.distribution.reconcilePayment(
-      payment.id,
-      {
-        workspaceId: distributionWorkspaceId,
-        bankTransactionId: "bank_tx_preview",
-        reconciledAt: new Date().toISOString()
-      },
-      {
-        idempotencyKey: createIdempotencyKey("payment-reconcile")
-      }
-    );
-    mutationReceiptPageId = activePageId;
+    try {
+      mutationReceipt = await client.distribution.reconcilePayment(
+        payment.id,
+        {
+          workspaceId: distributionWorkspaceId,
+          bankTransactionId: "bank_tx_preview",
+          reconciledAt: new Date().toISOString()
+        },
+        {
+          idempotencyKey: createIdempotencyKey("payment-reconcile")
+        }
+      );
+      mutationReceiptPageId = activePageId;
+    } catch (error: unknown) {
+      paymentsState = createErrorState<PageResult<PaymentSummary>>(error);
+    }
   }
 
   async function voidPayment(): Promise<void> {
@@ -1467,19 +1499,23 @@
 
     clearRunReceipt();
 
-    mutationReceipt = await client.distribution.updatePayment(
-      payment.id,
-      {
-        workspaceId: distributionWorkspaceId,
-        amountMicro: "0",
-        currency: payment.currency,
-        reference: "VOID-PREVIEW"
-      },
-      {
-        idempotencyKey: createIdempotencyKey("payment-void")
-      }
-    );
-    mutationReceiptPageId = activePageId;
+    try {
+      mutationReceipt = await client.distribution.updatePayment(
+        payment.id,
+        {
+          workspaceId: distributionWorkspaceId,
+          amountMicro: "0",
+          currency: payment.currency,
+          reference: "VOID-PREVIEW"
+        },
+        {
+          idempotencyKey: createIdempotencyKey("payment-void")
+        }
+      );
+      mutationReceiptPageId = activePageId;
+    } catch (error: unknown) {
+      paymentsState = createErrorState<PageResult<PaymentSummary>>(error);
+    }
   }
 
   async function runReconciliationAction(action: DistributionReconciliationAction): Promise<void> {
@@ -1496,20 +1532,24 @@
         return;
       }
 
-      mutationReceipt = await client.distribution.recordPayment(
-        {
-          workspaceId: distributionWorkspaceId,
-          statementId: statement.id,
-          payeeId: statement.payeeId,
-          amountMicro: statement.netPayableMicro,
-          currency: statement.currency,
-          paidAt: new Date().toISOString(),
-          reference: "CODEx-RECON-LINK"
-        },
-        { idempotencyKey: createIdempotencyKey("recon-link-payment") }
-      );
-      mutationReceiptPageId = activePageId;
-      await Promise.all([loadPayments(), loadReconciliation(), loadAuditLog()]);
+      try {
+        mutationReceipt = await client.distribution.recordPayment(
+          {
+            workspaceId: distributionWorkspaceId,
+            statementId: statement.id,
+            payeeId: statement.payeeId,
+            amountMicro: statement.netPayableMicro,
+            currency: statement.currency,
+            paidAt: new Date().toISOString(),
+            reference: "CODEx-RECON-LINK"
+          },
+          { idempotencyKey: createIdempotencyKey("recon-link-payment") }
+        );
+        mutationReceiptPageId = activePageId;
+        await Promise.all([loadPayments(), loadReconciliation(), loadAuditLog()]);
+      } catch (error: unknown) {
+        reconciliationState = createErrorState<DistributionReconciliationResponse>(error);
+      }
       return;
     }
 
@@ -1519,18 +1559,22 @@
         return;
       }
 
-      mutationReceipt = await client.distribution.updatePayment(
-        payment.id,
-        {
-          workspaceId: distributionWorkspaceId,
-          amountMicro: payment.amountMicro,
-          currency: payment.currency,
-          reference: payment.reference ?? "CODEx-BALANCE-RECOMPUTE"
-        },
-        { idempotencyKey: createIdempotencyKey("recon-recompute-balance") }
-      );
-      mutationReceiptPageId = activePageId;
-      await Promise.all([loadPayments(), loadReconciliation(), loadAuditLog()]);
+      try {
+        mutationReceipt = await client.distribution.updatePayment(
+          payment.id,
+          {
+            workspaceId: distributionWorkspaceId,
+            amountMicro: payment.amountMicro,
+            currency: payment.currency,
+            reference: payment.reference ?? "CODEx-BALANCE-RECOMPUTE"
+          },
+          { idempotencyKey: createIdempotencyKey("recon-recompute-balance") }
+        );
+        mutationReceiptPageId = activePageId;
+        await Promise.all([loadPayments(), loadReconciliation(), loadAuditLog()]);
+      } catch (error: unknown) {
+        reconciliationState = createErrorState<DistributionReconciliationResponse>(error);
+      }
       return;
     }
 
@@ -1553,16 +1597,20 @@
         return;
       }
 
-      mutationReceipt = await client.distribution.voidStatement(
-        statement.id,
-        {
-          workspaceId: distributionWorkspaceId,
-          reason: "Operator reconciliation void"
-        },
-        { idempotencyKey: createIdempotencyKey("recon-void-statement") }
-      );
-      mutationReceiptPageId = activePageId;
-      await Promise.all([loadStatements(), loadReconciliation(), loadAuditLog()]);
+      try {
+        mutationReceipt = await client.distribution.voidStatement(
+          statement.id,
+          {
+            workspaceId: distributionWorkspaceId,
+            reason: "Operator reconciliation void"
+          },
+          { idempotencyKey: createIdempotencyKey("recon-void-statement") }
+        );
+        mutationReceiptPageId = activePageId;
+        await Promise.all([loadStatements(), loadReconciliation(), loadAuditLog()]);
+      } catch (error: unknown) {
+        reconciliationState = createErrorState<DistributionReconciliationResponse>(error);
+      }
     }
   }
 
