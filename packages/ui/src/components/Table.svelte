@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Tone, TableColumn, TableRow, TableRowAction, TableState } from "./types.js";
+  import type { TableColumn, TableRow, TableRowAction, TableState } from "./types.js";
   import Badge from "./Badge.svelte";
   import Button from "./Button.svelte";
   import Loader from "./Loader.svelte";
@@ -19,8 +19,16 @@
 
   const hasRowActions = $derived((props.rowActions?.length ?? 0) > 0);
 
-  function moneyTone(tone: Tone): string {
-    return `money tone-${tone}`;
+  // Money cells are coloured by the sign of the displayed amount so debit/credit
+  // are easy to tell apart: negative → red, positive → green, zero/empty → muted.
+  function moneyToneClass(value: string): string {
+    const digits = value.replace(/[^0-9]/gu, "");
+
+    if (digits === "" || /^0+$/u.test(digits)) {
+      return "money tone-muted";
+    }
+
+    return value.includes("-") ? "money tone-error" : "money tone-success";
   }
 
   function rowKey(row: TableRow, index: number): string {
@@ -91,7 +99,7 @@
                   {#if cell.kind === "text"}
                     <span class:strong={cell.strong}>{cell.value}</span>
                   {:else if cell.kind === "money"}
-                    <span class={moneyTone(cell.tone)}>{cell.value}</span>
+                    <span class={moneyToneClass(cell.value)}>{cell.value}</span>
                   {:else if cell.kind === "badge"}
                     <Badge label={cell.value} tone={cell.tone} />
                   {:else}
