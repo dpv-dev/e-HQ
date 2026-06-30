@@ -90,30 +90,6 @@ importers:
         specifier: workspace:*
         version: link:../domain-finance
 
-  packages/migration-tools:
-    dependencies:
-      '@ehq/domain-distribution':
-        specifier: workspace:*
-        version: link:../domain-distribution
-      '@ehq/domain-finance':
-        specifier: workspace:*
-        version: link:../domain-finance
-      '@ehq/domain-office':
-        specifier: workspace:*
-        version: link:../domain-office
-      '@electric-sql/pglite':
-        specifier: ^0.5.3
-        version: 0.5.3
-      drizzle-orm:
-        specifier: ^0.45.2
-        version: 0.45.2(@electric-sql/pglite@0.5.3)(pg@8.22.0)
-      pg:
-        specifier: ^8.22.0
-        version: 8.22.0
-      pg-copy-streams:
-        specifier: ^7.0.0
-        version: 7.0.0
-
   packages/ui: {}
 
   services/api:
@@ -170,20 +146,6 @@ importers:
       esbuild:
         specifier: ^0.28.1
         version: 0.28.1
-
-  services/bots-bureau:
-    devDependencies:
-      '@types/node':
-        specifier: ^26.0.0
-        version: 26.0.0
-
-  services/realtime: {}
-
-  services/workers:
-    dependencies:
-      '@ehq/domain-finance':
-        specifier: workspace:*
-        version: link:../../packages/domain-finance
 
 packages:
 
@@ -1235,9 +1197,6 @@ packages:
   pg-connection-string@2.14.0:
     resolution: {integrity: sha512-XwWDGcLRGCXAR8F/AM5bG7Q+A3Wm2s6QeEjlOKZLlH3UYcguiqCWKyWXVag5TLTIjR7oOJUY8kcADaZgWPyLeg==}
 
-  pg-copy-streams@7.0.0:
-    resolution: {integrity: sha512-zBvnY6wtaBRE2ae2xXWOOGMaNVPkXh1vhypAkNSKgMdciJeTyIQAHZaEeRAxUjs/p1El5jgzYmwG5u871Zj3dQ==}
-
   pg-int8@1.0.1:
     resolution: {integrity: sha512-WCtabS6t3c8SkpDBUlb1kjOs7l66xsGdKpIPZsg4wR+B3+u9UAum2odSsF9tnvxg80h4ZxLWMy4pRjOsFIqQpw==}
     engines: {node: '>=4.0.0'}
@@ -2079,8 +2038,6 @@ snapshots:
     optional: true
 
   pg-connection-string@2.14.0: {}
-
-  pg-copy-streams@7.0.0: {}
 
   pg-int8@1.0.1: {}
 

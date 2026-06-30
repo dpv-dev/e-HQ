@@ -13,7 +13,6 @@
       "@ehq/domain-distribution": ["packages/domain-distribution/src/index.ts"],
       "@ehq/domain-finance": ["packages/domain-finance/src/index.ts"],
       "@ehq/domain-office": ["packages/domain-office/src/index.ts"],
-      "@ehq/migration-tools": ["packages/migration-tools/src/index.ts"],
       "@ehq/ui": ["packages/ui/src/index.ts"]
     },
     "strict": true,
