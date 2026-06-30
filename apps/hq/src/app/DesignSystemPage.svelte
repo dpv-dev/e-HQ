@@ -22,8 +22,8 @@
     type TableRow,
     type ToolbarFilter
   } from "@ehq/ui";
-  import { cssTokenGroups, typedTokenEntries, type CssTokenEntry } from "./design-system-data";
-  import type { AppRoute } from "./routes";
+  import { cssTokenGroups, typedTokenEntries, type CssTokenEntry } from "./design-system-data.js";
+  import type { AppRoute } from "./routes.js";
 
   interface Props {
     readonly onNavigate: (route: AppRoute) => void;
@@ -398,7 +398,7 @@
 
   .brand strong {
     font-family: var(--ehq-mono);
-    font-size: 11px;
+    font-size: var(--ehq-type-caption-size);
     letter-spacing: 0.1em;
     text-transform: uppercase;
   }
@@ -414,7 +414,7 @@
     border-radius: var(--ehq-radius-sm);
     color: var(--ehq-text-muted);
     font-family: var(--ehq-mono);
-    font-size: 11px;
+    font-size: var(--ehq-type-caption-size);
     text-decoration: none;
   }
 
@@ -449,7 +449,7 @@
     margin: 0;
     color: var(--ehq-yellow);
     font-family: var(--ehq-mono);
-    font-size: 11px;
+    font-size: var(--ehq-type-caption-size);
     font-weight: var(--ehq-type-label-weight);
     letter-spacing: 0.12em;
     text-transform: uppercase;
@@ -512,7 +512,7 @@
   .card-head small {
     color: var(--ehq-text-muted);
     font-family: var(--ehq-mono);
-    font-size: 11px;
+    font-size: var(--ehq-type-caption-size);
     text-align: right;
   }
 
@@ -584,7 +584,7 @@
   }
 
   .token-row strong {
-    font-size: 13px;
+    font-size: var(--ehq-type-ui-size);
   }
 
   .token-row code {
@@ -614,7 +614,7 @@
   .typed-row span {
     color: var(--ehq-text-soft);
     font-family: var(--ehq-mono);
-    font-size: 11px;
+    font-size: var(--ehq-type-caption-size);
     overflow-wrap: anywhere;
   }
 

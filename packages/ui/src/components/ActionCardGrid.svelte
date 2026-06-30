@@ -68,7 +68,7 @@
   p {
     color: var(--ehq-text-muted);
     font-family: var(--ehq-mono);
-    font-size: 10px;
+    font-size: var(--ehq-type-label-size);
     letter-spacing: 0.14em;
     text-transform: uppercase;
   }
@@ -77,7 +77,7 @@
     margin-top: var(--ehq-space-2);
     color: var(--ehq-text);
     font-family: var(--ehq-display);
-    font-size: var(--ehq-h3);
+    font-size: var(--ehq-type-section-title-size);
     font-weight: var(--ehq-type-heading-weight);
   }
 
@@ -86,8 +86,8 @@
     margin-top: var(--ehq-space-2);
     color: var(--ehq-text-soft);
     font-family: var(--ehq-font);
-    font-size: 13px;
-    line-height: 1.5;
+    font-size: var(--ehq-type-ui-size);
+    line-height: var(--ehq-type-ui-line);
   }
 
   a {
@@ -100,7 +100,7 @@
     display: inline-flex;
     align-items: center;
     font-family: var(--ehq-font);
-    font-size: 11px;
+    font-size: var(--ehq-type-action-size);
     letter-spacing: 0.08em;
     text-decoration: none;
     text-transform: uppercase;

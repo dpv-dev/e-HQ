@@ -71,6 +71,20 @@
       "when": 1782194415813,
       "tag": "0009_shiny_magneto",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1782460443849,
+      "tag": "0010_persistent_import_previews",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1782461206529,
+      "tag": "0011_command_center_writes",
+      "breakpoints": true
     }
   ]
 }

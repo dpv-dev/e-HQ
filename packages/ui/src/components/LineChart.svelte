@@ -45,7 +45,7 @@
 
   h3 {
     margin: 0;
-    font-size: var(--ehq-h3);
+    font-size: var(--ehq-type-section-title-size);
   }
 
   .title-stack,
@@ -59,7 +59,7 @@
   }
 
   .eyebrow {
-    font-size: 10px;
+    font-size: var(--ehq-type-label-size);
   }
 
   .line-frame {
@@ -113,7 +113,7 @@
     justify-content: space-between;
     color: var(--ehq-text-muted);
     font-family: var(--ehq-mono);
-    font-size: 10px;
+    font-size: var(--ehq-type-label-size);
     font-weight: var(--ehq-type-label-weight);
   }
 </style>

@@ -323,12 +323,9 @@ const SENSITIVE_ACTIONS = new Set<string>([
   "distribution_statement_void",
   "distribution_suspense_resolve",
   "distribution_track_upsert",
-  "office_bank_import_confirm",
-  "office_bank_import_preview",
   "office_bank_import_reverse",
   "office_partner_payee_link",
-  "office_partner_payee_unlink",
-  "office_reconciliation_approve"
+  "office_partner_payee_unlink"
 ]);
 
 const ALLOWED_MUTATING_ACTIONS = new Set<string>([
@@ -338,14 +335,40 @@ const ALLOWED_MUTATING_ACTIONS = new Set<string>([
   "office_plan_comptable_create",
   "office_plan_comptable_update",
   "office_transaction_create",
-  "office_transaction_update"
+  "office_transaction_update",
+  "office_transaction_validate",
+  "office_transaction_cancel",
+  "office_bank_account_create",
+  "office_bank_account_update",
+  "office_project_create",
+  "office_project_update",
+  "office_cashflow_import_confirm",
+  "office_bank_import_preview",
+  "office_bank_import_confirm",
+  "office_reconciliation_approve",
+  "office_reconciliation_match",
+  "office_reconciliation_unmatch",
+  "office_reconciliation_reject",
+  "office_reconciliation_create_transaction"
 ]);
 
 const OFFICE_BOT_ACTIONS = new Set<string>([
   "office_bank_import_preview",
   "office_bank_import_confirm",
   "office_transaction_create",
-  "office_transaction_update"
+  "office_transaction_update",
+  "office_transaction_validate",
+  "office_transaction_cancel",
+  "office_bank_account_create",
+  "office_bank_account_update",
+  "office_project_create",
+  "office_project_update",
+  "office_cashflow_import_confirm",
+  "office_reconciliation_approve",
+  "office_reconciliation_match",
+  "office_reconciliation_unmatch",
+  "office_reconciliation_reject",
+  "office_reconciliation_create_transaction"
 ]);
 
 const DISTRIBUTION_BOT_ACTIONS = new Set<string>([

@@ -310,6 +310,9 @@ function createOfficeFixture(): OfficeAnalyticsDataset {
         expectedClosingBalanceMinor: 505_000n,
         currency: "MUR"
       }
+    ],
+    exchangeRates: [
+      { fromCurrency: "EUR", toCurrency: "MUR", rateE10: 510_000_000_000n, effectiveDate: "2024-01-01" }
     ]
   };
 }

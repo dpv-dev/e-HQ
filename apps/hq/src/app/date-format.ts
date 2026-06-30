@@ -17,5 +17,5 @@ export function formatDateOnly(value: string | null): string {
 }
 
 export function formatDateRange(start: string, end: string): string {
-  return `${formatDateOnly(start)} -> ${formatDateOnly(end)}`;
+  return `${formatDateOnly(start)} → ${formatDateOnly(end)}`;
 }

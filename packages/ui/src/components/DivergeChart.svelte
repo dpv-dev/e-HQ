@@ -62,7 +62,7 @@
   }
 
   .eyebrow {
-    font-size: 10px;
+    font-size: var(--ehq-type-label-size);
   }
 
   .rows {
@@ -80,7 +80,7 @@
   span {
     color: var(--ehq-text-muted);
     font-family: var(--ehq-font);
-    font-size: 10px;
+    font-size: var(--ehq-type-label-size);
     font-weight: var(--ehq-type-body-weight);
   }
 

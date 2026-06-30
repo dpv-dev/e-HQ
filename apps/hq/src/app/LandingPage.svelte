@@ -1,5 +1,14 @@
 <script lang="ts">
   import {
+    createErrorState,
+    createIdleState,
+    createLoadingState,
+    createSuccessState,
+    type ApiRequestState,
+    type CommandCenterNotification,
+    type CommandCenterNotificationsResponse
+  } from "@ehq/api-client";
+  import {
     getWorkspaceAccess,
     type AuthSession,
     type WorkspaceAppId
@@ -8,12 +17,14 @@
   import commandCenterPhoto from "../../../../packages/ui/assets/backgrounds/hq-card-command-center.jpg?url";
   import distributionPhoto from "../../../../packages/ui/assets/backgrounds/hq-card-distribution.jpg?url";
   import officePhoto from "../../../../packages/ui/assets/backgrounds/hq-card-office.jpg?url";
-  import type { AppRoute } from "./routes";
-  import { signInWithSupabasePassword } from "./supabase";
+  import { createShellApiClient } from "./app-shell-data.js";
+  import type { AppRoute } from "./routes.js";
+  import { signInWithSupabasePassword } from "./supabase.js";
 
   interface Props {
     readonly session: AuthSession | null;
     readonly onLogin: (session: AuthSession) => void;
+    readonly onLogout: () => void;
     readonly onNavigate: (route: AppRoute) => void;
     readonly onOpenWorkspace: (workspaceId: WorkspaceAppId) => void;
   }
@@ -26,10 +37,17 @@
     readonly image: string;
   }
 
-  const { session, onLogin, onNavigate, onOpenWorkspace }: Props = $props();
+  const { session, onLogin, onLogout, onNavigate, onOpenWorkspace }: Props = $props();
+  const client = createShellApiClient();
 
   let accessRequestedFor = $state<string | null>(null);
   let loginOpen = $state(false);
+  let notificationsOpen = $state(false);
+  let sessionMenuOpen = $state(false);
+  let notificationSessionUserId = $state<string | null>(null);
+  let notificationsState = $state<ApiRequestState<CommandCenterNotificationsResponse>>(
+    createIdleState<CommandCenterNotificationsResponse>()
+  );
   let loginTarget = $state<WorkspaceCard | null>(null);
   let loginEmail = $state("david@eeee.mu");
   let loginPassword = $state("");
@@ -40,31 +58,53 @@
   const cards: readonly WorkspaceCard[] = [
     {
       workspaceId: "command-center",
-      eyebrow: "supervision",
-      title: "command center",
-      description: "global oversight, monitoring and ecosystem health.",
+      eyebrow: "Command Center",
+      title: "HQ",
+      description: "Manage overall operations and monitoring.",
       image: commandCenterPhoto
     },
     {
       workspaceId: "office",
-      eyebrow: "financial control",
-      title: "office",
-      description: "transactions, payments, chart of accounts and p&l.",
+      eyebrow: "Finance Control",
+      title: "Office",
+      description: "Manage transactions, payments and financial control.",
       image: officePhoto
     },
     {
       workspaceId: "distribution",
-      eyebrow: "royalties",
-      title: "distribution",
-      description: "imports, mapping, allocations and statements.",
+      eyebrow: "Royalty Operations",
+      title: "Distribution",
+      description: "Manage royalties, imports, mapping and allocations.",
       image: distributionPhoto
     }
   ];
 
   const isLoggedIn = $derived(session !== null);
   const userInitials = $derived(session?.initials ?? "ë");
-  const userName = $derived(session?.displayName.toLowerCase() ?? "sign in");
-  const userRole = $derived(session?.roleLabel ?? "public access");
+  const userName = $derived(session?.displayName ?? "Sign in");
+  const userRole = $derived(session?.roleLabel ?? "Public access");
+  const notificationItems = $derived(
+    notificationsState.status === "success" ? notificationsState.data.items : []
+  );
+  const notificationUnreadCount = $derived(
+    notificationsState.status === "success" ? notificationsState.data.unreadCount : 0
+  );
+
+  $effect((): void => {
+    const userId = session?.userId ?? null;
+    if (userId === null) {
+      notificationSessionUserId = null;
+      notificationsState = createIdleState<CommandCenterNotificationsResponse>();
+      return;
+    }
+
+    if (notificationSessionUserId === userId) {
+      return;
+    }
+
+    notificationSessionUserId = userId;
+    void loadNotifications();
+  });
 
   const isAllowed = (workspaceId: WorkspaceAppId): boolean => {
     if (session === null) {
@@ -80,6 +120,8 @@
     loginTarget = card;
     loginMessage = "";
     loginOpen = true;
+    sessionMenuOpen = false;
+    notificationsOpen = false;
   };
 
   const closeLogin = (): void => {
@@ -137,6 +179,58 @@
     loginMessage = "Password reset is ready for this account.";
   };
 
+  const toggleNotifications = (): void => {
+    notificationsOpen = !notificationsOpen;
+    sessionMenuOpen = false;
+
+    if (notificationsOpen && session !== null) {
+      void loadNotifications();
+    }
+  };
+
+  const toggleSessionMenu = (): void => {
+    if (session === null) {
+      openLogin(null);
+      return;
+    }
+
+    sessionMenuOpen = !sessionMenuOpen;
+    notificationsOpen = false;
+  };
+
+  const signOut = (): void => {
+    sessionMenuOpen = false;
+    notificationsOpen = false;
+    onLogout();
+  };
+
+  const loadNotifications = async (): Promise<void> => {
+    if (session === null) {
+      notificationsState = createIdleState<CommandCenterNotificationsResponse>();
+      return;
+    }
+
+    notificationsState = createLoadingState<CommandCenterNotificationsResponse>();
+
+    try {
+      const response = await client.commandCenter.listNotifications({
+        workspaceId: "eeee-mu"
+      });
+      notificationsState = createSuccessState<CommandCenterNotificationsResponse>(response);
+    } catch (error: unknown) {
+      notificationsState = createErrorState<CommandCenterNotificationsResponse>(error);
+    }
+  };
+
+  const openNotificationAction = (notification: CommandCenterNotification): void => {
+    if (notification.actionHref === null) {
+      return;
+    }
+
+    notificationsOpen = false;
+    onNavigate(notification.actionHref as AppRoute);
+  };
+
   const openWorkspace = (card: WorkspaceCard): void => {
     if (session === null) {
       openLogin(card);
@@ -158,28 +252,94 @@
 
 <main class="landing-shell" class:fogged={loginOpen}>
   <header class="landing-top">
-    <button class="brand" type="button" onclick={() => onNavigate("/")}>
+    <button class="brand" type="button" aria-label="ë • HQ home" onclick={() => onNavigate("/")}>
       <span class="brand-e">ë</span>
-      <span class="brand-name">ë • hq</span>
     </button>
 
     <div class="top-right">
-      <span class="coord">port louis · 20°10′s · 57°31′e</span>
-      <button class="user-chip" type="button" onclick={() => openLogin(null)}>
+      <button class="bell" type="button" aria-label="Notifications" aria-expanded={notificationsOpen} onclick={toggleNotifications}>
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M6 9a6 6 0 0 1 12 0v4l1.6 2.4a.6.6 0 0 1-.5.9H4.9a.6.6 0 0 1-.5-.9L6 13Z" />
+          <path d="M9.5 19a2.5 2.5 0 0 0 5 0" />
+        </svg>
+        {#if notificationUnreadCount > 0}
+          <span class="bell-dot" aria-hidden="true">{notificationUnreadCount}</span>
+        {/if}
+      </button>
+      <button class="user-chip" type="button" aria-haspopup="menu" aria-expanded={sessionMenuOpen} onclick={toggleSessionMenu}>
         <span>{userInitials}</span>
         <strong>{userName}</strong>
         <small>{userRole}</small>
+        <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
       </button>
+
+      {#if notificationsOpen}
+        <section class="notification-panel" aria-label="Notifications">
+          <header>
+            <div>
+              <p>notifications</p>
+              <strong>{isLoggedIn ? "Centre opérationnel" : "Connexion requise"}</strong>
+            </div>
+            <button class="panel-link" type="button" onclick={loadNotifications} disabled={!isLoggedIn || notificationsState.status === "loading"}>
+              actualiser
+            </button>
+          </header>
+
+          {#if !isLoggedIn}
+            <article class="notification-item muted">
+              <strong>Session requise</strong>
+              <span>Connecte-toi pour charger les alertes live du Command Center.</span>
+            </article>
+          {:else if notificationsState.status === "loading"}
+            <article class="notification-item muted">
+              <strong>Chargement</strong>
+              <span>Lecture des notifications API.</span>
+            </article>
+          {:else if notificationsState.status === "error"}
+            <article class="notification-item error">
+              <strong>Notifications indisponibles</strong>
+              <span>{notificationsState.error instanceof Error ? notificationsState.error.message : "Erreur inconnue."}</span>
+            </article>
+          {:else if notificationItems.length === 0}
+            <article class="notification-item muted">
+              <strong>Aucune notification</strong>
+              <span>Le panneau est prêt.</span>
+            </article>
+          {:else}
+            {#each notificationItems as notification (notification.id)}
+              <article class={`notification-item ${notification.tone}`}>
+                <div>
+                  <strong>{notification.title}</strong>
+                  <span>{notification.detail}</span>
+                </div>
+                {#if notification.actionHref !== null && notification.actionLabel !== null}
+                  <button class="panel-link" type="button" onclick={() => openNotificationAction(notification)}>
+                    {notification.actionLabel}
+                  </button>
+                {/if}
+              </article>
+            {/each}
+          {/if}
+        </section>
+      {/if}
+
+      {#if sessionMenuOpen && session !== null}
+        <section class="session-panel" aria-label="Session actions">
+          <header>
+            <p>session</p>
+            <strong>{session.displayName}</strong>
+            <span>{session.roleLabel}</span>
+          </header>
+          <button class="signout-button" type="button" onclick={signOut}>Sign out</button>
+        </section>
+      {/if}
     </div>
   </header>
 
   <section class="hero" aria-labelledby="landing-title">
     <div class="hero-copy">
-      <p class="eyebrow">{`{ workspace }`}</p>
-      <h1 id="landing-title">welcome to <span>ë</span> • hq</h1>
-      <p class="lead">
-        Choose your workspace. Public visitors can explore the entry points; permissions apply after sign-in.
-      </p>
+      <h1 id="landing-title">Welcome to <span>ë</span>-HQ</h1>
+      <p class="lead">Select your workspace to continue</p>
       <i aria-hidden="true"></i>
     </div>
 
@@ -191,7 +351,7 @@
   <section class="workspace-grid" aria-label="Available workspaces">
     {#each cards as card (card.workspaceId)}
       {@const locked = isLocked(card.workspaceId)}
-      <article class:locked class:live={!locked} class="workspace-card">
+      <article class:locked class:live={!locked} class={`workspace-card accent-${card.workspaceId}`}>
         {#if locked}
           <div class="cross" aria-label="Access denied">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
@@ -200,18 +360,17 @@
 
         <div class="photo">
           <img src={card.image} alt="" />
-          <div class="photo-copy">
-            <p>{card.eyebrow}</p>
-            <h2>{card.title}</h2>
-          </div>
         </div>
 
         <div class="workspace-copy">
-          <div class="mobile-title">
-            <span>{card.eyebrow}</span>
-            {card.title}
+          <div class="card-head">
+            <span class="hexicon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 2.6 20.5 7.3v9.4L12 21.4 3.5 16.7V7.3Z" /></svg>
+            </span>
+            <h2>{card.title}</h2>
           </div>
-          <p>{card.description}</p>
+          <p class="card-sub">{card.eyebrow}</p>
+          <p class="card-desc">{card.description}</p>
           <div class="workspace-actions">
             {#if locked}
               <button class="locked-button" type="button" onclick={() => openWorkspace(card)}>
@@ -221,7 +380,7 @@
               <button class="request-link" type="button" onclick={() => openWorkspace(card)}>request access →</button>
             {:else}
               <button class="enter-button" type="button" onclick={() => openWorkspace(card)}>
-                {isLoggedIn ? "enter" : "sign in"} <span aria-hidden="true">→</span>
+                Enter {card.title} <span aria-hidden="true">→</span>
               </button>
             {/if}
           </div>
@@ -231,8 +390,8 @@
   </section>
 
   <footer>
-    <span>© 2026 ë · wip v0001 · port louis, mu</span>
-    <span>privacy · terms · settings</span>
+    <span>© 2026 ë-HQ. All rights reserved.</span>
+    <span>Privacy Policy · Terms of Service</span>
   </footer>
 
   {#if accessRequestedFor !== null}
@@ -321,6 +480,10 @@
     gap: var(--ehq-space-4);
   }
 
+  .top-right {
+    position: relative;
+  }
+
   .brand,
   .user-chip {
     padding: 0;
@@ -342,11 +505,7 @@
     line-height: 1;
   }
 
-  .brand-name,
-  .coord,
   .eyebrow,
-  .photo-copy p,
-  .mobile-title span,
   .request-link,
   .request-note,
   footer,
@@ -359,26 +518,70 @@
   .submit-button,
   .sso-button,
   .login-message,
-  .close-button {
+  .close-button,
+  .notification-panel p,
+  .notification-panel span,
+  .panel-link,
+  .session-panel p,
+  .session-panel span,
+  .signout-button {
     font-family: var(--ehq-mono);
   }
 
-  .brand-name {
+  .bell {
+    position: relative;
+    width: 38px;
+    height: 38px;
+    border: 1px solid var(--ehq-border);
+    border-radius: var(--ehq-radius-pill);
+    background: var(--ehq-surface-high);
     color: var(--ehq-text-soft);
-    font-size: 12px;
-    letter-spacing: 0.16em;
-    text-transform: lowercase;
+    display: grid;
+    place-items: center;
   }
 
-  .coord {
-    color: var(--ehq-text-muted);
-    font-size: 11px;
-    letter-spacing: 0.04em;
+  .bell svg {
+    width: 18px;
+    height: 18px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .bell-dot {
+    position: absolute;
+    top: 1px;
+    right: 1px;
+    min-width: 15px;
+    height: 15px;
+    padding: 0 3px;
+    border-radius: var(--ehq-radius-pill);
+    background: var(--ehq-yellow);
+    color: var(--ehq-text-on-yellow);
+    box-shadow: 0 0 0 2px var(--ehq-bg-main);
+    display: grid;
+    place-items: center;
+    font-family: var(--ehq-mono);
+    font-size: 9px;
+    font-weight: 600;
+  }
+
+  .chev {
+    grid-row: span 2;
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: var(--ehq-text-muted);
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
 
   .user-chip {
     display: grid;
-    grid-template-columns: auto auto;
+    grid-template-columns: auto auto auto;
     align-items: center;
     column-gap: var(--ehq-space-2);
     text-align: left;
@@ -395,20 +598,146 @@
     display: grid;
     place-items: center;
     font-family: var(--ehq-mono);
-    font-size: 11px;
+    font-size: var(--ehq-type-caption-size);
     font-weight: var(--ehq-type-label-weight);
   }
 
   .user-chip strong {
-    font-size: 12.5px;
-    line-height: 1.2;
-    text-transform: lowercase;
+    font-size: var(--ehq-type-ui-size);
+    line-height: var(--ehq-type-ui-line);
+    text-transform: none;
   }
 
   .user-chip small {
     color: var(--ehq-text-muted);
     font-family: var(--ehq-mono);
-    font-size: 10.5px;
+    font-size: var(--ehq-type-label-size);
+  }
+
+  .notification-panel,
+  .session-panel {
+    position: absolute;
+    top: calc(100% + var(--ehq-space-2));
+    right: 0;
+    z-index: 12;
+    width: min(380px, calc(100vw - var(--ehq-space-6)));
+    padding: var(--ehq-space-3);
+    border: 1px solid var(--ehq-border);
+    border-radius: var(--ehq-radius-sm);
+    background: var(--ehq-surface);
+    box-shadow: var(--ehq-shadow-lg);
+    display: grid;
+    gap: var(--ehq-space-3);
+  }
+
+  .session-panel {
+    width: min(300px, calc(100vw - var(--ehq-space-6)));
+  }
+
+  .notification-panel header,
+  .session-panel header,
+  .notification-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ehq-space-3);
+  }
+
+  .notification-panel p,
+  .session-panel p,
+  .notification-panel strong,
+  .session-panel strong,
+  .notification-panel span,
+  .session-panel span {
+    margin: 0;
+  }
+
+  .notification-panel p,
+  .session-panel p {
+    color: var(--ehq-yellow);
+    font-size: var(--ehq-type-label-size);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+
+  .notification-panel header strong,
+  .session-panel strong {
+    display: block;
+    margin-top: var(--ehq-space-1);
+    font-size: var(--ehq-type-ui-size);
+    line-height: var(--ehq-type-ui-line);
+  }
+
+  .session-panel span {
+    color: var(--ehq-text-muted);
+    font-size: var(--ehq-type-label-size);
+  }
+
+  .notification-item {
+    padding: var(--ehq-space-2);
+    border: 1px solid var(--ehq-border-soft);
+    border-radius: var(--ehq-radius-sm);
+    background: var(--ehq-bg-main);
+  }
+
+  .notification-item div {
+    min-width: 0;
+    display: grid;
+    gap: var(--ehq-space-1);
+  }
+
+  .notification-item strong {
+    font-size: var(--ehq-type-ui-size);
+    line-height: var(--ehq-type-ui-line);
+  }
+
+  .notification-item span {
+    color: var(--ehq-text-muted);
+    font-size: var(--ehq-type-label-size);
+    line-height: 1.45;
+  }
+
+  .notification-item.success {
+    border-color: color-mix(in srgb, var(--ehq-success) 40%, var(--ehq-border));
+  }
+
+  .notification-item.warning {
+    border-color: var(--ehq-yellow-border);
+  }
+
+  .notification-item.error {
+    border-color: var(--ehq-error);
+  }
+
+  .notification-item.muted,
+  .notification-item.info {
+    border-color: var(--ehq-border-soft);
+  }
+
+  .panel-link,
+  .signout-button {
+    flex: 0 0 auto;
+    min-height: 30px;
+    padding: 0 var(--ehq-space-2);
+    border: 1px solid var(--ehq-border);
+    border-radius: var(--ehq-radius-sm);
+    background: transparent;
+    color: var(--ehq-text);
+    font-size: var(--ehq-type-label-size);
+    font-weight: var(--ehq-type-heading-weight);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .panel-link:hover,
+  .signout-button:hover {
+    border-color: var(--ehq-yellow-border);
+    color: var(--ehq-yellow);
+  }
+
+  .panel-link:disabled {
+    color: var(--ehq-text-disabled);
+    cursor: not-allowed;
   }
 
   .hero {
@@ -425,11 +754,9 @@
   }
 
   .eyebrow,
-  .photo-copy p,
-  .mobile-title span,
   .field span {
     color: var(--ehq-text-muted);
-    font-size: 11px;
+    font-size: var(--ehq-type-caption-size);
     letter-spacing: 0.22em;
     text-transform: uppercase;
   }
@@ -446,7 +773,7 @@
     font-weight: var(--ehq-type-display-weight);
     line-height: 1;
     letter-spacing: 0;
-    text-transform: lowercase;
+    text-transform: none;
   }
 
   h1 span {
@@ -457,9 +784,9 @@
     max-width: 45ch;
     margin-top: var(--ehq-space-3);
     color: var(--ehq-text-soft);
-    font-size: clamp(13px, 1.1vw, 15.5px);
+    font-size: var(--ehq-type-ui-size);
     font-weight: 300;
-    line-height: 1.55;
+    line-height: var(--ehq-type-ui-line);
   }
 
   .hero-copy i {
@@ -497,6 +824,7 @@
 
   .workspace-card {
     position: relative;
+    --card-accent: var(--ehq-yellow);
     flex: 0 1 clamp(230px, 28vw, 340px);
     min-width: 0;
     min-height: 0;
@@ -521,10 +849,19 @@
     border-color: var(--ehq-error);
   }
 
+  /* Per-workspace accent on the landing (matches the visual identity). */
+  .accent-office {
+    --card-accent: #E6E8EC;
+  }
+
+  .accent-distribution {
+    --card-accent: #FF7A1A;
+  }
+
   .photo {
     position: relative;
-    flex: 1 1 auto;
-    min-height: 0;
+    flex: 0 0 auto;
+    height: clamp(150px, 17vh, 200px);
     overflow: hidden;
   }
 
@@ -532,7 +869,7 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
-    filter: brightness(0.6) saturate(0.92);
+    filter: brightness(0.8) saturate(0.95);
     transform: scale(1.02);
     transition:
       transform var(--ehq-transition-normal) var(--ehq-ease),
@@ -540,53 +877,77 @@
   }
 
   .workspace-card.live:hover .photo img {
-    filter: brightness(1.08) saturate(1.06);
-    transform: scale(1.07);
+    filter: brightness(1) saturate(1.05);
+    transform: scale(1.06);
   }
 
   .photo::after {
     content: "";
     position: absolute;
     inset: 0;
-    background:
-      linear-gradient(180deg, transparent 30%, var(--ehq-bg-main) 100%),
-      linear-gradient(90deg, var(--ehq-bg-main), transparent 52%);
-    opacity: 0.82;
+    background: linear-gradient(180deg, transparent 45%, var(--ehq-surface) 100%);
+    opacity: 0.9;
   }
 
-  .photo-copy {
-    position: absolute;
-    inset: auto var(--ehq-space-4) var(--ehq-space-4);
-    z-index: 1;
+  .card-head {
+    display: flex;
+    align-items: center;
+    gap: var(--ehq-space-2);
   }
 
-  .photo-copy h2 {
-    margin-top: var(--ehq-space-2);
-    font-size: clamp(28px, 3.4vw, 46px);
+  .hexicon {
+    flex: 0 0 auto;
+    width: 26px;
+    height: 26px;
+    display: grid;
+    place-items: center;
+    color: var(--card-accent);
+  }
+
+  .hexicon svg {
+    width: 22px;
+    height: 22px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.4;
+    stroke-linejoin: round;
+  }
+
+  .card-head h2 {
+    font-size: clamp(22px, 2.4vw, 30px);
     font-weight: var(--ehq-type-display-weight);
-    line-height: 0.94;
+    line-height: 1;
     letter-spacing: 0;
-    text-transform: lowercase;
+    text-transform: none;
+  }
+
+  .card-sub {
+    color: var(--card-accent);
+    font-family: var(--ehq-mono);
+    font-size: var(--ehq-type-label-size);
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
   }
 
   .workspace-copy {
-    flex: 0 0 auto;
+    flex: 1 1 auto;
     padding: var(--ehq-space-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--ehq-space-1);
   }
 
-  .mobile-title {
-    display: none;
-  }
-
-  .workspace-copy > p {
+  .card-desc {
+    margin-top: var(--ehq-space-1);
     color: var(--ehq-text-soft);
-    font-size: 13px;
-    font-weight: 300;
-    line-height: 1.55;
+    font-size: var(--ehq-type-ui-size);
+    font-weight: 400;
+    line-height: var(--ehq-type-ui-line);
   }
 
   .workspace-actions {
-    margin-top: var(--ehq-space-3);
+    margin-top: auto;
+    padding-top: var(--ehq-space-3);
     display: grid;
     gap: var(--ehq-space-2);
   }
@@ -602,16 +963,21 @@
     justify-content: center;
     gap: var(--ehq-space-2);
     font-family: var(--ehq-font);
-    font-size: 12px;
+    font-size: var(--ehq-type-ui-size);
     font-weight: var(--ehq-type-heading-weight);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    text-transform: none;
   }
 
   .enter-button {
-    border: 1px solid var(--ehq-yellow);
-    background: var(--ehq-yellow);
-    color: var(--ehq-text-on-yellow);
+    border: 1px solid color-mix(in srgb, var(--card-accent) 55%, transparent);
+    background: color-mix(in srgb, var(--card-accent) 10%, transparent);
+    color: var(--card-accent);
+  }
+
+  .workspace-card.live:hover .enter-button {
+    border-color: var(--card-accent);
+    background: color-mix(in srgb, var(--card-accent) 16%, transparent);
   }
 
   .enter-button span {
@@ -643,7 +1009,7 @@
     border: 0;
     background: transparent;
     color: var(--ehq-text-muted);
-    font-size: 11px;
+    font-size: var(--ehq-type-caption-size);
     text-align: left;
   }
 
@@ -669,7 +1035,7 @@
   footer {
     padding-top: clamp(var(--ehq-space-2), 1.6vh, var(--ehq-space-4));
     color: var(--ehq-text-muted);
-    font-size: 11px;
+    font-size: var(--ehq-type-caption-size);
   }
 
   .request-note {
@@ -683,7 +1049,7 @@
     border-radius: var(--ehq-radius-sm);
     background: var(--ehq-surface);
     color: var(--ehq-yellow);
-    font-size: 11px;
+    font-size: var(--ehq-type-caption-size);
   }
 
   .login-fog {
@@ -717,7 +1083,7 @@
     border: 0;
     background: transparent;
     color: var(--ehq-text-muted);
-    font-size: 10px;
+    font-size: var(--ehq-type-label-size);
     letter-spacing: 0.12em;
     text-transform: uppercase;
   }
@@ -737,8 +1103,8 @@
   .login-lead {
     margin-top: var(--ehq-space-2);
     color: var(--ehq-text-soft);
-    font-size: 13.5px;
-    line-height: 1.55;
+    font-size: var(--ehq-type-ui-size);
+    line-height: var(--ehq-type-ui-line);
   }
 
   .field {
@@ -757,7 +1123,8 @@
     color: var(--ehq-text);
     color-scheme: dark;
     font-family: var(--ehq-font);
-    font-size: 14px;
+    font-size: var(--ehq-type-control-size);
+    line-height: var(--ehq-type-ui-line);
   }
 
   .field input:focus {
@@ -786,7 +1153,7 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--ehq-space-3);
-    font-size: 11px;
+    font-size: var(--ehq-type-caption-size);
   }
 
   .remember {
@@ -804,7 +1171,7 @@
     border: 0;
     background: transparent;
     color: var(--ehq-text-muted);
-    font-size: 11px;
+    font-size: var(--ehq-type-caption-size);
   }
 
   .plain-link:hover {
@@ -817,7 +1184,7 @@
     min-height: 44px;
     border-radius: var(--ehq-radius-sm);
     font-family: var(--ehq-font);
-    font-size: 12px;
+    font-size: var(--ehq-type-action-size);
     font-weight: var(--ehq-type-heading-weight);
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -836,7 +1203,7 @@
     display: flex;
     align-items: center;
     gap: var(--ehq-space-3);
-    font-size: 10.5px;
+    font-size: var(--ehq-type-label-size);
     letter-spacing: 0.1em;
     text-transform: uppercase;
   }
@@ -862,7 +1229,7 @@
   .login-message {
     margin-top: var(--ehq-space-3);
     color: var(--ehq-yellow);
-    font-size: 11px;
+    font-size: var(--ehq-type-caption-size);
   }
 
   @media (min-width: 921px) and (max-height: 760px) {
@@ -879,7 +1246,7 @@
     }
 
     .lead {
-      font-size: 13px;
+      font-size: var(--ehq-type-ui-size);
     }
 
     .workspace-copy {
@@ -893,10 +1260,7 @@
       gap: var(--ehq-space-3);
     }
 
-    .coord,
-    .hero-scene,
-    .photo-copy,
-    .workspace-copy > p {
+    .hero-scene {
       display: none;
     }
 
@@ -918,7 +1282,7 @@
 
     .lead {
       margin-top: var(--ehq-space-2);
-      font-size: 12.5px;
+      font-size: var(--ehq-type-ui-size);
     }
 
     .hero-copy i {
@@ -951,20 +1315,6 @@
       justify-content: center;
     }
 
-    .mobile-title {
-      display: block;
-      font-size: clamp(17px, 5.6vw, 20px);
-      font-weight: var(--ehq-type-display-weight);
-      line-height: 1;
-      text-transform: lowercase;
-    }
-
-    .mobile-title span {
-      display: block;
-      margin-bottom: var(--ehq-space-1);
-      font-weight: 400;
-    }
-
     .workspace-actions {
       margin-top: var(--ehq-space-2);
     }
@@ -973,11 +1323,11 @@
     .locked-button {
       min-height: 36px;
       padding: 0 var(--ehq-space-3);
-      font-size: 11px;
+      font-size: var(--ehq-type-action-size);
     }
 
     footer {
-      font-size: 10px;
+      font-size: var(--ehq-type-label-size);
     }
   }
 
@@ -985,10 +1335,6 @@
     .lead,
     footer {
       display: none;
-    }
-
-    .mobile-title {
-      font-size: 17px;
     }
   }
 </style>

@@ -68,7 +68,7 @@
   }
 
   h3 {
-    font-size: var(--ehq-h3);
+    font-size: var(--ehq-type-section-title-size);
   }
 
   .locked h3 {
@@ -77,21 +77,21 @@
 
   .eyebrow {
     margin-top: var(--ehq-space-1);
-    font-size: 11px;
+    font-size: var(--ehq-type-label-size);
   }
 
   .subtitle {
     margin-top: var(--ehq-space-1);
     color: var(--ehq-text-muted);
-    font-size: 11px;
+    font-size: var(--ehq-type-caption-size);
   }
 
   .body {
     color: var(--ehq-text-soft);
     font-family: var(--ehq-font);
-    font-size: 13px;
+    font-size: var(--ehq-type-ui-size);
     font-weight: var(--ehq-type-body-weight);
-    line-height: 1.6;
+    line-height: var(--ehq-type-ui-line);
   }
 
   footer {

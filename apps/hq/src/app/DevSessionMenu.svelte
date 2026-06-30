@@ -88,14 +88,14 @@
     display: grid;
     place-items: center;
     font-family: var(--ehq-mono);
-    font-size: 10px;
+    font-size: var(--ehq-type-label-size);
     font-weight: var(--ehq-type-label-weight);
   }
 
   .profile strong {
     max-width: 140px;
     overflow: hidden;
-    font-size: 12px;
+    font-size: var(--ehq-type-ui-size);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -109,7 +109,7 @@
 
   .profile small {
     color: var(--ehq-text-muted);
-    font-size: 10px;
+    font-size: var(--ehq-type-label-size);
   }
 
   .session-menu {
@@ -140,13 +140,13 @@
 
   .session-menu p {
     color: var(--ehq-yellow);
-    font-size: 10px;
+    font-size: var(--ehq-type-label-size);
     letter-spacing: 0.14em;
     text-transform: uppercase;
   }
 
   .session-menu header strong {
-    font-size: 13px;
+    font-size: var(--ehq-type-ui-size);
   }
 
   .logout {
@@ -155,7 +155,7 @@
     border-radius: var(--ehq-radius-sm);
     background: transparent;
     color: var(--ehq-text-muted);
-    font-size: 10px;
+    font-size: var(--ehq-type-action-size);
     font-weight: var(--ehq-type-heading-weight);
     letter-spacing: 0.08em;
     text-transform: uppercase;

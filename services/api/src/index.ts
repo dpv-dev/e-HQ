@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
-import type { Context } from "hono";
+import type { Context, MiddlewareHandler } from "hono";
 import { cors } from "hono/cors";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
+import { getAuthRoleProfile, type WorkspaceAppId } from "@ehq/auth";
 import { eofMoney, erhMoney, format as formatScaledUnits, parse as parseScaledUnits } from "@ehq/domain-finance";
 import {
   buildAllocationPlan,
@@ -53,7 +54,9 @@ import {
   readPnlByCategory,
   readPnlByDepartment,
   readProjectPnl,
+  convertMinorToMur,
   type OfficeBankAccountRow,
+  type OfficeWriteExchangeRateRow,
   type OfficeAnalyticsDataset,
   type OfficeBankStatementLineRow,
   type OfficeBankImportBatchRow,
@@ -81,7 +84,11 @@ import type {
   BankImportConfirmResponse,
   BankImportPreviewRequest,
   BankImportPreviewResponse,
+  OfficeImportRejectionReason,
+  OfficeBankPreviewRowResult,
   CashflowBucket,
+  CommandCenterNotification,
+  CommandCenterNotificationsResponse,
   CurrencyCode,
   DistributionContract,
   DistributionContractExpense,
@@ -129,6 +136,9 @@ import type {
   OfficeProjectSummary,
   OfficeReconciliationCandidate,
   OfficeReconciliationApproveRequest,
+  OfficeReconciliationMatchRequest,
+  OfficeReconciliationLineRequest,
+  OfficeReconciliationCreateTransactionRequest,
   OfficeTransaction,
   OfficeTransactionStatus,
   OfficeTransactionWriteRequest,
@@ -151,6 +161,7 @@ import {
   type AuthenticatedApiUser,
   type SupabaseJwtVerifier
 } from "./auth.js";
+import { createSupabaseRouter } from "./supabase-server.js";
 import { createFixtureStore, type ApiDistributionRoyaltyRuleInput, type ApiFixtureStore } from "./fixtures.js";
 import {
   appendAuditEvent,
@@ -487,6 +498,20 @@ const officeReconciliationApproveSchema = workspaceBodySchema.extend({
   reconciliationIds: z.array(z.string().min(1)).min(1),
   approvedAt: z.string().regex(isoDateTimePattern)
 });
+const officeReconciliationMatchSchema = workspaceBodySchema.extend({
+  statementLineId: z.string().min(1),
+  transactionId: z.string().min(1),
+  matchedAt: z.string().regex(isoDateTimePattern)
+});
+const officeReconciliationLineSchema = workspaceBodySchema.extend({
+  statementLineId: z.string().min(1)
+});
+const officeReconciliationCreateTransactionSchema = workspaceBodySchema.extend({
+  statementLineId: z.string().min(1),
+  categoryId: nullableStringSchema,
+  projectId: nullableStringSchema,
+  matchedAt: z.string().regex(isoDateTimePattern)
+});
 const officePartnerWriteSchema = workspaceBodySchema.extend({
   name: z.string().min(1),
   email: nullableStringSchema,
@@ -496,6 +521,31 @@ const officePartnerWriteSchema = workspaceBodySchema.extend({
   notes: nullableStringSchema,
   active: z.boolean()
 });
+const officeBankAccountWriteSchema = workspaceBodySchema.extend({
+  bankName: z.string().min(1),
+  accountLabel: z.string().min(1),
+  currency: z.string().regex(currencyCodePattern),
+  active: z.boolean()
+});
+type OfficeBankAccountWriteRequest = z.infer<typeof officeBankAccountWriteSchema>;
+const officeProjectWriteSchema = workspaceBodySchema.extend({
+  name: z.string().min(1),
+  status: z.enum(["draft", "active", "paused", "completed", "cancelled", "archived"]),
+  description: nullableStringSchema,
+  active: z.boolean()
+});
+type OfficeProjectWriteRequest = z.infer<typeof officeProjectWriteSchema>;
+const officeCashflowImportSchema = workspaceBodySchema.extend({
+  rows: z.array(z.record(z.string()))
+});
+type OfficeCashflowImportRequest = z.infer<typeof officeCashflowImportSchema>;
+interface ParsedCashflowRow {
+  readonly periodMonth: string;
+  readonly inflowMinor: bigint;
+  readonly outflowMinor: bigint;
+  readonly closingBalanceMinor: bigint;
+  readonly currency: string;
+}
 const officePartnerPayeeUnlinkSchema = workspaceBodySchema.extend({
   payeeId: z.null()
 });
@@ -566,6 +616,7 @@ type DistributionTrackUpsertRequest = z.infer<typeof distributionTrackUpsertSche
 type CommandCenterSettingUpdateRequest = z.infer<typeof commandCenterSettingUpdateSchema>;
 type CommandCenterIntegrationToggleRequest = z.infer<typeof commandCenterIntegrationToggleSchema>;
 type CommandCenterUserPermissionUpdateRequest = z.infer<typeof commandCenterUserPermissionUpdateSchema>;
+type WorkspaceBodyRequest = z.infer<typeof workspaceBodySchema>;
 
 export const legacyRestSurfaces: readonly LegacyRestSurface[] = [
   {
@@ -613,6 +664,44 @@ class ApiRouteError extends Error {
     this.code = code;
     this.context = context;
   }
+}
+
+// Server-side workspace authorization. The route family fixes the workspace DOMAIN
+// (eof -> office, erh -> distribution, cc -> command-center); after authentication, a
+// non-bot caller must have that domain in their role's allowedWorkspaces or the request is
+// rejected 403. This is the real barrier — the UI gate is never trusted as the only check.
+// Bots keep their own finer-grained route/permission scoping inside the handlers, so they
+// are intentionally not re-gated here (preserving their existing denial reasons).
+function createWorkspaceDomainGuard(
+  authMiddleware: MiddlewareHandler<ApiAuthBindings>,
+  domain: WorkspaceAppId
+): MiddlewareHandler<ApiAuthBindings> {
+  return async (context: Context<ApiAuthBindings>, next): Promise<Response | void> => {
+    if (context.req.method === "OPTIONS") {
+      await next();
+      return;
+    }
+    // Authenticate first. The auth middleware swallows any error thrown by its `next`
+    // into a 401, so the authorization check must run AFTER it returns — not inside it.
+    let authenticated = false;
+    const authResponse = await authMiddleware(context, async (): Promise<void> => {
+      authenticated = true;
+    });
+    if (!authenticated) {
+      return authResponse;
+    }
+    const authUser = context.get("authUser");
+    if (!isBotApiUser(authUser) && !getAuthRoleProfile(authUser.role).allowedWorkspaces.includes(domain)) {
+      throw new ApiRouteError(
+        403,
+        "workspace_access_denied",
+        `The ${authUser.role} role is not authorized for the ${domain} workspace.`,
+        [`role=${authUser.role}`, `domain=${domain}`, `path=${context.req.path}`]
+      );
+    }
+    await next();
+    return undefined;
+  };
 }
 
 export function createApiService(dependencies: ApiServiceDependencies): Hono<ApiAuthBindings> {
@@ -677,34 +766,17 @@ export function createApiService(dependencies: ApiServiceDependencies): Hono<Api
       workspaceId: authUser.workspaceId
     });
   });
-  app.use("/eof/v1/*", async (context, next) => {
-    if (context.req.method === "OPTIONS") {
-      await next();
-      return;
-    }
-
-    return authMiddleware(context, next);
-  });
-  app.use("/erh/v1/*", async (context, next) => {
-    if (context.req.method === "OPTIONS") {
-      await next();
-      return;
-    }
-
-    return authMiddleware(context, next);
-  });
-  app.use("/cc/v1/*", async (context, next) => {
-    if (context.req.method === "OPTIONS") {
-      await next();
-      return;
-    }
-
-    return authMiddleware(context, next);
-  });
+  app.use("/eof/v1/*", createWorkspaceDomainGuard(authMiddleware, "office"));
+  app.use("/erh/v1/*", createWorkspaceDomainGuard(authMiddleware, "distribution"));
+  app.use("/cc/v1/*", createWorkspaceDomainGuard(authMiddleware, "command-center"));
 
   registerOfficeRoutes(app, dependencies);
   registerDistributionRoutes(app, dependencies);
   registerCommandCenterRoutes(app, dependencies);
+
+  // Official @supabase/server integration (RLS-scoped + admin clients), isolated
+  // under /supabase so it does not affect the existing eof/erh/cc auth surfaces.
+  app.route("/supabase", createSupabaseRouter());
 
   return app;
 }
@@ -740,7 +812,7 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
   app.get("/eof/v1/dashboard", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
     const workspaceId = resolveWorkspaceId(context);
-    const filters = filtersForPeriod(period, null);
+    const filters = rangeFiltersFromContext(context, period, null);
     const monthlyRows = readMonthlyPnl(dependencies.fixtures.office, filters);
     const runwayWindowMonths = filterRunwayWindowMonths(monthlyRows, ["2026-02"]);
     const dashboard = readOfficeDashboardFull(dependencies.fixtures.office, period, filters, runwayWindowMonths);
@@ -771,7 +843,7 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
   app.get("/eof/v1/pl/global", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
     resolveWorkspaceId(context);
-    const response = toOfficeGlobalPnl(dependencies.fixtures.office, period);
+    const response = toOfficeGlobalPnl(dependencies.fixtures.office, period, rangeFiltersFromContext(context, period, null));
     return context.json(response);
   });
 
@@ -779,14 +851,14 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
     const period = requireCompatQuery(context, ["period", "month"], "period");
     resolveWorkspaceId(context);
     const departmentId = context.req.param("departmentId");
-    const response = toOfficeDepartmentPnl(dependencies.fixtures.office, departmentId, period);
+    const response = toOfficeDepartmentPnl(dependencies.fixtures.office, departmentId, period, rangeFiltersFromContext(context, period, departmentId));
     return context.json(response);
   });
 
   app.get("/eof/v1/pl/division", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
     resolveWorkspaceId(context);
-    const divisions = readPnlByDivision(dependencies.fixtures.office, filtersForPeriod(period, null)).map(toApiDivisionPnl);
+    const divisions = readPnlByDivision(dependencies.fixtures.office, rangeFiltersFromContext(context, period, null)).map(toApiDivisionPnl);
     return context.json(pageItems(context, divisions));
   });
 
@@ -804,6 +876,14 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
 
   app.patch("/eof/v1/transactions/:transactionId", async (context) => {
     return officeTransactionUpdateResponse(context, dependencies);
+  });
+
+  app.patch("/eof/v1/transactions/:transactionId/validate", async (context) => {
+    return officeTransactionValidateResponse(context, dependencies);
+  });
+
+  app.patch("/eof/v1/transactions/:transactionId/cancel", async (context) => {
+    return officeTransactionCancelResponse(context, dependencies);
   });
 
   app.get("/eof/v1/plan-comptable", (context) => {
@@ -841,6 +921,22 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
     return officeReconciliationApproveResponse(context, dependencies);
   });
 
+  app.post("/eof/v1/reconciliations/match", async (context) => {
+    return officeReconciliationMatchResponse(context, dependencies);
+  });
+
+  app.post("/eof/v1/reconciliations/unmatch", async (context) => {
+    return officeReconciliationUnmatchResponse(context, dependencies);
+  });
+
+  app.post("/eof/v1/reconciliations/reject", async (context) => {
+    return officeReconciliationRejectResponse(context, dependencies);
+  });
+
+  app.post("/eof/v1/reconciliations/create-transaction", async (context) => {
+    return officeReconciliationCreateTransactionResponse(context, dependencies);
+  });
+
   app.get("/eof/v1/cashflow", (context) => {
     const from = requireCompatQuery(context, ["from", "fromDate"], "from");
     const to = requireCompatQuery(context, ["to", "toDate"], "to");
@@ -848,6 +944,14 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
     const accountId = nullableQuery(context, "accountId");
     const buckets = readOfficeCashflowProjection(dependencies.fixtures.office, from, to, accountId);
     return context.json(toCashflowBuckets(buckets));
+  });
+
+  app.post("/eof/v1/cashflow/preview", async (context) => {
+    return officeCashflowPreviewResponse(context, dependencies);
+  });
+
+  app.post("/eof/v1/cashflow/confirm", async (context) => {
+    return officeCashflowConfirmResponse(context, dependencies);
   });
 
   app.get("/eof/v1/audit-log", (context) => {
@@ -859,8 +963,9 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
     const period = requireCompatQuery(context, ["period", "month"], "period");
     const facet = requirePartnerFacet(context);
     resolveWorkspaceId(context);
+    const filters = rangeFiltersFromContext(context, period, null);
     const partners = dependencies.fixtures.office.partners
-      .map((partner) => toPartnerListItem(dependencies.fixtures, partner, period))
+      .map((partner) => toPartnerListItem(dependencies.fixtures, partner, filters))
       .filter((partner) => hasFacetActivity(partner, facet));
     return context.json(pageItems(context, partners));
   });
@@ -884,7 +989,7 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
     const period = requireCompatQuery(context, ["period", "month"], "period");
     resolveWorkspaceId(context);
     const partner = requirePartner(dependencies.fixtures.office, context.req.param("partnerId"));
-    const response = toPartnerDetail(dependencies.fixtures, partner, period);
+    const response = toPartnerDetail(dependencies.fixtures, partner, period, rangeFiltersFromContext(context, period, null));
     return context.json(response);
   });
 
@@ -925,6 +1030,14 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
     return context.json(page);
   });
 
+  app.post("/eof/v1/bank/accounts", async (context) => {
+    return officeBankAccountCreateResponse(context, dependencies);
+  });
+
+  app.patch("/eof/v1/bank/accounts/:accountId", async (context) => {
+    return officeBankAccountUpdateResponse(context, dependencies);
+  });
+
   app.get("/eof/v1/bank/raw", (context) => {
     const workspaceId = resolveWorkspaceId(context);
     const period = optionalCompatQuery(context, ["period", "month"]);
@@ -947,6 +1060,14 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
     return context.json(pageItems(context, projects));
   });
 
+  app.post("/eof/v1/projects", async (context) => {
+    return officeProjectCreateResponse(context, dependencies);
+  });
+
+  app.patch("/eof/v1/projects/:projectId", async (context) => {
+    return officeProjectUpdateResponse(context, dependencies);
+  });
+
   app.get("/eof/v1/projects/:projectId/coherence-violations", (context) => {
     resolveWorkspaceId(context);
     const violations = dependencies.fixtures.officeProjectViolations[context.req.param("projectId")] ?? [];
@@ -956,7 +1077,7 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
   app.get("/eof/v1/pl/project/:projectId", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
     resolveWorkspaceId(context);
-    return context.json(toProjectPnl(dependencies.fixtures.office, context.req.param("projectId"), period));
+    return context.json(toProjectPnl(dependencies.fixtures.office, context.req.param("projectId"), period, rangeFiltersFromContext(context, period, null)));
   });
 
   app.get("/eof/v1/integrity/check-all", (context) => {
@@ -1388,6 +1509,20 @@ function registerCommandCenterRoutes(app: Hono<ApiAuthBindings>, dependencies: A
     });
   });
 
+  app.get("/cc/v1/notifications", (context) => {
+    const workspaceId = resolveWorkspaceId(context);
+    assertNonBotRouteAccess(context, "command_center_notifications_read");
+    return context.json(
+      toCommandCenterNotifications(
+        context,
+        dependencies.fixtures,
+        workspaceId,
+        dependencies.persistence.writesEnabled,
+        dependencies.nowIso()
+      )
+    );
+  });
+
   app.post("/cc/v1/settings", async (context) => {
     return commandCenterSettingUpdateResponse(context, dependencies);
   });
@@ -1660,6 +1795,86 @@ async function officeTransactionUpdateResponse(context: ApiContext, dependencies
   return context.json(result.body, result.status);
 }
 
+async function officeTransactionValidateResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const transactionId = requirePathParam(context, "transactionId");
+  const request = await readZodBody<WorkspaceBodyRequest>(context, workspaceBodySchema);
+  const before = requireOfficeTransaction(dependencies.fixtures.office, transactionId);
+  if (before.categoryId === null) {
+    throw new ApiRouteError(422, "office_transaction_category_required", "A transaction must be classified before validation.", [
+      `transactionId=${transactionId}`
+    ]);
+  }
+
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_transaction_validate",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `office:transaction:${transactionId}`);
+      await persistOfficeTransactionValidation(tx, transactionId, actor.userId);
+      const after: OfficeTransactionRow = {
+        ...before,
+        status: "validated"
+      };
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_transaction_validate",
+        targetType: "office_transaction",
+        targetId: transactionId,
+        before: { transaction: officeTransactionAuditSnapshot(before) },
+        after: { transaction: officeTransactionAuditSnapshot(after) },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      upsertOfficeTransactionFixture(dependencies.fixtures, after);
+      return mutationReceipt(transactionId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+// Soft-delete: an erroneous transaction is moved to "cancelled" (kept for audit, excluded
+// from every P&L/stat since those count only "validated") rather than hard-deleted.
+async function officeTransactionCancelResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const transactionId = requirePathParam(context, "transactionId");
+  const request = await readZodBody<WorkspaceBodyRequest>(context, workspaceBodySchema);
+  const before = requireOfficeTransaction(dependencies.fixtures.office, transactionId);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_transaction_cancel",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `office:transaction:${transactionId}`);
+      await persistOfficeTransactionCancellation(tx, transactionId);
+      const after: OfficeTransactionRow = {
+        ...before,
+        status: "cancelled"
+      };
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_transaction_cancel",
+        targetType: "office_transaction",
+        targetId: transactionId,
+        before: { transaction: officeTransactionAuditSnapshot(before) },
+        after: { transaction: officeTransactionAuditSnapshot(after) },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      upsertOfficeTransactionFixture(dependencies.fixtures, after);
+      return mutationReceipt(transactionId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
 async function officePlanComptableCreateResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
   const request = await readZodBody<OfficePlanComptableWriteRequest>(context, officePlanComptableWriteSchema);
   assertPlanComptableRequest(context, dependencies.fixtures.office, request);
@@ -1759,6 +1974,289 @@ async function officeReconciliationApproveResponse(context: ApiContext, dependen
   return context.json(result.body, result.status);
 }
 
+function requireOfficeBankLine(dataset: OfficeAnalyticsDataset, statementLineId: string): OfficeBankStatementLineRow {
+  const line = dataset.bankStatementLines.find((candidate) => candidate.id === statementLineId);
+  if (line === undefined) {
+    throw new ApiRouteError(404, "office_bank_line_not_found", "Office bank statement line was not found.", [
+      `statementLineId=${statementLineId}`
+    ]);
+  }
+
+  return line;
+}
+
+// Bank lines store a positive magnitude plus a direction; ledger transactions store a signed
+// amount (credit = money in = positive, debit = money out = negative).
+function bankLineSignedAmount(line: OfficeBankStatementLineRow): string {
+  const magnitude = line.amountMurMinor ?? line.amountMinor;
+  return eofMoney.format(line.direction === "credit" ? magnitude : -magnitude);
+}
+
+async function officeReconciliationMatchResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const request = await readZodBody<OfficeReconciliationMatchRequest>(context, officeReconciliationMatchSchema);
+  requireOfficeBankLine(dependencies.fixtures.office, request.statementLineId);
+  requireOfficeTransaction(dependencies.fixtures.office, request.transactionId);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_reconciliation_match",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `office:reconciliation:${request.statementLineId}`);
+      await persistOfficeReconciliationMatch(tx, request.statementLineId, request.transactionId, request.matchedAt, actor.userId);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_reconciliation_match",
+        targetType: "office_reconciliation_match",
+        targetId: request.statementLineId,
+        before: {},
+        after: { statementLineId: request.statementLineId, transactionId: request.transactionId, matchedAt: request.matchedAt },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      matchReconciliationFixture(dependencies.fixtures, request.statementLineId, request.transactionId, request.matchedAt, actor.userId);
+      return mutationReceipt(request.statementLineId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function officeReconciliationUnmatchResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const request = await readZodBody<OfficeReconciliationLineRequest>(context, officeReconciliationLineSchema);
+  const line = requireOfficeBankLine(dependencies.fixtures.office, request.statementLineId);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_reconciliation_unmatch",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `office:reconciliation:${request.statementLineId}`);
+      await persistOfficeReconciliationUnmatch(tx, request.statementLineId, line.matchedTransactionId);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_reconciliation_unmatch",
+        targetType: "office_reconciliation_match",
+        targetId: request.statementLineId,
+        before: { matchedTransactionId: line.matchedTransactionId },
+        after: { status: "unmatched" },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      unmatchReconciliationFixture(dependencies.fixtures, request.statementLineId);
+      return mutationReceipt(request.statementLineId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function officeReconciliationRejectResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const request = await readZodBody<OfficeReconciliationLineRequest>(context, officeReconciliationLineSchema);
+  requireOfficeBankLine(dependencies.fixtures.office, request.statementLineId);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_reconciliation_reject",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `office:reconciliation:${request.statementLineId}`);
+      await persistOfficeReconciliationReject(tx, request.statementLineId);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_reconciliation_reject",
+        targetType: "office_reconciliation_match",
+        targetId: request.statementLineId,
+        before: {},
+        after: { status: "rejected" },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      rejectReconciliationFixture(dependencies.fixtures, request.statementLineId);
+      return mutationReceipt(request.statementLineId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function officeReconciliationCreateTransactionResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const request = await readZodBody<OfficeReconciliationCreateTransactionRequest>(context, officeReconciliationCreateTransactionSchema);
+  const line = requireOfficeBankLine(dependencies.fixtures.office, request.statementLineId);
+  const transactionId = randomUUID();
+  const writeRequest: OfficeTransactionWriteRequest = {
+    workspaceId: request.workspaceId,
+    occurredOn: line.occurredOn,
+    accountId: line.accountId,
+    categoryId: request.categoryId,
+    projectId: request.projectId,
+    description: line.description ?? line.reference ?? "Ligne bancaire",
+    amountMicro: bankLineSignedAmount(line),
+    currency: line.currency
+  };
+  const amountMinor = normalizeEofAmountField(context, writeRequest.amountMicro, "amountMicro");
+  const transactionType = officeTransactionType(dependencies.fixtures.office, request.categoryId, writeRequest.amountMicro);
+  const transactionStatus: OfficeTransactionRow["status"] = request.categoryId === null ? "draft" : "validated";
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_reconciliation_create_transaction",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `office:reconciliation:${request.statementLineId}`);
+      await persistOfficeTransactionUpsert(tx, {
+        id: transactionId,
+        request: writeRequest,
+        amountMinor,
+        transactionType,
+        transactionStatus,
+        actorUserId: actor.userId,
+        isUpdate: false
+      });
+      await persistOfficeReconciliationMatch(tx, request.statementLineId, transactionId, request.matchedAt, actor.userId);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_reconciliation_create_transaction",
+        targetType: "office_transaction",
+        targetId: transactionId,
+        before: {},
+        after: { transactionId, statementLineId: request.statementLineId, request: writeRequest, amountMinor: amountMinor.toString() },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      upsertOfficeTransactionFixture(dependencies.fixtures, transactionFromOfficeRequest(transactionId, writeRequest, amountMinor, transactionType, transactionStatus));
+      matchReconciliationFixture(dependencies.fixtures, request.statementLineId, transactionId, request.matchedAt, actor.userId);
+      return mutationReceipt(transactionId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+// One active match per line: stale matches to other transactions are rejected before the new one
+// is recorded; the line and transaction are flipped to matched/reconciled.
+async function persistOfficeReconciliationMatch(
+  tx: ApiWriteTransaction,
+  statementLineId: string,
+  transactionId: string,
+  matchedAt: string,
+  actorUserId: string
+): Promise<void> {
+  if (tx.kind === "memory") {
+    return;
+  }
+
+  await tx.executor.execute(sql`
+    update office_bank_reconciliation_matches
+    set status = 'rejected', updated_at = now()
+    where bank_statement_line_id = ${statementLineId} and transaction_id <> ${transactionId}
+  `);
+  await tx.executor.execute(sql`
+    insert into office_bank_reconciliation_matches (
+      id, bank_statement_line_id, transaction_id, confidence_bp, status, approved_by_user_id, approved_at
+    )
+    values (${randomUUID()}, ${statementLineId}, ${transactionId}, 10000, 'matched', ${actorUserId}, ${matchedAt})
+    on conflict (bank_statement_line_id, transaction_id) do update
+    set status = 'matched', confidence_bp = 10000, approved_by_user_id = excluded.approved_by_user_id, approved_at = excluded.approved_at, updated_at = now()
+  `);
+  await tx.executor.execute(sql`
+    update office_bank_statement_lines
+    set reconciliation_status = 'matched', matched_transaction_id = ${transactionId}
+    where id = ${statementLineId}
+  `);
+  await tx.executor.execute(sql`
+    update transactions set is_fully_reconciled = true, updated_at = now() where id = ${transactionId}
+  `);
+}
+
+async function persistOfficeReconciliationUnmatch(
+  tx: ApiWriteTransaction,
+  statementLineId: string,
+  matchedTransactionId: string | null
+): Promise<void> {
+  if (tx.kind === "memory") {
+    return;
+  }
+
+  await tx.executor.execute(sql`
+    update office_bank_reconciliation_matches set status = 'rejected', updated_at = now() where bank_statement_line_id = ${statementLineId}
+  `);
+  await tx.executor.execute(sql`
+    update office_bank_statement_lines set reconciliation_status = 'unmatched', matched_transaction_id = null where id = ${statementLineId}
+  `);
+  if (matchedTransactionId !== null) {
+    await tx.executor.execute(sql`
+      update transactions set is_fully_reconciled = false, updated_at = now() where id = ${matchedTransactionId}
+    `);
+  }
+}
+
+async function persistOfficeReconciliationReject(tx: ApiWriteTransaction, statementLineId: string): Promise<void> {
+  if (tx.kind === "memory") {
+    return;
+  }
+
+  await tx.executor.execute(sql`
+    update office_bank_reconciliation_matches set status = 'rejected', updated_at = now() where bank_statement_line_id = ${statementLineId}
+  `);
+  await tx.executor.execute(sql`
+    update office_bank_statement_lines set reconciliation_status = 'rejected', matched_transaction_id = null where id = ${statementLineId}
+  `);
+}
+
+function matchReconciliationFixture(
+  fixtures: ApiFixtureStore,
+  statementLineId: string,
+  transactionId: string,
+  matchedAt: string,
+  actorUserId: string
+): void {
+  const mutableOffice = fixtures.office as Mutable<OfficeAnalyticsDataset>;
+  mutableOffice.bankStatementLines = fixtures.office.bankStatementLines.map((line) =>
+    line.id === statementLineId ? { ...line, reconciliationStatus: "matched", matchedTransactionId: transactionId } : line
+  );
+  mutableOffice.bankReconciliationMatches = [
+    ...fixtures.office.bankReconciliationMatches.filter((match) => match.bankStatementLineId !== statementLineId),
+    {
+      id: randomUUID(),
+      bankStatementLineId: statementLineId,
+      transactionId,
+      confidenceBp: 10000,
+      status: "matched" as const,
+      approvedByUserId: actorUserId,
+      approvedAt: matchedAt
+    }
+  ];
+}
+
+function unmatchReconciliationFixture(fixtures: ApiFixtureStore, statementLineId: string): void {
+  const mutableOffice = fixtures.office as Mutable<OfficeAnalyticsDataset>;
+  mutableOffice.bankStatementLines = fixtures.office.bankStatementLines.map((line) =>
+    line.id === statementLineId ? { ...line, reconciliationStatus: "unmatched", matchedTransactionId: null } : line
+  );
+  mutableOffice.bankReconciliationMatches = fixtures.office.bankReconciliationMatches.filter(
+    (match) => match.bankStatementLineId !== statementLineId
+  );
+}
+
+function rejectReconciliationFixture(fixtures: ApiFixtureStore, statementLineId: string): void {
+  const mutableOffice = fixtures.office as Mutable<OfficeAnalyticsDataset>;
+  mutableOffice.bankStatementLines = fixtures.office.bankStatementLines.map((line) =>
+    line.id === statementLineId ? { ...line, reconciliationStatus: "rejected", matchedTransactionId: null } : line
+  );
+  mutableOffice.bankReconciliationMatches = fixtures.office.bankReconciliationMatches.filter(
+    (match) => match.bankStatementLineId !== statementLineId
+  );
+}
+
 async function officePartnerCreateResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
   const request = await readZodBody<OfficePartnerWriteRequest>(context, officePartnerWriteSchema);
   const partnerId = randomUUID();
@@ -1819,6 +2317,346 @@ async function officePartnerUpdateResponse(context: ApiContext, dependencies: Ap
     }
   });
   return context.json(result.body, result.status);
+}
+
+async function officeBankAccountCreateResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const request = await readZodBody<OfficeBankAccountWriteRequest>(context, officeBankAccountWriteSchema);
+  const accountId = randomUUID();
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_bank_account_create",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await persistOfficeBankAccountUpsert(tx, accountId, request, false);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_bank_account_create",
+        targetType: "office_bank_account",
+        targetId: accountId,
+        before: {},
+        after: { accountId, request },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      upsertOfficeBankAccountFixture(dependencies.fixtures, accountId, request);
+      return mutationReceipt(accountId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function officeBankAccountUpdateResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const accountId = requirePathParam(context, "accountId");
+  const request = await readZodBody<OfficeBankAccountWriteRequest>(context, officeBankAccountWriteSchema);
+  const before = dependencies.fixtures.office.bankAccounts.find((account: OfficeBankAccountRow): boolean => account.id === accountId);
+  if (before === undefined) {
+    throw new ApiRouteError(404, "office_bank_account_not_found", "Office bank account was not found.", [`accountId=${accountId}`]);
+  }
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_bank_account_update",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `office:bank-account:${accountId}`);
+      await persistOfficeBankAccountUpsert(tx, accountId, request, true);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_bank_account_update",
+        targetType: "office_bank_account",
+        targetId: accountId,
+        before: { account: before },
+        after: { accountId, request },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      upsertOfficeBankAccountFixture(dependencies.fixtures, accountId, request);
+      return mutationReceipt(accountId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function persistOfficeBankAccountUpsert(tx: ApiWriteTransaction, accountId: string, request: OfficeBankAccountWriteRequest, isUpdate: boolean): Promise<void> {
+  if (tx.kind === "memory") {
+    return;
+  }
+
+  if (isUpdate) {
+    await tx.executor.execute(sql`
+      update office_bank_accounts
+      set
+        bank_name = ${request.bankName.trim()},
+        account_label = ${request.accountLabel.trim()},
+        currency = ${request.currency.toUpperCase()},
+        is_active = ${request.active}
+      where id = ${accountId}
+    `);
+    return;
+  }
+
+  await tx.executor.execute(sql`
+    insert into office_bank_accounts (id, workspace_id, bank_name, account_label, account_reference_hash, currency, current_balance_minor, current_balance_mur_minor, is_active)
+    values (${accountId}, ${request.workspaceId}, ${request.bankName.trim()}, ${request.accountLabel.trim()}, ${`manual-${accountId}`}, ${request.currency.toUpperCase()}, 0, 0, ${request.active})
+  `);
+}
+
+function upsertOfficeBankAccountFixture(fixtures: ApiFixtureStore, accountId: string, request: OfficeBankAccountWriteRequest): void {
+  const mutableOffice = fixtures.office as Mutable<OfficeAnalyticsDataset>;
+  const existing = fixtures.office.bankAccounts.find((account: OfficeBankAccountRow): boolean => account.id === accountId);
+  const account: OfficeBankAccountRow = {
+    id: accountId,
+    workspaceId: request.workspaceId,
+    bankName: request.bankName.trim(),
+    accountLabel: request.accountLabel.trim(),
+    accountReferenceHash: existing?.accountReferenceHash ?? `manual-${accountId}`,
+    currency: request.currency.toUpperCase() as CurrencyCode,
+    currentBalanceMinor: existing?.currentBalanceMinor ?? 0n,
+    currentBalanceMurMinor: existing?.currentBalanceMurMinor ?? null,
+    isActive: request.active,
+    balanceAsOf: existing?.balanceAsOf ?? null
+  };
+  mutableOffice.bankAccounts = upsertById(fixtures.office.bankAccounts, account);
+}
+
+async function officeProjectCreateResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const request = await readZodBody<OfficeProjectWriteRequest>(context, officeProjectWriteSchema);
+  const projectId = randomUUID();
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_project_create",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await persistOfficeProjectUpsert(tx, projectId, request, false);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_project_create",
+        targetType: "office_project",
+        targetId: projectId,
+        before: {},
+        after: { projectId, request },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      upsertOfficeProjectFixture(dependencies.fixtures, projectId, request);
+      return mutationReceipt(projectId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function officeProjectUpdateResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const projectId = requirePathParam(context, "projectId");
+  const request = await readZodBody<OfficeProjectWriteRequest>(context, officeProjectWriteSchema);
+  const before = requireProject(dependencies.fixtures.office, projectId);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_project_update",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `office:project:${projectId}`);
+      await persistOfficeProjectUpsert(tx, projectId, request, true);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_project_update",
+        targetType: "office_project",
+        targetId: projectId,
+        before: { project: before },
+        after: { projectId, request },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      upsertOfficeProjectFixture(dependencies.fixtures, projectId, request);
+      return mutationReceipt(projectId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function persistOfficeProjectUpsert(tx: ApiWriteTransaction, projectId: string, request: OfficeProjectWriteRequest, isUpdate: boolean): Promise<void> {
+  if (tx.kind === "memory") {
+    return;
+  }
+
+  if (isUpdate) {
+    await tx.executor.execute(sql`
+      update projects
+      set
+        name = ${request.name.trim()},
+        status = ${request.status}::project_status,
+        description = ${request.description},
+        is_active = ${request.active}
+      where id = ${projectId}
+    `);
+    return;
+  }
+
+  await tx.executor.execute(sql`
+    insert into projects (id, name, status, state, description, is_active)
+    values (${projectId}, ${request.name.trim()}, ${request.status}::project_status, ${request.status}, ${request.description}, ${request.active})
+  `);
+}
+
+function upsertOfficeProjectFixture(fixtures: ApiFixtureStore, projectId: string, request: OfficeProjectWriteRequest): void {
+  const mutableOffice = fixtures.office as Mutable<OfficeAnalyticsDataset>;
+  const project: OfficeProjectRow = {
+    id: projectId,
+    name: request.name.trim(),
+    status: request.status,
+    state: request.status,
+    isActive: request.active
+  };
+  mutableOffice.projects = upsertById(fixtures.office.projects, project);
+}
+
+// Accept "YYYY-MM", "YYYY-M", or "MM/YYYY" / "M/YYYY" → canonical "YYYY-MM".
+function normalizeCashflowMonth(value: string): string | null {
+  const trimmed = value.trim();
+  if (/^\d{4}-\d{2}$/u.test(trimmed)) {
+    return trimmed;
+  }
+  const iso = /^(\d{4})-(\d{1,2})\b/u.exec(trimmed);
+  if (iso !== null && iso[1] !== undefined && iso[2] !== undefined) {
+    return `${iso[1]}-${iso[2].padStart(2, "0")}`;
+  }
+  const slash = /^(\d{1,2})[/\-](\d{4})$/u.exec(trimmed);
+  if (slash !== null && slash[1] !== undefined && slash[2] !== undefined) {
+    return `${slash[2]}-${slash[1].padStart(2, "0")}`;
+  }
+  return null;
+}
+
+function parseCashflowImportRow(record: Readonly<Record<string, string>>): { readonly parsed: ParsedCashflowRow | null; readonly issues: readonly string[] } {
+  const periodRaw = rowValue(record, ["periodMonth", "period_month", "period", "month", "Month", "PERIOD", "Mois"]);
+  const periodMonth = periodRaw !== null ? normalizeCashflowMonth(periodRaw) : null;
+  const currency = normalizedCurrency(rowValue(record, ["currency", "currency_code", "Currency", "CURRENCY"])) ?? "MUR";
+  const inflow = moneyValue(record, ["inflow", "Inflow", "expectedInflow", "expected_inflow", "inflowMinor", "entrees"]);
+  const outflow = moneyValue(record, ["outflow", "Outflow", "expectedOutflow", "expected_outflow", "outflowMinor", "sorties"]);
+  const closing = moneyValue(record, ["closingBalance", "closing_balance", "ClosingBalance", "balance", "Balance", "solde"]);
+  const issues = [
+    ...(periodMonth === null ? ["period_missing_or_invalid"] : []),
+    ...(inflow === null && outflow === null && closing === null ? ["amounts_missing"] : [])
+  ];
+  if (issues.length > 0 || periodMonth === null) {
+    return { parsed: null, issues };
+  }
+  return {
+    parsed: {
+      periodMonth,
+      inflowMinor: inflow ?? 0n,
+      outflowMinor: outflow ?? 0n,
+      closingBalanceMinor: closing ?? 0n,
+      currency
+    },
+    issues: []
+  };
+}
+
+async function officeCashflowPreviewResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const request = await readZodBody<OfficeCashflowImportRequest>(context, officeCashflowImportSchema);
+  resolveWorkspaceId(context);
+  const rows = request.rows.map((record: Readonly<Record<string, string>>, index: number) => {
+    const { parsed, issues } = parseCashflowImportRow(record);
+    return {
+      rowNumber: index + 1,
+      periodMonth: parsed?.periodMonth ?? null,
+      inflow: parsed !== null ? eofMoney.format(parsed.inflowMinor) : null,
+      outflow: parsed !== null ? eofMoney.format(parsed.outflowMinor) : null,
+      closingBalance: parsed !== null ? eofMoney.format(parsed.closingBalanceMinor) : null,
+      currency: parsed?.currency ?? null,
+      issues
+    };
+  });
+  const acceptedRowCount = rows.filter((row): boolean => row.issues.length === 0).length;
+  return context.json({
+    acceptedRowCount,
+    rejectedRowCount: rows.length - acceptedRowCount,
+    rows
+  });
+}
+
+async function officeCashflowConfirmResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const request = await readZodBody<OfficeCashflowImportRequest>(context, officeCashflowImportSchema);
+  const workspaceId = resolveWorkspaceId(context);
+  const parsed = request.rows
+    .map((record: Readonly<Record<string, string>>): ParsedCashflowRow | null => parseCashflowImportRow(record).parsed)
+    .filter((row: ParsedCashflowRow | null): row is ParsedCashflowRow => row !== null);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const batchId = randomUUID();
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_cashflow_import_confirm",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await persistOfficeCashflowRows(tx, workspaceId, parsed);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_cashflow_import_confirm",
+        targetType: "office_cashflow_import",
+        targetId: batchId,
+        before: {},
+        after: { workspaceId, rowCount: parsed.length },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      upsertOfficeCashflowFixture(dependencies.fixtures, workspaceId, parsed);
+      return mutationReceipt(batchId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function persistOfficeCashflowRows(tx: ApiWriteTransaction, workspaceId: string, rows: readonly ParsedCashflowRow[]): Promise<void> {
+  if (tx.kind === "memory" || rows.length === 0) {
+    return;
+  }
+  const periods = [...new Set(rows.map((row: ParsedCashflowRow): string => row.periodMonth))];
+  for (const period of periods) {
+    await tx.executor.execute(sql`delete from office_cashflow_projection_rows where workspace_id = ${workspaceId} and period_month = ${period}`);
+  }
+  for (const row of rows) {
+    await tx.executor.execute(sql`
+      insert into office_cashflow_projection_rows (id, workspace_id, period_month, expected_inflow_minor, expected_outflow_minor, expected_closing_balance_minor, currency)
+      values (${randomUUID()}, ${workspaceId}, ${row.periodMonth}, ${row.inflowMinor.toString()}, ${row.outflowMinor.toString()}, ${row.closingBalanceMinor.toString()}, ${row.currency})
+    `);
+  }
+}
+
+function upsertOfficeCashflowFixture(fixtures: ApiFixtureStore, workspaceId: string, rows: readonly ParsedCashflowRow[]): void {
+  const mutableOffice = fixtures.office as Mutable<OfficeAnalyticsDataset>;
+  const periods = new Set(rows.map((row: ParsedCashflowRow): string => row.periodMonth));
+  const kept = fixtures.office.cashflowProjectionRows.filter(
+    (row): boolean => !(row.workspaceId === workspaceId && periods.has(row.periodMonth))
+  );
+  const added: OfficeAnalyticsDataset["cashflowProjectionRows"][number][] = rows.map((row: ParsedCashflowRow) => ({
+    id: randomUUID(),
+    workspaceId,
+    accountId: null,
+    periodMonth: row.periodMonth,
+    expectedInflowMinor: row.inflowMinor,
+    expectedOutflowMinor: row.outflowMinor,
+    expectedClosingBalanceMinor: row.closingBalanceMinor,
+    currency: row.currency as CurrencyCode
+  }));
+  mutableOffice.cashflowProjectionRows = [...kept, ...added];
 }
 
 async function officePartnerPayeeUnlinkResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
@@ -2554,6 +3392,40 @@ async function persistOfficeTransactionUpsert(
       ${input.transactionStatus === "validated" ? input.actorUserId : null},
       ${input.transactionStatus === "validated" ? new Date().toISOString() : null}
     )
+  `);
+}
+
+async function persistOfficeTransactionValidation(
+  tx: ApiWriteTransaction,
+  transactionId: string,
+  actorUserId: string
+): Promise<void> {
+  if (tx.kind === "memory") {
+    return;
+  }
+
+  await tx.executor.execute(sql`
+    update transactions
+    set
+      status = 'validated',
+      approved_by_user_id = ${actorUserId},
+      approved_at = now(),
+      updated_at = now()
+    where id = ${transactionId}
+  `);
+}
+
+async function persistOfficeTransactionCancellation(tx: ApiWriteTransaction, transactionId: string): Promise<void> {
+  if (tx.kind === "memory") {
+    return;
+  }
+
+  await tx.executor.execute(sql`
+    update transactions
+    set
+      status = 'cancelled',
+      updated_at = now()
+    where id = ${transactionId}
   `);
 }
 
@@ -4005,8 +4877,9 @@ async function officeBankImportPreviewResponse(context: ApiContext, dependencies
   assertOfficeBankImportPreviewRequest(context, request);
   requirePermissionForWorkspace(context.get("authUser"), "office_bank_import_preview", request.workspaceId);
   const previewRows = previewRowsFromRecords(request.rows);
-  const parsedRows = previewRows
-    .map((row: ApiImportPreviewRow): ParsedOfficeBankPreviewRow => parseOfficeBankPreviewRow(row, request.workspaceId, dependencies.fixtures.office.bankAccounts))
+  const allParsedRows = previewRows
+    .map((row: ApiImportPreviewRow): ParsedOfficeBankPreviewRow => parseOfficeBankPreviewRow(row, request.workspaceId, dependencies.fixtures.office.bankAccounts, dependencies.fixtures.office.exchangeRates));
+  const parsedRows = allParsedRows
     .filter((row: ParsedOfficeBankPreviewRow): row is ParsedOfficeBankPreviewRow & { readonly line: OfficeBankStatementLineInsert } => row.line !== null);
   const idempotencyFingerprint = `${request.source}:${request.checksum}:${hashRequestBody(request.rows)}`;
   const previewId = previewIdFor("office-bank", idempotencyFingerprint);
@@ -4040,7 +4913,9 @@ async function officeBankImportPreviewResponse(context: ApiContext, dependencies
     ],
     warnings: parsedRows.length === previewRows.length
       ? []
-      : ["Some rows could not be converted into bank statement lines and will remain in batch metadata instead of being fabricated."]
+      : ["Some rows could not be converted into bank statement lines and will remain in batch metadata instead of being fabricated."],
+    rejectionReasons: aggregateRejectionReasons(allParsedRows),
+    rowResults: allParsedRows.map(previewRowResult)
   };
   return context.json(response);
 }
@@ -4062,7 +4937,7 @@ async function officeBankImportConfirmResponse(context: ApiContext, dependencies
       const acceptedRowIds = new Set<string>(request.acceptedRowIds);
       const parsedRows = preview.rows
         .filter((row: ApiImportPreviewRow): boolean => acceptedRowIds.has(row.id))
-        .map((row: ApiImportPreviewRow): ParsedOfficeBankPreviewRow => parseOfficeBankPreviewRow(row, request.workspaceId, dependencies.fixtures.office.bankAccounts));
+        .map((row: ApiImportPreviewRow): ParsedOfficeBankPreviewRow => parseOfficeBankPreviewRow(row, request.workspaceId, dependencies.fixtures.office.bankAccounts, dependencies.fixtures.office.exchangeRates));
       const lines = parsedRows
         .map((row: ParsedOfficeBankPreviewRow): OfficeBankStatementLineInsert | null => row.line)
         .filter((line: OfficeBankStatementLineInsert | null): line is OfficeBankStatementLineInsert => line !== null);
@@ -4877,25 +5752,60 @@ function joinKeysFromRows(rows: readonly Readonly<Record<string, string>>[]): re
   return keys.length === 0 ? ["raw_row"] : keys;
 }
 
+// Roll up per-row rejection issues into {reason, count}, most frequent first, so the
+// import UI can explain why rows were dropped (e.g. account_not_found) instead of just a count.
+function aggregateRejectionReasons(rows: readonly ParsedOfficeBankPreviewRow[]): readonly OfficeImportRejectionReason[] {
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    for (const issue of row.issues) {
+      counts.set(issue, (counts.get(issue) ?? 0) + 1);
+    }
+  }
+  return [...counts.entries()]
+    .map(([reason, count]: readonly [string, number]): OfficeImportRejectionReason => ({ reason, count }))
+    .sort((left: OfficeImportRejectionReason, right: OfficeImportRejectionReason): number => right.count - left.count);
+}
+
+// Per-row accepted/rejected outcome for the preview table. The id matches confirm's acceptedRowIds.
+function previewRowResult(parsed: ParsedOfficeBankPreviewRow): OfficeBankPreviewRowResult {
+  return {
+    id: parsed.row.id,
+    rowNumber: parsed.row.rowNumber,
+    status: parsed.line !== null ? "accepted" : "rejected",
+    issues: parsed.issues
+  };
+}
+
 function parseOfficeBankPreviewRow(
   row: ApiImportPreviewRow,
   workspaceId: string,
-  accounts: readonly OfficeBankAccountRow[]
+  accounts: readonly OfficeBankAccountRow[],
+  exchangeRates: readonly OfficeWriteExchangeRateRow[]
 ): ParsedOfficeBankPreviewRow {
   const currency = normalizedCurrency(rowValue(row.rawData, ["currency", "currency_code", "Currency", "CURRENCY"])) ?? "MUR";
   const account = accountForRow(row.rawData, workspaceId, currency, accounts);
   const occurredOn = isoDateValue(row.rawData, ["occurredOn", "occurred_on", "transactionDate", "transaction_date", "date", "DATE", "Date", "paid_on", "paidOn"]);
   const description = rowValue(row.rawData, ["description", "label", "particulars", "details", "narrative", "memo"]);
   const amount = amountForBankRow(row.rawData);
+  // Foreign-currency lines without an explicit MUR amount are converted via the office FX
+  // table (exchange_rates) at the transaction date, so they consolidate into the MUR books.
+  const amountMurMinor =
+    amount === null
+      ? null
+      : amount.amountMurMinor !== null
+        ? amount.amountMurMinor
+        : occurredOn !== null
+          ? convertMinorToMur(amount.amountMinor, amount.currency, occurredOn, exchangeRates)
+          : null;
   const issues = [
     ...(account === null ? ["account_not_found"] : []),
     ...(occurredOn === null ? ["occurred_on_missing"] : []),
     ...(description === null ? ["description_missing"] : []),
     ...(amount === null ? ["amount_missing_or_invalid"] : []),
-    ...(amount !== null && amount.currency !== "MUR" && amount.amountMurMinor === null ? ["amount_mur_missing_for_foreign_currency"] : [])
+    ...(amount !== null && amountMurMinor === null ? ["amount_mur_missing_for_foreign_currency"] : [])
   ];
 
-  if (issues.length > 0 || account === null || occurredOn === null || description === null || amount === null || amount.amountMurMinor === null) {
+  if (issues.length > 0 || account === null || occurredOn === null || description === null || amount === null || amountMurMinor === null) {
     return {
       row,
       line: null,
@@ -4916,7 +5826,7 @@ function parseOfficeBankPreviewRow(
       amountMinor: amount.amountMinor,
       balanceMinor: moneyValue(row.rawData, ["balance", "balanceMinor", "closingBalance", "closing_balance"]),
       currency: amount.currency,
-      amountMurMinor: amount.amountMurMinor,
+      amountMurMinor,
       balanceMurMinor: moneyValue(row.rawData, ["balanceMur", "balance_mur", "balanceMurMinor", "balance_mur_minor"]),
       isDuplicateCandidate: false,
       rawData: row.rawData
@@ -6101,8 +7011,31 @@ function filtersForPeriod(period: string, departmentId: string | null): OfficePn
   };
 }
 
-function toOfficeGlobalPnl(dataset: OfficeAnalyticsDataset, period: string): OfficeGlobalPnl {
-  const filters = filtersForPeriod(period, null);
+function isIsoDate(value: string | null): value is string {
+  return value !== null && /^\d{4}-\d{2}-\d{2}$/u.test(value);
+}
+
+// True when an ISO date/timestamp falls within the filters' inclusive range.
+function dateInFilters(dateLike: string, filters: OfficePnlFilters): boolean {
+  const day = dateLike.slice(0, 10);
+  if (filters.dateFrom !== null && day < filters.dateFrom) {
+    return false;
+  }
+  return !(filters.dateTo !== null && day > filters.dateTo);
+}
+
+// Resolve the P&L date filters from the request: an explicit dateFrom/dateTo range
+// (sent by the Period control) takes precedence; otherwise fall back to the month.
+function rangeFiltersFromContext(context: ApiContext, period: string, departmentId: string | null): OfficePnlFilters {
+  const dateFrom = optionalCompatQuery(context, ["dateFrom", "date_from"]);
+  const dateTo = optionalCompatQuery(context, ["dateTo", "date_to"]);
+  if (isIsoDate(dateFrom) && isIsoDate(dateTo)) {
+    return { dateFrom, dateTo, departmentId };
+  }
+  return filtersForPeriod(period, departmentId);
+}
+
+function toOfficeGlobalPnl(dataset: OfficeAnalyticsDataset, period: string, filters: OfficePnlFilters): OfficeGlobalPnl {
   const pnl = readGlobalPnl(dataset, filters);
   return {
     scope: "global",
@@ -6123,8 +7056,7 @@ function toOfficeGlobalPnl(dataset: OfficeAnalyticsDataset, period: string): Off
   };
 }
 
-function toOfficeDepartmentPnl(dataset: OfficeAnalyticsDataset, departmentId: string, period: string): OfficeDepartmentPnl {
-  const filters = filtersForPeriod(period, departmentId);
+function toOfficeDepartmentPnl(dataset: OfficeAnalyticsDataset, departmentId: string, period: string, filters: OfficePnlFilters): OfficeDepartmentPnl {
   const pnl = readDepartmentPnl(dataset, departmentId, filters);
   const categoryRows = readPnlByCategory(dataset, filters).filter((row) => row.department_id === departmentId);
   return {
@@ -6305,7 +7237,13 @@ function matchesOfficeTransactionQuery(context: ApiContext, transaction: OfficeT
   const projectId = nullableQuery(context, "projectId");
   const type = nullableQuery(context, "type");
   const status = nullableQuery(context, "status");
-  if (period !== null && !transaction.occurredOn.startsWith(period)) {
+  const dateFrom = nullableQuery(context, "dateFrom");
+  const dateTo = nullableQuery(context, "dateTo");
+  if (isIsoDate(dateFrom) && isIsoDate(dateTo)) {
+    if (transaction.occurredOn < dateFrom || transaction.occurredOn > dateTo) {
+      return false;
+    }
+  } else if (period !== null && !transaction.occurredOn.startsWith(period)) {
     return false;
   }
 
@@ -6408,13 +7346,23 @@ function toApiReconciliationStatus(line: OfficeBankStatementLineRow): OfficeReco
     return "suggested";
   }
 
+  if (line.reconciliationStatus === "rejected") {
+    return "rejected";
+  }
+
   return "unmatched";
 }
 
 function matchesReconciliationQuery(context: ApiContext, candidate: OfficeReconciliationCandidate): boolean {
   const period = nullableQuery(context, "period");
   const status = nullableQuery(context, "status");
-  if (period !== null && !candidate.occurredOn.startsWith(period)) {
+  const dateFrom = nullableQuery(context, "dateFrom");
+  const dateTo = nullableQuery(context, "dateTo");
+  if (isIsoDate(dateFrom) && isIsoDate(dateTo)) {
+    if (candidate.occurredOn < dateFrom || candidate.occurredOn > dateTo) {
+      return false;
+    }
+  } else if (period !== null && !candidate.occurredOn.startsWith(period)) {
     return false;
   }
 
@@ -6462,12 +7410,12 @@ function requirePartnerFacet(context: ApiContext): OfficePartnerFacet {
   return facet;
 }
 
-function toPartnerListItem(fixtures: ApiFixtureStore, partner: OfficePartnerRow, period: string): OfficePartnerListItem {
+function toPartnerListItem(fixtures: ApiFixtureStore, partner: OfficePartnerRow, filters: OfficePnlFilters): OfficePartnerListItem {
   return {
     id: partner.id,
     name: partner.name,
     status: partner.isActive ? "active" : "inactive",
-    activity: toPartnerActivity(fixtures.office, partner.id, period),
+    activity: toPartnerActivity(fixtures.office, partner.id, filters),
     distributionPayeeLink: toPartnerPayeeLink(fixtures, partner)
   };
 }
@@ -6475,11 +7423,12 @@ function toPartnerListItem(fixtures: ApiFixtureStore, partner: OfficePartnerRow,
 function toPartnerDetail(
   fixtures: ApiFixtureStore,
   partner: OfficePartnerRow,
-  period: string
+  period: string,
+  filters: OfficePnlFilters
 ): OfficePartnerDetail & Pick<OfficePartnerPnl, "completeness" | "period"> {
-  readPartnerPnl(fixtures.office, partner.id, filtersForPeriod(period, null));
+  readPartnerPnl(fixtures.office, partner.id, filters);
   return {
-    ...toPartnerListItem(fixtures, partner, period),
+    ...toPartnerListItem(fixtures, partner, filters),
     completeness: "partial",
     period,
     email: null,
@@ -6511,8 +7460,8 @@ function hasFacetActivity(partner: OfficePartnerListItem, facet: OfficePartnerFa
   return eofMoney.parse(side.periodTotalMicro) > 0n;
 }
 
-function toPartnerActivity(dataset: OfficeAnalyticsDataset, partnerId: string, period: string): OfficePartnerActivity {
-  const units = partnerActivityUnits(dataset, partnerId, period);
+function toPartnerActivity(dataset: OfficeAnalyticsDataset, partnerId: string, filters: OfficePnlFilters): OfficePartnerActivity {
+  const units = partnerActivityUnits(dataset, partnerId, filters);
   const income: OfficePartnerSideActivity = {
     periodTotalMicro: eofMoney.format(units.incomeUnits),
     openBalanceMicro: eofMoney.format(units.incomeUnits),
@@ -6532,7 +7481,7 @@ function toPartnerActivity(dataset: OfficeAnalyticsDataset, partnerId: string, p
   };
 }
 
-function partnerActivityUnits(dataset: OfficeAnalyticsDataset, partnerId: string, period: string): PartnerActivityUnits {
+function partnerActivityUnits(dataset: OfficeAnalyticsDataset, partnerId: string, filters: OfficePnlFilters): PartnerActivityUnits {
   let incomeUnits = 0n;
   let expenseUnits = 0n;
   let incomeCount = 0;
@@ -6540,7 +7489,7 @@ function partnerActivityUnits(dataset: OfficeAnalyticsDataset, partnerId: string
   let incomeLastActivityOn: string | null = null;
   let expenseLastActivityOn: string | null = null;
   for (const transaction of dataset.transactions) {
-    if (transaction.partnerId !== partnerId || !transaction.transactionDate.startsWith(period) || !transaction.isActive) {
+    if (transaction.partnerId !== partnerId || !dateInFilters(transaction.transactionDate, filters) || !transaction.isActive) {
       continue;
     }
 
@@ -6607,9 +7556,9 @@ function latestProjectActivityOn(dataset: OfficeAnalyticsDataset, projectId: str
   return latest;
 }
 
-function toProjectPnl(dataset: OfficeAnalyticsDataset, projectId: string, period: string): OfficeProjectPnl {
-  const pnl = readProjectPnl(dataset, projectId, filtersForPeriod(period, null));
-  const lines = projectPnlLines(dataset, projectId, period);
+function toProjectPnl(dataset: OfficeAnalyticsDataset, projectId: string, period: string, filters: OfficePnlFilters): OfficeProjectPnl {
+  const pnl = readProjectPnl(dataset, projectId, filters);
+  const lines = projectPnlLines(dataset, projectId, filters);
   return {
     completeness: "partial",
     projectId,
@@ -6626,10 +7575,10 @@ function toProjectPnl(dataset: OfficeAnalyticsDataset, projectId: string, period
   };
 }
 
-function projectPnlLines(dataset: OfficeAnalyticsDataset, projectId: string, period: string): readonly OfficeProjectPnlLine[] {
+function projectPnlLines(dataset: OfficeAnalyticsDataset, projectId: string, filters: OfficePnlFilters): readonly OfficeProjectPnlLine[] {
   const categoryRows = new Map<string, { readonly category: OfficePnlCategoryRow; readonly transactionCount: number; readonly amountUnits: bigint }>();
   for (const transaction of dataset.transactions) {
-    if (transaction.projectId !== projectId || !transaction.transactionDate.startsWith(period) || transaction.categoryId === null) {
+    if (transaction.projectId !== projectId || !dateInFilters(transaction.transactionDate, filters) || transaction.categoryId === null) {
       continue;
     }
 
@@ -7192,6 +8141,79 @@ function toDistributionSettings(context: ApiContext, store: ApiFixtureStore, wri
     currencies,
     fxRateCount: store.distributionFxRates.length,
     mutationsEnabled: writesEnabled
+  };
+}
+
+function toCommandCenterNotifications(
+  context: ApiContext,
+  store: ApiFixtureStore,
+  workspaceId: string,
+  writesEnabled: boolean,
+  generatedAt: string
+): CommandCenterNotificationsResponse {
+  const actor = context.get("authUser");
+  const officePendingCount = store.office.transactions.filter(
+    (transaction): boolean => transaction.categoryId === null || transaction.status === "draft"
+  ).length;
+  const openSuspenseCount = store.distribution.suspenseItems.filter((item): boolean => !item.resolved).length;
+  const pendingStatementCount = store.distribution.statements.filter((statement): boolean => statement.status !== "void").length;
+  const items: readonly CommandCenterNotification[] = [
+    {
+      id: "write-gate",
+      title: writesEnabled ? "Writes enabled" : "Writes disabled",
+      detail: writesEnabled ? "Mutation buttons are guarded by permissions, idempotency, and audit." : "Set WRITES_ENABLED=true on the API runtime to activate mutation buttons.",
+      tone: writesEnabled ? "success" : "warning",
+      workspaceId,
+      createdAt: generatedAt,
+      actionLabel: "Command Center",
+      actionHref: "/console/command-center/integrations"
+    },
+    {
+      id: "office-pending",
+      title: "Office pending queue",
+      detail: `${String(officePendingCount)} transaction${officePendingCount === 1 ? "" : "s"} awaiting classification or validation.`,
+      tone: officePendingCount === 0 ? "success" : "warning",
+      workspaceId,
+      createdAt: generatedAt,
+      actionLabel: "Open Office",
+      actionHref: "/console/office/pending"
+    },
+    {
+      id: "distribution-suspense",
+      title: "Distribution suspense",
+      detail: `${String(openSuspenseCount)} open suspense item${openSuspenseCount === 1 ? "" : "s"} in the royalty pipeline.`,
+      tone: openSuspenseCount === 0 ? "success" : "warning",
+      workspaceId,
+      createdAt: generatedAt,
+      actionLabel: "Open suspense",
+      actionHref: "/console/distribution/suspense"
+    },
+    {
+      id: "distribution-statements",
+      title: "Statement queue",
+      detail: `${String(pendingStatementCount)} active statement${pendingStatementCount === 1 ? "" : "s"} available for payment workflows.`,
+      tone: pendingStatementCount === 0 ? "info" : "success",
+      workspaceId,
+      createdAt: generatedAt,
+      actionLabel: "Open statements",
+      actionHref: "/console/distribution/statements"
+    },
+    {
+      id: "session",
+      title: "Session verified",
+      detail: `${actor.email} · ${actor.role}`,
+      tone: "success",
+      workspaceId,
+      createdAt: generatedAt,
+      actionLabel: null,
+      actionHref: null
+    }
+  ];
+  return {
+    workspaceId,
+    unreadCount: items.filter((item): boolean => item.tone === "warning" || item.tone === "error").length,
+    generatedAt,
+    items
   };
 }
 

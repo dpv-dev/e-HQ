@@ -85,7 +85,7 @@
     margin: 0;
     color: var(--ehq-text-muted);
     font-family: var(--ehq-mono);
-    font-size: 10px;
+    font-size: var(--ehq-type-label-size);
     font-weight: var(--ehq-type-label-weight);
     letter-spacing: 0.14em;
     text-transform: uppercase;
@@ -94,7 +94,7 @@
   h3 {
     margin: var(--ehq-space-2) 0 0;
     font-family: var(--ehq-display);
-    font-size: var(--ehq-h3);
+    font-size: var(--ehq-type-section-title-size);
     font-weight: var(--ehq-type-heading-weight);
   }
 
@@ -107,8 +107,8 @@
     margin-top: var(--ehq-space-2);
     color: var(--ehq-text-soft);
     font-family: var(--ehq-font);
-    font-size: 13px;
+    font-size: var(--ehq-type-ui-size);
     font-weight: var(--ehq-type-body-weight);
-    line-height: 1.5;
+    line-height: var(--ehq-type-ui-line);
   }
 </style>

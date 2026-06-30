@@ -5,7 +5,6 @@
     KPI,
     Loader,
     Table,
-    type TableColumn,
     type TableRow,
     type Tone
   } from "@ehq/ui";
@@ -20,6 +19,8 @@
     type OfficeApiClient,
     type OfficeProjectCoherenceViolation,
     type OfficeProjectPnl,
+    type OfficeProjectWriteRequest,
+    type OfficeProjectWriteStatus,
     type OfficeProjectPnlLine,
     type OfficeProjectSummary,
     type PageResult
@@ -31,6 +32,9 @@
     readonly client: OfficeApiClient;
     readonly workspaceId: string;
     readonly period: string;
+    readonly dateFrom: string;
+    readonly dateTo: string;
+    readonly writesEnabled: boolean;
   }
 
   interface ProjectKpi {
@@ -52,6 +56,58 @@
     createIdleState<PageResult<OfficeProjectCoherenceViolation>>()
   );
   let selectedProjectId = $state<EntityId | null>(null);
+  let projectFormName = $state("");
+  let projectFormStatus = $state<OfficeProjectWriteStatus>("active");
+  let projectFormDescription = $state("");
+  let projectFormActive = $state(true);
+  let editingProjectId = $state<string | null>(null);
+
+  function projectWriteRequest(): OfficeProjectWriteRequest {
+    return {
+      workspaceId: props.workspaceId,
+      name: projectFormName.trim(),
+      status: projectFormStatus,
+      description: projectFormDescription.trim().length > 0 ? projectFormDescription.trim() : null,
+      active: projectFormActive
+    };
+  }
+
+  function resetProjectForm(): void {
+    editingProjectId = null;
+    projectFormName = "";
+    projectFormStatus = "active";
+    projectFormDescription = "";
+    projectFormActive = true;
+  }
+
+  function startEditProject(projectId: string): void {
+    const project = projects.find((row: OfficeProjectSummary): boolean => row.id === projectId);
+    if (project === undefined) {
+      return;
+    }
+    editingProjectId = project.id;
+    projectFormName = project.label;
+    projectFormStatus = project.status;
+    projectFormActive = true;
+  }
+
+  async function submitProjectForm(): Promise<void> {
+    if (projectFormName.trim().length === 0) {
+      return;
+    }
+    const projectId = editingProjectId;
+    try {
+      if (projectId === null) {
+        await props.client.createProject(projectWriteRequest(), { idempotencyKey: crypto.randomUUID() });
+      } else {
+        await props.client.updateProject(projectId, projectWriteRequest(), { idempotencyKey: crypto.randomUUID() });
+      }
+      resetProjectForm();
+      await loadProjects();
+    } catch (error: unknown) {
+      projectsState = createErrorState<PageResult<OfficeProjectSummary>>(error);
+    }
+  }
 
   const projects = $derived(readPageItems(projectsState));
   const selectedProject = $derived(readSelectedProject(projects, selectedProjectId));
@@ -96,7 +152,9 @@
       const [projectPnlResult, violationsResult] = await Promise.all([
         props.client.getProjectPnl(projectId, {
           workspaceId: props.workspaceId,
-          period: props.period
+          period: props.period,
+          dateFrom: props.dateFrom,
+          dateTo: props.dateTo
         }),
         props.client.listProjectCoherenceViolations(projectId, {
           workspaceId: props.workspaceId,
@@ -280,6 +338,32 @@
         <button type="button" onclick={loadProjects}>Refresh</button>
       </header>
 
+      <section class="project-form ehq-edge-surface" aria-label={editingProjectId === null ? "Créer un projet" : "Éditer le projet"}>
+        <label>
+          <span class="ehq-type-label-mono">Nom du projet</span>
+          <input type="text" bind:value={projectFormName} placeholder="Album launch" />
+        </label>
+        <label>
+          <span class="ehq-type-label-mono">Statut</span>
+          <select bind:value={projectFormStatus}>
+            <option value="draft">draft</option>
+            <option value="active">active</option>
+            <option value="paused">paused</option>
+            <option value="completed">completed</option>
+            <option value="cancelled">cancelled</option>
+            <option value="archived">archived</option>
+          </select>
+        </label>
+        <div class="project-form-actions">
+          <button type="button" class="project-submit" disabled={!props.writesEnabled} onclick={submitProjectForm}>
+            {editingProjectId === null ? "Créer le projet" : "Enregistrer"}
+          </button>
+          {#if editingProjectId !== null}
+            <button type="button" class="project-cancel" onclick={resetProjectForm}>Annuler</button>
+          {/if}
+        </div>
+      </section>
+
       {#if projectsState.status === "loading"}
         <Loader label="Loading projects" detail="Reading eof/v1/projects." size="medium" />
       {:else if projectsState.status === "error"}
@@ -313,7 +397,10 @@
           <span>Validated project projection from Office.</span>
         </div>
         {#if selectedProject !== null}
-          <Badge label={selectedProject.status} tone="info" />
+          <div class="project-detail-actions">
+            <Badge label={selectedProject.status} tone="info" />
+            <button type="button" class="project-edit" onclick={() => startEditProject(selectedProject.id)}>Éditer</button>
+          </div>
         {/if}
       </header>
 
@@ -398,6 +485,53 @@
   }
 
   .project-list,
+  .project-form {
+    padding: var(--ehq-space-3);
+    border-radius: var(--ehq-radius-sm);
+    display: grid;
+    gap: var(--ehq-space-2);
+    margin-bottom: var(--ehq-space-3);
+  }
+
+  .project-form label {
+    display: grid;
+    gap: var(--ehq-space-1);
+  }
+
+  .project-form-actions,
+  .project-detail-actions {
+    display: flex;
+    gap: var(--ehq-space-2);
+    align-items: center;
+  }
+
+  .project-submit,
+  .project-cancel,
+  .project-edit {
+    min-height: 32px;
+    padding: 0 var(--ehq-space-3);
+    border: 1px solid var(--ehq-border);
+    border-radius: var(--ehq-radius-sm);
+    background: transparent;
+    color: var(--ehq-text);
+    font-family: var(--ehq-mono);
+    font-size: var(--ehq-type-label-size);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+
+  .project-submit {
+    border-color: var(--ehq-yellow);
+    background: var(--ehq-yellow);
+    color: var(--ehq-text-on-yellow);
+  }
+
+  .project-submit:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
   .project-detail {
     min-width: 0;
     border: 0;
@@ -460,7 +594,7 @@
     min-height: 34px;
     padding: 0 var(--ehq-space-3);
     font-family: var(--ehq-mono);
-    font-size: 10px;
+    font-size: var(--ehq-type-label-size);
     font-weight: var(--ehq-type-label-weight);
     text-transform: uppercase;
   }
@@ -477,7 +611,7 @@
   small {
     color: var(--ehq-text-muted);
     font-family: var(--ehq-mono);
-    font-size: 10px;
+    font-size: var(--ehq-type-label-size);
     font-weight: var(--ehq-type-label-weight);
     text-transform: uppercase;
   }
@@ -485,7 +619,7 @@
   h2 {
     margin-top: var(--ehq-space-1);
     font-weight: var(--ehq-type-heading-weight);
-    font-size: var(--ehq-h2);
+    font-size: var(--ehq-type-section-title-size);
   }
 
   .project-detail > header span,
@@ -493,9 +627,9 @@
   .state-copy span {
     color: var(--ehq-text-soft);
     font-family: var(--ehq-font);
-    font-size: 13px;
+    font-size: var(--ehq-type-ui-size);
     font-weight: var(--ehq-type-body-weight);
-    line-height: 1.5;
+    line-height: var(--ehq-type-ui-line);
   }
 
   .state-copy {

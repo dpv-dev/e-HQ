@@ -66,17 +66,17 @@
   p {
     color: var(--ehq-workspace-accent);
     font-family: var(--ehq-mono);
-    font-size: 11px;
+    font-size: var(--ehq-type-caption-size);
     letter-spacing: 0.16em;
     text-transform: uppercase;
   }
 
   h1 {
-    color: var(--ehq-text);
+    color: var(--ehq-type-page-title-color);
     font-family: var(--ehq-display);
-    font-size: clamp(28px, 4vw, 44px);
+    font-size: var(--ehq-type-page-title-size);
     font-weight: var(--ehq-type-display-weight);
-    line-height: 1.05;
+    line-height: var(--ehq-type-page-title-line);
     letter-spacing: 0;
   }
 
@@ -84,14 +84,14 @@
     max-width: 760px;
     color: var(--ehq-text-soft);
     font-family: var(--ehq-font);
-    font-size: 15px;
-    line-height: 1.5;
+    font-size: var(--ehq-type-ui-size);
+    line-height: var(--ehq-type-ui-line);
   }
 
   small {
     color: var(--ehq-text-muted);
     font-family: var(--ehq-mono);
-    font-size: 11px;
+    font-size: var(--ehq-type-caption-size);
   }
 
   .header-side {

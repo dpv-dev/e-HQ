@@ -157,20 +157,20 @@
   .config-panel p {
     margin: 0;
     color: var(--ehq-text-muted);
-    font-size: 10px;
+    font-size: var(--ehq-type-label-size);
     letter-spacing: 0.2em;
     text-transform: uppercase;
   }
 
   .config-panel h2 {
     margin: 0;
-    font-size: var(--ehq-h2);
+    font-size: var(--ehq-type-section-title-size);
   }
 
   .config-panel span {
     color: var(--ehq-text-soft);
-    font-size: 13px;
-    line-height: 1.5;
+    font-size: var(--ehq-type-ui-size);
+    line-height: var(--ehq-type-ui-line);
   }
 
   .state-copy {
@@ -184,8 +184,8 @@
 
   .state-copy span {
     color: var(--ehq-text-soft);
-    font-size: 13px;
-    line-height: 1.5;
+    font-size: var(--ehq-type-ui-size);
+    line-height: var(--ehq-type-ui-line);
   }
 
   .state-copy.error strong {

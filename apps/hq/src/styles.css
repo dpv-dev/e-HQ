@@ -15,11 +15,16 @@ body {
   background: var(--ehq-bg-main);
   color: var(--ehq-text);
   font-family: var(--ehq-font);
+  font-size: var(--ehq-type-ui-size);
+  font-weight: var(--ehq-type-body-weight);
+  line-height: var(--ehq-type-ui-line);
   -webkit-font-smoothing: antialiased;
 }
 
 button,
-input {
+input,
+select,
+textarea {
   font: inherit;
 }
 

@@ -1,5 +1,6 @@
 import type { OfficeBankAccount, OfficeBankImportBatch, OfficeBankReconciliationMatch, OfficeBankStatementLine, OfficeCashflowProjectionRow } from "@ehq/db";
 import { eofMoney, format as formatScaledUnits, roundRatioHalfUp } from "@ehq/domain-finance";
+import type { OfficeWriteExchangeRateRow } from "./allocations.js";
 import {
   type OfficePnlDataset,
   type OfficePnlFilters,
@@ -17,6 +18,7 @@ export interface OfficeAnalyticsDataset extends OfficePnlDataset {
   readonly bankStatementLines: readonly OfficeBankStatementLineRow[];
   readonly bankReconciliationMatches: readonly OfficeBankReconciliationMatchRow[];
   readonly cashflowProjectionRows: readonly OfficeCashflowProjectionRowInput[];
+  readonly exchangeRates: readonly OfficeWriteExchangeRateRow[];
 }
 
 export type OfficeBankAccountRow = Pick<
@@ -301,4 +303,51 @@ function toBasisPointValue(value: bigint): number {
   }
 
   return parseInt(value.toString(), 10);
+}
+
+const EXCHANGE_RATE_SCALE = 10_000_000_000n; // rateE10 stores rate × 10^10
+
+// Pick the exchange rate for a foreign currency into MUR effective on (or, failing that,
+// closest to) the given ISO date. Returns null when no MUR rate exists for the currency.
+export function pickMurExchangeRate(
+  fromCurrency: string,
+  occurredOn: string,
+  exchangeRates: readonly OfficeWriteExchangeRateRow[]
+): OfficeWriteExchangeRateRow | null {
+  const candidates = exchangeRates.filter(
+    (rate: OfficeWriteExchangeRateRow): boolean => rate.fromCurrency === fromCurrency && rate.toCurrency === "MUR"
+  );
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const onOrBefore = candidates.filter((rate: OfficeWriteExchangeRateRow): boolean => rate.effectiveDate <= occurredOn);
+  const pool = onOrBefore.length > 0 ? onOrBefore : candidates;
+  return pool.reduce(
+    (best: OfficeWriteExchangeRateRow | null, rate: OfficeWriteExchangeRateRow): OfficeWriteExchangeRateRow =>
+      best === null || rate.effectiveDate > best.effectiveDate ? rate : best,
+    null as OfficeWriteExchangeRateRow | null
+  );
+}
+
+// Convert a foreign-currency minor amount into MUR minor units using the office FX table.
+// Returns null when no applicable EUR→MUR (or other→MUR) rate is configured, so the caller
+// can surface a clear "fx_missing" issue instead of silently importing a wrong figure.
+export function convertMinorToMur(
+  amountMinor: bigint,
+  fromCurrency: string,
+  occurredOn: string,
+  exchangeRates: readonly OfficeWriteExchangeRateRow[]
+): bigint | null {
+  if (fromCurrency === "MUR") {
+    return amountMinor;
+  }
+
+  const rate = pickMurExchangeRate(fromCurrency, occurredOn, exchangeRates);
+  if (rate === null) {
+    return null;
+  }
+
+  const product = amountMinor * rate.rateE10;
+  return (product + EXCHANGE_RATE_SCALE / 2n) / EXCHANGE_RATE_SCALE; // round half-up
 }

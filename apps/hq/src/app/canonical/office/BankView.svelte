@@ -5,6 +5,7 @@
     Loader,
     Table,
     type TableRow,
+    type TableRowAction,
     type Tone
   } from "@ehq/ui";
   import {
@@ -13,8 +14,10 @@
     createLoadingState,
     createSuccessState,
     type ApiRequestState,
+    type CurrencyCode,
     type OfficeApiClient,
     type OfficeBankAccountSummary,
+    type OfficeBankAccountWriteRequest,
     type OfficeBankQualityResponse,
     type OfficeBankRawLine,
     type OfficeReconciliationCandidate,
@@ -27,6 +30,7 @@
     readonly client: OfficeApiClient;
     readonly workspaceId: string;
     readonly period: string;
+    readonly writesEnabled: boolean;
   }
 
   interface BankKpi {
@@ -57,6 +61,61 @@
   const reconciliationRows = $derived(readPageItems(reconciliationState));
   const bankKpis = $derived(createBankKpis(accountRows, qualityState));
   const accountTableRows = $derived(createAccountTableRows(accountRows));
+  const accountRowActions = $derived<readonly TableRowAction[]>([{ label: "Éditer", onAction: startEditAccount }]);
+
+  let bankFormName = $state("");
+  let bankFormLabel = $state("");
+  let bankFormCurrency = $state<CurrencyCode>("MUR");
+  let bankFormActive = $state(true);
+  let editingAccountId = $state<string | null>(null);
+
+  function accountWriteRequest(): OfficeBankAccountWriteRequest {
+    return {
+      workspaceId: props.workspaceId,
+      bankName: bankFormName.trim(),
+      accountLabel: bankFormLabel.trim(),
+      currency: bankFormCurrency,
+      active: bankFormActive
+    };
+  }
+
+  function resetAccountForm(): void {
+    editingAccountId = null;
+    bankFormName = "";
+    bankFormLabel = "";
+    bankFormCurrency = "MUR";
+    bankFormActive = true;
+  }
+
+  function startEditAccount(accountId: string): void {
+    const account = accountRows.find((row: OfficeBankAccountSummary): boolean => row.id === accountId);
+    if (account === undefined) {
+      return;
+    }
+    editingAccountId = account.id;
+    bankFormName = account.bankName;
+    bankFormLabel = account.accountLabel;
+    bankFormCurrency = account.currency;
+    bankFormActive = account.isActive;
+  }
+
+  async function submitAccountForm(): Promise<void> {
+    if (bankFormName.trim().length === 0 || bankFormLabel.trim().length === 0) {
+      return;
+    }
+    const accountId = editingAccountId;
+    try {
+      if (accountId === null) {
+        await props.client.createBankAccount(accountWriteRequest(), { idempotencyKey: crypto.randomUUID() });
+      } else {
+        await props.client.updateBankAccount(accountId, accountWriteRequest(), { idempotencyKey: crypto.randomUUID() });
+      }
+      resetAccountForm();
+      await loadBank();
+    } catch (error: unknown) {
+      accountsState = createErrorState<PageResult<OfficeBankAccountSummary>>(error);
+    }
+  }
   const rawTableRows = $derived(createRawTableRows(rawRows));
   const reconciliationTableRows = $derived(createReconciliationTableRows(reconciliationRows));
 
@@ -270,7 +329,37 @@
       <span class="ehq-type-body">{getErrorMessage(accountsState.error)}</span>
     </div>
   {:else}
-    <Table title="Bank accounts" columns={accountColumns} rows={accountTableRows} state={accountTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
+    <section class="bank-account-form ehq-edge-surface" aria-label={editingAccountId === null ? "Ajouter un compte bancaire" : "Éditer le compte bancaire"}>
+      <label>
+        <span class="ehq-type-label-mono">Banque</span>
+        <input type="text" bind:value={bankFormName} placeholder="MCB" />
+      </label>
+      <label>
+        <span class="ehq-type-label-mono">Libellé du compte</span>
+        <input type="text" bind:value={bankFormLabel} placeholder="MCB EUR" />
+      </label>
+      <label>
+        <span class="ehq-type-label-mono">Devise</span>
+        <select bind:value={bankFormCurrency}>
+          <option value="MUR">MUR</option>
+          <option value="EUR">EUR</option>
+          <option value="USD">USD</option>
+        </select>
+      </label>
+      <label class="bank-account-active">
+        <input type="checkbox" bind:checked={bankFormActive} />
+        <span class="ehq-type-label-mono">Actif</span>
+      </label>
+      <div class="bank-account-actions">
+        <button type="button" class="office-action ehq-type-heading primary" disabled={!props.writesEnabled} onclick={submitAccountForm}>
+          {editingAccountId === null ? "Ajouter le compte" : "Enregistrer"}
+        </button>
+        {#if editingAccountId !== null}
+          <button type="button" class="office-action ehq-type-heading" onclick={resetAccountForm}>Annuler</button>
+        {/if}
+      </div>
+    </section>
+    <Table title="Bank accounts" columns={accountColumns} rows={accountTableRows} state={accountTableRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={accountRowActions} />
     <Table title="Raw bank lines" columns={rawColumns} rows={rawTableRows} state={rawState.status === "loading" ? "loading" : rawState.status === "error" ? "error" : rawTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
     <Table title="Reconciliation candidates" columns={reconciliationColumns} rows={reconciliationTableRows} state={reconciliationState.status === "loading" ? "loading" : reconciliationState.status === "error" ? "error" : reconciliationTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
   {/if}
@@ -332,8 +421,8 @@
 
   .state-copy span {
     color: var(--ehq-text-soft);
-    font-size: 13px;
-    line-height: 1.5;
+    font-size: var(--ehq-type-ui-size);
+    line-height: var(--ehq-type-ui-line);
   }
 
   .state-copy.error strong {
@@ -350,5 +439,57 @@
     .kpi-grid {
       grid-template-columns: 1fr;
     }
+  }
+
+  .bank-account-form {
+    padding: var(--ehq-space-3);
+    border-radius: var(--ehq-radius-sm);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    gap: var(--ehq-space-3);
+  }
+
+  .bank-account-form label {
+    display: grid;
+    gap: var(--ehq-space-1);
+  }
+
+  .bank-account-active {
+    display: flex;
+    align-items: center;
+    gap: var(--ehq-space-1);
+  }
+
+  .bank-account-actions {
+    display: flex;
+    gap: var(--ehq-space-2);
+    margin-left: auto;
+  }
+
+  .office-action {
+    min-height: 38px;
+    padding: 0 var(--ehq-space-3);
+    border: 1px solid var(--ehq-border);
+    border-radius: var(--ehq-radius-sm);
+    background: transparent;
+    color: var(--ehq-text);
+    font-family: var(--ehq-font);
+    font-size: var(--ehq-type-action-size);
+    font-weight: var(--ehq-type-heading-weight);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+
+  .office-action.primary {
+    border-color: var(--ehq-yellow);
+    background: var(--ehq-yellow);
+    color: var(--ehq-text-on-yellow);
+  }
+
+  .office-action:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 </style>

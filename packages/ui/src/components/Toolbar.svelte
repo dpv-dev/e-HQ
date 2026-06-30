@@ -7,21 +7,47 @@
     readonly filters: readonly ToolbarFilter[];
     readonly actionLabel: string;
     readonly loading: boolean;
+    readonly onFilterSelect?: ((filter: ToolbarFilter) => void) | null;
+    readonly onActionSelect?: (() => void) | null;
   }
 
   const props: Props = $props();
+
+  function selectFilter(filter: ToolbarFilter): void {
+    if (filter.disabled || props.onFilterSelect === undefined || props.onFilterSelect === null) {
+      return;
+    }
+
+    props.onFilterSelect(filter);
+  }
+
+  function selectAction(): void {
+    if (props.onActionSelect === undefined || props.onActionSelect === null) {
+      return;
+    }
+
+    props.onActionSelect();
+  }
 </script>
 
 <section class="ehq-toolbar ehq-edge-surface" aria-label={props.label}>
   {#each props.filters as filter (filter.label)}
-    <button class="ehq-toolbar-filter" class:active={filter.active} type="button" disabled={filter.disabled}>
+    <button
+      class="ehq-toolbar-filter"
+      class:active={filter.active}
+      type="button"
+      disabled={filter.disabled}
+      aria-pressed={filter.active}
+      title={filter.title}
+      onclick={() => selectFilter(filter)}
+    >
       <span>{filter.label}</span>
       <strong>{filter.value}</strong>
     </button>
   {/each}
   {#if props.actionLabel.length > 0}
     <div class="action">
-      <Button label={props.actionLabel} variant="primary" size="small" type="button" disabled={false} loading={props.loading} locked={false} focus={false} ariaLabel={props.actionLabel} />
+      <Button label={props.actionLabel} variant="primary" size="small" type="button" disabled={false} loading={props.loading} locked={false} focus={false} ariaLabel={props.actionLabel} onclick={selectAction} />
     </div>
   {/if}
 </section>
@@ -64,7 +90,7 @@
   span {
     color: var(--ehq-text-muted);
     font-family: var(--ehq-mono);
-    font-size: 10px;
+    font-size: var(--ehq-type-label-size);
     font-weight: var(--ehq-type-label-weight);
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -72,7 +98,7 @@
 
   strong {
     font-family: var(--ehq-font);
-    font-size: 13px;
+    font-size: var(--ehq-type-ui-size);
     font-weight: var(--ehq-type-body-weight);
   }
 

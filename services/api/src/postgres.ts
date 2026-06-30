@@ -177,6 +177,11 @@ async function readOfficeDataset(pool: Pool): Promise<OfficeAnalyticsDataset> {
     "select id::text, workspace_id, account_id::text, period_month, expected_inflow_minor::text, expected_outflow_minor::text, expected_closing_balance_minor::text, currency from office_cashflow_projection_rows order by period_month, id",
     []
   );
+  const exchangeRates = await queryRows(
+    pool,
+    "select from_currency, to_currency, rate_e10::text, effective_date from exchange_rates order by effective_date, from_currency, to_currency",
+    []
+  );
 
   return {
     departments: departments.map(toOfficeDepartment),
@@ -191,7 +196,8 @@ async function readOfficeDataset(pool: Pool): Promise<OfficeAnalyticsDataset> {
     bankImportBatches: bankImportBatches.map(toOfficeBankImportBatch),
     bankStatementLines: bankStatementLines.map(toOfficeBankStatementLine),
     bankReconciliationMatches: bankReconciliationMatches.map(toOfficeBankReconciliationMatch),
-    cashflowProjectionRows: cashflowProjectionRows.map(toOfficeCashflowProjectionRow)
+    cashflowProjectionRows: cashflowProjectionRows.map(toOfficeCashflowProjectionRow),
+    exchangeRates: exchangeRates.map(toOfficeExchangeRate)
   };
 }
 
@@ -513,6 +519,15 @@ function toOfficeBankAccount(row: PgRow): OfficeAnalyticsDataset["bankAccounts"]
     currentBalanceMurMinor: nullableBigintCell(row, "current_balance_mur_minor"),
     isActive: booleanCell(row, "is_active"),
     balanceAsOf: nullableTimestampCell(row, "balance_as_of")
+  };
+}
+
+function toOfficeExchangeRate(row: PgRow): OfficeAnalyticsDataset["exchangeRates"][number] {
+  return {
+    fromCurrency: stringCell(row, "from_currency"),
+    toCurrency: stringCell(row, "to_currency"),
+    rateE10: bigintCell(row, "rate_e10"),
+    effectiveDate: dateCell(row, "effective_date")
   };
 }
 

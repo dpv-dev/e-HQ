@@ -9,10 +9,13 @@ import type {
   BankImportPreviewRequest,
   BankImportPreviewResponse,
   CashflowBucket,
+  OfficeCashflowImportRequest,
+  OfficeCashflowPreviewResponse,
   CashflowQuery,
   EntityId,
   OfficeBankAccountsQuery,
   OfficeBankAccountSummary,
+  OfficeBankAccountWriteRequest,
   OfficeBankQualityQuery,
   OfficeBankQualityResponse,
   OfficeBankRawLine,
@@ -49,7 +52,11 @@ import type {
   OfficeProjectPnlQuery,
   OfficeProjectsQuery,
   OfficeProjectSummary,
+  OfficeProjectWriteRequest,
   OfficeReconciliationApproveRequest,
+  OfficeReconciliationMatchRequest,
+  OfficeReconciliationLineRequest,
+  OfficeReconciliationCreateTransactionRequest,
   OfficeReconciliationCandidate,
   OfficeReconciliationsQuery,
   OfficeTransaction,
@@ -77,6 +84,16 @@ export interface OfficeApiClient {
     request: OfficeTransactionWriteRequest,
     options: WriteRequestOptions
   ) => Promise<ApiMutationReceipt>;
+  readonly cancelTransaction: (
+    transactionId: EntityId,
+    request: { readonly workspaceId: EntityId },
+    options: WriteRequestOptions
+  ) => Promise<ApiMutationReceipt>;
+  readonly validateTransaction: (
+    transactionId: EntityId,
+    request: { readonly workspaceId: EntityId },
+    options: WriteRequestOptions
+  ) => Promise<ApiMutationReceipt>;
   readonly getPlanComptable: (query: OfficePlanComptableQuery) => Promise<readonly OfficePlanComptableNode[]>;
   readonly createPlanComptableNode: (
     request: OfficePlanComptableWriteRequest,
@@ -95,6 +112,11 @@ export interface OfficeApiClient {
     request: BankImportConfirmRequest,
     options: WriteRequestOptions
   ) => Promise<BankImportConfirmResponse>;
+  readonly reverseBankImportBatch: (
+    batchId: EntityId,
+    request: { readonly workspaceId: EntityId },
+    options: WriteRequestOptions
+  ) => Promise<ApiMutationReceipt>;
   readonly listReconciliations: (
     query: OfficeReconciliationsQuery
   ) => Promise<PageResult<OfficeReconciliationCandidate>>;
@@ -102,7 +124,25 @@ export interface OfficeApiClient {
     request: OfficeReconciliationApproveRequest,
     options: WriteRequestOptions
   ) => Promise<ApiMutationReceipt>;
+  readonly matchReconciliation: (
+    request: OfficeReconciliationMatchRequest,
+    options: WriteRequestOptions
+  ) => Promise<ApiMutationReceipt>;
+  readonly unmatchReconciliation: (
+    request: OfficeReconciliationLineRequest,
+    options: WriteRequestOptions
+  ) => Promise<ApiMutationReceipt>;
+  readonly rejectReconciliation: (
+    request: OfficeReconciliationLineRequest,
+    options: WriteRequestOptions
+  ) => Promise<ApiMutationReceipt>;
+  readonly createTransactionFromBankLine: (
+    request: OfficeReconciliationCreateTransactionRequest,
+    options: WriteRequestOptions
+  ) => Promise<ApiMutationReceipt>;
   readonly getCashflow: (query: CashflowQuery) => Promise<readonly CashflowBucket[]>;
+  readonly previewCashflowImport: (request: OfficeCashflowImportRequest, options: WriteRequestOptions) => Promise<OfficeCashflowPreviewResponse>;
+  readonly confirmCashflowImport: (request: OfficeCashflowImportRequest, options: WriteRequestOptions) => Promise<ApiMutationReceipt>;
   readonly listAuditLog: (query: AuditLogQuery) => Promise<PageResult<AuditLogEntry>>;
   readonly listPartners: (query: OfficePartnersQuery) => Promise<PageResult<OfficePartnerListItem>>;
   readonly getPartnerRecord: (partnerId: EntityId, query: OfficePartnerRecordQuery) => Promise<OfficePartnerRecord>;
@@ -133,6 +173,8 @@ export interface OfficeApiClient {
     options: WriteRequestOptions
   ) => Promise<ApiMutationReceipt>;
   readonly listProjects: (query: OfficeProjectsQuery) => Promise<PageResult<OfficeProjectSummary>>;
+  readonly createProject: (request: OfficeProjectWriteRequest, options: WriteRequestOptions) => Promise<ApiMutationReceipt>;
+  readonly updateProject: (projectId: EntityId, request: OfficeProjectWriteRequest, options: WriteRequestOptions) => Promise<ApiMutationReceipt>;
   readonly listProjectCoherenceViolations: (
     projectId: EntityId,
     query: OfficeProjectCoherenceViolationsQuery
@@ -141,6 +183,8 @@ export interface OfficeApiClient {
   readonly checkIntegrity: (query: OfficeIntegrityCheckQuery) => Promise<OfficeIntegrityCheckAllResponse>;
   readonly getBankQuality: (query: OfficeBankQualityQuery) => Promise<OfficeBankQualityResponse>;
   readonly listBankAccounts: (query: OfficeBankAccountsQuery) => Promise<PageResult<OfficeBankAccountSummary>>;
+  readonly createBankAccount: (request: OfficeBankAccountWriteRequest, options: WriteRequestOptions) => Promise<ApiMutationReceipt>;
+  readonly updateBankAccount: (accountId: EntityId, request: OfficeBankAccountWriteRequest, options: WriteRequestOptions) => Promise<ApiMutationReceipt>;
   readonly listBankRawLines: (query: OfficeBankRawLinesQuery) => Promise<PageResult<OfficeBankRawLine>>;
   readonly getVatReport: (query: OfficeVatQuery) => Promise<OfficeVatReport>;
 }
@@ -152,22 +196,30 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
     getDashboard: (query: OfficeDashboardQuery): Promise<OfficeDashboardResponse> =>
       transport.get<OfficeDashboardResponse>("dashboard", {
         workspaceId: query.workspaceId,
-        period: query.period
+        period: query.period,
+        dateFrom: query.dateFrom ?? null,
+        dateTo: query.dateTo ?? null
       }),
     getGlobalPnl: (query: OfficeGlobalPnlQuery): Promise<OfficeGlobalPnl> =>
       transport.get<OfficeGlobalPnl>("pl/global", {
         workspaceId: query.workspaceId,
-        period: query.period
+        period: query.period,
+        dateFrom: query.dateFrom ?? null,
+        dateTo: query.dateTo ?? null
       }),
     getDepartmentPnl: (departmentId: EntityId, query: OfficeDepartmentPnlQuery): Promise<OfficeDepartmentPnl> =>
       transport.get<OfficeDepartmentPnl>(`pl/department/${encodePathSegment(departmentId)}`, {
         workspaceId: query.workspaceId,
-        period: query.period
+        period: query.period,
+        dateFrom: query.dateFrom ?? null,
+        dateTo: query.dateTo ?? null
       }),
     getDivisionPnl: (query: OfficeDivisionPnlQuery): Promise<PageResult<OfficeDivisionPnl>> =>
       transport.get<PageResult<OfficeDivisionPnl>>("pl/division", {
         workspaceId: query.workspaceId,
-        period: query.period
+        period: query.period,
+        dateFrom: query.dateFrom ?? null,
+        dateTo: query.dateTo ?? null
       }),
     getPnlProjection: async (query: OfficePnlProjectionQuery): Promise<readonly OfficePnlProjectionRow[]> => {
       if (query.departmentId === null) {
@@ -193,6 +245,8 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
       transport.get<PageResult<OfficeTransaction>>("transactions", {
         workspaceId: query.workspaceId,
         period: query.period,
+        dateFrom: query.dateFrom ?? null,
+        dateTo: query.dateTo ?? null,
         accountId: query.accountId,
         departmentId: query.departmentId,
         divisionId: query.divisionId,
@@ -215,6 +269,26 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
     ): Promise<ApiMutationReceipt> =>
       transport.patch<ApiMutationReceipt>(
         `transactions/${encodePathSegment(transactionId)}`,
+        request,
+        options.idempotencyKey
+      ),
+    cancelTransaction: (
+      transactionId: EntityId,
+      request: { readonly workspaceId: EntityId },
+      options: WriteRequestOptions
+    ): Promise<ApiMutationReceipt> =>
+      transport.patch<ApiMutationReceipt>(
+        `transactions/${encodePathSegment(transactionId)}/cancel`,
+        request,
+        options.idempotencyKey
+      ),
+    validateTransaction: (
+      transactionId: EntityId,
+      request: { readonly workspaceId: EntityId },
+      options: WriteRequestOptions
+    ): Promise<ApiMutationReceipt> =>
+      transport.patch<ApiMutationReceipt>(
+        `transactions/${encodePathSegment(transactionId)}/validate`,
         request,
         options.idempotencyKey
       ),
@@ -248,6 +322,16 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
       options: WriteRequestOptions
     ): Promise<BankImportConfirmResponse> =>
       transport.post<BankImportConfirmResponse>("bank-import/confirm", request, options.idempotencyKey),
+    reverseBankImportBatch: (
+      batchId: EntityId,
+      request: { readonly workspaceId: EntityId },
+      options: WriteRequestOptions
+    ): Promise<ApiMutationReceipt> =>
+      transport.post<ApiMutationReceipt>(
+        `bank-import/batches/${encodePathSegment(batchId)}/reverse`,
+        request,
+        options.idempotencyKey
+      ),
     listReconciliations: (
       query: OfficeReconciliationsQuery
     ): Promise<PageResult<OfficeReconciliationCandidate>> =>
@@ -255,6 +339,8 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
         workspaceId: query.workspaceId,
         accountId: query.accountId,
         period: query.period,
+        dateFrom: query.dateFrom ?? null,
+        dateTo: query.dateTo ?? null,
         status: query.status,
         cursor: query.cursor,
         limit: query.limit
@@ -264,6 +350,26 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
       options: WriteRequestOptions
     ): Promise<ApiMutationReceipt> =>
       transport.post<ApiMutationReceipt>("reconciliations/approve", request, options.idempotencyKey),
+    matchReconciliation: (
+      request: OfficeReconciliationMatchRequest,
+      options: WriteRequestOptions
+    ): Promise<ApiMutationReceipt> =>
+      transport.post<ApiMutationReceipt>("reconciliations/match", request, options.idempotencyKey),
+    unmatchReconciliation: (
+      request: OfficeReconciliationLineRequest,
+      options: WriteRequestOptions
+    ): Promise<ApiMutationReceipt> =>
+      transport.post<ApiMutationReceipt>("reconciliations/unmatch", request, options.idempotencyKey),
+    rejectReconciliation: (
+      request: OfficeReconciliationLineRequest,
+      options: WriteRequestOptions
+    ): Promise<ApiMutationReceipt> =>
+      transport.post<ApiMutationReceipt>("reconciliations/reject", request, options.idempotencyKey),
+    createTransactionFromBankLine: (
+      request: OfficeReconciliationCreateTransactionRequest,
+      options: WriteRequestOptions
+    ): Promise<ApiMutationReceipt> =>
+      transport.post<ApiMutationReceipt>("reconciliations/create-transaction", request, options.idempotencyKey),
     getCashflow: (query: CashflowQuery): Promise<readonly CashflowBucket[]> =>
       transport.get<readonly CashflowBucket[]>("cashflow", {
         workspaceId: query.workspaceId,
@@ -271,6 +377,10 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
         to: query.to,
         accountId: query.accountId
       }),
+    previewCashflowImport: (request: OfficeCashflowImportRequest, options: WriteRequestOptions): Promise<OfficeCashflowPreviewResponse> =>
+      transport.post<OfficeCashflowPreviewResponse>("cashflow/preview", request, options.idempotencyKey),
+    confirmCashflowImport: (request: OfficeCashflowImportRequest, options: WriteRequestOptions): Promise<ApiMutationReceipt> =>
+      transport.post<ApiMutationReceipt>("cashflow/confirm", request, options.idempotencyKey),
     listAuditLog: (query: AuditLogQuery): Promise<PageResult<AuditLogEntry>> =>
       transport.get<PageResult<AuditLogEntry>>("audit-log", {
         workspaceId: query.workspaceId,
@@ -285,6 +395,8 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
       transport.get<PageResult<OfficePartnerListItem>>("partners", {
         workspaceId: query.workspaceId,
         period: query.period,
+        dateFrom: query.dateFrom ?? null,
+        dateTo: query.dateTo ?? null,
         facet: query.facet,
         cursor: query.cursor,
         limit: query.limit
@@ -296,7 +408,9 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
     getPartnerPnl: (partnerId: EntityId, query: OfficePartnerDetailQuery): Promise<OfficePartnerPnl> =>
       transport.get<OfficePartnerPnl>(`pl/partner/${encodePathSegment(partnerId)}`, {
         workspaceId: query.workspaceId,
-        period: query.period
+        period: query.period,
+        dateFrom: query.dateFrom ?? null,
+        dateTo: query.dateTo ?? null
       }),
     listPartnerClassificationSuggestions: (
       partnerId: EntityId,
@@ -356,6 +470,10 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
         cursor: query.cursor,
         limit: query.limit
       }),
+    createProject: (request: OfficeProjectWriteRequest, options: WriteRequestOptions): Promise<ApiMutationReceipt> =>
+      transport.post<ApiMutationReceipt>("projects", request, options.idempotencyKey),
+    updateProject: (projectId: EntityId, request: OfficeProjectWriteRequest, options: WriteRequestOptions): Promise<ApiMutationReceipt> =>
+      transport.patch<ApiMutationReceipt>(`projects/${encodePathSegment(projectId)}`, request, options.idempotencyKey),
     listProjectCoherenceViolations: (
       projectId: EntityId,
       query: OfficeProjectCoherenceViolationsQuery
@@ -371,7 +489,9 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
     getProjectPnl: (projectId: EntityId, query: OfficeProjectPnlQuery): Promise<OfficeProjectPnl> =>
       transport.get<OfficeProjectPnl>(`pl/project/${encodePathSegment(projectId)}`, {
         workspaceId: query.workspaceId,
-        period: query.period
+        period: query.period,
+        dateFrom: query.dateFrom ?? null,
+        dateTo: query.dateTo ?? null
       }),
     checkIntegrity: (query: OfficeIntegrityCheckQuery): Promise<OfficeIntegrityCheckAllResponse> =>
       transport.get<OfficeIntegrityCheckAllResponse>("integrity/check-all", {
@@ -387,6 +507,10 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
         workspaceId: query.workspaceId,
         limit: query.limit
       }),
+    createBankAccount: (request: OfficeBankAccountWriteRequest, options: WriteRequestOptions): Promise<ApiMutationReceipt> =>
+      transport.post<ApiMutationReceipt>("bank/accounts", request, options.idempotencyKey),
+    updateBankAccount: (accountId: EntityId, request: OfficeBankAccountWriteRequest, options: WriteRequestOptions): Promise<ApiMutationReceipt> =>
+      transport.patch<ApiMutationReceipt>(`bank/accounts/${encodePathSegment(accountId)}`, request, options.idempotencyKey),
     listBankRawLines: (query: OfficeBankRawLinesQuery): Promise<PageResult<OfficeBankRawLine>> =>
       transport.get<PageResult<OfficeBankRawLine>>("bank/raw", {
         workspaceId: query.workspaceId,

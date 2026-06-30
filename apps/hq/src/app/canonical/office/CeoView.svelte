@@ -58,7 +58,7 @@
   async function loadCeo(): Promise<void> {
     dashboardState = createLoadingState<OfficeDashboardResponse>();
     globalPnlState = createLoadingState<OfficeGlobalPnl>();
-    divisionState = createLoadingState<PageResult<DivisionPnl>>();
+    divisionState = createLoadingState<PageResult<OfficeDivisionPnl>>();
 
     try {
       const [dashboard, globalPnl, divisions] = await Promise.all([
@@ -267,8 +267,8 @@
 
   .state-copy span {
     color: var(--ehq-text-soft);
-    font-size: 13px;
-    line-height: 1.5;
+    font-size: var(--ehq-type-ui-size);
+    line-height: var(--ehq-type-ui-line);
   }
 
   .state-copy.error strong {

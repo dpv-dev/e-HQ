@@ -52,7 +52,7 @@
   strong {
     display: block;
     font-family: var(--ehq-font);
-    font-size: 13px;
+    font-size: var(--ehq-type-ui-size);
     font-weight: var(--ehq-type-heading-weight);
   }
 
@@ -60,7 +60,7 @@
     margin: var(--ehq-space-1) 0 0;
     color: var(--ehq-text-muted);
     font-family: var(--ehq-font);
-    font-size: 10px;
+    font-size: var(--ehq-type-label-size);
     font-weight: var(--ehq-type-body-weight);
   }
 

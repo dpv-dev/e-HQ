@@ -58,7 +58,7 @@
   }
 
   .eyebrow {
-    font-size: 10px;
+    font-size: var(--ehq-type-label-size);
   }
 
   .donut-ring {
@@ -99,7 +99,7 @@
   p {
     color: var(--ehq-text-soft);
     font-family: var(--ehq-font);
-    font-size: 13px;
+    font-size: var(--ehq-type-ui-size);
     font-weight: var(--ehq-type-body-weight);
   }
 </style>

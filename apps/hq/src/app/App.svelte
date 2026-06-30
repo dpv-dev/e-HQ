@@ -12,13 +12,16 @@
     resolveConsoleRouteForWorkspace,
     resolveConsoleTarget,
     type AppRoute
-  } from "./routes";
-  import { restoreSupabaseAuthSession, signOutOfSupabase, subscribeToSupabaseAuthSession } from "./supabase";
+  } from "./routes.js";
+  import { normalizeRoutePath } from "./route-utils.js";
+  import { restoreSupabaseAuthSession, signOutOfSupabase, subscribeToSupabaseAuthSession } from "./supabase.js";
 
   let route = $state<AppRoute>("/");
   let session = $state<AuthSession | null>(null);
+  let isRestoringSession = $state<boolean>(false);
   let initialWorkspaceId = $state<WorkspaceAppId>("command-center");
   let initialPageId = $state<PlatformPageId | null>(null);
+  let loginNextRoute = $state<AppRoute | null>(null);
 
   const navigate = (nextRoute: AppRoute): void => {
     window.history.pushState({}, "", nextRoute);
@@ -27,6 +30,67 @@
 
   const setSession = (nextSession: AuthSession): void => {
     session = nextSession;
+  };
+
+  const readLoginNextRoute = (): AppRoute | null => {
+    const params = new URLSearchParams(window.location.search);
+    const rawNextRoute = params.get("next");
+
+    if (rawNextRoute === null) {
+      return null;
+    }
+
+    if (rawNextRoute === "") {
+      return null;
+    }
+
+    const nextRoute = normalizeRoutePath(rawNextRoute);
+
+    if (nextRoute === "/") {
+      return null;
+    }
+
+    if (nextRoute === "/login") {
+      return null;
+    }
+
+    return nextRoute as AppRoute;
+  };
+
+  const resolveWorkspaceFromConsoleRoute = (consoleRoute: AppRoute): WorkspaceAppId => {
+    const exactMatch = resolveConsoleTarget(consoleRoute);
+
+    if (exactMatch !== null) {
+      return exactMatch.workspaceId;
+    }
+
+    if (consoleRoute.startsWith("/console/office")) {
+      return "office";
+    }
+
+    if (consoleRoute.startsWith("/console/distribution")) {
+      return "distribution";
+    }
+
+    return "command-center";
+  };
+
+  const syncWorkspaceFromRoute = (nextRoute: AppRoute): void => {
+    const consoleTarget = resolveConsoleTarget(nextRoute);
+
+    if (consoleTarget !== null) {
+      initialWorkspaceId = consoleTarget.workspaceId;
+      return;
+    }
+
+    if (nextRoute.startsWith("/console/")) {
+      initialWorkspaceId = resolveWorkspaceFromConsoleRoute(nextRoute);
+      return;
+    }
+
+    if (nextRoute !== "/app") {
+      initialWorkspaceId = "command-center";
+    }
   };
 
   const clearSessionState = (): void => {
@@ -71,35 +135,61 @@
   onMount((): (() => void) => {
     let cancelled = false;
     route = readRouteFromLocation();
+    loginNextRoute = route === "/login" ? readLoginNextRoute() : null;
     const target = resolveConsoleTarget(route);
     if (target !== null) {
       initialWorkspaceId = target.workspaceId;
-      initialPageId = target.pageId;
+      initialPageId = target.pageId ?? null;
     } else if (route !== "/app") {
-      initialWorkspaceId = "command-center";
+      syncWorkspaceFromRoute(route);
       initialPageId = null;
+    }
+
+    if (session === null && route === "/login" && loginNextRoute !== null) {
+      initialWorkspaceId = resolveWorkspaceFromConsoleRoute(loginNextRoute);
     }
 
     const handlePopState = (): void => {
       route = readRouteFromLocation();
+      loginNextRoute = route === "/login" ? readLoginNextRoute() : null;
       const popTarget = resolveConsoleTarget(route);
       if (popTarget !== null) {
         initialWorkspaceId = popTarget.workspaceId;
-        initialPageId = popTarget.pageId;
+        initialPageId = popTarget.pageId ?? null;
       } else if (route !== "/app") {
-        initialWorkspaceId = "command-center";
+        syncWorkspaceFromRoute(route);
         initialPageId = null;
+      }
+
+      if (route !== "/login") {
+        if (route.startsWith("/console/") && session === null && !isRestoringSession) {
+          void restoreSession();
+        }
+
+        return;
+      }
+
+      if (session === null) {
+        initialWorkspaceId = resolveWorkspaceFromConsoleRoute("/console/office/dashboard");
       }
     };
 
     const restoreSession = async (): Promise<void> => {
+      isRestoringSession = true;
+
       try {
         const restoredSession = await restoreSupabaseAuthSession();
         if (!cancelled && restoredSession !== null) {
           session = restoredSession;
+
+          if (route === "/login" && loginNextRoute !== null) {
+            navigate(loginNextRoute);
+          }
         }
       } catch (error: unknown) {
         console.error("Supabase session restore failed.", { error });
+      } finally {
+        isRestoringSession = false;
       }
     };
 
@@ -110,6 +200,10 @@
       }
 
       session = nextSession;
+
+      if (route === "/login" && loginNextRoute !== null) {
+        navigate(loginNextRoute);
+      }
     });
 
     void restoreSession();
@@ -124,8 +218,8 @@
 </script>
 
 {#if route === "/login"}
-  <LoginPage onLogin={setSession} onNavigate={navigate} />
-{:else if session !== null && (route === "/app" || route.startsWith("/console/"))}
+  <LoginPage onLogin={setSession} onNavigate={navigate} nextRoute={loginNextRoute} />
+{:else if session !== null && (route === "/app" || route === "/console" || route.startsWith("/console/"))}
   <PlatformShell
     initialWorkspaceId={initialWorkspaceId}
     initialPageId={initialPageId}
@@ -135,6 +229,26 @@
   />
 {:else if route === "/design"}
   <DesignSystemPage onNavigate={navigate} />
+{:else if isRestoringSession && (route === "/app" || route.startsWith("/console/"))}
+  <main class="auth-recovery">
+    <p>Restoring your session…</p>
+  </main>
 {:else}
-  <LandingPage session={session} onLogin={setSession} onNavigate={navigate} onOpenWorkspace={openWorkspace} />
+  <LandingPage session={session} onLogin={setSession} onLogout={clearSession} onNavigate={navigate} onOpenWorkspace={openWorkspace} />
 {/if}
+
+<style>
+  .auth-recovery {
+    min-height: 100dvh;
+    display: grid;
+    place-items: center;
+    background: var(--ehq-bg-main);
+    color: var(--ehq-text);
+  }
+
+  .auth-recovery p {
+    margin: 0;
+    font-family: var(--ehq-mono);
+    font-size: 0.95rem;
+  }
+</style>

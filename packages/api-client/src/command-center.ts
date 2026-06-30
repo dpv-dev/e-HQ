@@ -2,6 +2,7 @@ import { createRestTransport, encodePathSegment } from "./transport.js";
 import type {
   ApiClientConfig,
   ApiMutationReceipt,
+  CommandCenterNotificationsResponse,
   CommandCenterIntegrationToggleRequest,
   CommandCenterSettingUpdateRequest,
   CommandCenterUserPermissionUpdateRequest,
@@ -22,6 +23,7 @@ export interface CommandCenterApiClient {
     options: { readonly idempotencyKey: string }
   ) => Promise<ApiMutationReceipt>;
   readonly getStatus: (query: CommandCenterWorkspaceQuery) => Promise<{ readonly writesEnabled: boolean }>;
+  readonly listNotifications: (query: CommandCenterWorkspaceQuery) => Promise<CommandCenterNotificationsResponse>;
 }
 
 export function createCommandCenterApiClient(config: ApiClientConfig): CommandCenterApiClient {
@@ -52,6 +54,10 @@ export function createCommandCenterApiClient(config: ApiClientConfig): CommandCe
       ),
     getStatus: (query: CommandCenterWorkspaceQuery): Promise<{ readonly writesEnabled: boolean }> =>
       transport.get<{ readonly writesEnabled: boolean }>("status", {
+        workspaceId: query.workspaceId
+      }),
+    listNotifications: (query: CommandCenterWorkspaceQuery): Promise<CommandCenterNotificationsResponse> =>
+      transport.get<CommandCenterNotificationsResponse>("notifications", {
         workspaceId: query.workspaceId
       })
   };

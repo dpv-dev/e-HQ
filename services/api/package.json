@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc -b --pretty false",
     "check": "tsc -b --pretty false",
-    "build:deploy": "esbuild src/server.ts --bundle --platform=node --format=esm --target=node18 --external:pg --external:pg-pool --external:pg-protocol --outfile=deploy/server.bundle.js",
+    "build:deploy": "esbuild src/server.ts --bundle --platform=node --format=esm --target=node20 --external:pg --external:pg-pool --external:pg-protocol --outfile=deploy/server.bundle.js",
     "phase-e:parity": "node dist/phase-e-parity.js",
     "start": "node dist/server.js",
     "smoke": "node dist/smoke.js",
@@ -21,6 +21,8 @@
     "@ehq/domain-distribution": "workspace:*",
     "@ehq/domain-finance": "workspace:*",
     "@ehq/domain-office": "workspace:*",
+    "@supabase/server": "^1.2.0",
+    "@supabase/supabase-js": "^2.108.2",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.12.26",
     "jose": "^6.2.3",

@@ -41,10 +41,12 @@ export type {
   TableCell,
   TableColumn,
   TableRow,
+  TableRowAction,
   TableState,
   Tone,
   ToolbarFilter,
   WorkspaceKind,
+  WorkspaceNavGroup,
   WorkspaceNavItem
 } from "./components/types.js";
 

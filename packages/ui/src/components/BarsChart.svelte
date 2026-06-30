@@ -58,7 +58,7 @@
   }
 
   .eyebrow {
-    font-size: 10px;
+    font-size: var(--ehq-type-label-size);
   }
 
   .bars-frame {
@@ -107,7 +107,7 @@
     min-width: 0;
     color: var(--ehq-text-muted);
     font-family: var(--ehq-mono);
-    font-size: 10px;
+    font-size: var(--ehq-type-label-size);
     font-weight: var(--ehq-type-label-weight);
     line-height: 1.25;
     overflow-wrap: anywhere;

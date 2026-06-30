@@ -17,8 +17,9 @@ Entreprise). It contains four frontend apps — **HQ** (front door / hub),
 **Office** (finance), **Distribution** (music business), and **Command Center**
 (admin) — all sitting on one shared backend.
 
-WordPress is optional infrastructure, **not** the heart. The heart is a shared,
-typed financial/domain engine that every UI consumes through typed APIs.
+The production stack is **Supabase Auth + Hono API + Supabase Postgres**. The
+heart is a shared, typed financial/domain engine that every UI consumes through
+typed APIs.
 
 **Prime directive — calculate once, consume everywhere.**
 `open_recoupments`, splits, allocations, VAT, P&L, and royalties are computed in
@@ -33,32 +34,33 @@ same function.
 **Exactly one owner per fact, always.** This single rule is what keeps the
 system from drifting into a split-brain where two stores disagree.
 
-Current data strategy (we keep the data — we upgrade the access):
+Current data strategy (same product, new implementation):
 
 ```
-Existing WordPress / Office / Distribution DB   ← source of truth (for now)
+Supabase Auth + Supabase Postgres              ← source of truth
         ↓
-New typed API layer (services/api)
+Typed Hono API layer (services/api)
         ↓
 Shared financial engine (packages/domain-*)
         ↓
-New apps (HQ / Office / Distribution / Command Center)
+Consolidated app (HQ / Office / Distribution / Command Center)
 ```
 
 Hard rules:
 
-- **No app or frontend touches legacy tables directly.** All access flows
+- **No app or frontend touches tables directly.** All access flows
   through `services/api` → typed repositories → domain engine.
-- **Do not stand up a second canonical store.** Until a table is formally
-  migrated, the legacy DB owns it. Read models and projections are *derived and
-  disposable* — never canonical, always regenerable.
+- **Do not stand up a second canonical store.** Supabase Postgres owns runtime
+  data. Read models and projections are *derived and disposable* — never
+  canonical, always regenerable.
+- **e-hq.eeee.mu is a product reference, not a runtime backend.** Its Office and
+  Distribution screens define the pages, options, actions, templates, and UX
+  parity target for `app.eeee.mu`; the implementation is Supabase/Hono.
 - **Imported financial/contract data is never mutated in place.** Corrections
   are written as **audited override records**, never destructive edits. This is
-  the guardrail against split-brain between the legacy DB and any downstream
-  service.
-- **The future Postgres migration is controlled and table-by-table**, only once
-  a model is proven. Never a blind rebuild. "Same database: yes. Same old
-  architecture: no."
+  the guardrail against split-brain inside the Supabase runtime.
+- **Postgres changes are controlled and table-by-table.** Never a blind rebuild.
+  "Same product: yes. Same old implementation: no."
 
 ---
 
@@ -121,9 +123,9 @@ These are not preferences. A change that breaks any of them is a defect.
 - **Every write endpoint validates with the shared schema (Zod)** before the
   engine is touched.
 - **Every endpoint has explicit permissions.** No implicit access.
-- **Legacy WordPress REST surfaces** — Office `eof/v1`, Distribution `erh/v1` —
-  are treated as legacy *data sources sitting behind the API layer*, never as an
-  app's direct backend.
+- **Compatibility route names** — Office `eof/v1`, Distribution `erh/v1` — are
+  Hono API surfaces over Supabase-backed repositories. They are not permission
+  to call WordPress or any legacy backend from the app.
 
 ---
 

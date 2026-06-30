@@ -20,20 +20,25 @@
     DonutChart,
     KPI,
     LineChart,
+    PageHeader,
     Panel,
     Table,
     Toolbar,
+    WorkspaceShell,
     type ChartPoint,
     type SelectOption,
     type TableColumn,
     type TableRow,
     type Tone,
-    type ToolbarFilter
+    type ToolbarFilter,
+    type WorkspaceNavGroup,
+    type WorkspaceNavItem
   } from "@ehq/ui";
   import { onMount } from "svelte";
   import { createShellApiClient } from "../../app-shell-data.js";
   import { getLatestDataPeriod, periodLabel } from "../../period-controls.js";
   import DevSessionMenu from "../../DevSessionMenu.svelte";
+  import { normalizeRoutePath } from "../../route-utils.js";
 
   type CommandCenterPageId = "dashboard" | "users" | "integrations" | "settings";
   type IntegrationStatus = "connected" | "idle" | "attention";
@@ -48,6 +53,12 @@
     readonly label: string;
     readonly title: string;
     readonly subtitle: string;
+  }
+
+  interface NavGroup {
+    readonly id: string;
+    readonly label: string;
+    readonly items: readonly NavItem[];
   }
 
   interface ReadinessItem {
@@ -96,32 +107,45 @@
   const client = createShellApiClient();
   const workspaceId = "eeee-mu";
   const period = getLatestDataPeriod();
-  const navItems: readonly NavItem[] = [
+  const navGroups: readonly NavGroup[] = [
     {
-      id: "dashboard",
-      label: "Dashboard",
-      title: "Command Center dashboard",
-      subtitle: "Ecosystem readiness, health signals, and action queue."
+      id: "overview",
+      label: "Command Center",
+      items: [
+        {
+          id: "dashboard",
+          label: "Dashboard",
+          title: "Command Center dashboard",
+          subtitle: "Ecosystem readiness, health signals, and action queue."
+        }
+      ]
     },
     {
-      id: "users",
-      label: "Users & permissions",
-      title: "Users & permissions",
-      subtitle: "Allowed and denied app access from the shared auth model."
-    },
-    {
-      id: "integrations",
-      label: "Integrations",
-      title: "Integrations",
-      subtitle: "WordPress, MCP, and bank connector status."
-    },
-    {
-      id: "settings",
-      label: "Settings",
-      title: "Settings",
-      subtitle: "Workspace preferences for the admin and supervision surface."
+      id: "administration",
+      label: "Administration",
+      items: [
+        {
+          id: "users",
+          label: "Users & permissions",
+          title: "Users & permissions",
+          subtitle: "Allowed and denied app access from the shared auth model."
+        },
+        {
+          id: "integrations",
+          label: "Integrations",
+          title: "Integrations",
+          subtitle: "Supabase runtime, MCP, and bank connector status."
+        },
+        {
+          id: "settings",
+          label: "Settings",
+          title: "Settings",
+          subtitle: "Workspace preferences for the admin and supervision surface."
+        }
+      ]
     }
   ];
+  const navItems: readonly NavItem[] = navGroups.flatMap((group: NavGroup): readonly NavItem[] => group.items);
 
   const actionColumns: readonly TableColumn[] = [
     { label: "Action", align: "left", sortable: true },
@@ -158,32 +182,34 @@
     { label: "Office", value: "office" },
     { label: "Distribution", value: "distribution" }
   ];
+  let writesEnabled = $state(false);
+  let writeGateMessage = $state("Checking write gate.");
   const dashboardToolbar: readonly ToolbarFilter[] = [
-    { label: "Scope", value: "All apps", active: true, disabled: false },
-    { label: "Mode", value: "Read-only", active: false, disabled: false },
-    { label: "Period", value: periodLabel(period), active: false, disabled: false }
+    { label: "Scope", value: "All apps", active: true, disabled: false, actionId: "scope", title: "Open dashboard scope" },
+    { label: "Mode", value: "Read-only", active: false, disabled: false, actionId: "mode", title: "Refresh write gate" },
+    { label: "Period", value: periodLabel(period), active: false, disabled: false, actionId: "period", title: "Refresh readiness period" }
   ];
   const usersToolbar: readonly ToolbarFilter[] = [
-    { label: "Source", value: "@ehq/auth", active: true, disabled: false },
-    { label: "Denied cards", value: "Visible", active: false, disabled: false },
-    { label: "Hidden apps", value: "Never", active: false, disabled: false }
+    { label: "Source", value: "@ehq/auth", active: true, disabled: false, actionId: "source", title: "Show auth source" },
+    { label: "Denied cards", value: "Visible", active: false, disabled: false, actionId: "denied-cards", title: "Show denied card rule" },
+    { label: "Hidden apps", value: "Never", active: false, disabled: false, actionId: "hidden-apps", title: "Show hidden app policy" }
   ];
-  const integrationToolbar: readonly ToolbarFilter[] = [
-    { label: "Scope", value: "Platform", active: true, disabled: false },
-    { label: "Writes", value: "Enabled", active: false, disabled: false },
-    { label: "Network", value: "Status only", active: false, disabled: false }
-  ];
+  const integrationToolbar = $derived<readonly ToolbarFilter[]>([
+    { label: "Scope", value: "Platform", active: true, disabled: false, actionId: "scope", title: "Open integration scope" },
+    { label: "Writes", value: writesEnabled ? "Enabled" : "Disabled", active: writesEnabled, disabled: false, actionId: "writes", title: "Refresh write gate" },
+    { label: "Network", value: "Status only", active: false, disabled: false, actionId: "network", title: "Refresh API readiness" }
+  ]);
   const settingsToolbar: readonly ToolbarFilter[] = [
-    { label: "Workspace", value: "Command Center", active: true, disabled: false },
-    { label: "Theme", value: "Dark", active: false, disabled: false },
-    { label: "Release gate", value: "Manual", active: false, disabled: false }
+    { label: "Workspace", value: "Command Center", active: true, disabled: false, actionId: "workspace", title: "Open workspace settings" },
+    { label: "Theme", value: "Dark", active: false, disabled: false, actionId: "theme", title: "Persist theme review" },
+    { label: "Release gate", value: "Manual", active: false, disabled: false, actionId: "release-gate", title: "Persist release gate review" }
   ];
   const integrations: readonly IntegrationRow[] = [
     {
-      id: "wordpress",
-      connector: "WordPress e-hq",
-      kind: "REST / MCP",
-      scope: "Office · Distribution",
+      id: "supabase-runtime",
+      connector: "Supabase runtime",
+      kind: "Auth · Postgres · Hono",
+      scope: "All workspaces",
       status: "connected",
       action: "Manage"
     },
@@ -236,6 +262,23 @@
   ];
 
   let activePageId = $state<CommandCenterPageId>("dashboard");
+  const shellNavGroups = $derived<readonly WorkspaceNavGroup[]>(
+    navGroups.map((group: NavGroup): WorkspaceNavGroup => ({
+      id: group.id,
+      label: group.label,
+      items: group.items.map((item: NavItem): WorkspaceNavItem => ({
+        label: item.label,
+        href: item.id,
+        icon: "",
+        active: activePageId === item.id,
+        disabled: false,
+        badge: null
+      }))
+    }))
+  );
+  const handleShellNavigate = (href: string): void => {
+    selectPage(href as CommandCenterPageId);
+  };
   let selectedRole = $state("administrator");
   let inviteEmail = $state("new.user@eeee.mu");
   let workspaceName = $state("ë • Entreprise");
@@ -254,7 +297,7 @@
   const readinessItems = $derived(createReadinessItems(officeDashboardState, distributionDashboardState));
   const dashboardKpis = $derived(createDashboardKpis(permissionUsers, integrations));
   const usersKpis = $derived(createUsersKpis(permissionUsers));
-  const integrationKpis = $derived(createIntegrationKpis(integrations));
+  const integrationKpis = $derived(createIntegrationKpis(integrations, writesEnabled, writeGateMessage));
   const settingsKpis = $derived(createSettingsKpis(settingRows));
   const actionRows = $derived(createActionRows());
   const permissionRows = $derived(createPermissionRows(permissionUsers));
@@ -264,6 +307,7 @@
   onMount((): (() => void) => {
     syncPageFromLocation();
     window.addEventListener("popstate", syncPageFromLocation);
+    void loadWriteGate();
     void loadCommandReadiness();
 
     return (): void => {
@@ -294,6 +338,102 @@
     }
   }
 
+  async function loadWriteGate(): Promise<void> {
+    try {
+      const status = await client.commandCenter.getStatus({
+        workspaceId
+      });
+      writesEnabled = status.writesEnabled;
+      writeGateMessage = status.writesEnabled ? "writes enabled" : "enable writes";
+    } catch (error: unknown) {
+      writesEnabled = false;
+      writeGateMessage = errorMessage(error);
+    }
+  }
+
+  function selectDashboardToolbarFilter(filter: ToolbarFilter): void {
+    if (filter.actionId === "scope") {
+      selectPage("dashboard");
+      commandNotice = "Dashboard scope is set to all workspaces.";
+      return;
+    }
+
+    if (filter.actionId === "mode") {
+      void loadWriteGate();
+      commandNotice = "Write gate refresh requested.";
+      return;
+    }
+
+    if (filter.actionId === "period") {
+      void loadCommandReadiness();
+      commandNotice = `Readiness refresh requested for ${periodLabel(period)}.`;
+      return;
+    }
+
+    throw new Error(`Unknown dashboard toolbar action: ${filter.label}.`);
+  }
+
+  function selectUsersToolbarFilter(filter: ToolbarFilter): void {
+    if (filter.actionId === "source") {
+      commandNotice = "Permission source is the verified Supabase Auth session.";
+      return;
+    }
+
+    if (filter.actionId === "denied-cards") {
+      commandNotice = "Denied workspace cards remain visible on HQ.";
+      return;
+    }
+
+    if (filter.actionId === "hidden-apps") {
+      commandNotice = "Hidden app policy remains disabled; denied apps are never silently hidden.";
+      return;
+    }
+
+    throw new Error(`Unknown users toolbar action: ${filter.label}.`);
+  }
+
+  function selectIntegrationToolbarFilter(filter: ToolbarFilter): void {
+    if (filter.actionId === "scope") {
+      selectPage("integrations");
+      commandNotice = "Integration scope is platform-wide.";
+      return;
+    }
+
+    if (filter.actionId === "writes") {
+      void loadWriteGate();
+      commandNotice = "Write gate refresh requested.";
+      return;
+    }
+
+    if (filter.actionId === "network") {
+      void loadCommandReadiness();
+      commandNotice = "API readiness refresh requested.";
+      return;
+    }
+
+    throw new Error(`Unknown integration toolbar action: ${filter.label}.`);
+  }
+
+  function selectSettingsToolbarFilter(filter: ToolbarFilter): void {
+    if (filter.actionId === "workspace") {
+      selectPage("settings");
+      commandNotice = "Workspace settings are open.";
+      return;
+    }
+
+    if (filter.actionId === "theme") {
+      void persistCommandSetting("theme", { name: "dark-command-center" }, "reviewed");
+      return;
+    }
+
+    if (filter.actionId === "release-gate") {
+      void persistCommandSetting("release_gate", { mode: "manual" }, "reviewed");
+      return;
+    }
+
+    throw new Error(`Unknown settings toolbar action: ${filter.label}.`);
+  }
+
   $effect((): void => {
     if (!canUseCommandCenter) {
       redirectToHqLanding();
@@ -322,15 +462,25 @@
   }
 
   function readPageIdFromPath(pathname: string): CommandCenterPageId {
-    if (pathname.endsWith("/console/command-center/users")) {
+    const normalizedPath = normalizeRoutePath(pathname);
+
+    if (normalizedPath.endsWith("/console/command-center/users")) {
       return "users";
     }
 
-    if (pathname.endsWith("/console/command-center/integrations")) {
+    if (normalizedPath.endsWith("/console/dashboard")) {
+      return "dashboard";
+    }
+
+    if (normalizedPath.endsWith("/console/command-center-dashboard")) {
+      return "dashboard";
+    }
+
+    if (normalizedPath.endsWith("/console/command-center/integrations")) {
       return "integrations";
     }
 
-    if (pathname.endsWith("/console/command-center/settings")) {
+    if (normalizedPath.endsWith("/console/command-center/settings")) {
       return "settings";
     }
 
@@ -460,12 +610,22 @@
     ];
   }
 
-  function createIntegrationKpis(rows: readonly IntegrationRow[]): readonly CommandKpi[] {
+  function createIntegrationKpis(
+    rows: readonly IntegrationRow[],
+    remoteWritesEnabled: boolean,
+    remoteWriteGateMessage: string
+  ): readonly CommandKpi[] {
     return [
       { label: "Connectors", value: String(rows.length), detail: "status only", tone: "info", accent: true },
-      { label: "WordPress", value: "Connected", detail: "REST / MCP", tone: "success", accent: false },
+      { label: "Supabase", value: "Live", detail: "Auth + Postgres", tone: "success", accent: false },
       { label: "Banks", value: "2", detail: "Office import scope", tone: "info", accent: false },
-      { label: "Remote writes", value: "On", detail: "guarded by API audit", tone: "success", accent: false }
+      {
+        label: "Remote writes",
+        value: remoteWritesEnabled ? "On" : "Off",
+        detail: remoteWritesEnabled ? "guarded by API audit" : remoteWriteGateMessage,
+        tone: remoteWritesEnabled ? "success" : "warning",
+        accent: false
+      }
     ];
   }
 
@@ -662,28 +822,30 @@
     }
   }
 
-  async function saveSettingsReview(): Promise<void> {
+  async function persistCommandSetting(key: string, value: Readonly<Record<string, unknown>>, status: string): Promise<void> {
     commandBusy = true;
     try {
       const receipt = await client.commandCenter.updateSetting(
         {
           workspaceId,
-          key: "workspace_name",
-          value: {
-            name: workspaceName
-          },
-          status: "reviewed"
+          key,
+          value,
+          status
         },
         {
-          idempotencyKey: createCommandIdempotencyKey("command-center-setting")
+          idempotencyKey: createCommandIdempotencyKey(`command-center-setting-${key}`)
         }
       );
-      commandNotice = `Workspace setting persisted · audit ${receipt.auditEventId ?? "missing"}.`;
+      commandNotice = `${key} setting persisted · audit ${receipt.auditEventId ?? "missing"}.`;
     } catch (error: unknown) {
-      commandNotice = `Settings write failed · ${errorMessage(error)}.`;
+      commandNotice = `${key} setting write failed · ${errorMessage(error)}.`;
     } finally {
       commandBusy = false;
     }
+  }
+
+  async function saveSettingsReview(): Promise<void> {
+    await persistCommandSetting("workspace_name", { name: workspaceName }, "reviewed");
   }
 
   async function persistIntegrationStatus(integrationId: string, enabled: boolean, status: string): Promise<void> {
@@ -757,43 +919,35 @@
   <title>ë • Command Center</title>
 </svelte:head>
 
-<main class="command-shell">
-  <aside class="sidebar" aria-label="Command Center navigation">
-    <button class="brand" type="button" onclick={() => selectPage("dashboard")}>
-      <span>ë</span>
-      <strong>ë • command</strong>
-    </button>
-
-    <nav>
-      <h2>Command Center</h2>
-      {#each navItems as item (item.id)}
-        <button class="ehq-nav-fade-item ehq-edge-surface" class:active={activePageId === item.id} type="button" onclick={() => selectPage(item.id)}>
-          <span aria-hidden="true"></span>
-          {item.label}
-        </button>
-      {/each}
-    </nav>
-
-    <p class="system-status"><span aria-hidden="true"></span>{systemStatusLabel}</p>
-  </aside>
-
-  <section class="main-panel">
-    <header class="topbar">
-      <p><span>Command Center</span> / <strong>{activePage.label}</strong></p>
-      <label class="search">
-        <span>⌘K</span>
-        <input aria-label="Search Command Center" placeholder="user, connector, setting..." />
-      </label>
-      <button class="notification" type="button" aria-label="Notifications">3</button>
-      <DevSessionMenu {session} {onLogout} />
-    </header>
-
+<WorkspaceShell
+  workspace="command-center"
+  brandLabel="ë • command"
+  homeHref="/console/command-center/dashboard"
+  navLabel="Command Center navigation"
+  navItems={[]}
+  navGroups={shellNavGroups}
+  statusLabel="command-center"
+  statusValue={systemStatusLabel}
+  userInitial={session.initials}
+  userName={session.displayName}
+  userContext={session.roleLabel}
+  signOutHref="#"
+  onNavigate={handleShellNavigate}
+  onSignOut={onLogout}
+>
+  {#snippet footer()}
+    <DevSessionMenu {session} {onLogout} />
+  {/snippet}
     <div class="content">
-      <section class="page-head">
-        <p>Command Center</p>
-        <h1>{activePage.title}</h1>
-        <span>{activePage.subtitle}</span>
-      </section>
+      <PageHeader
+        workspace="command-center"
+        eyebrow="Command Center"
+        title={activePage.title}
+        description={activePage.subtitle}
+        meta=""
+        statusLabel=""
+        statusTone="muted"
+      />
 
       {#if commandNotice.length > 0}
         <p class="notice" role="status">{commandNotice}</p>
@@ -806,7 +960,7 @@
           <span>Command Center remains available from the unlocked administrator card.</span>
         </section>
       {:else if activePageId === "dashboard"}
-        <Toolbar label="Dashboard controls" filters={dashboardToolbar} actionLabel="" loading={false} />
+        <Toolbar label="Dashboard controls" filters={dashboardToolbar} actionLabel="" loading={false} onFilterSelect={selectDashboardToolbarFilter} />
 
         <section class="kpi-grid" aria-label="Command Center indicators">
           {#each dashboardKpis as kpi (kpi.label)}
@@ -842,7 +996,7 @@
           <Table title="Action list" columns={actionColumns} rows={actionRows} state="default" actionLabel="" />
         </section>
       {:else if activePageId === "users"}
-        <Toolbar label="Permission controls" filters={usersToolbar} actionLabel="" loading={false} />
+        <Toolbar label="Permission controls" filters={usersToolbar} actionLabel="" loading={false} onFilterSelect={selectUsersToolbarFilter} />
 
         <section class="kpi-grid" aria-label="Permission indicators">
           {#each usersKpis as kpi (kpi.label)}
@@ -866,7 +1020,7 @@
                 {/each}
               </select>
             </label>
-            <button class="command-action" type="button" disabled={commandBusy} onclick={requestAccessReview}>Prepare review</button>
+            <button class="command-action" type="button" disabled={commandBusy || !writesEnabled} title={writeGateMessage} onclick={requestAccessReview}>Prepare review</button>
           </section>
 
           <section class="locked-card-reference ehq-edge-surface" aria-label="Locked card rule">
@@ -887,7 +1041,7 @@
 
         <Table title="Members" columns={permissionColumns} rows={permissionRows} state="default" actionLabel="" />
       {:else if activePageId === "integrations"}
-        <Toolbar label="Integration controls" filters={integrationToolbar} actionLabel="" loading={false} />
+        <Toolbar label="Integration controls" filters={integrationToolbar} actionLabel="" loading={false} onFilterSelect={selectIntegrationToolbarFilter} />
 
         <section class="kpi-grid" aria-label="Integration indicators">
           {#each integrationKpis as kpi (kpi.label)}
@@ -897,19 +1051,19 @@
 
         <section class="integration-grid">
           <Panel
-            title="WordPress"
-            subtitle="Legacy data source status"
-            body="Office eof/v1 and Distribution erh/v1 stay behind the typed API boundary. This screen displays connector health only."
-            state="default"
+            title="Supabase runtime"
+            subtitle="Auth, Postgres, and Hono API"
+            body="Office eof/v1 and Distribution erh/v1 are compatibility route names on the new Hono API. The app does not use WordPress as a backend."
+            state={writesEnabled ? "default" : "locked"}
             primaryAction="Inspect"
             secondaryAction=""
-            onPrimaryAction={() => persistIntegrationStatus("wordpress", true, "connected")}
+            onPrimaryAction={() => persistIntegrationStatus("supabase-runtime", true, "connected")}
           />
           <Panel
             title="MCP"
             subtitle="Project-scoped tools"
             body="Enterprise context stays scoped to this repository. No global connector leak is introduced by the app shell."
-            state="default"
+            state={writesEnabled ? "default" : "locked"}
             primaryAction="View scope"
             secondaryAction=""
             onPrimaryAction={() => persistIntegrationStatus("mcp", true, "connected")}
@@ -918,7 +1072,7 @@
             title="Bank connectors"
             subtitle="Office import scope"
             body="MCB and SBI statement import status belongs to Office. Command Center watches readiness without parsing bank files."
-            state="default"
+            state={writesEnabled ? "default" : "locked"}
             primaryAction="Open status"
             secondaryAction=""
             onPrimaryAction={() => persistIntegrationStatus("bank-connectors", true, "reviewed")}
@@ -927,7 +1081,7 @@
 
         <Table title="Connectors" columns={integrationColumns} rows={integrationRows} state="default" actionLabel="" />
       {:else}
-        <Toolbar label="Settings controls" filters={settingsToolbar} actionLabel="" loading={false} />
+        <Toolbar label="Settings controls" filters={settingsToolbar} actionLabel="" loading={false} onFilterSelect={selectSettingsToolbarFilter} />
 
         <section class="kpi-grid" aria-label="Settings indicators">
           {#each settingsKpis as kpi (kpi.label)}
@@ -943,14 +1097,14 @@
               <span>Workspace name</span>
               <input id="workspace-name" value={workspaceName} placeholder="Workspace" type="text" oninput={updateWorkspaceName} />
             </label>
-            <button class="command-action" type="button" disabled={commandBusy} onclick={saveSettingsReview}>Save review</button>
+            <button class="command-action" type="button" disabled={commandBusy || !writesEnabled} title={writeGateMessage} onclick={saveSettingsReview}>Save review</button>
           </section>
 
           <Panel
             title="Supervision mode"
             subtitle="Admin workspace only"
             body="The Command Center menu is local to this app and does not appear inside Office or Distribution."
-            state="default"
+            state={writesEnabled ? "default" : "locked"}
             primaryAction="Verified"
             secondaryAction=""
             onPrimaryAction={saveSettingsReview}
@@ -960,58 +1114,13 @@
         <Table title="Preferences" columns={settingColumns} rows={settingsRows} state="default" actionLabel="" />
       {/if}
     </div>
-  </section>
-</main>
+</WorkspaceShell>
 
 <style>
   :global(body) {
     overflow: hidden;
   }
 
-  .command-shell {
-    height: 100dvh;
-    background: var(--ehq-bg-main);
-    color: var(--ehq-text);
-    display: grid;
-    grid-template-columns: 236px minmax(0, 1fr);
-    overflow: hidden;
-  }
-
-  .sidebar {
-    min-height: 0;
-    border-right: 1px solid var(--ehq-border-soft);
-    background: color-mix(in srgb, var(--ehq-bg-main) 72%, var(--ehq-surface));
-    display: flex;
-    flex-direction: column;
-  }
-
-  .brand {
-    min-height: 64px;
-    padding: var(--ehq-space-4);
-    border: 0;
-    border-bottom: 1px solid var(--ehq-border-soft);
-    background: transparent;
-    color: var(--ehq-text);
-    display: flex;
-    align-items: center;
-    gap: var(--ehq-space-2);
-    text-align: left;
-  }
-
-  .brand span {
-    color: var(--ehq-yellow);
-    font-size: 26px;
-    font-weight: var(--ehq-type-display-weight);
-    line-height: 1;
-  }
-
-  .brand strong,
-  nav h2,
-  .system-status,
-  .topbar p,
-  .search span,
-  .page-head p,
-  .page-head span,
   .notice,
   .redirecting-panel p,
   .redirecting-panel span,
@@ -1022,197 +1131,13 @@
     font-family: var(--ehq-mono);
   }
 
-  .brand strong {
-    font-size: 12px;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-  }
-
-  nav {
-    min-height: 0;
-    padding: var(--ehq-space-3) var(--ehq-space-2);
-    display: grid;
-    align-content: start;
-    gap: var(--ehq-space-1);
-    overflow-y: auto;
-  }
-
-  nav h2 {
-    margin: var(--ehq-space-3) var(--ehq-space-2) var(--ehq-space-2);
-    color: var(--ehq-text-muted);
-    font-size: 10px;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-  }
-
-  nav button {
-    min-height: 36px;
-    padding: 0 var(--ehq-space-3);
-    border: 0;
-    border-radius: var(--ehq-radius-sm);
-    background: transparent;
-    color: var(--ehq-text-soft);
-    display: flex;
-    align-items: center;
-    gap: var(--ehq-space-2);
-    text-align: left;
-  }
-
-  nav button:hover,
-  nav button.active {
-    color: var(--ehq-text);
-  }
-
-  nav button.active {
-    box-shadow: inset 2px 0 0 var(--ehq-yellow);
-  }
-
-  nav button span {
-    width: 7px;
-    height: 7px;
-    border-radius: 2px;
-    background: currentColor;
-    opacity: 0.5;
-  }
-
-  nav button.active span {
-    background: var(--ehq-yellow);
-    opacity: 1;
-  }
-
-  .system-status {
-    margin: auto 0 0;
-    padding: var(--ehq-space-3) var(--ehq-space-4);
-    border-top: 1px solid var(--ehq-border-soft);
-    color: var(--ehq-text-muted);
-    display: flex;
-    align-items: center;
-    gap: var(--ehq-space-2);
-    font-size: 11px;
-  }
-
-  .system-status span {
-    width: 7px;
-    height: 7px;
-    border-radius: var(--ehq-radius-pill);
-    background: var(--ehq-success);
-    box-shadow: 0 0 10px var(--ehq-success-bg);
-  }
-
-  .main-panel {
-    min-width: 0;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-  }
-
-  .topbar {
-    flex: 0 0 auto;
-    min-height: 58px;
-    padding: var(--ehq-space-3) var(--ehq-space-5);
-    border-bottom: 1px solid var(--ehq-border-soft);
-    display: flex;
-    align-items: center;
-    gap: var(--ehq-space-4);
-  }
-
-  .topbar p,
-  .page-head p,
-  .page-head h1,
-  .page-head span {
-    margin: 0;
-  }
-
-  .topbar p {
-    color: var(--ehq-text-soft);
-    font-size: 12px;
-  }
-
-  .topbar p span {
-    color: var(--ehq-text-muted);
-  }
-
-  .topbar p strong {
-    color: var(--ehq-text);
-  }
-
-  .search {
-    width: min(380px, 34vw);
-    min-width: 220px;
-    min-height: 38px;
-    padding: 0 var(--ehq-space-3);
-    border: 1px solid var(--ehq-border);
-    border-radius: var(--ehq-radius-sm);
-    background: var(--ehq-bg-main);
-    display: flex;
-    align-items: center;
-    gap: var(--ehq-space-2);
-  }
-
-  .search span {
-    color: var(--ehq-text-muted);
-    font-size: 10px;
-  }
-
-  .search input {
-    min-width: 0;
-    width: 100%;
-    border: 0;
-    background: transparent;
-    color: var(--ehq-text);
-    outline: 0;
-  }
-
-  .search input::placeholder {
-    color: var(--ehq-text-muted);
-  }
-
-  .notification {
-    border: 1px solid var(--ehq-border);
-    border-radius: var(--ehq-radius-sm);
-    background: transparent;
-    color: var(--ehq-text);
-  }
-
-  .notification {
-    width: 38px;
-    height: 38px;
-    margin-left: auto;
-    color: var(--ehq-yellow);
-    font-family: var(--ehq-mono);
-    font-weight: var(--ehq-type-label-weight);
-  }
-
   .content {
     min-height: 0;
     padding: var(--ehq-space-5) var(--ehq-space-5) var(--ehq-space-8);
     display: grid;
     gap: var(--ehq-space-4);
     overflow-y: auto;
-    overflow-x: hidden;
-  }
-
-  .page-head {
-    display: grid;
-    gap: var(--ehq-space-1);
-  }
-
-  .page-head p {
-    color: var(--ehq-text-muted);
-    font-size: 11px;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-  }
-
-  .page-head h1 {
-    font-size: var(--ehq-h1);
-    font-weight: var(--ehq-type-display-weight);
-    letter-spacing: 0;
-  }
-
-  .page-head span {
-    color: var(--ehq-text-soft);
-    font-size: 13px;
+    overflow-x: auto;
   }
 
   .notice {
@@ -1222,7 +1147,7 @@
     border-radius: var(--ehq-radius-sm);
     background: var(--ehq-yellow-muted);
     color: var(--ehq-yellow);
-    font-size: 11px;
+    font-size: var(--ehq-type-caption-size);
   }
 
   .redirecting-panel {
@@ -1245,20 +1170,20 @@
 
   .redirecting-panel p {
     color: var(--ehq-yellow);
-    font-size: 10px;
+    font-size: var(--ehq-type-label-size);
     letter-spacing: 0.16em;
     text-transform: uppercase;
   }
 
   .redirecting-panel h2 {
-    font-size: var(--ehq-h2);
+    font-size: var(--ehq-type-section-title-size);
     line-height: 1.2;
   }
 
   .redirecting-panel span {
     color: var(--ehq-text-soft);
-    font-size: 12px;
-    line-height: 1.6;
+    font-size: var(--ehq-type-ui-size);
+    line-height: var(--ehq-type-ui-line);
   }
 
   .kpi-grid,
@@ -1307,7 +1232,7 @@
   .form-panel h2,
   .locked-card-reference h2 {
     margin: 0;
-    font-size: var(--ehq-h3);
+    font-size: var(--ehq-type-section-title-size);
     font-weight: var(--ehq-type-heading-weight);
   }
 
@@ -1316,8 +1241,8 @@
   .locked-card-reference p {
     margin: 0;
     color: var(--ehq-text-muted);
-    font-size: 11px;
-    line-height: 1.6;
+    font-size: var(--ehq-type-caption-size);
+    line-height: var(--ehq-type-ui-line);
   }
 
   .check-list {
@@ -1342,13 +1267,13 @@
   }
 
   .check-list strong {
-    font-size: 13px;
+    font-size: var(--ehq-type-ui-size);
     font-weight: var(--ehq-type-body-weight);
   }
 
   .check-list span {
     color: var(--ehq-text-muted);
-    font-size: 10px;
+    font-size: var(--ehq-type-label-size);
   }
 
   .field {
@@ -1359,7 +1284,7 @@
   .field span {
     color: var(--ehq-text-muted);
     font-family: var(--ehq-mono);
-    font-size: 10px;
+    font-size: var(--ehq-type-label-size);
     letter-spacing: 0.12em;
     text-transform: uppercase;
   }
@@ -1373,6 +1298,9 @@
     border-radius: var(--ehq-radius-sm);
     background: var(--ehq-bg-main);
     color: var(--ehq-text);
+    font-family: var(--ehq-font);
+    font-size: var(--ehq-type-control-size);
+    line-height: var(--ehq-type-ui-line);
     outline: 0;
   }
 
@@ -1391,7 +1319,7 @@
     background: var(--ehq-yellow);
     color: var(--ehq-text-on-yellow);
     font-family: var(--ehq-font);
-    font-size: 10px;
+    font-size: var(--ehq-type-action-size);
     font-weight: var(--ehq-type-heading-weight);
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -1431,14 +1359,14 @@
 
   .workspace-mini-grid strong {
     min-width: 0;
-    font-size: 13px;
+    font-size: var(--ehq-type-ui-size);
     font-weight: var(--ehq-type-body-weight);
     text-transform: capitalize;
   }
 
   .workspace-mini-grid small {
     color: var(--ehq-text-muted);
-    font-size: 10px;
+    font-size: var(--ehq-type-label-size);
   }
 
   @media (max-width: 1180px) {
@@ -1453,25 +1381,6 @@
   }
 
   @media (max-width: 820px) {
-    .command-shell {
-      grid-template-columns: 1fr;
-    }
-
-    .sidebar {
-      display: none;
-    }
-
-    .topbar {
-      padding: var(--ehq-space-3);
-      flex-wrap: wrap;
-    }
-
-    .search {
-      order: 3;
-      width: 100%;
-      min-width: 0;
-    }
-
     .content {
       padding: var(--ehq-space-4);
     }

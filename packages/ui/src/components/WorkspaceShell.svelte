@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
-  import type { WorkspaceKind, WorkspaceNavItem } from "./types.js";
+  import type { WorkspaceKind, WorkspaceNavGroup, WorkspaceNavItem } from "./types.js";
 
   interface Props {
     readonly workspace: WorkspaceKind;
@@ -8,16 +8,48 @@
     readonly homeHref: string;
     readonly navLabel: string;
     readonly navItems: readonly WorkspaceNavItem[];
+    readonly navGroups: readonly WorkspaceNavGroup[] | null;
     readonly statusLabel: string;
     readonly statusValue: string;
     readonly userInitial: string;
     readonly userName: string;
     readonly userContext: string;
     readonly signOutHref: string;
+    readonly onNavigate: ((href: string) => void) | null;
+    readonly onSignOut: (() => void) | null;
+    readonly footer?: Snippet;
     readonly children?: Snippet;
   }
 
   const props: Props = $props();
+  let sessionMenuOpen = $state(false);
+
+  const navGroupList = $derived<readonly WorkspaceNavGroup[]>(
+    props.navGroups !== null ? props.navGroups : [{ id: "default", label: "", items: props.navItems }]
+  );
+
+  function handleNavClick(item: WorkspaceNavItem, event: MouseEvent): void {
+    if (props.onNavigate === null || item.disabled) {
+      return;
+    }
+
+    event.preventDefault();
+    props.onNavigate(item.href);
+  }
+
+  function toggleSessionMenu(): void {
+    sessionMenuOpen = !sessionMenuOpen;
+  }
+
+  function signOut(): void {
+    sessionMenuOpen = false;
+
+    if (props.onSignOut === null) {
+      return;
+    }
+
+    props.onSignOut();
+  }
 </script>
 
 <div class={`ehq-workspace-shell ehq-workspace-${props.workspace}`}>
@@ -25,28 +57,39 @@
     <a class="shell-mark" href={props.homeHref} aria-label={`${props.brandLabel} accueil`}>ë</a>
 
     <nav aria-label={props.navLabel}>
-      {#each props.navItems as item (item.href)}
-        <a
-          class="nav-item ehq-nav-fade-item ehq-edge-surface"
-          class:active={item.active}
-          class:disabled={item.disabled}
-          href={item.disabled ? undefined : item.href}
-          aria-current={item.active ? "page" : undefined}
-          aria-disabled={item.disabled}
-        >
-          <span class="nav-icon" aria-hidden="true">{item.icon}</span>
-          <span class="nav-label">{item.label}</span>
-          {#if item.badge !== null}
-            <strong>{item.badge}</strong>
-          {/if}
-        </a>
+      {#each navGroupList as group (group.id)}
+        {#if group.label.length > 0}
+          <h2 class="nav-group">{group.label}</h2>
+        {/if}
+        {#each group.items as item (item.href)}
+          <a
+            class="nav-item ehq-nav-fade-item ehq-edge-surface"
+            class:active={item.active}
+            class:disabled={item.disabled}
+            href={item.disabled ? undefined : item.href}
+            aria-current={item.active ? "page" : undefined}
+            aria-disabled={item.disabled}
+            onclick={(event: MouseEvent): void => handleNavClick(item, event)}
+          >
+            <span class="nav-icon" aria-hidden="true">{item.icon}</span>
+            <span class="nav-label">{item.label}</span>
+            {#if item.badge !== null}
+              <strong>{item.badge}</strong>
+            {/if}
+          </a>
+        {/each}
       {/each}
     </nav>
 
-    <section class="shell-status" aria-label="Statut de l'espace">
-      <span>{props.statusLabel}</span>
-      <strong>{props.statusValue}</strong>
-    </section>
+    <div class="shell-foot">
+      <section class="shell-status" aria-label="Statut de l'espace">
+        <span>{props.statusLabel}</span>
+        <strong>{props.statusValue}</strong>
+      </section>
+      {#if props.footer}
+        {@render props.footer()}
+      {/if}
+    </div>
   </aside>
 
   <div class="shell-main">
@@ -56,13 +99,27 @@
         <span>Aller à une section</span>
         <kbd>⌘K</kbd>
       </div>
-      <a class="shell-user" href={props.signOutHref}>
-        <b>{props.userInitial}</b>
-        <span>
-          <strong>{props.userName}</strong>
-          <small>{props.userContext}</small>
-        </span>
-      </a>
+      <div class="shell-user-wrap">
+        <button class="shell-user" type="button" aria-haspopup="menu" aria-expanded={sessionMenuOpen} onclick={toggleSessionMenu}>
+          <b>{props.userInitial}</b>
+          <span>
+            <strong>{props.userName}</strong>
+            <small>{props.userContext}</small>
+          </span>
+        </button>
+
+        {#if sessionMenuOpen}
+          <section class="shell-session-menu" aria-label="Session actions">
+            <header>
+              <span>session</span>
+              <strong>{props.userName}</strong>
+              <small>{props.userContext}</small>
+            </header>
+            <a href={props.signOutHref} onclick={(event: MouseEvent): void => event.preventDefault()}>Session active</a>
+            <button type="button" onclick={signOut}>Sign out</button>
+          </section>
+        {/if}
+      </div>
     </header>
 
     <main>
@@ -75,7 +132,9 @@
 
 <style>
   .ehq-workspace-shell {
-    min-height: 100dvh;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
     background:
       radial-gradient(circle at 14% 4%, var(--ehq-workspace-accent-bg), transparent 24%),
       radial-gradient(circle at 84% 18%, var(--ehq-yellow-muted), transparent 20%),
@@ -86,13 +145,18 @@
   }
 
   aside {
-    min-height: 100dvh;
+    min-height: 0;
     padding: var(--ehq-space-4);
     border-right: 1px solid var(--ehq-border-soft);
     background: color-mix(in srgb, var(--ehq-black) 86%, transparent);
     display: grid;
     grid-template-rows: auto 1fr auto;
     gap: var(--ehq-space-5);
+    overflow: hidden;
+  }
+
+  nav {
+    overflow-y: auto;
   }
 
   .shell-mark {
@@ -114,6 +178,20 @@
     display: grid;
     align-content: start;
     gap: var(--ehq-space-2);
+  }
+
+  .nav-group {
+    margin: var(--ehq-space-3) 0 var(--ehq-space-1);
+    color: var(--ehq-text-muted);
+    font-family: var(--ehq-mono);
+    font-size: var(--ehq-type-label-size);
+    font-weight: var(--ehq-type-heading-weight);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .nav-group:first-child {
+    margin-top: 0;
   }
 
   .nav-item {
@@ -147,13 +225,14 @@
   .nav-icon {
     color: var(--ehq-workspace-accent);
     font-family: var(--ehq-mono);
-    font-size: 11px;
+    font-size: var(--ehq-type-caption-size);
   }
 
   .nav-label {
     overflow: hidden;
     font-family: var(--ehq-font);
-    font-size: 13px;
+    font-size: var(--ehq-type-menu-size);
+    line-height: var(--ehq-type-ui-line);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -161,7 +240,12 @@
   .nav-item strong {
     color: var(--ehq-text-muted);
     font-family: var(--ehq-mono);
-    font-size: 10px;
+    font-size: var(--ehq-type-label-size);
+  }
+
+  .shell-foot {
+    display: grid;
+    gap: var(--ehq-space-3);
   }
 
   .shell-status {
@@ -177,7 +261,7 @@
   .shell-user small {
     color: var(--ehq-text-muted);
     font-family: var(--ehq-mono);
-    font-size: 10px;
+    font-size: var(--ehq-type-label-size);
     letter-spacing: 0.12em;
     text-transform: uppercase;
   }
@@ -185,12 +269,13 @@
   .shell-status strong {
     color: var(--ehq-text);
     font-family: var(--ehq-font);
-    font-size: 13px;
+    font-size: var(--ehq-type-ui-size);
     font-weight: var(--ehq-type-heading-weight);
   }
 
   .shell-main {
     min-width: 0;
+    min-height: 0;
     display: grid;
     grid-template-rows: var(--ehq-shell-topbar-height) 1fr;
   }
@@ -223,22 +308,30 @@
     justify-content: space-between;
     gap: var(--ehq-space-3);
     font-family: var(--ehq-font);
-    font-size: 12px;
+    font-size: var(--ehq-type-ui-size);
   }
 
   kbd {
     color: var(--ehq-text-soft);
     font-family: var(--ehq-mono);
-    font-size: 10px;
+    font-size: var(--ehq-type-label-size);
+  }
+
+  .shell-user-wrap {
+    position: relative;
+    justify-self: end;
   }
 
   .shell-user {
+    padding: 0;
+    border: 0;
+    background: transparent;
     color: var(--ehq-text);
     display: inline-flex;
     align-items: center;
     justify-content: flex-end;
     gap: var(--ehq-space-2);
-    text-decoration: none;
+    text-align: left;
   }
 
   .shell-user b {
@@ -250,7 +343,7 @@
     display: grid;
     place-items: center;
     font-family: var(--ehq-font);
-    font-size: 13px;
+    font-size: var(--ehq-type-ui-size);
   }
 
   .shell-user span {
@@ -260,12 +353,79 @@
 
   .shell-user strong {
     font-family: var(--ehq-font);
-    font-size: 13px;
+    font-size: var(--ehq-type-ui-size);
     font-weight: var(--ehq-type-heading-weight);
+  }
+
+  .shell-session-menu {
+    position: absolute;
+    z-index: 20;
+    top: calc(100% + var(--ehq-space-2));
+    right: 0;
+    width: min(300px, calc(100vw - var(--ehq-space-6)));
+    padding: var(--ehq-space-3);
+    border: 1px solid var(--ehq-border);
+    border-radius: var(--ehq-radius-sm);
+    background: var(--ehq-surface);
+    box-shadow: var(--ehq-shadow-md);
+    display: grid;
+    gap: var(--ehq-space-3);
+  }
+
+  .shell-session-menu header {
+    display: grid;
+    gap: var(--ehq-space-1);
+  }
+
+  .shell-session-menu span,
+  .shell-session-menu small,
+  .shell-session-menu a,
+  .shell-session-menu button {
+    font-family: var(--ehq-mono);
+  }
+
+  .shell-session-menu span {
+    color: var(--ehq-yellow);
+    font-size: var(--ehq-type-label-size);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+
+  .shell-session-menu strong {
+    font-size: var(--ehq-type-ui-size);
+  }
+
+  .shell-session-menu small {
+    color: var(--ehq-text-muted);
+    font-size: var(--ehq-type-label-size);
+  }
+
+  .shell-session-menu a,
+  .shell-session-menu button {
+    min-height: 32px;
+    border: 1px solid var(--ehq-border);
+    border-radius: var(--ehq-radius-sm);
+    background: transparent;
+    color: var(--ehq-text-muted);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: var(--ehq-type-action-size);
+    font-weight: var(--ehq-type-heading-weight);
+    letter-spacing: 0.08em;
+    text-decoration: none;
+    text-transform: uppercase;
+  }
+
+  .shell-session-menu button:hover {
+    border-color: var(--ehq-error);
+    color: var(--ehq-error);
   }
 
   main {
     min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
   }
 
   @media (max-width: 980px) {

@@ -54,6 +54,10 @@ export interface PageResult<TItem> {
 export interface PeriodQuery {
   readonly workspaceId: EntityId;
   readonly period: IsoMonthString;
+  // Optional explicit date range from the Period control. When both are set they
+  // drive the server-side dateFrom/dateTo filters; otherwise the month is used.
+  readonly dateFrom?: IsoDateString | null;
+  readonly dateTo?: IsoDateString | null;
 }
 
 export interface DateRangeQuery {
@@ -70,6 +74,26 @@ export interface ApiMutationReceipt {
 
 export interface CommandCenterWorkspaceQuery {
   readonly workspaceId: EntityId;
+}
+
+export type CommandCenterNotificationTone = "success" | "warning" | "error" | "info";
+
+export interface CommandCenterNotification {
+  readonly id: EntityId;
+  readonly title: string;
+  readonly detail: string;
+  readonly tone: CommandCenterNotificationTone;
+  readonly workspaceId: EntityId;
+  readonly createdAt: IsoDateTimeString;
+  readonly actionLabel: string | null;
+  readonly actionHref: string | null;
+}
+
+export interface CommandCenterNotificationsResponse {
+  readonly workspaceId: EntityId;
+  readonly unreadCount: number;
+  readonly generatedAt: IsoDateTimeString;
+  readonly items: readonly CommandCenterNotification[];
 }
 
 export interface CommandCenterSettingUpdateRequest {
@@ -237,6 +261,8 @@ export interface OfficeDepartmentPnl {
 export interface OfficeTransactionsQuery extends PageQuery {
   readonly workspaceId: EntityId;
   readonly period: IsoMonthString | null;
+  readonly dateFrom?: IsoDateString | null;
+  readonly dateTo?: IsoDateString | null;
   readonly accountId: EntityId | null;
   readonly departmentId: EntityId | null;
   readonly divisionId: EntityId | null;
@@ -367,6 +393,24 @@ export interface BankImportPreviewResponse {
   readonly duplicateRowCount: number;
   readonly parsingNotes: readonly string[];
   readonly warnings: readonly string[];
+  readonly rejectionReasons: readonly OfficeImportRejectionReason[];
+  readonly rowResults: readonly OfficeBankPreviewRowResult[];
+}
+
+// Aggregated per-row rejection cause (e.g. "account_not_found") with how many rows hit it,
+// so the import UI can tell the user why rows were dropped instead of failing silently.
+export interface OfficeImportRejectionReason {
+  readonly reason: string;
+  readonly count: number;
+}
+
+// Per-row outcome of a bank-import preview, so the UI can show a detected/rejected table
+// and let the user confirm only selected rows. `id` matches the confirm acceptedRowIds.
+export interface OfficeBankPreviewRowResult {
+  readonly id: EntityId;
+  readonly rowNumber: number;
+  readonly status: "accepted" | "rejected";
+  readonly issues: readonly string[];
 }
 
 export interface BankImportConfirmRequest {
@@ -384,6 +428,8 @@ export interface OfficeReconciliationsQuery extends PageQuery {
   readonly workspaceId: EntityId;
   readonly accountId: EntityId | null;
   readonly period: IsoMonthString | null;
+  readonly dateFrom?: IsoDateString | null;
+  readonly dateTo?: IsoDateString | null;
   readonly status: "unmatched" | "suggested" | "matched" | null;
 }
 
@@ -396,13 +442,36 @@ export interface OfficeReconciliationCandidate {
   readonly ledgerDescription: string;
   readonly amountMicro: MoneyMicroString;
   readonly confidenceBp: BasisPoints;
-  readonly status: "unmatched" | "suggested" | "matched";
+  readonly status: "unmatched" | "suggested" | "matched" | "rejected";
 }
 
 export interface OfficeReconciliationApproveRequest {
   readonly workspaceId: EntityId;
   readonly reconciliationIds: readonly EntityId[];
   readonly approvedAt: IsoDateTimeString;
+}
+
+// Manually match one bank statement line to a chosen ledger transaction.
+export interface OfficeReconciliationMatchRequest {
+  readonly workspaceId: EntityId;
+  readonly statementLineId: EntityId;
+  readonly transactionId: EntityId;
+  readonly matchedAt: IsoDateTimeString;
+}
+
+// Undo a match, or reject/ignore a candidate — both addressed by the bank line.
+export interface OfficeReconciliationLineRequest {
+  readonly workspaceId: EntityId;
+  readonly statementLineId: EntityId;
+}
+
+// Create a ledger transaction directly from an unmatched bank line, then match it.
+export interface OfficeReconciliationCreateTransactionRequest {
+  readonly workspaceId: EntityId;
+  readonly statementLineId: EntityId;
+  readonly categoryId: EntityId | null;
+  readonly projectId: EntityId | null;
+  readonly matchedAt: IsoDateTimeString;
 }
 
 export interface CashflowQuery extends DateRangeQuery {
@@ -423,6 +492,8 @@ export type OfficePartnerFacet = "client" | "supplier";
 export interface OfficePartnersQuery extends PageQuery {
   readonly workspaceId: EntityId;
   readonly period: IsoMonthString;
+  readonly dateFrom?: IsoDateString | null;
+  readonly dateTo?: IsoDateString | null;
   readonly facet: OfficePartnerFacet;
 }
 
@@ -465,6 +536,8 @@ export interface OfficePartnerRecord {
 export interface OfficePartnerDetailQuery {
   readonly workspaceId: EntityId;
   readonly period: IsoMonthString;
+  readonly dateFrom?: IsoDateString | null;
+  readonly dateTo?: IsoDateString | null;
 }
 
 export interface OfficePartnerPnl extends OfficePartnerListItem {
@@ -519,6 +592,16 @@ export interface OfficePartnerPayeeLinkRequest {
 export interface OfficeProjectsQuery extends PageQuery {
   readonly workspaceId: EntityId;
   readonly status: "active" | "archived" | null;
+}
+
+export type OfficeProjectWriteStatus = "draft" | "active" | "paused" | "completed" | "cancelled" | "archived";
+
+export interface OfficeProjectWriteRequest {
+  readonly workspaceId: EntityId;
+  readonly name: string;
+  readonly status: OfficeProjectWriteStatus;
+  readonly description: string | null;
+  readonly active: boolean;
 }
 
 export interface OfficeProjectSummary {
@@ -610,6 +693,35 @@ export interface OfficeBankQualityResponse {
 export interface OfficeBankAccountsQuery {
   readonly workspaceId: EntityId;
   readonly limit: number;
+}
+
+export interface OfficeCashflowImportRequest {
+  readonly workspaceId: EntityId;
+  readonly rows: readonly Readonly<Record<string, string>>[];
+}
+
+export interface OfficeCashflowPreviewRow {
+  readonly rowNumber: number;
+  readonly periodMonth: string | null;
+  readonly inflow: string | null;
+  readonly outflow: string | null;
+  readonly closingBalance: string | null;
+  readonly currency: string | null;
+  readonly issues: readonly string[];
+}
+
+export interface OfficeCashflowPreviewResponse {
+  readonly acceptedRowCount: number;
+  readonly rejectedRowCount: number;
+  readonly rows: readonly OfficeCashflowPreviewRow[];
+}
+
+export interface OfficeBankAccountWriteRequest {
+  readonly workspaceId: EntityId;
+  readonly bankName: string;
+  readonly accountLabel: string;
+  readonly currency: CurrencyCode;
+  readonly active: boolean;
 }
 
 export interface OfficeBankAccountSummary {

@@ -471,7 +471,7 @@
     border-radius: var(--ehq-radius-sm);
     background: transparent;
     color: var(--ehq-text);
-    font-size: 10px;
+    font-size: var(--ehq-type-action-size);
     text-transform: uppercase;
   }
 
@@ -488,21 +488,21 @@
   }
 
   p {
-    font-size: 10px;
+    font-size: var(--ehq-type-label-size);
     text-transform: uppercase;
   }
 
   h2 {
     margin-top: var(--ehq-space-1);
-    font-size: var(--ehq-h2);
+    font-size: var(--ehq-type-section-title-size);
   }
 
   .monitoring-panel header span,
   .state-copy span,
   .check-summary span {
     color: var(--ehq-text-soft);
-    font-size: 13px;
-    line-height: 1.5;
+    font-size: var(--ehq-type-ui-size);
+    line-height: var(--ehq-type-ui-line);
   }
 
   .check-summary,
@@ -516,7 +516,7 @@
   }
 
   .check-summary strong {
-    font-size: 12px;
+    font-size: var(--ehq-type-ui-size);
   }
 
   .state-copy.error strong {

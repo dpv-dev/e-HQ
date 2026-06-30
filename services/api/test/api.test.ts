@@ -104,6 +104,60 @@ test("Business routes require Supabase bearer auth and auth/me returns the verif
   });
 });
 
+test("Command Center notifications expose guarded live readiness items", async () => {
+  const app = createDisabledFixtureApiService();
+
+  const response = await app.request("/cc/v1/notifications?workspaceId=eeee-mu", {
+    headers: authHeaders()
+  });
+  assert.equal(response.status, 200);
+  const notifications = (await response.json()) as {
+    readonly workspaceId: string;
+    readonly unreadCount: number;
+    readonly items: readonly {
+      readonly id: string;
+      readonly title: string;
+      readonly actionHref: string | null;
+    }[];
+  };
+  assert.equal(notifications.workspaceId, "eeee-mu");
+  assert.ok(notifications.unreadCount > 0);
+  assert.ok(notifications.items.some((item) => item.id === "write-gate" && item.actionHref === "/console/command-center/integrations"));
+
+  const botDenied = await app.request("/cc/v1/notifications?workspaceId=eeee-mu", {
+    headers: authHeadersForToken("fixture-bot-distribution-token")
+  });
+  assert.equal(botDenied.status, 403);
+  assert.equal((await botDenied.json()).error.code, "bot_route_denied");
+});
+
+test("read routes enforce server-side workspace authorization, not just the UI", async () => {
+  const app = createDisabledFixtureApiService();
+  const officeRead = "/eof/v1/dashboard?workspaceId=eeee-mu&period=2026-02";
+  const distributionRead = "/erh/v1/dashboard?workspaceId=eeee-mu&period=2026-06";
+  const commandCenterRead = "/cc/v1/status";
+
+  // A viewer (what office@eeee.mu resolves to when the JWT carries no role claim) must be
+  // denied on every domain's READ routes — the reported hole was that these returned 200.
+  for (const path of [officeRead, distributionRead, commandCenterRead]) {
+    const denied = await app.request(path, { headers: authHeadersForToken("fixture-viewer-token") });
+    assert.equal(denied.status, 403, `viewer must be denied on ${path}`);
+    assert.equal((await denied.json()).error.code, "workspace_access_denied");
+  }
+
+  // The office role reaches Office only — denied on Distribution and Command Center.
+  const officeOnOffice = await app.request(officeRead, { headers: authHeadersForToken("fixture-office-token") });
+  assert.equal(officeOnOffice.status, 200);
+  const officeOnDistribution = await app.request(distributionRead, { headers: authHeadersForToken("fixture-office-token") });
+  assert.equal(officeOnDistribution.status, 403);
+  const officeOnCommandCenter = await app.request(commandCenterRead, { headers: authHeadersForToken("fixture-office-token") });
+  assert.equal(officeOnCommandCenter.status, 403);
+
+  // An administrator still reaches every domain.
+  const adminOnDistribution = await app.request(distributionRead, { headers: authHeaders() });
+  assert.equal(adminOnDistribution.status, 200);
+});
+
 test("API responds with CORS headers for the HQ origin", async () => {
   const app = createFixtureApiService();
 
@@ -511,6 +565,19 @@ test("formerly disabled write routes are activated with receipts and audit ids",
     currency: "MUR"
   }));
 
+  // An office-role user (e.g. Sophie via office@eeee.mu) can cancel/correct her own entries.
+  const officeCancel = await app.request(`/eof/v1/transactions/${transactionCreate.id}/cancel`, {
+    method: "PATCH",
+    headers: {
+      ...authHeadersForToken("fixture-office-token"),
+      "Content-Type": "application/json",
+      "Idempotency-Key": "office-transaction-cancel"
+    },
+    body: JSON.stringify({ workspaceId: "workspace_1" })
+  });
+  assert.equal(officeCancel.status, 200);
+  assertReceipt(await officeCancel.json());
+
   const nodeCreate = await jsonWrite(app, "/eof/v1/plan-comptable", "POST", "activated-plan-create", {
     workspaceId: "workspace_1",
     parentId: "div_admin",
@@ -554,6 +621,53 @@ test("formerly disabled write routes are activated with receipts and audit ids",
     active: true
   });
   assertReceipt(partnerCreate);
+
+  const bankAccountCreate = await jsonWrite(app, "/eof/v1/bank/accounts", "POST", "activated-bank-account-create", {
+    workspaceId: "workspace_1",
+    bankName: "MCB",
+    accountLabel: "MCB EUR",
+    currency: "EUR",
+    active: true
+  });
+  assertReceipt(bankAccountCreate);
+  assertReceipt(await jsonWrite(app, `/eof/v1/bank/accounts/${bankAccountCreate.id}`, "PATCH", "activated-bank-account-update", {
+    workspaceId: "workspace_1",
+    bankName: "MCB",
+    accountLabel: "MCB EUR (renamed)",
+    currency: "EUR",
+    active: false
+  }));
+
+  const projectCreate = await jsonWrite(app, "/eof/v1/projects", "POST", "activated-project-create", {
+    workspaceId: "workspace_1",
+    name: "Activated Project",
+    status: "active",
+    description: null,
+    active: true
+  });
+  assertReceipt(projectCreate);
+  assertReceipt(await jsonWrite(app, `/eof/v1/projects/${projectCreate.id}`, "PATCH", "activated-project-update", {
+    workspaceId: "workspace_1",
+    name: "Activated Project Updated",
+    status: "completed",
+    description: "Wrapped up",
+    active: true
+  }));
+
+  const cashflowRows = [
+    { periodMonth: "2026-07", inflow: "1000.00", outflow: "400.00", closingBalance: "600.00", currency: "MUR" }
+  ];
+  const cashflowPreview = await jsonWrite(app, "/eof/v1/cashflow/preview", "POST", "activated-cashflow-preview", {
+    workspaceId: "workspace_1",
+    rows: cashflowRows
+  });
+  assert.equal(cashflowPreview.acceptedRowCount, 1);
+  assert.equal(cashflowPreview.rejectedRowCount, 0);
+  assertReceipt(await jsonWrite(app, "/eof/v1/cashflow/confirm", "POST", "activated-cashflow-confirm", {
+    workspaceId: "workspace_1",
+    rows: cashflowRows
+  }));
+
   assertReceipt(await jsonWrite(app, `/eof/v1/partners/${partnerCreate.id}`, "PATCH", "activated-partner-update", {
     workspaceId: "workspace_1",
     name: "Activated Partner Updated",
@@ -1817,6 +1931,21 @@ test("import previews are permission-checked but not gated by WRITES_ENABLED", a
   });
   assert.equal(viewerPreview.status, 403);
 
+  // The office role (e.g. office@eeee.mu / Sophie) must be able to import bank statements —
+  // it is the core office task, not an admin-only action.
+  const officePreview = await app.request("/eof/v1/bank-import/preview", {
+    method: "POST",
+    headers: { ...authHeadersForToken("fixture-office-token"), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      source: "csv",
+      fileName: "bank.csv",
+      checksum: "checksum-bank-preview-office",
+      rows: [{ date: "2026-02-20", description: "Office row", amount: "1.00", currency: "MUR", accountId: "bank_mur" }]
+    })
+  });
+  assert.equal(officePreview.status, 200);
+
   const preview = await app.request("/eof/v1/bank-import/preview", {
     method: "POST",
     headers: { ...authHeaders(), "Content-Type": "application/json" },
@@ -1846,6 +1975,97 @@ test("import previews are permission-checked but not gated by WRITES_ENABLED", a
   const disabled = (await confirmDisabled.json()) as { readonly error: string; readonly action: string };
   assert.equal(disabled.error, "action_not_enabled_yet");
   assert.equal(disabled.action, "office_bank_import_confirm");
+});
+
+// Regression for the SBI MUR import that rejected all 2652 rows with no visible reason: when
+// no target account resolves (here a currency with no matching account, mirroring rows sent
+// without an accountId), every row is rejected and the cause must be surfaced — not swallowed.
+test("bank import preview surfaces account_not_found when no target account resolves", async () => {
+  const app = createWriteEnabledFixtureApiService();
+  const preview = await app.request("/eof/v1/bank-import/preview", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      source: "csv",
+      fileName: "sbi.csv",
+      checksum: "checksum-bank-preview-no-account",
+      rows: [
+        { date: "2026-05-27", description: "CHARGES FOR BILL I", debit: "40.00", currency: "USD" },
+        { date: "2026-05-26", description: "IO-ELECTR-RASNATTM", debit: "50000.00", currency: "USD" }
+      ]
+    })
+  });
+  assert.equal(preview.status, 200);
+  const json = (await preview.json()) as {
+    readonly acceptedRowCount: number;
+    readonly rejectedRowCount: number;
+    readonly rejectionReasons: readonly { readonly reason: string; readonly count: number }[];
+    readonly rowResults: readonly { readonly id: string; readonly status: string; readonly issues: readonly string[] }[];
+  };
+  assert.equal(json.acceptedRowCount, 0);
+  assert.equal(json.rejectedRowCount, 2);
+  const accountReason = json.rejectionReasons.find((entry) => entry.reason === "account_not_found");
+  assert.ok(accountReason !== undefined, "expected account_not_found to be surfaced in rejectionReasons");
+  assert.equal(accountReason?.count, 2);
+  // Per-row results drive the import table: both rows present, both rejected, each carrying its reason.
+  assert.equal(json.rowResults.length, 2);
+  assert.ok(json.rowResults.every((row) => row.status === "rejected"));
+  assert.ok(json.rowResults.every((row) => row.issues.includes("account_not_found")));
+});
+
+async function reconciliationLineStatus(
+  app: ReturnType<typeof createApiService>,
+  statementLineId: string
+): Promise<{ readonly status: string; readonly transactionId: string } | undefined> {
+  const response = await app.request("/eof/v1/reconciliations?workspaceId=workspace_1", { headers: authHeaders() });
+  assert.equal(response.status, 200);
+  const page = (await response.json()) as {
+    readonly items: readonly { readonly statementLineId: string; readonly status: string; readonly transactionId: string }[];
+  };
+  return page.items.find((item) => item.statementLineId === statementLineId);
+}
+
+test("reconciliation manual match, unmatch, and reject flip the bank line status", async () => {
+  const app = createWriteEnabledFixtureApiService();
+  assert.equal((await reconciliationLineStatus(app, "bank_line_unmatched"))?.status, "unmatched");
+
+  assertReceipt(await jsonWrite(app, "/eof/v1/reconciliations/match", "POST", "recon-match-1", {
+    workspaceId: "workspace_1",
+    statementLineId: "bank_line_unmatched",
+    transactionId: "tx_mcb_fee",
+    matchedAt: "2026-02-20T10:00:00.000Z"
+  }));
+  const matched = await reconciliationLineStatus(app, "bank_line_unmatched");
+  assert.equal(matched?.status, "matched");
+  assert.equal(matched?.transactionId, "tx_mcb_fee");
+
+  assertReceipt(await jsonWrite(app, "/eof/v1/reconciliations/unmatch", "POST", "recon-unmatch-1", {
+    workspaceId: "workspace_1",
+    statementLineId: "bank_line_unmatched"
+  }));
+  assert.equal((await reconciliationLineStatus(app, "bank_line_unmatched"))?.status, "unmatched");
+
+  assertReceipt(await jsonWrite(app, "/eof/v1/reconciliations/reject", "POST", "recon-reject-1", {
+    workspaceId: "workspace_1",
+    statementLineId: "bank_line_unmatched"
+  }));
+  assert.equal((await reconciliationLineStatus(app, "bank_line_unmatched"))?.status, "rejected");
+});
+
+test("reconciliation create-transaction builds a ledger line from a bank line and matches it", async () => {
+  const app = createWriteEnabledFixtureApiService();
+  const receipt = await jsonWrite(app, "/eof/v1/reconciliations/create-transaction", "POST", "recon-create-1", {
+    workspaceId: "workspace_1",
+    statementLineId: "bank_line_unmatched",
+    categoryId: null,
+    projectId: null,
+    matchedAt: "2026-02-20T10:00:00.000Z"
+  });
+  assertReceipt(receipt);
+  const candidate = await reconciliationLineStatus(app, "bank_line_unmatched");
+  assert.equal(candidate?.status, "matched");
+  assert.equal(candidate?.transactionId, receipt.id);
 });
 
 test("office bank import confirm persists lines once and replays idempotent responses", async () => {
@@ -2066,6 +2286,15 @@ function createTestAuthVerifier(): SupabaseJwtVerifier {
           email: "viewer@eeee.mu",
           role: "viewer",
           workspaceId: null
+        };
+      }
+
+      if (token === "fixture-office-token") {
+        return {
+          userId: "user_office",
+          email: "office@eeee.mu",
+          role: "office",
+          workspaceId: "eeee-mu"
         };
       }
 

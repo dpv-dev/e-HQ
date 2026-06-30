@@ -416,14 +416,14 @@ export const platformPages: Readonly<Record<PlatformPageId, PlatformPage>> = {
     title: "Integrations",
     subtitle: "Connected services and health status.",
     toolbar: [filter("Scope", "All", true), filter("Status", "Connected", false)],
-    kpis: [kpi("Connectors", "4", "3 active", "success", true), kpi("WordPress", "Connected", "Office · Distribution", "success", false), kpi("Banks", "2", "MCB + SBI", "info", false), kpi("Incidents", "0", "today", "success", false)],
+    kpis: [kpi("Connectors", "4", "3 active", "success", true), kpi("Supabase", "Live", "Auth · Postgres", "success", false), kpi("Banks", "2", "MCB + SBI", "info", false), kpi("Incidents", "0", "today", "success", false)],
     chartTitle: "Connector activity",
     chartSubtitle: "latest signals",
-    bars: [bar("WP", 96), bar("MCB", 88), bar("SBI", 36), bar("Assets", 72)],
+    bars: [bar("DB", 96), bar("MCB", 88), bar("SBI", 36), bar("Assets", 72)],
     divergenceRows: [],
     checksTitle: "Checks",
     checksSubtitle: "read-only here",
-    checks: [check("WordPress REST available", "success"), check("Project-scoped MCP", "success"), check("SBI on standby", "warning"), check("No remote writes", "success")],
+    checks: [check("Supabase runtime available", "success"), check("Project-scoped MCP", "success"), check("SBI on standby", "warning"), check("Guarded writes enabled", "success")],
     panels: [],
     treeRows: [],
     table: table(
@@ -437,7 +437,7 @@ export const platformPages: Readonly<Record<PlatformPageId, PlatformPage>> = {
         { label: "", align: "left" }
       ],
       [
-        [textCell("WordPress e-hq", true), textCell("REST / MCP", false), textCell("Office · Distribution", false), badgeCell("Connected", "success"), actionCell("Manage", "muted")],
+        [textCell("Supabase runtime", true), textCell("Auth · Postgres · Hono", false), textCell("All workspaces", false), badgeCell("Connected", "success"), actionCell("Manage", "muted")],
         [textCell("MCB statements", true), textCell("Bank import", false), textCell("Office", false), badgeCell("Connected", "success"), actionCell("Manage", "muted")],
         [textCell("SBI statements", true), textCell("Bank import", false), textCell("Office", false), badgeCell("Idle", "muted"), actionCell("Connect", "muted")],
         [textCell("Firefly / Adobe", true), textCell("Assets", false), textCell("Visuals", false), badgeCell("Connected", "success"), actionCell("Manage", "muted")]

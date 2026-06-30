@@ -51,7 +51,7 @@
     justify-content: center;
     gap: var(--ehq-space-2);
     font-family: var(--ehq-font);
-    font-size: 11px;
+    font-size: var(--ehq-type-action-size);
     font-weight: var(--ehq-type-heading-weight);
     letter-spacing: 0.08em;
     line-height: 1;
@@ -62,7 +62,7 @@
   .ehq-button.small {
     min-height: 30px;
     padding: 0 var(--ehq-space-2);
-    font-size: 10px;
+    font-size: var(--ehq-type-action-size);
   }
 
   .ehq-button.primary {

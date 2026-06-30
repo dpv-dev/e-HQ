@@ -255,7 +255,8 @@ export function transformOfficeLegacyDump(dump: LegacyOfficeDump, contract: Offi
     bankImportBatches: transformBankImportBatches(dump.bankRawTransactions),
     bankStatementLines: transformBankStatementLines(dump.bankRawTransactions, dump.bankReconciliations),
     bankReconciliationMatches: transformBankReconciliationMatches(dump.bankReconciliations),
-    cashflowProjectionRows: transformCashflowProjectionRows()
+    cashflowProjectionRows: transformCashflowProjectionRows(),
+    exchangeRates: []
   };
   const ignoredDivisionNameDriftCount = countDivisionNameDrift(dump, dimensions);
   const parityReport = createParityReport(dataset, contract.parity);

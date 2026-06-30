@@ -1,15 +1,16 @@
 <script lang="ts">
   import type { AuthSession } from "@ehq/auth";
   import sceneCommandCenter from "../../../../packages/ui/assets/backgrounds/scene-command-center.svg?url";
-  import type { AppRoute } from "./routes";
-  import { signInWithSupabasePassword } from "./supabase";
+  import type { AppRoute } from "./routes.js";
+  import { signInWithSupabasePassword } from "./supabase.js";
 
   interface Props {
     readonly onLogin: (session: AuthSession) => void;
     readonly onNavigate: (route: AppRoute) => void;
+    readonly nextRoute: AppRoute | null;
   }
 
-  const { onLogin, onNavigate }: Props = $props();
+  const { onLogin, onNavigate, nextRoute }: Props = $props();
 
   let email = $state("david@eeee.mu");
   let password = $state("");
@@ -35,7 +36,7 @@
         ? "Session ready. Opening your available workspaces."
         : "Sign-in validated for this session.";
       onLogin(session);
-      onNavigate("/");
+      onNavigate(nextRoute ?? "/");
     } catch (error: unknown) {
       statusMessage = error instanceof Error ? error.message : "Supabase sign-in failed.";
     } finally {
@@ -194,7 +195,7 @@
 
   .brand strong {
     color: var(--ehq-text-soft);
-    font-size: 12px;
+    font-size: var(--ehq-type-caption-size);
     letter-spacing: 0.16em;
     text-transform: lowercase;
   }
@@ -226,7 +227,7 @@
   .eyebrow,
   .field span {
     color: var(--ehq-text-muted);
-    font-size: 11px;
+    font-size: var(--ehq-type-caption-size);
     letter-spacing: 0.2em;
     text-transform: uppercase;
   }
@@ -251,16 +252,16 @@
     max-width: 36ch;
     margin-top: var(--ehq-space-2);
     color: var(--ehq-text-soft);
-    font-size: 13px;
+    font-size: var(--ehq-type-ui-size);
     font-weight: 300;
-    line-height: 1.5;
+    line-height: var(--ehq-type-ui-line);
   }
 
   .brand-copy span {
     display: block;
     margin-top: var(--ehq-space-4);
     color: var(--ehq-text-muted);
-    font-size: 11px;
+    font-size: var(--ehq-type-caption-size);
   }
 
   .form-panel {
@@ -285,9 +286,9 @@
   .lead {
     margin-top: var(--ehq-space-2);
     color: var(--ehq-text-soft);
-    font-size: 13.5px;
+    font-size: var(--ehq-type-ui-size);
     font-weight: 300;
-    line-height: 1.55;
+    line-height: var(--ehq-type-ui-line);
   }
 
   .field {
@@ -306,7 +307,8 @@
     color: var(--ehq-text);
     color-scheme: dark;
     font-family: var(--ehq-font);
-    font-size: 14px;
+    font-size: var(--ehq-type-control-size);
+    line-height: var(--ehq-type-ui-line);
   }
 
   .field input:focus {
@@ -335,7 +337,7 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--ehq-space-3);
-    font-size: 11px;
+    font-size: var(--ehq-type-caption-size);
   }
 
   .remember {
@@ -353,7 +355,7 @@
     border: 0;
     background: transparent;
     color: var(--ehq-text-muted);
-    font-size: 11px;
+    font-size: var(--ehq-type-caption-size);
   }
 
   .plain-link:hover {
@@ -366,7 +368,7 @@
     min-height: 46px;
     border-radius: var(--ehq-radius-sm);
     font-family: var(--ehq-font);
-    font-size: 12px;
+    font-size: var(--ehq-type-action-size);
     font-weight: var(--ehq-type-heading-weight);
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -394,7 +396,7 @@
     display: flex;
     align-items: center;
     gap: var(--ehq-space-3);
-    font-size: 10.5px;
+    font-size: var(--ehq-type-label-size);
     letter-spacing: 0.1em;
     text-transform: uppercase;
   }
@@ -421,8 +423,8 @@
   .foot {
     margin-top: var(--ehq-space-5);
     color: var(--ehq-text-muted);
-    font-size: 11px;
-    line-height: 1.7;
+    font-size: var(--ehq-type-caption-size);
+    line-height: var(--ehq-type-ui-line);
   }
 
   .status {

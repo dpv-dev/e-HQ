@@ -34,11 +34,12 @@ Build bottom-up so every layer rests on a proven one:
 
 ---
 
-## 2. Database — phased plan (keep the data, upgrade the access)
+## 2. Database — production plan (same product, new implementation)
 
-**Phase 1 — Same DB.**
-Existing tables are the source of truth. The new typed API reads and writes them
-correctly. Immediate continuity, zero migration trauma.
+**Runtime source of truth.**
+Supabase Postgres is the runtime database. Supabase Auth owns identity. The
+Hono API reads and writes the Supabase tables correctly through typed
+repositories and domain packages.
 
 **Phase 2 — Add clean read models.**
 For heavy screens, build derived projections (regenerable, never canonical):
@@ -46,9 +47,9 @@ For heavy screens, build derived projections (regenerable, never canonical):
 `open_recoupments_by_contract`, `royalties_pending_by_artist`,
 `distribution_batch_summary`.
 
-**Phase 3 — Normalize via adapters.**
-Where legacy tables are messy, do not break them. Wrap them in compatibility
-adapters that map legacy → domain model:
+**Normalize via adapters.**
+Where imported or compatibility-shaped tables are messy, do not push that shape
+into UI code. Wrap them in adapters that map storage → domain model:
 
 | Legacy table   | New domain model                          |
 |----------------|-------------------------------------------|

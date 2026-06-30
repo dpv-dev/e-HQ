@@ -38,7 +38,7 @@
   span {
     color: var(--ehq-text-muted);
     font-family: var(--ehq-mono);
-    font-size: 10px;
+    font-size: var(--ehq-type-label-size);
     font-weight: var(--ehq-type-label-weight);
     letter-spacing: 0.12em;
     text-transform: uppercase;
@@ -53,7 +53,9 @@
     background: var(--ehq-bg-main);
     color: var(--ehq-text);
     font-family: var(--ehq-font);
+    font-size: var(--ehq-type-control-size);
     font-weight: var(--ehq-type-body-weight);
+    line-height: var(--ehq-type-ui-line);
     outline: 0;
   }
 
@@ -74,7 +76,7 @@
   small {
     color: var(--ehq-error);
     font-family: var(--ehq-font);
-    font-size: 10px;
+    font-size: var(--ehq-type-label-size);
     font-weight: var(--ehq-type-body-weight);
   }
 

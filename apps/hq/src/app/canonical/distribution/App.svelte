@@ -22,6 +22,7 @@
     type DistributionImportPreviewRequest,
     type DistributionImportPreviewResponse,
     type DistributionMappingRow,
+    type DistributionReconciliationAction,
     type DistributionReconciliationResponse,
     type DistributionRevenueRow,
     type DistributionSettingsResponse,
@@ -33,12 +34,13 @@
     type SuspenseItem,
     type TrackSummary
   } from "@ehq/api-client";
-  import { BarsChart, KPI, Loader, Table, Toolbar } from "@ehq/ui";
-  import type { ChartPoint, SelectOption, TableColumn, TableRow, Tone, ToolbarFilter } from "@ehq/ui";
+  import { BarsChart, KPI, Loader, PageHeader, SectionTemplate, Table, Toolbar, WorkspaceShell } from "@ehq/ui";
+  import type { ChartPoint, SelectOption, TableColumn, TableRow, Tone, ToolbarFilter, WorkspaceNavGroup, WorkspaceNavItem } from "@ehq/ui";
   import { createShellApiClient } from "../../app-shell-data.js";
   import { formatDateOnly, formatDateRange } from "../../date-format.js";
   import { formatMoneyValue, moneyToneForValue } from "../../money-format.js";
-  import { createPeriodOptions, getLatestDataPeriod, periodEndDate, periodLabel, rangeForScope, type PeriodScope } from "../../period-controls.js";
+  import { createPeriodOptions, getLatestDataPeriod, periodEndDate, periodLabel, rangeForScope, rangeLabel, todayIso, type DateRange, type PeriodScope } from "../../period-controls.js";
+  import { normalizeRoutePath } from "../../route-utils.js";
 
   type DistributionPageId =
     | "dashboard"
@@ -76,6 +78,12 @@
     readonly subtitle: string;
   }
 
+  interface DistributionNavGroup {
+    readonly id: string;
+    readonly label: string;
+    readonly items: readonly DistributionNavItem[];
+  }
+
   interface ImportUiState {
     readonly status: RequestStatus;
     readonly source: ImportSource;
@@ -96,28 +104,52 @@
   const { session, onLogout }: Props = $props();
   const client = createShellApiClient();
   const distributionWorkspaceId = "eeee-mu";
-  const writesEnabled = true;
   const allValue = "all";
   const periodOptions = createPeriodOptions();
   const fallbackLatestPeriod = getLatestDataPeriod();
   const fallbackLatestPeriodEnd = periodEndDate(fallbackLatestPeriod);
-  const navItems: readonly DistributionNavItem[] = [
-    { id: "dashboard", label: "Dashboard", title: "Dashboard", subtitle: "Royalty cockpit, blockers, and actions." },
-    { id: "imports", label: "Imports", title: "Imports", subtitle: "Kontor and RouteNote exports, preview then confirm." },
-    { id: "mapping", label: "Mapping", title: "Mapping", subtitle: "Review rows, automate safe matches, apply reusable rules." },
-    { id: "catalog", label: "Catalog", title: "Catalog", subtitle: "Releases, tracks, contributors, and split health." },
-    { id: "contracts", label: "Contracts", title: "Contracts", subtitle: "Splits, payees, expenses, and recoupments." },
-    { id: "allocations", label: "Allocations", title: "Allocations", subtitle: "Preview/post/unpost through cadenced runs and server locks." },
-    { id: "suspense", label: "Suspense", title: "Suspense", subtitle: "Grouped by reason with an exact fix path." },
-    { id: "statements", label: "Statements", title: "Statements", subtitle: "Financial summary first, print-first A4 PDF." },
-    { id: "payments", label: "Payments", title: "Payments", subtitle: "Record, edit, void, and reconcile payment records." },
-    { id: "revenue", label: "Revenue", title: "Revenue", subtitle: "Financial view by payee, track, currency, store, or period." },
-    { id: "financial-reconciliation", label: "Financial reconciliation", title: "Financial reconciliation", subtitle: "Read-only diagnostic of payments, statements, balances, and allocations." },
-    { id: "aliases", label: "Aliases", title: "Aliases", subtitle: "Catalog aliases that route imported names to canonical entities." },
-    { id: "duplicates", label: "Duplicates", title: "Duplicates", subtitle: "Potential duplicate records detected across the catalog." },
-    { id: "audit-log", label: "Audit log", title: "Audit log", subtitle: "Distribution-scoped audit trail of recorded actions." },
-    { id: "settings", label: "Settings", title: "Settings", subtitle: "Read-only workspace configuration for Distribution." }
+  const navGroups: readonly DistributionNavGroup[] = [
+    {
+      id: "overview",
+      label: "Overview",
+      items: [
+        { id: "dashboard", label: "Dashboard", title: "Dashboard", subtitle: "Royalty cockpit, blockers, and actions." },
+        { id: "allocations", label: "Allocations", title: "Allocations", subtitle: "Preview/post/unpost through cadenced runs and server locks." },
+        { id: "suspense", label: "Suspense", title: "Suspense", subtitle: "Grouped by reason with an exact fix path." },
+        { id: "statements", label: "Statements", title: "Statements", subtitle: "Financial summary first, print-first A4 PDF." },
+        { id: "payments", label: "Payments", title: "Payments", subtitle: "Record, edit, void, and reconcile payment records." },
+        { id: "revenue", label: "Revenue", title: "Revenue", subtitle: "Financial view by payee, track, currency, store, or period." },
+      ]
+    },
+    {
+      id: "imports",
+      label: "Import & Mapping",
+      items: [
+        { id: "imports", label: "Imports", title: "Imports", subtitle: "Kontor and RouteNote exports, preview then confirm." },
+        { id: "mapping", label: "Mapping", title: "Mapping", subtitle: "Review rows, automate safe matches, apply reusable rules." },
+        { id: "aliases", label: "Aliases", title: "Aliases", subtitle: "Catalog aliases that route imported names to canonical entities." },
+        { id: "duplicates", label: "Duplicates", title: "Duplicates", subtitle: "Potential duplicate records detected across the catalog." }
+      ]
+    },
+    {
+      id: "catalog",
+      label: "Catalog & Contracts",
+      items: [
+        { id: "catalog", label: "Catalog", title: "Catalog", subtitle: "Releases, tracks, contributors, and split health." },
+        { id: "contracts", label: "Contracts", title: "Contracts", subtitle: "Splits, payees, expenses, and recoupments." },
+        { id: "financial-reconciliation", label: "Financial reconciliation", title: "Financial reconciliation", subtitle: "Read-only diagnostic of payments, statements, balances, and allocations." }
+      ]
+    },
+    {
+      id: "administration",
+      label: "Administration",
+      items: [
+        { id: "audit-log", label: "Audit log", title: "Audit log", subtitle: "Distribution-scoped audit trail of recorded actions." },
+        { id: "settings", label: "Settings", title: "Settings", subtitle: "Read-only workspace configuration for Distribution." }
+      ]
+    }
   ];
+  const navItems: readonly DistributionNavItem[] = navGroups.flatMap((group: DistributionNavGroup): readonly DistributionNavItem[] => group.items);
   const importSourceOptions: readonly SelectOption[] = [
     { label: "Kontor", value: "kontor" },
     { label: "RouteNote", value: "routenote" }
@@ -345,8 +377,27 @@
   ];
 
   let activePageId = $state<DistributionPageId>("dashboard");
+  const shellNavGroups = $derived<readonly WorkspaceNavGroup[]>(
+    navGroups.map((group: DistributionNavGroup): WorkspaceNavGroup => ({
+      id: group.id,
+      label: group.label,
+      items: group.items.map((item: DistributionNavItem): WorkspaceNavItem => ({
+        label: item.label,
+        href: item.id,
+        icon: "",
+        active: activePageId === item.id,
+        disabled: false,
+        badge: null
+      }))
+    }))
+  );
+  const handleShellNavigate = (href: string): void => {
+    selectPage(href as DistributionPageId);
+  };
   let periodScope = $state<PeriodScope>("month");
   let selectedPeriod = $state(getLatestDataPeriod());
+  const today = todayIso();
+  let customRange = $state<DateRange | null>(null);
   let dashboardState = $state<ApiRequestState<DistributionDashboardResponse>>(
     createIdleState<DistributionDashboardResponse>()
   );
@@ -408,10 +459,12 @@
   let mutationReceipt = $state<ApiMutationReceipt | null>(null);
   let runReceiptPageId = $state<DistributionPageId | null>(null);
   let mutationReceiptPageId = $state<DistributionPageId | null>(null);
+  let writesEnabled = $state(false);
+  let writeGateMessage = $state("Checking write gate.");
 
   const activePage = $derived(getNavItem(activePageId));
   const distributionPeriod = $derived(selectedPeriod);
-  const activeRange = $derived(rangeForScope(periodScope, selectedPeriod));
+  const activeRange = $derived(rangeForScope(periodScope, today, customRange));
   const periodControlVisible = $derived(pageUsesPeriodControl(activePageId));
   const allocationLockKey = $derived(`distribution:allocations:${distributionPeriod}`);
   const dashboardKpis = $derived(createDashboardKpis(dashboardState));
@@ -468,6 +521,7 @@
 
   async function loadInitialData(): Promise<void> {
     await Promise.all([
+      loadWriteGate(),
       loadDashboard(),
       loadImportBatches(),
       loadMappingRows(),
@@ -485,6 +539,19 @@
       loadAuditLog(),
       loadSettings()
     ]);
+  }
+
+  async function loadWriteGate(): Promise<void> {
+    try {
+      const status = await client.commandCenter.getStatus({
+        workspaceId: distributionWorkspaceId
+      });
+      writesEnabled = status.writesEnabled;
+      writeGateMessage = status.writesEnabled ? "writes enabled" : "enable writes";
+    } catch (error: unknown) {
+      writesEnabled = false;
+      writeGateMessage = getErrorMessage(error);
+    }
   }
 
   async function loadDashboard(): Promise<void> {
@@ -789,59 +856,145 @@
   }
 
   function readPageIdFromPath(pathname: string): DistributionPageId {
-    if (pathname.endsWith("/console/distribution/imports")) {
-      return "imports";
-    }
+    const normalizedPath = normalizeRoutePath(pathname);
 
-    if (pathname.endsWith("/console/distribution/mapping")) {
-      return "mapping";
-    }
-
-    if (pathname.endsWith("/console/distribution/catalog")) {
-      return "catalog";
-    }
-
-    if (pathname.endsWith("/console/distribution/contracts")) {
-      return "contracts";
-    }
-
-    if (pathname.endsWith("/console/distribution/allocations")) {
-      return "allocations";
-    }
-
-    if (pathname.endsWith("/console/distribution/suspense")) {
-      return "suspense";
-    }
-
-    if (pathname.endsWith("/console/distribution/statements")) {
-      return "statements";
-    }
-
-    if (pathname.endsWith("/console/distribution/payments")) {
-      return "payments";
-    }
-
-    if (pathname.endsWith("/console/distribution/revenue")) {
-      return "revenue";
-    }
-
-    if (pathname.endsWith("/console/distribution/financial-reconciliation")) {
-      return "financial-reconciliation";
-    }
-
-    if (pathname.endsWith("/console/distribution/aliases")) {
-      return "aliases";
-    }
-
-    if (pathname.endsWith("/console/distribution/duplicates")) {
+    if (normalizedPath.endsWith("/console/distribution/contracts/duplicates")) {
       return "duplicates";
     }
 
-    if (pathname.endsWith("/console/distribution/audit-log")) {
+    if (normalizedPath.endsWith("/console/contracts/duplicates")) {
+      return "duplicates";
+    }
+
+    if (normalizedPath.endsWith("/console/distribution/contracts")) {
+      return "contracts";
+    }
+
+    if (normalizedPath.endsWith("/console/contracts")) {
+      return "contracts";
+    }
+
+    if (normalizedPath.endsWith("/console/import")) {
+      return "imports";
+    }
+
+    if (normalizedPath.endsWith("/console/imports")) {
+      return "imports";
+    }
+
+    if (normalizedPath.endsWith("/console/mapping")) {
+      return "mapping";
+    }
+
+    if (normalizedPath.endsWith("/console/catalog")) {
+      return "catalog";
+    }
+
+    if (normalizedPath.endsWith("/console/allocations")) {
+      return "allocations";
+    }
+
+    if (normalizedPath.endsWith("/console/action-needed")) {
+      return "suspense";
+    }
+
+    if (normalizedPath.endsWith("/console/suspense")) {
+      return "suspense";
+    }
+
+    if (normalizedPath.endsWith("/console/statements")) {
+      return "statements";
+    }
+
+    if (normalizedPath.endsWith("/console/payments")) {
+      return "payments";
+    }
+
+    if (normalizedPath.endsWith("/console/revenue")) {
+      return "revenue";
+    }
+
+    if (normalizedPath.endsWith("/console/aliases")) {
+      return "aliases";
+    }
+
+    if (normalizedPath.endsWith("/console/duplicates")) {
+      return "duplicates";
+    }
+
+    if (normalizedPath.endsWith("/console/audit-log")) {
       return "audit-log";
     }
 
-    if (pathname.endsWith("/console/distribution/settings")) {
+    if (normalizedPath.endsWith("/console/distribution/import")) {
+      return "imports";
+    }
+
+    if (normalizedPath.endsWith("/console/distribution/audit")) {
+      return "audit-log";
+    }
+
+    if (normalizedPath.endsWith("/console/distribution/imports")) {
+      return "imports";
+    }
+
+    if (normalizedPath.endsWith("/console/distribution/mapping")) {
+      return "mapping";
+    }
+
+    if (normalizedPath.endsWith("/console/distribution/catalog")) {
+      return "catalog";
+    }
+
+    if (normalizedPath.endsWith("/console/distribution/allocations")) {
+      return "allocations";
+    }
+
+    if (normalizedPath.endsWith("/console/distribution/action-needed")) {
+      return "suspense";
+    }
+
+    if (normalizedPath.endsWith("/console/distribution/suspense")) {
+      return "suspense";
+    }
+
+    if (normalizedPath.endsWith("/console/distribution/statements")) {
+      return "statements";
+    }
+
+    if (normalizedPath.endsWith("/console/distribution/payments")) {
+      return "payments";
+    }
+
+    if (normalizedPath.endsWith("/console/distribution/revenue")) {
+      return "revenue";
+    }
+
+    if (normalizedPath.endsWith("/console/distribution/financial-reconciliation")) {
+      return "financial-reconciliation";
+    }
+
+    if (normalizedPath.endsWith("/console/distribution/aliases")) {
+      return "aliases";
+    }
+
+    if (normalizedPath.endsWith("/console/distribution/duplicates")) {
+      return "duplicates";
+    }
+
+    if (normalizedPath.endsWith("/console/distribution/audit-log")) {
+      return "audit-log";
+    }
+
+    if (normalizedPath.endsWith("/console/distribution/settings")) {
+      return "settings";
+    }
+
+    if (normalizedPath.endsWith("/console/financial-reconciliation")) {
+      return "financial-reconciliation";
+    }
+
+    if (normalizedPath.endsWith("/console/settings")) {
       return "settings";
     }
 
@@ -930,9 +1083,12 @@
   }
 
   function updateImportSource(event: Event): void {
+    const source = distributionImportSourceFromValue(readSelectValue(event));
+
     importState = {
       ...importState,
-      source: readSelectValue(event) as ImportSource,
+      source,
+      fileName: sampleFileNameForImportSource(source),
       preview: null,
       confirm: null,
       message: "Source changed, run preview again."
@@ -946,6 +1102,55 @@
       preview: null,
       confirm: null,
       message: "File ready for preview."
+    };
+  }
+
+  function selectImportToolbarFilter(filter: ToolbarFilter): void {
+    if (filter.actionId === "source") {
+      cycleImportSource();
+      return;
+    }
+
+    if (filter.actionId === "file") {
+      resetImportFileName();
+      return;
+    }
+
+    if (filter.actionId === "status") {
+      void previewImport();
+      return;
+    }
+
+    throw new Error(`Unknown Distribution import toolbar action: ${filter.label}.`);
+  }
+
+  function cycleImportSource(): void {
+    const currentIndex = importSourceOptions.findIndex((option: SelectOption): boolean => option.value === importState.source);
+    const nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % importSourceOptions.length;
+    const nextOption = importSourceOptions[nextIndex];
+
+    if (nextOption === undefined) {
+      throw new Error("Distribution import source options are empty.");
+    }
+
+    const source = distributionImportSourceFromValue(nextOption.value);
+    importState = {
+      ...importState,
+      source,
+      fileName: sampleFileNameForImportSource(source),
+      preview: null,
+      confirm: null,
+      message: "Source changed, run preview again."
+    };
+  }
+
+  function resetImportFileName(): void {
+    importState = {
+      ...importState,
+      fileName: sampleFileNameForImportSource(importState.source),
+      preview: null,
+      confirm: null,
+      message: "Sample file restored, run preview again."
     };
   }
 
@@ -967,6 +1172,21 @@
 
   function updatePeriodScope(event: Event): void {
     periodScope = readSelectValue(event) as PeriodScope;
+    if (periodScope === "custom" && customRange === null) {
+      customRange = activeRange;
+    }
+    void reloadPeriodScopedData();
+  }
+
+  function updateCustomFrom(event: Event): void {
+    const base = customRange ?? activeRange;
+    customRange = { from: readInputValue(event), to: base.to };
+    void reloadPeriodScopedData();
+  }
+
+  function updateCustomTo(event: Event): void {
+    const base = customRange ?? activeRange;
+    customRange = { from: base.from, to: readInputValue(event) };
     void reloadPeriodScopedData();
   }
 
@@ -1022,7 +1242,8 @@
   }
 
   async function confirmImport(): Promise<void> {
-    if (importState.preview === null) {
+    const preview = importState.preview;
+    if (preview === null) {
       return;
     }
 
@@ -1036,7 +1257,7 @@
       const confirm = await client.distribution.confirmImport(
         {
           workspaceId: distributionWorkspaceId,
-          previewId: importState.preview.previewId,
+          previewId: preview.previewId,
           acceptedRowIds: ["row_1", "row_2", "row_3"],
           rejectedRowIds: []
         },
@@ -1771,9 +1992,9 @@
 
   function createImportToolbarFilters(state: ImportUiState): readonly ToolbarFilter[] {
     return [
-      { label: "Source", value: state.source, active: true, disabled: false },
-      { label: "File", value: state.fileName, active: false, disabled: false },
-      { label: "State", value: state.status, active: false, disabled: false }
+      { label: "Source", value: state.source, active: true, disabled: false, actionId: "source", title: "Cycle import source" },
+      { label: "File", value: state.fileName, active: false, disabled: false, actionId: "file", title: "Restore sample file" },
+      { label: "State", value: state.status, active: false, disabled: false, actionId: "status", title: "Run import preview" }
     ];
   }
 
@@ -1845,6 +2066,22 @@
     return target.value;
   }
 
+  function distributionImportSourceFromValue(value: string): ImportSource {
+    if (value === "kontor" || value === "routenote") {
+      return value;
+    }
+
+    throw new Error(`Unknown Distribution import source: ${value}.`);
+  }
+
+  function sampleFileNameForImportSource(source: ImportSource): string {
+    if (source === "kontor") {
+      return "Kontor_Music_Report_Jan2026.csv";
+    }
+
+    return "RNSales_Jan2026_eeeemusic.xlsx";
+  }
+
   function formatMicro(amountMicro: string): string {
     return formatMoney(amountMicro, "MUR");
   }
@@ -1871,7 +2108,7 @@
     const trimmed = stripRawMoneySuffix(value.trim());
     const [firstPart, ...rest] = trimmed.split(" · ");
 
-    if (isUuidLike(firstPart) && rest.length > 0) {
+    if (firstPart !== undefined && isUuidLike(firstPart) && rest.length > 0) {
       return rest.join(" · ");
     }
 
@@ -2008,7 +2245,7 @@
   }
 
   function writeDisabledTitle(): string {
-    return writesEnabled ? "" : "enable writes";
+    return writesEnabled ? "" : writeGateMessage;
   }
 
   function createIdempotencyKey(scope: string): string {
@@ -2028,47 +2265,32 @@
   <title>ë • Distribution</title>
 </svelte:head>
 
-<main class="distribution-shell">
-  <aside class="sidebar" aria-label="Navigation Distribution">
-    <button class="brand" type="button" onclick={() => selectPage("dashboard")}>
-      <span>ë</span>
-      <strong>ë • distribution</strong>
-    </button>
-
-    <nav>
-      <h2>Distribution</h2>
-      {#each navItems as item (item.id)}
-        <button class="ehq-nav-fade-item ehq-edge-surface" class:active={activePageId === item.id} type="button" onclick={() => selectPage(item.id)}>
-          <span aria-hidden="true"></span>
-          {item.label}
-        </button>
-      {/each}
-    </nav>
-
-    <p class="system-status"><span aria-hidden="true"></span>erh/v1 · live reads</p>
-  </aside>
-
-  <section class="main-panel">
-    <header class="topbar">
-      <p><span>Distribution</span> / <strong>{activePage.label}</strong></p>
-      <label class="search">
-        <span>⌘K</span>
-        <input aria-label="Search Distribution" placeholder="payee, ISRC, statement..." />
-      </label>
-      <button class="notification" type="button" aria-label="Notifications">5</button>
-      <button class="profile" type="button" aria-label="Sign out" onclick={onLogout}>
-        <span>{session.initials}</span>
-        <strong>{session.displayName}</strong>
-        <small>{session.roleLabel}</small>
-      </button>
-    </header>
-
+<WorkspaceShell
+  workspace="distribution"
+  brandLabel="ë • distribution"
+  homeHref="/console/distribution/dashboard"
+  navLabel="Navigation Distribution"
+  navItems={[]}
+  navGroups={shellNavGroups}
+  statusLabel="erh/v1"
+  statusValue={writesEnabled ? "writes enabled" : "live reads"}
+  userInitial={session.initials}
+  userName={session.displayName}
+  userContext={session.roleLabel}
+  signOutHref="#"
+  onNavigate={handleShellNavigate}
+  onSignOut={onLogout}
+>
     <div class="content">
-      <section class="page-head">
-        <p>Distribution</p>
-        <h1>{activePage.title}</h1>
-        <span>{activePage.subtitle}</span>
-      </section>
+      <PageHeader
+        workspace="distribution"
+        eyebrow="Distribution"
+        title={activePage.title}
+        description={activePage.subtitle}
+        meta=""
+        statusLabel=""
+        statusTone="muted"
+      />
 
       {#if periodControlVisible}
         <section class="period-control ehq-edge-surface" aria-label="Period control">
@@ -2076,11 +2298,21 @@
             <span>Period</span>
             <select value={periodScope} onchange={updatePeriodScope}>
               {#each periodOptions as option (option.value)}
-                <option value={option.value}>{option.label} · {option.detail}</option>
+                <option value={option.value}>{option.label}</option>
               {/each}
             </select>
           </label>
-          <p>{periodLabel(distributionPeriod)} · {activeRange.from} -> {activeRange.to}</p>
+          {#if periodScope === "custom"}
+            <label>
+              <span>From</span>
+              <input type="date" value={activeRange.from} max={activeRange.to} onchange={updateCustomFrom} />
+            </label>
+            <label>
+              <span>To</span>
+              <input type="date" value={activeRange.to} min={activeRange.from} onchange={updateCustomTo} />
+            </label>
+          {/if}
+          <p>{rangeLabel(activeRange)}</p>
         </section>
       {/if}
 
@@ -2103,7 +2335,7 @@
           <Table title="Action list" columns={dashboardColumns} rows={dashboardRows} state="default" actionLabel="" />
         </section>
       {:else if activePageId === "imports"}
-        <Toolbar label="Kontor RouteNote import" filters={importToolbarFilters} actionLabel="" loading={importState.status === "loading"} />
+        <Toolbar label="Kontor RouteNote import" filters={importToolbarFilters} actionLabel="" loading={importState.status === "loading"} onFilterSelect={selectImportToolbarFilter} />
         <section class="form-panel ehq-edge-surface" aria-label="Import Kontor RouteNote">
           <label>
             <span>Source</span>
@@ -2160,9 +2392,14 @@
         <section class="dashboard-grid">
           <Table title="Catalog canonical + contributors" columns={catalogColumns} rows={catalogRows} state={tableStateFor(tracksState.status, catalogRows.length)} actionLabel="" />
           <div class="command-card ehq-edge-surface">
-            <h2>Review focus</h2>
-            <p>Import artist and catalog contributors stay separate until an exact track match is approved.</p>
-            <button class="distribution-action primary" type="button" onclick={() => selectPage("mapping")}>Fix contributor mapping</button>
+            <SectionTemplate
+              eyebrow="catalog"
+              title="Review focus"
+              detail="Import artist and catalog contributors stay separate until an exact track match is approved."
+              state="ready"
+            >
+              <button class="distribution-action primary" type="button" onclick={() => selectPage("mapping")}>Fix contributor mapping</button>
+            </SectionTemplate>
           </div>
         </section>
       {:else if activePageId === "contracts"}
@@ -2176,14 +2413,19 @@
         </section>
       {:else if activePageId === "allocations"}
         <section class="lock-panel ehq-edge-surface">
-          <div>
-            <h2>Server lock</h2>
-            <p>{allocationLockKey}</p>
-            <span>Preview, post and unpost are available only through cadenced workflow runs.</span>
-          </div>
-          <button class="distribution-action" type="button" onclick={previewAllocationRun}>Preview locked run</button>
-          <button class="distribution-action primary" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={startCadencedAllocationRun}>Post cadence wave</button>
-          <button class="distribution-action danger" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={unpostAllocationRun}>Request unpost run</button>
+          <SectionTemplate
+            eyebrow="allocations"
+            title="Server lock"
+            detail="Preview, post and unpost are available only through cadenced workflow runs."
+            state="ready"
+          >
+            {#snippet action()}
+              <button class="distribution-action" type="button" onclick={previewAllocationRun}>Preview locked run</button>
+              <button class="distribution-action primary" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={startCadencedAllocationRun}>Post cadence wave</button>
+              <button class="distribution-action danger" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={unpostAllocationRun}>Request unpost run</button>
+            {/snippet}
+            <p class="lock-key">{allocationLockKey}</p>
+          </SectionTemplate>
         </section>
         <Table title="Allocation runs" columns={allocationColumns} rows={allocationRows} state={tableStateFor(allocationsState.status, allocationRuns.length)} actionLabel="" />
       {:else if activePageId === "suspense"}
@@ -2279,10 +2521,12 @@
           <Table title="Matched unallocated (sample)" columns={reconMatchedColumns} rows={reconMatchedRows} state={reconMatchedRows.length === 0 ? "empty" : "default"} actionLabel="" />
           <Table title="Payee balances summary" columns={reconBalanceColumns} rows={reconBalanceRows} state={reconBalanceRows.length === 0 ? "empty" : "default"} actionLabel="" />
           <section class="recon-actions ehq-edge-surface" aria-label="Guarded repair actions">
-            <header>
-              <h2>Guarded repair actions</h2>
-              <span>Guarded actions use the API write path with idempotency, audit, and locks.</span>
-            </header>
+            <SectionTemplate
+              eyebrow="reconciliation"
+              title="Guarded repair actions"
+              detail="Guarded actions use the API write path with idempotency, audit, and locks."
+              state="ready"
+            >
             <div class="recon-action-grid">
               {#each (reconciliation?.actions ?? []) as action (action.id)}
                 <div class="recon-action ehq-edge-surface">
@@ -2304,6 +2548,7 @@
                 </div>
               {/each}
             </div>
+            </SectionTemplate>
           </section>
         {/if}
       {:else if activePageId === "aliases"}
@@ -2317,10 +2562,12 @@
         {/if}
       {:else if activePageId === "duplicates"}
         <section class="recon-actions ehq-edge-surface" aria-label="Duplicates note">
-          <header>
-            <h2>Duplicate detection</h2>
-            <span>Potential duplicate records are listed with human labels; merge remains a reviewed maintenance action.</span>
-          </header>
+          <SectionTemplate
+            eyebrow="duplicates"
+            title="Duplicate detection"
+            detail="Potential duplicate records are listed with human labels; merge remains a reviewed maintenance action."
+            state="ready"
+          />
         </section>
         {#if duplicates.length === 0 && duplicatesState.status === "success"}
           <section class="empty-state ehq-edge-surface">
@@ -2364,55 +2611,13 @@
         {/if}
       {/if}
     </div>
-  </section>
-</main>
+</WorkspaceShell>
 
 <style>
   :global(body) {
     overflow: hidden;
   }
 
-  .distribution-shell {
-    height: 100dvh;
-    min-height: 0;
-    background: var(--ehq-bg-main);
-    color: var(--ehq-text);
-    display: grid;
-    grid-template-columns: 236px minmax(0, 1fr);
-    overflow: hidden;
-  }
-
-  .sidebar {
-    min-height: 0;
-    border-right: 1px solid var(--ehq-border-soft);
-    background: var(--ehq-surface);
-    display: flex;
-    flex-direction: column;
-  }
-
-  .brand {
-    padding: var(--ehq-space-4);
-    border: 0;
-    background: transparent;
-    color: var(--ehq-text);
-    display: inline-flex;
-    align-items: center;
-    gap: var(--ehq-space-2);
-  }
-
-  .brand span {
-    color: var(--ehq-yellow);
-    font-size: 24px;
-    font-weight: var(--ehq-type-display-weight);
-  }
-
-  .brand strong,
-  nav h2,
-  .system-status,
-  .topbar p,
-  .search,
-  .profile small,
-  .page-head p,
   .receipt,
   label span,
   .distribution-action,
@@ -2425,180 +2630,6 @@
     font-family: var(--ehq-mono);
   }
 
-  .brand strong {
-    color: var(--ehq-text-soft);
-    font-size: 12px;
-    letter-spacing: 0.16em;
-    text-transform: lowercase;
-  }
-
-  nav {
-    flex: 1 1 auto;
-    min-height: 0;
-    padding: var(--ehq-space-2);
-    overflow-y: auto;
-  }
-
-  nav h2 {
-    margin: var(--ehq-space-3) var(--ehq-space-2) var(--ehq-space-2);
-    color: var(--ehq-text-muted);
-    font-size: 10px;
-    letter-spacing: 0.2em;
-    text-transform: uppercase;
-  }
-
-  nav button {
-    width: 100%;
-    min-height: 36px;
-    padding: 0 var(--ehq-space-3);
-    border: 0;
-    border-radius: var(--ehq-radius-sm);
-    background: transparent;
-    color: var(--ehq-text-soft);
-    display: flex;
-    align-items: center;
-    gap: var(--ehq-space-2);
-    text-align: left;
-  }
-
-  nav button:hover,
-  nav button.active {
-    color: var(--ehq-text);
-  }
-
-  nav button.active {
-    box-shadow: inset 2px 0 0 var(--ehq-yellow);
-  }
-
-  nav button span {
-    width: 7px;
-    height: 7px;
-    border-radius: 2px;
-    background: currentColor;
-  }
-
-  .system-status {
-    margin: 0;
-    padding: var(--ehq-space-3) var(--ehq-space-4);
-    border-top: 1px solid var(--ehq-border-soft);
-    color: var(--ehq-text-muted);
-    display: flex;
-    align-items: center;
-    gap: var(--ehq-space-2);
-    font-size: 11px;
-  }
-
-  .system-status span {
-    width: 7px;
-    height: 7px;
-    border-radius: var(--ehq-radius-pill);
-    background: var(--ehq-success);
-  }
-
-  .main-panel {
-    min-width: 0;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-  }
-
-  .topbar {
-    flex: 0 0 auto;
-    min-width: 0;
-    min-height: 58px;
-    padding: 0 var(--ehq-space-5);
-    border-bottom: 1px solid var(--ehq-border-soft);
-    display: flex;
-    align-items: center;
-    gap: var(--ehq-space-4);
-  }
-
-  .topbar p {
-    margin: 0;
-    color: var(--ehq-text-soft);
-    font-size: 12px;
-  }
-
-  .topbar p span {
-    color: var(--ehq-text-muted);
-  }
-
-  .search {
-    flex: 1 1 360px;
-    max-width: 420px;
-    min-height: 38px;
-    padding: 0 var(--ehq-space-3);
-    border: 1px solid var(--ehq-border);
-    border-radius: var(--ehq-radius-sm);
-    background: var(--ehq-bg-main);
-    color: var(--ehq-text-muted);
-    display: flex;
-    align-items: center;
-    gap: var(--ehq-space-2);
-    font-size: 11px;
-  }
-
-  .search input {
-    min-width: 0;
-    flex: 1;
-    border: 0;
-    background: transparent;
-    color: var(--ehq-text);
-    outline: 0;
-  }
-
-  .notification,
-  .profile {
-    border: 1px solid var(--ehq-border);
-    background: var(--ehq-surface-high);
-    color: var(--ehq-text);
-  }
-
-  .notification {
-    width: 34px;
-    height: 34px;
-    border-radius: var(--ehq-radius-sm);
-    color: var(--ehq-yellow);
-    font-family: var(--ehq-mono);
-    font-size: 11px;
-    font-weight: var(--ehq-type-label-weight);
-  }
-
-  .profile {
-    min-height: 38px;
-    padding: var(--ehq-space-1) var(--ehq-space-2);
-    border-radius: var(--ehq-radius-sm);
-    display: grid;
-    grid-template-columns: auto auto;
-    align-items: center;
-    column-gap: var(--ehq-space-2);
-    text-align: left;
-  }
-
-  .profile span {
-    grid-row: span 2;
-    width: 28px;
-    height: 28px;
-    border-radius: var(--ehq-radius-pill);
-    background: var(--ehq-bg-main);
-    color: var(--ehq-yellow);
-    display: grid;
-    place-items: center;
-    font-family: var(--ehq-mono);
-    font-size: 10px;
-    font-weight: var(--ehq-type-label-weight);
-  }
-
-  .profile strong {
-    font-size: 12px;
-    font-weight: var(--ehq-type-heading-weight);
-  }
-
-  .profile small {
-    color: var(--ehq-text-muted);
-    font-size: 10px;
-  }
-
   .content {
     flex: 1 1 auto;
     min-height: 0;
@@ -2607,36 +2638,9 @@
     align-content: start;
     gap: var(--ehq-space-4);
     overflow-y: auto;
-    overflow-x: hidden;
+    overflow-x: auto;
   }
 
-  .page-head p,
-  .page-head h1,
-  .page-head span {
-    margin: 0;
-  }
-
-  .page-head p {
-    color: var(--ehq-text-muted);
-    font-size: 11px;
-    letter-spacing: 0.2em;
-    text-transform: uppercase;
-  }
-
-  .page-head h1 {
-    margin-top: var(--ehq-space-2);
-    font-size: clamp(24px, 2.6vw, 34px);
-    font-weight: var(--ehq-type-display-weight);
-    line-height: 1;
-    letter-spacing: 0;
-  }
-
-  .page-head span {
-    display: block;
-    margin-top: var(--ehq-space-2);
-    color: var(--ehq-text-soft);
-    font-size: 13.5px;
-  }
 
   .receipt,
   .import-result {
@@ -2646,7 +2650,7 @@
     border-radius: var(--ehq-radius-sm);
     background: var(--ehq-yellow-muted);
     color: var(--ehq-yellow);
-    font-size: 11px;
+    font-size: var(--ehq-type-caption-size);
   }
 
   .kpi-grid {
@@ -2690,7 +2694,7 @@
     margin: 0;
     color: var(--ehq-text-muted);
     font-family: var(--ehq-mono);
-    font-size: 11px;
+    font-size: var(--ehq-type-caption-size);
   }
 
   label {
@@ -2701,7 +2705,7 @@
 
   label span {
     color: var(--ehq-text-muted);
-    font-size: 10px;
+    font-size: var(--ehq-type-label-size);
     letter-spacing: 0.12em;
     text-transform: uppercase;
   }
@@ -2716,7 +2720,9 @@
     background: var(--ehq-bg-main);
     color: var(--ehq-text);
     font-family: var(--ehq-font);
+    font-size: var(--ehq-type-control-size);
     font-weight: var(--ehq-type-body-weight);
+    line-height: var(--ehq-type-ui-line);
     color-scheme: dark;
     outline: 0;
   }
@@ -2735,7 +2741,7 @@
     background: transparent;
     color: var(--ehq-text);
     font-family: var(--ehq-font);
-    font-size: 11px;
+    font-size: var(--ehq-type-action-size);
     font-weight: var(--ehq-type-heading-weight);
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -2781,8 +2787,6 @@
     background: transparent;
   }
 
-  .command-card h2,
-  .command-card p,
   .statement-summary h2,
   .statement-summary p,
   .statement-pdf h2,
@@ -2791,18 +2795,10 @@
     margin: 0;
   }
 
-  .command-card h2,
   .statement-summary h2,
   .statement-pdf h2 {
-    font-size: 18px;
+    font-size: var(--ehq-type-section-title-size);
     font-weight: var(--ehq-type-heading-weight);
-  }
-
-  .command-card p {
-    margin: var(--ehq-space-2) 0 var(--ehq-space-3);
-    color: var(--ehq-text-soft);
-    font-size: 13px;
-    line-height: 1.6;
   }
 
   .contracts-actions,
@@ -2811,15 +2807,9 @@
   }
 
   .contracts-actions span,
-  .lock-panel span,
   .lock-panel p {
     color: var(--ehq-text-muted);
-    font-size: 11px;
-  }
-
-  .lock-panel h2 {
-    margin: 0 0 var(--ehq-space-1);
-    font-size: 14px;
+    font-size: var(--ehq-type-caption-size);
   }
 
   .statement-summary {
@@ -2829,7 +2819,7 @@
 
   .statement-summary p {
     color: var(--ehq-text-muted);
-    font-size: 11px;
+    font-size: var(--ehq-type-caption-size);
     letter-spacing: 0.12em;
     text-transform: uppercase;
   }
@@ -2852,7 +2842,7 @@
 
   .statement-summary dt {
     color: var(--ehq-text-muted);
-    font-size: 11px;
+    font-size: var(--ehq-type-caption-size);
   }
 
   .statement-summary dd {
@@ -2878,13 +2868,13 @@
 
   .statement-pdf h2 {
     margin-top: var(--ehq-space-5);
-    font-size: 28px;
+    font-size: var(--ehq-type-page-title-size);
   }
 
   .statement-pdf p {
     margin: var(--ehq-space-2) 0 var(--ehq-space-4);
     color: var(--ehq-text-muted);
-    font-size: 12px;
+    font-size: var(--ehq-type-caption-size);
   }
 
   .kpi-grid.recon {
@@ -2903,14 +2893,14 @@
 
   .empty-state strong {
     font-family: var(--ehq-display);
-    font-size: 18px;
+    font-size: var(--ehq-type-section-title-size);
     font-weight: var(--ehq-type-heading-weight);
   }
 
   .empty-state span {
     color: var(--ehq-text-soft);
-    font-size: 13px;
-    line-height: 1.6;
+    font-size: var(--ehq-type-ui-size);
+    line-height: var(--ehq-type-ui-line);
   }
 
   .recon-actions {
@@ -2922,19 +2912,6 @@
     gap: var(--ehq-space-3);
   }
 
-  .recon-actions header h2 {
-    margin: 0;
-    font-size: 16px;
-    font-weight: var(--ehq-type-heading-weight);
-  }
-
-  .recon-actions header span {
-    display: block;
-    margin-top: var(--ehq-space-1);
-    color: var(--ehq-text-muted);
-    font-family: var(--ehq-mono);
-    font-size: 11px;
-  }
 
   .recon-action-grid {
     display: grid;
@@ -2953,21 +2930,21 @@
   }
 
   .recon-action strong {
-    font-size: 13px;
+    font-size: var(--ehq-type-ui-size);
     font-weight: var(--ehq-type-heading-weight);
   }
 
   .recon-action p {
     margin: 0;
     color: var(--ehq-text-soft);
-    font-size: 12px;
-    line-height: 1.5;
+    font-size: var(--ehq-type-caption-size);
+    line-height: var(--ehq-type-ui-line);
   }
 
   .recon-action-flag {
     color: var(--ehq-text-muted);
     font-family: var(--ehq-mono);
-    font-size: 10px;
+    font-size: var(--ehq-type-label-size);
     letter-spacing: 0.04em;
     text-transform: uppercase;
   }
@@ -2998,7 +2975,7 @@
   .settings-panel dt {
     color: var(--ehq-text-muted);
     font-family: var(--ehq-mono);
-    font-size: 11px;
+    font-size: var(--ehq-type-caption-size);
     letter-spacing: 0.1em;
     text-transform: uppercase;
   }
@@ -3014,14 +2991,6 @@
       overflow: visible;
     }
 
-    .distribution-shell {
-      display: block;
-      height: auto;
-    }
-
-    .sidebar,
-    .topbar,
-    .page-head,
     .receipt,
     .statement-summary {
       display: none;
@@ -3043,10 +3012,6 @@
   }
 
   @media (max-width: 1100px) {
-    .distribution-shell {
-      grid-template-columns: 210px minmax(0, 1fr);
-    }
-
     .kpi-grid,
     .dashboard-grid {
       grid-template-columns: 1fr 1fr;
@@ -3058,22 +3023,6 @@
   }
 
   @media (max-width: 760px) {
-    .distribution-shell {
-      grid-template-columns: 1fr;
-    }
-
-    .sidebar {
-      display: none;
-    }
-
-    .topbar {
-      padding: 0 var(--ehq-space-3);
-    }
-
-    .search {
-      display: none;
-    }
-
     .content {
       padding: var(--ehq-space-3);
     }

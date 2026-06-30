@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Tone, TableCell, TableColumn, TableRow, TableState } from "./types.js";
+  import type { Tone, TableCell, TableColumn, TableRow, TableRowAction, TableState } from "./types.js";
   import Badge from "./Badge.svelte";
   import Button from "./Button.svelte";
   import Loader from "./Loader.svelte";
@@ -10,9 +10,14 @@
     readonly rows: readonly TableRow[];
     readonly state: TableState;
     readonly actionLabel: string;
+    // Optional per-row action buttons (e.g. "Éditer", "Annuler"): rendered in a trailing
+    // column, each calling its onAction with the row id. Absent on most tables.
+    readonly rowActions?: readonly TableRowAction[];
   }
 
   const props: Props = $props();
+
+  const hasRowActions = $derived((props.rowActions?.length ?? 0) > 0);
 
   function moneyTone(tone: Tone): string {
     return `money tone-${tone}`;
@@ -73,6 +78,9 @@
                 {column.label}{column.sortable ? " ↑" : ""}
               </th>
             {/each}
+            {#if hasRowActions}
+              <th class="right" aria-label="Actions"></th>
+            {/if}
           </tr>
         </thead>
         <tbody>
@@ -87,20 +95,21 @@
                   {:else if cell.kind === "badge"}
                     <Badge label={cell.value} tone={cell.tone} />
                   {:else}
-                    <Button
-                      label={cell.value}
-                      variant={cell.tone === "error" ? "danger" : "secondary"}
-                      size="small"
-                      type="button"
-                      disabled={false}
-                      loading={false}
-                      locked={cell.locked}
-                      focus={cell.tone === "active"}
-                      ariaLabel={cell.value}
-                    />
+                    <Badge label={cell.value} tone={cell.tone} />
                   {/if}
                 </td>
               {/each}
+              {#if hasRowActions}
+                <td class="right">
+                  <div class="row-actions">
+                    {#each props.rowActions ?? [] as action (action.label)}
+                      <button type="button" class="ehq-row-action" class:danger={action.danger} onclick={() => action.onAction(row.id)}>
+                        {action.label}
+                      </button>
+                    {/each}
+                  </div>
+                </td>
+              {/if}
             </tr>
           {/each}
         </tbody>
@@ -129,7 +138,7 @@
 
   h3 {
     margin: 0;
-    font-size: var(--ehq-h3);
+    font-size: var(--ehq-type-section-title-size);
   }
 
   .title-stack,
@@ -143,7 +152,7 @@
   }
 
   .eyebrow {
-    font-size: 10px;
+    font-size: var(--ehq-type-label-size);
   }
 
   .table-frame {
@@ -168,7 +177,7 @@
   th {
     color: var(--ehq-text-muted);
     font-family: var(--ehq-mono);
-    font-size: 10px;
+    font-size: var(--ehq-type-label-size);
     font-weight: var(--ehq-type-label-weight);
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -177,8 +186,9 @@
   td {
     color: var(--ehq-text);
     font-family: var(--ehq-font);
-    font-size: 13px;
+    font-size: var(--ehq-type-ui-size);
     font-weight: var(--ehq-type-body-weight);
+    line-height: var(--ehq-type-ui-line);
   }
 
   tr:last-child td {
@@ -191,6 +201,37 @@
 
   .strong {
     font-weight: var(--ehq-type-body-weight);
+  }
+
+  .row-actions {
+    display: flex;
+    gap: var(--ehq-space-2);
+    justify-content: flex-end;
+  }
+
+  .ehq-row-action {
+    appearance: none;
+    cursor: pointer;
+    border: 1px solid var(--ehq-border-soft);
+    border-radius: var(--ehq-radius-sm);
+    background: transparent;
+    color: var(--ehq-text-soft);
+    font-family: var(--ehq-mono);
+    font-size: var(--ehq-type-label-size);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: var(--ehq-space-1) var(--ehq-space-2);
+    white-space: nowrap;
+  }
+
+  .ehq-row-action:hover {
+    color: var(--ehq-text);
+    border-color: var(--ehq-border);
+  }
+
+  .ehq-row-action.danger:hover {
+    color: var(--ehq-error);
+    border-color: var(--ehq-error);
   }
 
   .money {
@@ -230,13 +271,13 @@
   }
 
   .state-card strong {
-    font-size: var(--ehq-h3);
+    font-size: var(--ehq-type-section-title-size);
     font-weight: var(--ehq-type-heading-weight);
   }
 
   .state-card span {
     color: var(--ehq-text-muted);
-    font-size: 13px;
+    font-size: var(--ehq-type-ui-size);
   }
 
   .error-copy strong,

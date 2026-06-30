@@ -1,14 +1,27 @@
 import type { PlatformPageId } from "./platform-data.js";
+import { normalizeRoutePath } from "./route-utils.js";
 import type { WorkspaceAppId } from "@ehq/auth";
 
-export type AppRoute = "/" | "/login" | "/app" | "/design" | `/console/${string}`;
+export type AppRoute = "/" | "/login" | "/app" | "/console" | "/design" | `/console/${string}`;
 
 export interface ConsoleTarget {
   readonly workspaceId: WorkspaceAppId;
-  readonly pageId: PlatformPageId;
+  readonly pageId?: PlatformPageId;
 }
 
 const exactConsoleTargets: Readonly<Record<string, ConsoleTarget>> = {
+  "/console": {
+    workspaceId: "command-center",
+    pageId: "cc_dash"
+  },
+  "/console/dashboard": {
+    workspaceId: "command-center",
+    pageId: "cc_dash"
+  },
+  "/console/command-center": {
+    workspaceId: "command-center",
+    pageId: "cc_dash"
+  },
   "/console/command-center/dashboard": {
     workspaceId: "command-center",
     pageId: "cc_dash"
@@ -33,6 +46,10 @@ const exactConsoleTargets: Readonly<Record<string, ConsoleTarget>> = {
     workspaceId: "distribution",
     pageId: "di_imports"
   },
+  "/console/distribution/import": {
+    workspaceId: "distribution",
+    pageId: "di_imports"
+  },
   "/console/distribution/mapping": {
     workspaceId: "distribution",
     pageId: "di_mapping"
@@ -42,30 +59,30 @@ const exactConsoleTargets: Readonly<Record<string, ConsoleTarget>> = {
     pageId: "di_catalog"
   },
   "/console/distribution/aliases": {
-    workspaceId: "distribution",
-    pageId: "di_catalog"
+    workspaceId: "distribution"
   },
   "/console/distribution/contracts": {
     workspaceId: "distribution",
     pageId: "di_contracts"
   },
   "/console/distribution/contracts/duplicates": {
-    workspaceId: "distribution",
-    pageId: "di_contracts"
+    workspaceId: "distribution"
   },
   "/console/distribution/duplicates": {
-    workspaceId: "distribution",
-    pageId: "di_contracts"
+    workspaceId: "distribution"
   },
   "/console/distribution/settings": {
-    workspaceId: "distribution",
-    pageId: "di_dash"
+    workspaceId: "distribution"
   },
   "/console/distribution/allocations": {
     workspaceId: "distribution",
     pageId: "di_alloc"
   },
   "/console/distribution/suspense": {
+    workspaceId: "distribution",
+    pageId: "di_suspense"
+  },
+  "/console/distribution/action-needed": {
     workspaceId: "distribution",
     pageId: "di_suspense"
   },
@@ -82,12 +99,72 @@ const exactConsoleTargets: Readonly<Record<string, ConsoleTarget>> = {
     pageId: "di_rev"
   },
   "/console/distribution/audit-log": {
+    workspaceId: "distribution"
+  },
+  "/console/distribution/audit": {
+    workspaceId: "distribution"
+  },
+  "/console/distribution/financial-reconciliation": {
+    workspaceId: "distribution"
+  },
+  "/console/import": {
+    workspaceId: "distribution",
+    pageId: "di_imports"
+  },
+  "/console/imports": {
+    workspaceId: "distribution",
+    pageId: "di_imports"
+  },
+  "/console/mapping": {
+    workspaceId: "distribution",
+    pageId: "di_mapping"
+  },
+  "/console/catalog": {
+    workspaceId: "distribution",
+    pageId: "di_catalog"
+  },
+  "/console/contracts": {
+    workspaceId: "distribution",
+    pageId: "di_contracts"
+  },
+  "/console/allocations": {
+    workspaceId: "distribution",
+    pageId: "di_alloc"
+  },
+  "/console/suspense": {
+    workspaceId: "distribution",
+    pageId: "di_suspense"
+  },
+  "/console/action-needed": {
+    workspaceId: "distribution",
+    pageId: "di_suspense"
+  },
+  "/console/statements": {
+    workspaceId: "distribution",
+    pageId: "di_state"
+  },
+  "/console/payments": {
+    workspaceId: "distribution",
+    pageId: "di_pay"
+  },
+  "/console/revenue": {
     workspaceId: "distribution",
     pageId: "di_rev"
   },
-  "/console/distribution/financial-reconciliation": {
-    workspaceId: "distribution",
-    pageId: "di_suspense"
+  "/console/aliases": {
+    workspaceId: "distribution"
+  },
+  "/console/duplicates": {
+    workspaceId: "distribution"
+  },
+  "/console/audit-log": {
+    workspaceId: "distribution"
+  },
+  "/console/financial-reconciliation": {
+    workspaceId: "distribution"
+  },
+  "/console/settings": {
+    workspaceId: "distribution"
   },
   "/console/office/dashboard": {
     workspaceId: "office",
@@ -98,6 +175,10 @@ const exactConsoleTargets: Readonly<Record<string, ConsoleTarget>> = {
     pageId: "of_pnl"
   },
   "/console/office/coa": {
+    workspaceId: "office",
+    pageId: "of_coa"
+  },
+  "/console/office/plan-comptable": {
     workspaceId: "office",
     pageId: "of_coa"
   },
@@ -117,6 +198,10 @@ const exactConsoleTargets: Readonly<Record<string, ConsoleTarget>> = {
     workspaceId: "office",
     pageId: "of_recon"
   },
+  "/console/office/reconciliations": {
+    workspaceId: "office",
+    pageId: "of_recon"
+  },
   "/console/office/pending": {
     workspaceId: "office",
     pageId: "of_pending"
@@ -126,44 +211,118 @@ const exactConsoleTargets: Readonly<Record<string, ConsoleTarget>> = {
     pageId: "of_cash"
   },
   "/console/office/clients": {
-    workspaceId: "office",
-    pageId: "of_imports"
+    workspaceId: "office"
   },
   "/console/office/suppliers": {
-    workspaceId: "office",
-    pageId: "of_imports"
+    workspaceId: "office"
   },
   "/console/office/projects": {
+    workspaceId: "office"
+  },
+  "/console/office/monitoring": {
+    workspaceId: "office"
+  },
+  "/console/office/integrity": {
+    workspaceId: "office"
+  },
+  "/console/office/vat": {
+    workspaceId: "office"
+  },
+  "/console/office/audit": {
+    workspaceId: "office"
+  },
+  "/console/office/ceo": {
+    workspaceId: "office"
+  },
+  "/console/office/bank": {
+    workspaceId: "office"
+  },
+  "/console/office/settings": {
+    workspaceId: "office"
+  },
+  "/console/office/wave-invoices": {
+    workspaceId: "office"
+  },
+  "/console/office-dashboard": {
+    workspaceId: "office",
+    pageId: "of_dash"
+  },
+  "/console/office-pl": {
+    workspaceId: "office",
+    pageId: "of_pnl"
+  },
+  "/console/office-imports": {
     workspaceId: "office",
     pageId: "of_imports"
   },
-  "/console/office/monitoring": {
+  "/console/office-audit": {
+    workspaceId: "office"
+  },
+  "/console/office-settings": {
+    workspaceId: "office"
+  },
+  "/console/pl": {
+    workspaceId: "office",
+    pageId: "of_pnl"
+  },
+  "/console/coa": {
+    workspaceId: "office",
+    pageId: "of_coa"
+  },
+  "/console/chart-of-accounts": {
+    workspaceId: "office",
+    pageId: "of_coa"
+  },
+  "/console/plan-comptable": {
+    workspaceId: "office",
+    pageId: "of_coa"
+  },
+  "/console/transactions": {
+    workspaceId: "office",
+    pageId: "of_tx"
+  },
+  "/console/reconciliation": {
     workspaceId: "office",
     pageId: "of_recon"
   },
-  "/console/office/vat": {
+  "/console/reconciliations": {
+    workspaceId: "office",
+    pageId: "of_recon"
+  },
+  "/console/pending": {
+    workspaceId: "office",
+    pageId: "of_pending"
+  },
+  "/console/cashflow": {
     workspaceId: "office",
     pageId: "of_cash"
   },
-  "/console/office/audit": {
-    workspaceId: "office",
-    pageId: "of_recon"
+  "/console/clients": {
+    workspaceId: "office"
   },
-  "/console/office/ceo": {
-    workspaceId: "office",
-    pageId: "of_dash"
+  "/console/suppliers": {
+    workspaceId: "office"
   },
-  "/console/office/bank": {
-    workspaceId: "office",
-    pageId: "of_recon"
+  "/console/projects": {
+    workspaceId: "office"
   },
-  "/console/office/settings": {
-    workspaceId: "office",
-    pageId: "of_dash"
+  "/console/monitoring": {
+    workspaceId: "office"
   },
-  "/console/office/wave-invoices": {
-    workspaceId: "office",
-    pageId: "of_imports"
+  "/console/integrity": {
+    workspaceId: "office"
+  },
+  "/console/vat": {
+    workspaceId: "office"
+  },
+  "/console/bank": {
+    workspaceId: "office"
+  },
+  "/console/wave-invoices": {
+    workspaceId: "office"
+  },
+  "/console/ceo": {
+    workspaceId: "office"
   }
 };
 
@@ -205,31 +364,33 @@ const bareWorkspaceRedirects: Readonly<Record<string, AppRoute>> = {
 };
 
 export const resolveBareWorkspaceRedirect = (path: string): AppRoute | null => {
-  return bareWorkspaceRedirects[path] ?? null;
+  return bareWorkspaceRedirects[normalizeRoutePath(path)] ?? null;
 };
 
 export const normalizeRoute = (path: string): AppRoute => {
-  if (path === "/login") {
+  const normalizedPath = normalizeRoutePath(path);
+
+  if (normalizedPath === "/login") {
     return "/login";
   }
 
-  if (path === "/app") {
+  if (normalizedPath === "/app") {
     return "/app";
   }
 
-  if (path === "/design") {
+  if (normalizedPath === "/design") {
     return "/design";
   }
 
-  if (path.startsWith("/console/")) {
-    return path as AppRoute;
+  if (normalizedPath === "/console" || normalizedPath.startsWith("/console/")) {
+    return normalizedPath as AppRoute;
   }
 
   return "/";
 };
 
 export const resolveConsoleTarget = (path: string): ConsoleTarget | null => {
-  const exactMatch = exactConsoleTargets[path];
+  const exactMatch = exactConsoleTargets[normalizeRoutePath(path)];
 
   if (exactMatch !== undefined) {
     return exactMatch;

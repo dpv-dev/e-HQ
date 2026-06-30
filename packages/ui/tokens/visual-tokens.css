@@ -8,8 +8,10 @@
    migrations, DB, payments, or statement formulas.
 */
 
-/* Brand fonts — same as eeee.mu. Self-host later if you prefer; for now Google Fonts. */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Space+Mono:wght@400&display=swap');
+/* Brand fonts. Calibri is the chosen UI typeface; Carlito (libre, metric-compatible with
+   Calibri) is loaded as the web fallback so the Calibri look renders even where Calibri is
+   not installed. Space Mono for labels/technical. Self-host Calibri/Carlito later if preferred. */
+@import url('https://fonts.googleapis.com/css2?family=Carlito:ital,wght@0,400;0,700;1,400;1,700&family=Space+Mono:wght@400&display=swap');
 
 :root{
   /* Core accent — #FFB800 canonical */
@@ -23,11 +25,11 @@
   --ehq-black:#0D0F14;
   --ehq-bg-main:#0D0F14;
   --ehq-surface:#171B22;
-  --ehq-surface-high:#222831;
-  --ehq-surface-raised:#30363D;
+  --ehq-surface-high:#333D44;   /* visual identity: Surface High */
+  --ehq-surface-raised:#3E4751; /* elevated step kept above Surface High */
 
-  /* Text — warmed off-white (eeee.mu) */
-  --ehq-text:#FFFFFF;
+  /* Text — warmed off-white (visual identity: Text Primary #F6F7F9) */
+  --ehq-text:#F6F7F9;
   --ehq-text-muted:rgba(255,255,255,.48);
   --ehq-text-soft:rgba(255,255,255,.74);
   --ehq-text-secondary:var(--ehq-text-soft);
@@ -35,7 +37,7 @@
   --ehq-text-on-yellow:#0A0A0A;
 
   /* Borders */
-  --ehq-border:rgba(255,255,255,.11);
+  --ehq-border:rgba(255,255,255,.10);
   --ehq-border-soft:rgba(255,255,255,.06);
   --ehq-border-strong:rgba(255,184,0,.42);
 
@@ -46,13 +48,28 @@
   --ehq-error:#FF3B30;   --ehq-error-bg:rgba(255,59,48,.12);   /* eeee.mu red */
   --ehq-purple:#A855F7;
 
-  /* Typography — Inter (body + display) + Space Mono (labels / technical) */
-  --ehq-font:'Inter',-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif;   /* body / UI */
-  --ehq-display:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;                        /* headings */
+  /* Typography — Calibri (per David) + Space Mono (labels / technical).
+     Calibri ships on Windows / MS-Office Macs but NOT stock macOS/Linux/web. To render
+     the Calibri look everywhere, self-host Carlito (libre, metric-compatible) via @font-face;
+     the stack already lists it as the first fallback. */
+  --ehq-font:'Calibri','Carlito','Segoe UI',-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif;   /* body / UI */
+  --ehq-display:'Calibri','Carlito','Segoe UI',-apple-system,BlinkMacSystemFont,sans-serif;                        /* headings */
   --ehq-mono:'Space Mono','SFMono-Regular','JetBrains Mono',Consolas,monospace;             /* labels, coords, editorial */
   --ehq-brand-font:var(--ehq-display);
   --ehq-h1:32px; --ehq-h2:24px; --ehq-h3:18px;
   --ehq-body:16px; --ehq-small:14px; --ehq-caption:12px;
+  --ehq-type-ui-size:13px;
+  --ehq-type-ui-line:1.5;
+  --ehq-type-menu-size:14px;
+  --ehq-type-control-size:var(--ehq-type-ui-size);
+  --ehq-type-action-size:11px;
+  --ehq-type-label-size:10px;
+  --ehq-type-caption-size:11px;
+  --ehq-type-page-title-size:clamp(24px,2.6vw,34px);
+  --ehq-type-page-title-line:1;
+  --ehq-type-page-title-color:var(--ehq-yellow);
+  --ehq-type-section-title-size:var(--ehq-h3);
+  --ehq-type-card-body-size:var(--ehq-type-ui-size);
   --ehq-type-display-weight:600;
   --ehq-type-heading-weight:500;
   --ehq-type-heading-color:var(--ehq-text-secondary);
@@ -129,11 +146,58 @@
 }
 .ehq-type-body{
   font-family:var(--ehq-font);
+  font-size:var(--ehq-type-ui-size);
   font-weight:var(--ehq-type-body-weight);
+  line-height:var(--ehq-type-ui-line);
   letter-spacing:0;
+}
+.ehq-type-menu{
+  font-family:var(--ehq-font);
+  font-size:var(--ehq-type-menu-size);
+  font-weight:var(--ehq-type-body-weight);
+  line-height:var(--ehq-type-ui-line);
+  letter-spacing:0;
+}
+.ehq-type-control{
+  font-family:var(--ehq-font);
+  font-size:var(--ehq-type-control-size);
+  font-weight:var(--ehq-type-body-weight);
+  line-height:var(--ehq-type-ui-line);
+  letter-spacing:0;
+}
+.ehq-type-action{
+  font-family:var(--ehq-font);
+  font-size:var(--ehq-type-action-size);
+  font-weight:var(--ehq-type-heading-weight);
+  letter-spacing:.08em;
+  text-transform:uppercase;
+}
+.ehq-type-page-title{
+  font-family:var(--ehq-display);
+  font-size:var(--ehq-type-page-title-size);
+  font-weight:var(--ehq-type-display-weight);
+  line-height:var(--ehq-type-page-title-line);
+  color:var(--ehq-type-page-title-color);
+  letter-spacing:0;
+}
+.ehq-type-page-kicker{
+  font-family:var(--ehq-mono);
+  font-size:var(--ehq-type-caption-size);
+  font-weight:var(--ehq-type-label-weight);
+  color:var(--ehq-text-muted);
+  letter-spacing:.18em;
+  text-transform:uppercase;
+}
+.ehq-type-page-subtitle{
+  font-family:var(--ehq-font);
+  font-size:var(--ehq-type-ui-size);
+  font-weight:var(--ehq-type-body-weight);
+  line-height:var(--ehq-type-ui-line);
+  color:var(--ehq-text-soft);
 }
 .ehq-type-label-mono{
   font-family:var(--ehq-mono);
+  font-size:var(--ehq-type-label-size);
   font-weight:var(--ehq-type-label-weight);
   color:var(--ehq-type-label-color);
   letter-spacing:.12em;
@@ -250,7 +314,7 @@
   background:var(--ehq-error-bg); color:var(--ehq-text);
   border:1px solid var(--ehq-error); border-radius:var(--ehq-radius-sm);
 }
-.ehq-label{ font-family:var(--ehq-mono); text-transform:uppercase; letter-spacing:.16em; font-size:11px; color:var(--ehq-text-muted); }
+.ehq-label{ font-family:var(--ehq-mono); text-transform:uppercase; letter-spacing:.16em; font-size:var(--ehq-type-caption-size); color:var(--ehq-text-muted); }
 .ehq-input,.ehq-select{
   background:var(--ehq-black); color:var(--ehq-text);
   border:1px solid var(--ehq-border); border-radius:var(--ehq-radius-sm);

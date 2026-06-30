@@ -29,6 +29,8 @@
     readonly client: OfficeApiClient;
     readonly workspaceId: string;
     readonly period: string;
+    readonly dateFrom: string;
+    readonly dateTo: string;
     readonly onReceipt: (receipt: ApiMutationReceipt) => void;
   }
 
@@ -93,6 +95,8 @@
       const page = await props.client.listPartners({
         workspaceId: props.workspaceId,
         period: props.period,
+        dateFrom: props.dateFrom,
+        dateTo: props.dateTo,
         facet: props.facet,
         cursor: null,
         limit: 50
@@ -116,7 +120,9 @@
         }),
         props.client.getPartnerPnl(partnerId, {
           workspaceId: props.workspaceId,
-          period: props.period
+          period: props.period,
+          dateFrom: props.dateFrom,
+          dateTo: props.dateTo
         }),
         props.client.listPartnerClassificationSuggestions(partnerId, {
           workspaceId: props.workspaceId
@@ -723,7 +729,7 @@
   th {
     color: var(--ehq-text-muted);
     font-family: var(--ehq-mono);
-    font-size: 10px;
+    font-size: var(--ehq-type-label-size);
     font-weight: var(--ehq-type-label-weight);
     text-transform: uppercase;
   }
@@ -745,20 +751,20 @@
   .action-message {
     color: var(--ehq-text-muted);
     font-family: var(--ehq-mono);
-    font-size: 10px;
+    font-size: var(--ehq-type-label-size);
     font-weight: var(--ehq-type-label-weight);
     text-transform: uppercase;
   }
 
   h2 {
     margin-top: var(--ehq-space-1);
-    font-size: var(--ehq-h2);
+    font-size: var(--ehq-type-section-title-size);
     font-weight: var(--ehq-type-heading-weight);
   }
 
   h3 {
     margin-top: var(--ehq-space-1);
-    font-size: var(--ehq-h3);
+    font-size: var(--ehq-type-section-title-size);
     font-weight: var(--ehq-type-heading-weight);
   }
 
@@ -769,9 +775,9 @@
   .link-panel strong {
     color: var(--ehq-text-soft);
     font-family: var(--ehq-font);
-    font-size: 13px;
+    font-size: var(--ehq-type-ui-size);
     font-weight: var(--ehq-type-body-weight);
-    line-height: 1.5;
+    line-height: var(--ehq-type-ui-line);
   }
 
   .right {
@@ -815,7 +821,7 @@
     background: transparent;
     color: var(--ehq-text);
     font-family: var(--ehq-font);
-    font-size: 10px;
+    font-size: var(--ehq-type-action-size);
     font-weight: var(--ehq-type-heading-weight);
     text-transform: uppercase;
   }
@@ -835,7 +841,7 @@
     width: 100%;
     justify-content: flex-start;
     text-align: left;
-    font-size: 13px;
+    font-size: var(--ehq-type-ui-size);
     font-weight: var(--ehq-type-body-weight);
     text-transform: none;
   }

@@ -1,15 +1,22 @@
-# Parity Matrix (Phase 1)
+# Parity Matrix
 
 Source capture:
 - Live crawl artifacts: `/Users/poups/Documents/Codex/Projects/ehq-platform/reference/e-hq/*`
 - Route scan context from previous live scan in `/private/tmp/ehq-live-audit-20260625-170018`
+
+Runtime rule:
+- `e-hq.eeee.mu/office` and `e-hq.eeee.mu/distribution` define the product
+  reference: pages, options, actions, templates, and expected UX.
+- `app.eeee.mu` implements the same product with the new stack:
+  Supabase Auth → Hono API → Supabase Postgres.
+- e-hq is not an app backend for the new console.
 
 Definition:
 - **present** = equivalent screen exists and covers the function.
 - **partial** = route exists but with reduced/shifted feature scope.
 - **missing** = no equivalent app route implemented yet (to-create required).
 
-| Live route (WordPress) | Purpose (from rendered H1/title) | Interactive actions observed | Target route in app.eeee.mu | Status |
+| Live product route | Purpose (from rendered H1/title) | Interactive actions observed | Target route in app.eeee.mu | Status |
 | --- | --- | --- | --- | --- |
 | `wp-admin/index.php` | Dashboard | Toggle/collapse admin panels, screen options checkboxes, quick draft post fields/actions, widget links | N/A | missing |
 | `wp-admin/edit.php` | Posts | Screen options form, search/filter, list row actions, bulk actions scaffold, pagination controls | N/A | missing |

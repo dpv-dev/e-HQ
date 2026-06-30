@@ -44,7 +44,7 @@
   span {
     color: var(--ehq-text-muted);
     font-family: var(--ehq-mono);
-    font-size: 10px;
+    font-size: var(--ehq-type-label-size);
     letter-spacing: 0.12em;
     text-transform: uppercase;
   }
@@ -52,7 +52,7 @@
   strong {
     color: var(--ehq-text);
     font-family: var(--ehq-font);
-    font-size: 15px;
+    font-size: var(--ehq-type-ui-size);
     font-weight: var(--ehq-type-heading-weight);
   }
 

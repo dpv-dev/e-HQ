@@ -5,7 +5,7 @@
   import OfficeApp from "./canonical/office/App.svelte";
   import type { PlatformPageId } from "./platform-data.js";
   import { getWorkspaceForPage, workspaces, type WorkspaceDefinition } from "./platform-data.js";
-  import type { AppRoute } from "./routes";
+  import type { AppRoute } from "./routes.js";
 
   interface Props {
     readonly initialWorkspaceId: WorkspaceAppId;
@@ -31,7 +31,7 @@
     workspaceId: WorkspaceAppId,
     pageId: PlatformPageId | null
   ): WorkspaceAppId {
-    if (pageId === null) {
+    if (pageId === null || pageId === undefined) {
       return workspaceId;
     }
 

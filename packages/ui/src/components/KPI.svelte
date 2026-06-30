@@ -54,7 +54,7 @@
   p,
   span {
     margin: 0;
-    font-size: 11px;
+    font-size: var(--ehq-type-caption-size);
     font-weight: var(--ehq-type-body-weight);
   }
 

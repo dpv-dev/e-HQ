@@ -20,7 +20,7 @@
     display: inline-flex;
     align-items: center;
     font-family: var(--ehq-mono);
-    font-size: 10px;
+    font-size: var(--ehq-type-label-size);
     font-weight: var(--ehq-type-label-weight);
     letter-spacing: 0.04em;
     text-transform: uppercase;

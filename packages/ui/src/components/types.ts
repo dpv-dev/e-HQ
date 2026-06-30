@@ -19,6 +19,8 @@ export interface ToolbarFilter {
   readonly value: string;
   readonly active: boolean;
   readonly disabled: boolean;
+  readonly actionId?: string;
+  readonly title?: string;
 }
 
 export interface WorkspaceNavItem {
@@ -28,6 +30,12 @@ export interface WorkspaceNavItem {
   readonly active: boolean;
   readonly disabled: boolean;
   readonly badge: string | null;
+}
+
+export interface WorkspaceNavGroup {
+  readonly id: string;
+  readonly label: string;
+  readonly items: readonly WorkspaceNavItem[];
 }
 
 export interface OperatorMetric {
@@ -74,6 +82,13 @@ export interface TableColumn {
 export interface TableRow {
   readonly id: string;
   readonly cells: readonly TableCell[];
+}
+
+// Optional per-row action button rendered in a trailing column (e.g. "Éditer", "Annuler").
+export interface TableRowAction {
+  readonly label: string;
+  readonly onAction: (rowId: string) => void;
+  readonly danger?: boolean;
 }
 
 export interface ChartPoint {
