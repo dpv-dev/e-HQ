@@ -35,12 +35,13 @@
     type TrackSummary
   } from "@ehq/api-client";
   import { BarsChart, KPI, Loader, PageHeader, SectionTemplate, Table, Toolbar, WorkspaceShell } from "@ehq/ui";
-  import type { ChartPoint, SelectOption, TableColumn, TableRow, Tone, ToolbarFilter, WorkspaceNavGroup, WorkspaceNavItem } from "@ehq/ui";
+  import type { ChartPoint, SelectOption, TableColumn, TablePagination, TableRow, Tone, ToolbarFilter, WorkspaceNavGroup, WorkspaceNavItem } from "@ehq/ui";
   import { createShellApiClient } from "../../app-shell-data.js";
   import { formatDateOnly, formatDateRange } from "../../date-format.js";
   import { formatMoneyValue, moneyToneForValue } from "../../money-format.js";
   import { createPeriodOptions, getLatestDataPeriod, periodLabel, rangeForScope, rangeLabel, todayIso, type DateRange, type PeriodScope } from "../../period-controls.js";
   import { normalizeRoutePath } from "../../route-utils.js";
+  import { appendPageResult, createTablePagination, loadPageResult, readPageItems, TABLE_PAGE_SIZE, type PageLoadMode } from "../../table-pagination.js";
 
   type DistributionPageId =
     | "dashboard"
@@ -65,6 +66,23 @@
   type PaymentStatusFilter = "all" | "draft" | "queued" | "paid" | "voided";
   type RevenueGroupBy = "payee" | "track" | "currency" | "store" | "period";
   type RequestStatus = "idle" | "loading" | "success" | "error";
+  type DistributionPagedTableId =
+    | "importBatches"
+    | "mapping"
+    | "payees"
+    | "releases"
+    | "tracks"
+    | "catalog"
+    | "contracts"
+    | "expenses"
+    | "allocations"
+    | "suspense"
+    | "statements"
+    | "payments"
+    | "revenue"
+    | "aliases"
+    | "duplicates"
+    | "auditLog";
 
   interface Props {
     readonly session: AuthSession;
@@ -403,6 +421,8 @@
   let mutationReceiptPageId = $state<DistributionPageId | null>(null);
   let writesEnabled = $state(false);
   let writeGateMessage = $state("Checking write gate.");
+  let tablePaginationLoading = $state<DistributionPagedTableId | null>(null);
+  let tablePaginationErrors = $state<Partial<Record<DistributionPagedTableId, string | null>>>({});
 
   const activePage = $derived(getNavItem(activePageId));
   const distributionPeriod = $derived(selectedPeriod);
@@ -446,6 +466,43 @@
   const aliasRows = $derived(createAliasRows(aliases));
   const duplicateRows = $derived(createDuplicateRows(duplicates));
   const auditRows = $derived(createAuditRows(auditEntries));
+  const importPagination = $derived<TablePagination | null>(
+    createTablePagination(importBatchesState, tablePaginationLoading === "importBatches", tablePaginationError("importBatches"), loadMoreImportBatches, loadAllImportBatches)
+  );
+  const mappingPagination = $derived<TablePagination | null>(
+    createTablePagination(mappingState, tablePaginationLoading === "mapping", tablePaginationError("mapping"), loadMoreMappingRows, loadAllMappingRows)
+  );
+  const catalogPagination = $derived<TablePagination | null>(createCatalogPagination());
+  const contractsPagination = $derived<TablePagination | null>(
+    createTablePagination(contractsState, tablePaginationLoading === "contracts", tablePaginationError("contracts"), loadMoreContracts, loadAllContracts)
+  );
+  const expensesPagination = $derived<TablePagination | null>(
+    createTablePagination(expensesState, tablePaginationLoading === "expenses", tablePaginationError("expenses"), loadMoreExpenses, loadAllExpenses)
+  );
+  const allocationsPagination = $derived<TablePagination | null>(
+    createTablePagination(allocationsState, tablePaginationLoading === "allocations", tablePaginationError("allocations"), loadMoreAllocationRuns, loadAllAllocationRuns)
+  );
+  const suspensePagination = $derived<TablePagination | null>(
+    createTablePagination(suspenseState, tablePaginationLoading === "suspense", tablePaginationError("suspense"), loadMoreSuspense, loadAllSuspense)
+  );
+  const statementsPagination = $derived<TablePagination | null>(
+    createTablePagination(statementsState, tablePaginationLoading === "statements", tablePaginationError("statements"), loadMoreStatements, loadAllStatements)
+  );
+  const paymentsPagination = $derived<TablePagination | null>(
+    createTablePagination(paymentsState, tablePaginationLoading === "payments", tablePaginationError("payments"), loadMorePayments, loadAllPayments)
+  );
+  const revenuePagination = $derived<TablePagination | null>(
+    createTablePagination(revenueState, tablePaginationLoading === "revenue", tablePaginationError("revenue"), loadMoreRevenue, loadAllRevenue)
+  );
+  const aliasesPagination = $derived<TablePagination | null>(
+    createTablePagination(aliasesState, tablePaginationLoading === "aliases", tablePaginationError("aliases"), loadMoreAliases, loadAllAliases)
+  );
+  const duplicatesPagination = $derived<TablePagination | null>(
+    createTablePagination(duplicatesState, tablePaginationLoading === "duplicates", tablePaginationError("duplicates"), loadMoreDuplicates, loadAllDuplicates)
+  );
+  const auditPagination = $derived<TablePagination | null>(
+    createTablePagination(auditLogState, tablePaginationLoading === "auditLog", tablePaginationError("auditLog"), loadMoreAuditLog, loadAllAuditLog)
+  );
   const settings = $derived(settingsState.status === "success" ? settingsState.data : null);
   const importToolbarFilters = $derived(createImportToolbarFilters(importState));
   const canConfirmImport = $derived(importState.preview !== null && importState.status !== "loading");
@@ -483,9 +540,459 @@
     ]);
   }
 
+  function tablePaginationError(tableId: DistributionPagedTableId): string | null {
+    return tablePaginationErrors[tableId] ?? null;
+  }
+
+  function setTablePaginationError(tableId: DistributionPagedTableId, error: string | null): void {
+    tablePaginationErrors = {
+      ...tablePaginationErrors,
+      [tableId]: error
+    };
+  }
+
+  async function loadDistributionPageResult<TItem>(
+    tableId: DistributionPagedTableId,
+    state: ApiRequestState<PageResult<TItem>>,
+    setState: (state: ApiRequestState<PageResult<TItem>>) => void,
+    fetchPage: (cursor: string) => Promise<PageResult<TItem>>,
+    mode: PageLoadMode
+  ): Promise<void> {
+    await loadPageResult(mode, {
+      state,
+      loading: tablePaginationLoading === tableId,
+      setLoading: (loading: boolean): void => {
+        tablePaginationLoading = loading ? tableId : null;
+      },
+      setError: (error: string | null): void => {
+        setTablePaginationError(tableId, error);
+      },
+      setState,
+      fetchPage
+    });
+  }
+
+  function createCatalogPagination(): TablePagination | null {
+    if (releasesState.status !== "success" || tracksState.status !== "success") {
+      return null;
+    }
+
+    const loadedCount = releasesState.data.items.length + tracksState.data.items.length;
+    const hasMore = releasesState.data.nextCursor !== null || tracksState.data.nextCursor !== null;
+
+    return {
+      loadedCount,
+      hasMore,
+      loading: tablePaginationLoading === "catalog",
+      error: tablePaginationError("catalog"),
+      onLoadMore: loadMoreCatalog,
+      onLoadAll: loadAllCatalog
+    };
+  }
+
+  async function loadMoreImportBatches(): Promise<void> {
+    await loadImportBatchesPage("one");
+  }
+
+  async function loadAllImportBatches(): Promise<void> {
+    await loadImportBatchesPage("all");
+  }
+
+  async function loadImportBatchesPage(mode: PageLoadMode): Promise<void> {
+    await loadDistributionPageResult(
+      "importBatches",
+      importBatchesState,
+      (state: ApiRequestState<PageResult<DistributionImportBatch>>): void => {
+        importBatchesState = state;
+      },
+      (cursor: string): Promise<PageResult<DistributionImportBatch>> =>
+        client.distribution.listImportBatches({
+          workspaceId: distributionWorkspaceId,
+          source: toNullableImportSource(importSourceFilter),
+          status: null,
+          cursor,
+          limit: TABLE_PAGE_SIZE
+        }),
+      mode
+    );
+  }
+
+  async function loadMoreMappingRows(): Promise<void> {
+    await loadMappingRowsPage("one");
+  }
+
+  async function loadAllMappingRows(): Promise<void> {
+    await loadMappingRowsPage("all");
+  }
+
+  async function loadMappingRowsPage(mode: PageLoadMode): Promise<void> {
+    await loadDistributionPageResult(
+      "mapping",
+      mappingState,
+      (state: ApiRequestState<PageResult<DistributionMappingRow>>): void => {
+        mappingState = state;
+      },
+      (cursor: string): Promise<PageResult<DistributionMappingRow>> =>
+        client.distribution.listMappingRows({
+          workspaceId: distributionWorkspaceId,
+          batchId: null,
+          status: toNullableMappingStatus(mappingStatusFilter),
+          cursor,
+          limit: TABLE_PAGE_SIZE
+        }),
+      mode
+    );
+  }
+
+  async function loadMoreCatalog(): Promise<void> {
+    await loadCatalogPage("one");
+  }
+
+  async function loadAllCatalog(): Promise<void> {
+    await loadCatalogPage("all");
+  }
+
+  async function loadCatalogPage(mode: PageLoadMode): Promise<void> {
+    if (
+      tablePaginationLoading === "catalog" ||
+      releasesState.status !== "success" ||
+      tracksState.status !== "success" ||
+      (releasesState.data.nextCursor === null && tracksState.data.nextCursor === null)
+    ) {
+      return;
+    }
+
+    tablePaginationLoading = "catalog";
+    setTablePaginationError("catalog", null);
+
+    try {
+      let releaseCursor: string | null = releasesState.data.nextCursor;
+      let trackCursor: string | null = tracksState.data.nextCursor;
+      let loadedReleases: PageResult<ReleaseSummary> = releasesState.data;
+      let loadedTracks: PageResult<TrackSummary> = tracksState.data;
+
+      while (releaseCursor !== null || trackCursor !== null) {
+        const [releasePage, trackPage] = await Promise.all([
+          releaseCursor === null
+            ? Promise.resolve(null)
+            : client.distribution.listReleases({
+                workspaceId: distributionWorkspaceId,
+                status: null,
+                cursor: releaseCursor,
+                limit: TABLE_PAGE_SIZE
+              }),
+          trackCursor === null
+            ? Promise.resolve(null)
+            : client.distribution.listTracks({
+                workspaceId: distributionWorkspaceId,
+                releaseId: null,
+                status: null,
+                cursor: trackCursor,
+                limit: TABLE_PAGE_SIZE
+              })
+        ]);
+
+        if (releasePage !== null) {
+          loadedReleases = appendPageResult(loadedReleases, releasePage);
+          releasesState = createSuccessState<PageResult<ReleaseSummary>>(loadedReleases);
+          releaseCursor = releasePage.nextCursor;
+        }
+
+        if (trackPage !== null) {
+          loadedTracks = appendPageResult(loadedTracks, trackPage);
+          tracksState = createSuccessState<PageResult<TrackSummary>>(loadedTracks);
+          trackCursor = trackPage.nextCursor;
+        }
+
+        if (mode === "one") {
+          break;
+        }
+      }
+    } catch (error: unknown) {
+      setTablePaginationError("catalog", getErrorMessage(error));
+    } finally {
+      tablePaginationLoading = null;
+    }
+  }
+
+  async function loadMoreContracts(): Promise<void> {
+    await loadContractsPage("one");
+  }
+
+  async function loadAllContracts(): Promise<void> {
+    await loadContractsPage("all");
+  }
+
+  async function loadContractsPage(mode: PageLoadMode): Promise<void> {
+    await loadDistributionPageResult(
+      "contracts",
+      contractsState,
+      (state: ApiRequestState<PageResult<DistributionContract>>): void => {
+        contractsState = state;
+      },
+      (cursor: string): Promise<PageResult<DistributionContract>> =>
+        client.distribution.listContracts({
+          workspaceId: distributionWorkspaceId,
+          payeeId: null,
+          status: null,
+          cursor,
+          limit: TABLE_PAGE_SIZE
+        }),
+      mode
+    );
+  }
+
+  async function loadMoreExpenses(): Promise<void> {
+    await loadExpensesPage("one");
+  }
+
+  async function loadAllExpenses(): Promise<void> {
+    await loadExpensesPage("all");
+  }
+
+  async function loadExpensesPage(mode: PageLoadMode): Promise<void> {
+    await loadDistributionPageResult(
+      "expenses",
+      expensesState,
+      (state: ApiRequestState<PageResult<DistributionContractExpense>>): void => {
+        expensesState = state;
+      },
+      (cursor: string): Promise<PageResult<DistributionContractExpense>> =>
+        client.distribution.listContractExpenses({
+          workspaceId: distributionWorkspaceId,
+          contractId: contracts[0]?.id ?? "contract_alma",
+          status: null,
+          cursor,
+          limit: TABLE_PAGE_SIZE
+        }),
+      mode
+    );
+  }
+
+  async function loadMoreAllocationRuns(): Promise<void> {
+    await loadAllocationRunsPage("one");
+  }
+
+  async function loadAllAllocationRuns(): Promise<void> {
+    await loadAllocationRunsPage("all");
+  }
+
+  async function loadAllocationRunsPage(mode: PageLoadMode): Promise<void> {
+    await loadDistributionPageResult(
+      "allocations",
+      allocationsState,
+      (state: ApiRequestState<PageResult<AllocationRunSummary>>): void => {
+        allocationsState = state;
+      },
+      (cursor: string): Promise<PageResult<AllocationRunSummary>> =>
+        client.distribution.listAllocationRuns({
+          workspaceId: distributionWorkspaceId,
+          period: null,
+          status: null,
+          cursor,
+          limit: TABLE_PAGE_SIZE
+        }),
+      mode
+    );
+  }
+
+  async function loadMoreSuspense(): Promise<void> {
+    await loadSuspensePage("one");
+  }
+
+  async function loadAllSuspense(): Promise<void> {
+    await loadSuspensePage("all");
+  }
+
+  async function loadSuspensePage(mode: PageLoadMode): Promise<void> {
+    await loadDistributionPageResult(
+      "suspense",
+      suspenseState,
+      (state: ApiRequestState<PageResult<SuspenseItem>>): void => {
+        suspenseState = state;
+      },
+      (cursor: string): Promise<PageResult<SuspenseItem>> =>
+        client.distribution.listSuspense({
+          workspaceId: distributionWorkspaceId,
+          period: distributionPeriod,
+          status: toNullableSuspenseStatus(suspenseStatusFilter),
+          cursor,
+          limit: TABLE_PAGE_SIZE
+        }),
+      mode
+    );
+  }
+
+  async function loadMoreStatements(): Promise<void> {
+    await loadStatementsPage("one");
+  }
+
+  async function loadAllStatements(): Promise<void> {
+    await loadStatementsPage("all");
+  }
+
+  async function loadStatementsPage(mode: PageLoadMode): Promise<void> {
+    await loadDistributionPageResult(
+      "statements",
+      statementsState,
+      (state: ApiRequestState<PageResult<StatementSummary>>): void => {
+        statementsState = state;
+      },
+      (cursor: string): Promise<PageResult<StatementSummary>> =>
+        client.distribution.listStatements({
+          workspaceId: distributionWorkspaceId,
+          period: null,
+          payeeId: null,
+          status: null,
+          cursor,
+          limit: TABLE_PAGE_SIZE
+        }),
+      mode
+    );
+  }
+
+  async function loadMorePayments(): Promise<void> {
+    await loadPaymentsPage("one");
+  }
+
+  async function loadAllPayments(): Promise<void> {
+    await loadPaymentsPage("all");
+  }
+
+  async function loadPaymentsPage(mode: PageLoadMode): Promise<void> {
+    await loadDistributionPageResult(
+      "payments",
+      paymentsState,
+      (state: ApiRequestState<PageResult<PaymentSummary>>): void => {
+        paymentsState = state;
+      },
+      (cursor: string): Promise<PageResult<PaymentSummary>> =>
+        client.distribution.listPayments({
+          workspaceId: distributionWorkspaceId,
+          period: distributionPeriod,
+          payeeId: null,
+          status: toNullablePaymentStatus(paymentStatusFilter),
+          cursor,
+          limit: TABLE_PAGE_SIZE
+        }),
+      mode
+    );
+  }
+
+  async function loadMoreRevenue(): Promise<void> {
+    await loadRevenuePage("one");
+  }
+
+  async function loadAllRevenue(): Promise<void> {
+    await loadRevenuePage("all");
+  }
+
+  async function loadRevenuePage(mode: PageLoadMode): Promise<void> {
+    await loadDistributionPageResult(
+      "revenue",
+      revenueState,
+      (state: ApiRequestState<PageResult<DistributionRevenueRow>>): void => {
+        revenueState = state;
+      },
+      (cursor: string): Promise<PageResult<DistributionRevenueRow>> =>
+        client.distribution.getRevenue({
+          workspaceId: distributionWorkspaceId,
+          period: distributionPeriod,
+          payeeId: null,
+          store: null,
+          currency: null,
+          groupBy: revenueGroupBy,
+          cursor,
+          limit: TABLE_PAGE_SIZE
+        }),
+      mode
+    );
+  }
+
+  async function loadMoreAliases(): Promise<void> {
+    await loadAliasesPage("one");
+  }
+
+  async function loadAllAliases(): Promise<void> {
+    await loadAliasesPage("all");
+  }
+
+  async function loadAliasesPage(mode: PageLoadMode): Promise<void> {
+    await loadDistributionPageResult(
+      "aliases",
+      aliasesState,
+      (state: ApiRequestState<PageResult<DistributionAlias>>): void => {
+        aliasesState = state;
+      },
+      (cursor: string): Promise<PageResult<DistributionAlias>> =>
+        client.distribution.listAliases({
+          workspaceId: distributionWorkspaceId,
+          cursor,
+          limit: TABLE_PAGE_SIZE
+        }),
+      mode
+    );
+  }
+
+  async function loadMoreDuplicates(): Promise<void> {
+    await loadDuplicatesPage("one");
+  }
+
+  async function loadAllDuplicates(): Promise<void> {
+    await loadDuplicatesPage("all");
+  }
+
+  async function loadDuplicatesPage(mode: PageLoadMode): Promise<void> {
+    await loadDistributionPageResult(
+      "duplicates",
+      duplicatesState,
+      (state: ApiRequestState<PageResult<DistributionDuplicate>>): void => {
+        duplicatesState = state;
+      },
+      (cursor: string): Promise<PageResult<DistributionDuplicate>> =>
+        client.distribution.listDuplicates({
+          workspaceId: distributionWorkspaceId,
+          cursor,
+          limit: TABLE_PAGE_SIZE
+        }),
+      mode
+    );
+  }
+
+  async function loadMoreAuditLog(): Promise<void> {
+    await loadAuditLogPage("one");
+  }
+
+  async function loadAllAuditLog(): Promise<void> {
+    await loadAuditLogPage("all");
+  }
+
+  async function loadAuditLogPage(mode: PageLoadMode): Promise<void> {
+    await loadDistributionPageResult(
+      "auditLog",
+      auditLogState,
+      (state: ApiRequestState<PageResult<AuditLogEntry>>): void => {
+        auditLogState = state;
+      },
+      (cursor: string): Promise<PageResult<AuditLogEntry>> =>
+        client.distribution.listAuditLog({
+          workspaceId: distributionWorkspaceId,
+          from: null,
+          to: null,
+          actorId: null,
+          entityType: null,
+          cursor,
+          limit: TABLE_PAGE_SIZE
+        }),
+      mode
+    );
+  }
+
   async function loadWriteGate(): Promise<void> {
     try {
-      const status = await client.commandCenter.getStatus({
+      // Distribution-scoped write gate: the distribution role is 403 on cc/v1 since the domain-authz
+      // fix, so read writesEnabled from erh/v1/status — not cc/v1/status.
+      const status = await client.distribution.getStatus({
         workspaceId: distributionWorkspaceId
       });
       writesEnabled = status.writesEnabled;
@@ -518,9 +1025,10 @@
           source: toNullableImportSource(importSourceFilter),
           status: null,
           cursor: null,
-          limit: 50
+          limit: TABLE_PAGE_SIZE
         })
       );
+      setTablePaginationError("importBatches", null);
     } catch (error: unknown) {
       importBatchesState = createErrorState<PageResult<DistributionImportBatch>>(error);
     }
@@ -536,9 +1044,10 @@
           batchId: null,
           status: toNullableMappingStatus(mappingStatusFilter),
           cursor: null,
-          limit: 50
+          limit: TABLE_PAGE_SIZE
         })
       );
+      setTablePaginationError("mapping", null);
     } catch (error: unknown) {
       mappingState = createErrorState<PageResult<DistributionMappingRow>>(error);
     }
@@ -549,8 +1058,9 @@
 
     try {
       payeesState = createSuccessState<PageResult<PayeeSummary>>(
-        await client.distribution.listPayees({ workspaceId: distributionWorkspaceId, status: null, cursor: null, limit: 50 })
+        await client.distribution.listPayees({ workspaceId: distributionWorkspaceId, status: null, cursor: null, limit: TABLE_PAGE_SIZE })
       );
+      setTablePaginationError("payees", null);
     } catch (error: unknown) {
       payeesState = createErrorState<PageResult<PayeeSummary>>(error);
     }
@@ -562,11 +1072,12 @@
 
     try {
       const [releasePage, trackPage] = await Promise.all([
-        client.distribution.listReleases({ workspaceId: distributionWorkspaceId, status: null, cursor: null, limit: 50 }),
-        client.distribution.listTracks({ workspaceId: distributionWorkspaceId, releaseId: null, status: null, cursor: null, limit: 50 })
+        client.distribution.listReleases({ workspaceId: distributionWorkspaceId, status: null, cursor: null, limit: TABLE_PAGE_SIZE }),
+        client.distribution.listTracks({ workspaceId: distributionWorkspaceId, releaseId: null, status: null, cursor: null, limit: TABLE_PAGE_SIZE })
       ]);
       releasesState = createSuccessState<PageResult<ReleaseSummary>>(releasePage);
       tracksState = createSuccessState<PageResult<TrackSummary>>(trackPage);
+      setTablePaginationError("catalog", null);
     } catch (error: unknown) {
       releasesState = createErrorState<PageResult<ReleaseSummary>>(error);
       tracksState = createErrorState<PageResult<TrackSummary>>(error);
@@ -583,7 +1094,7 @@
         payeeId: null,
         status: null,
         cursor: null,
-        limit: 50
+        limit: TABLE_PAGE_SIZE
       });
       const firstContract = contractPage.items[0];
       const expensePage = await client.distribution.listContractExpenses({
@@ -591,10 +1102,12 @@
         contractId: firstContract?.id ?? "contract_alma",
         status: null,
         cursor: null,
-        limit: 50
+        limit: TABLE_PAGE_SIZE
       });
       contractsState = createSuccessState<PageResult<DistributionContract>>(contractPage);
       expensesState = createSuccessState<PageResult<DistributionContractExpense>>(expensePage);
+      setTablePaginationError("contracts", null);
+      setTablePaginationError("expenses", null);
     } catch (error: unknown) {
       contractsState = createErrorState<PageResult<DistributionContract>>(error);
       expensesState = createErrorState<PageResult<DistributionContractExpense>>(error);
@@ -611,9 +1124,10 @@
           period: null,
           status: null,
           cursor: null,
-          limit: 50
+          limit: TABLE_PAGE_SIZE
         })
       );
+      setTablePaginationError("allocations", null);
     } catch (error: unknown) {
       allocationsState = createErrorState<PageResult<AllocationRunSummary>>(error);
     }
@@ -629,9 +1143,10 @@
           period: distributionPeriod,
           status: toNullableSuspenseStatus(suspenseStatusFilter),
           cursor: null,
-          limit: 50
+          limit: TABLE_PAGE_SIZE
         })
       );
+      setTablePaginationError("suspense", null);
     } catch (error: unknown) {
       suspenseState = createErrorState<PageResult<SuspenseItem>>(error);
     }
@@ -648,9 +1163,10 @@
           payeeId: null,
           status: null,
           cursor: null,
-          limit: 50
+          limit: TABLE_PAGE_SIZE
         })
       );
+      setTablePaginationError("statements", null);
     } catch (error: unknown) {
       statementsState = createErrorState<PageResult<StatementSummary>>(error);
     }
@@ -667,9 +1183,10 @@
           payeeId: null,
           status: toNullablePaymentStatus(paymentStatusFilter),
           cursor: null,
-          limit: 50
+          limit: TABLE_PAGE_SIZE
         })
       );
+      setTablePaginationError("payments", null);
     } catch (error: unknown) {
       paymentsState = createErrorState<PageResult<PaymentSummary>>(error);
     }
@@ -688,9 +1205,10 @@
           currency: null,
           groupBy: revenueGroupBy,
           cursor: null,
-          limit: 50
+          limit: TABLE_PAGE_SIZE
         })
       );
+      setTablePaginationError("revenue", null);
     } catch (error: unknown) {
       revenueState = createErrorState<PageResult<DistributionRevenueRow>>(error);
     }
@@ -718,9 +1236,10 @@
         await client.distribution.listAliases({
           workspaceId: distributionWorkspaceId,
           cursor: null,
-          limit: 50
+          limit: TABLE_PAGE_SIZE
         })
       );
+      setTablePaginationError("aliases", null);
     } catch (error: unknown) {
       aliasesState = createErrorState<PageResult<DistributionAlias>>(error);
     }
@@ -734,9 +1253,10 @@
         await client.distribution.listDuplicates({
           workspaceId: distributionWorkspaceId,
           cursor: null,
-          limit: 50
+          limit: TABLE_PAGE_SIZE
         })
       );
+      setTablePaginationError("duplicates", null);
     } catch (error: unknown) {
       duplicatesState = createErrorState<PageResult<DistributionDuplicate>>(error);
     }
@@ -754,9 +1274,10 @@
           actorId: null,
           entityType: null,
           cursor: null,
-          limit: 50
+          limit: TABLE_PAGE_SIZE
         })
       );
+      setTablePaginationError("auditLog", null);
     } catch (error: unknown) {
       auditLogState = createErrorState<PageResult<AuditLogEntry>>(error);
     }
@@ -1624,14 +2145,6 @@
     return item;
   }
 
-  function readPageItems<TItem>(state: ApiRequestState<PageResult<TItem>>): readonly TItem[] {
-    if (state.status === "success") {
-      return state.data.items;
-    }
-
-    return [];
-  }
-
   function createDashboardKpis(state: ApiRequestState<DistributionDashboardResponse>): readonly DistributionKpi[] {
     if (state.status !== "success") {
       return [
@@ -2363,7 +2876,7 @@
             <span>{importState.confirm.importedRoyaltyEventCount} royalty events imported.</span>
           {/if}
         </section>
-        <Table title="Batches Kontor / RouteNote" columns={importColumns} rows={importRows} state={tableStateFor(importBatchesState.status, importBatches.length)} actionLabel="" />
+        <Table title="Batches Kontor / RouteNote" columns={importColumns} rows={importRows} state={tableStateFor(importBatchesState.status, importBatches.length)} actionLabel="" pagination={importPagination} />
       {:else if activePageId === "mapping"}
         <section class="filter-strip ehq-edge-surface" aria-label="Mapping filters">
           <label>
@@ -2377,10 +2890,10 @@
           <button class="distribution-action" type="button" onclick={loadMappingRows}>Filter</button>
           <button class="distribution-action primary" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={applyMappingRules}>Apply reusable rules</button>
         </section>
-        <Table title="Kontor / RouteNote rows to map" columns={mappingColumns} rows={mappingTableRows} state={mappingState.status === "loading" ? "loading" : mappingState.status === "error" ? "error" : mappingRows.length === 0 ? "empty" : "default"} actionLabel="" />
+        <Table title="Kontor / RouteNote rows to map" columns={mappingColumns} rows={mappingTableRows} state={mappingState.status === "loading" ? "loading" : mappingState.status === "error" ? "error" : mappingRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={mappingPagination} />
       {:else if activePageId === "catalog"}
         <section class="dashboard-grid">
-          <Table title="Catalog canonical + contributors" columns={catalogColumns} rows={catalogRows} state={tableStateFor(tracksState.status, catalogRows.length)} actionLabel="" />
+          <Table title="Catalog canonical + contributors" columns={catalogColumns} rows={catalogRows} state={tableStateFor(tracksState.status, catalogRows.length)} actionLabel="" pagination={catalogPagination} />
           <div class="command-card ehq-edge-surface">
             <SectionTemplate
               eyebrow="catalog"
@@ -2398,8 +2911,8 @@
           <span>Expenses remain source records; corrections later become audited overrides.</span>
         </section>
         <section class="dashboard-grid">
-          <Table title="Splits / contracts" columns={contractColumns} rows={contractRows} state={tableStateFor(contractsState.status, contracts.length)} actionLabel="" />
-          <Table title="Expenses / recoupments" columns={expenseColumns} rows={expenseRows} state={tableStateFor(expensesState.status, expenses.length)} actionLabel="" />
+          <Table title="Splits / contracts" columns={contractColumns} rows={contractRows} state={tableStateFor(contractsState.status, contracts.length)} actionLabel="" pagination={contractsPagination} />
+          <Table title="Expenses / recoupments" columns={expenseColumns} rows={expenseRows} state={tableStateFor(expensesState.status, expenses.length)} actionLabel="" pagination={expensesPagination} />
         </section>
       {:else if activePageId === "allocations"}
         <section class="lock-panel ehq-edge-surface">
@@ -2417,7 +2930,7 @@
             <p class="lock-key">{allocationLockKey}</p>
           </SectionTemplate>
         </section>
-        <Table title="Allocation runs" columns={allocationColumns} rows={allocationRows} state={tableStateFor(allocationsState.status, allocationRuns.length)} actionLabel="" />
+        <Table title="Allocation runs" columns={allocationColumns} rows={allocationRows} state={tableStateFor(allocationsState.status, allocationRuns.length)} actionLabel="" pagination={allocationsPagination} />
       {:else if activePageId === "suspense"}
         <section class="filter-strip ehq-edge-surface" aria-label="Suspense filters">
           <label>
@@ -2431,7 +2944,7 @@
           <button class="distribution-action" type="button" onclick={loadSuspense}>Filter</button>
           <button class="distribution-action primary" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={resolveFirstSuspense}>Resolve first exact path</button>
         </section>
-        <Table title="Suspense grouped by reason" columns={suspenseColumns} rows={suspenseTableRows} state={suspenseState.status === "loading" ? "loading" : suspenseState.status === "error" ? "error" : suspenseItems.length === 0 ? "empty" : "default"} actionLabel="" />
+        <Table title="Suspense grouped by reason" columns={suspenseColumns} rows={suspenseTableRows} state={suspenseState.status === "loading" ? "loading" : suspenseState.status === "error" ? "error" : suspenseItems.length === 0 ? "empty" : "default"} actionLabel="" pagination={suspensePagination} />
       {:else if activePageId === "statements"}
         <section class="statement-summary ehq-edge-surface">
           {#if statementPreview !== null}
@@ -2456,7 +2969,7 @@
           </header>
           <h2>{statementPreview?.payeeName ?? "Payee"} Statement</h2>
           <p>Period {statementPreview === null ? periodLabel(distributionPeriod) : formatDateRange(statementPreview.period_start, statementPreview.period_end)} · currency {statementPreview?.currency ?? "MUR"}</p>
-          <Table title="Statements" columns={statementColumns} rows={statementRows} state={tableStateFor(statementsState.status, statements.length)} actionLabel="" />
+          <Table title="Statements" columns={statementColumns} rows={statementRows} state={tableStateFor(statementsState.status, statements.length)} actionLabel="" pagination={statementsPagination} />
         </section>
       {:else if activePageId === "payments"}
         <section class="filter-strip ehq-edge-surface" aria-label="Payment filters">
@@ -2474,7 +2987,7 @@
           <button class="distribution-action" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={reconcilePayment}>Reconcile payment</button>
           <button class="distribution-action danger" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={voidPayment}>Void payment</button>
         </section>
-        <Table title="Payments" columns={paymentColumns} rows={paymentRows} state={paymentsState.status === "loading" ? "loading" : paymentsState.status === "error" ? "error" : payments.length === 0 ? "empty" : "default"} actionLabel="" />
+        <Table title="Payments" columns={paymentColumns} rows={paymentRows} state={paymentsState.status === "loading" ? "loading" : paymentsState.status === "error" ? "error" : payments.length === 0 ? "empty" : "default"} actionLabel="" pagination={paymentsPagination} />
       {:else if activePageId === "revenue"}
         <section class="filter-strip ehq-edge-surface" aria-label="Revenue filters">
           <label>
@@ -2489,7 +3002,7 @@
         </section>
         <section class="dashboard-grid">
           <BarsChart title="Revenue grouped view" points={revenueChartPoints} tone="active" />
-          <Table title="Revenue detail" columns={revenueColumns} rows={revenueTableRows} state={tableStateFor(revenueState.status, revenueRows.length)} actionLabel="" />
+          <Table title="Revenue detail" columns={revenueColumns} rows={revenueTableRows} state={tableStateFor(revenueState.status, revenueRows.length)} actionLabel="" pagination={revenuePagination} />
         </section>
       {:else if activePageId === "financial-reconciliation"}
         {#if reconciliationState.status === "loading"}
@@ -2548,7 +3061,7 @@
             <span>No alias records are available for this workspace. Aliases route imported names to canonical entities once configured.</span>
           </section>
         {:else}
-          <Table title="Catalog aliases" columns={aliasColumns} rows={aliasRows} state={tableStateFor(aliasesState.status, aliases.length)} actionLabel="" />
+          <Table title="Catalog aliases" columns={aliasColumns} rows={aliasRows} state={tableStateFor(aliasesState.status, aliases.length)} actionLabel="" pagination={aliasesPagination} />
         {/if}
       {:else if activePageId === "duplicates"}
         <section class="recon-actions ehq-edge-surface" aria-label="Duplicates note">
@@ -2565,7 +3078,7 @@
             <span>No potential duplicate records were found across the catalog.</span>
           </section>
         {:else}
-          <Table title="Potential duplicates" columns={duplicateColumns} rows={duplicateRows} state={tableStateFor(duplicatesState.status, duplicates.length)} actionLabel="" />
+          <Table title="Potential duplicates" columns={duplicateColumns} rows={duplicateRows} state={tableStateFor(duplicatesState.status, duplicates.length)} actionLabel="" pagination={duplicatesPagination} />
         {/if}
       {:else if activePageId === "audit-log"}
         {#if auditEntries.length === 0 && auditLogState.status === "success"}
@@ -2574,7 +3087,7 @@
             <span>No distribution-scoped audit events are recorded for this workspace.</span>
           </section>
         {:else}
-          <Table title="Audit log" columns={auditColumns} rows={auditRows} state={tableStateFor(auditLogState.status, auditEntries.length)} actionLabel="" />
+          <Table title="Audit log" columns={auditColumns} rows={auditRows} state={tableStateFor(auditLogState.status, auditEntries.length)} actionLabel="" pagination={auditPagination} />
         {/if}
       {:else if activePageId === "settings"}
         {#if settingsState.status === "loading"}

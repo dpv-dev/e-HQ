@@ -28,7 +28,10 @@ export interface OfficePnlDataset {
 
 export type OfficeDepartmentRow = Pick<Department, "id" | "name" | "type" | "color" | "isActive">;
 export type OfficeDivisionRow = Pick<Division, "id" | "departmentId" | "name" | "isActive">;
-export type OfficeCategoryRow = Pick<Category, "id" | "divisionId" | "name" | "type" | "isActive">;
+export type OfficeCategoryRow = Pick<Category, "id" | "divisionId" | "name" | "type" | "isActive"> & {
+  readonly accountCode?: string | null;
+  readonly accountLabel?: string | null;
+};
 export type OfficePartnerRow = Pick<Partner, "id" | "name" | "type" | "isActive">;
 export type OfficeProjectRow = Pick<Project, "id" | "name" | "status" | "state" | "isActive">;
 export type OfficeProjectBudgetLineRow = Pick<ProjectBudgetLine, "id" | "projectId" | "categoryId" | "type" | "plannedAmountMinor">;

@@ -2068,6 +2068,104 @@ test("reconciliation create-transaction builds a ledger line from a bank line an
   assert.equal(candidate?.transactionId, receipt.id);
 });
 
+test("ledger bulk preview resolves classified rows by name and reports unresolved ones", async () => {
+  const app = createWriteEnabledFixtureApiService();
+  const preview = await app.request("/eof/v1/transactions/bulk-preview", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      rows: [
+        { legacyId: 90001, occurredOn: "2026-05-27", type: "expense", amount: "40.00", currency: "MUR", description: "Bank charge", departmentName: null, divisionName: null, categoryName: "Bank fees", partnerName: null, accountCode: "6150", accountLabel: "Bank Charges", projectId: null },
+        { legacyId: 90002, occurredOn: "2026-05-26", type: "expense", amount: "50.00", currency: "MUR", description: "Mystery", departmentName: null, divisionName: null, categoryName: "Ghost Category", partnerName: null, accountCode: null, accountLabel: null, projectId: null },
+        { legacyId: 90003, occurredOn: "2026-05-25", type: "expense", amount: "10.00", currency: "MUR", description: "Unclassified", departmentName: null, divisionName: null, categoryName: null, partnerName: null, accountCode: null, accountLabel: null, projectId: null }
+      ]
+    })
+  });
+  assert.equal(preview.status, 200);
+  const json = (await preview.json()) as {
+    readonly acceptedRowCount: number;
+    readonly rejectedRowCount: number;
+    readonly validatedRowCount: number;
+    readonly draftRowCount: number;
+    readonly rejectionReasons: readonly { readonly reason: string; readonly count: number }[];
+    readonly rows: readonly { readonly legacyId: number; readonly willValidate: boolean }[];
+  };
+  assert.equal(json.acceptedRowCount, 2);
+  assert.equal(json.rejectedRowCount, 1);
+  assert.equal(json.validatedRowCount, 1);
+  assert.equal(json.draftRowCount, 1);
+  assert.ok(json.rejectionReasons.some((entry) => entry.reason === "category_not_found" && entry.count === 1));
+  assert.equal(json.rows.find((entry) => entry.legacyId === 90001)?.willValidate, true);
+  assert.equal(json.rows.find((entry) => entry.legacyId === 90003)?.willValidate, false);
+});
+
+test("ledger bulk-upsert preview accepts externalId and resolves category by account code", async () => {
+  const app = createWriteEnabledFixtureApiService();
+  const preview = await app.request("/eof/v1/transactions/bulk-upsert/preview", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      workspaceId: "office",
+      rows: [
+        {
+          externalId: 91001,
+          occurredOn: "2026-05-27",
+          type: "expense",
+          amount: "40.00",
+          currency: "MUR",
+          description: "Bank charge",
+          accountCode: "6150"
+        }
+      ]
+    })
+  });
+  assert.equal(preview.status, 200);
+  const json = (await preview.json()) as {
+    readonly acceptedRowCount: number;
+    readonly rejectedRowCount: number;
+    readonly validatedRowCount: number;
+    readonly rows: readonly { readonly legacyId: number; readonly willValidate: boolean; readonly categoryId: string | null }[];
+  };
+  assert.equal(json.acceptedRowCount, 1);
+  assert.equal(json.rejectedRowCount, 0);
+  assert.equal(json.validatedRowCount, 1);
+  assert.equal(json.rows[0]?.legacyId, 91001);
+  assert.equal(json.rows[0]?.willValidate, true);
+  assert.equal(json.rows[0]?.categoryId, "cat_bank_fee");
+});
+
+test("ledger bulk confirm upserts accepted rows and replays idempotently", async () => {
+  const app = createWriteEnabledFixtureApiService();
+  const body = {
+    workspaceId: "workspace_1",
+    rows: [
+      { legacyId: 90001, occurredOn: "2026-05-27", type: "expense", amount: "40.00", currency: "MUR", description: "Bank charge", departmentName: null, divisionName: null, categoryName: "Bank fees", partnerName: null, accountCode: "6150", accountLabel: "Bank Charges", projectId: null },
+      { legacyId: 90002, occurredOn: "2026-05-26", type: "expense", amount: "50.00", currency: "MUR", description: "Ghost", departmentName: null, divisionName: null, categoryName: "Ghost Category", partnerName: null, accountCode: null, accountLabel: null, projectId: null }
+    ]
+  };
+  const first = await jsonWrite(app, "/eof/v1/transactions/bulk-confirm", "POST", "ledger-bulk-1", body);
+  assertReceipt(first);
+  assert.equal((first as { readonly upsertedRowCount: number }).upsertedRowCount, 1);
+  const replay = await jsonWrite(app, "/eof/v1/transactions/bulk-confirm", "POST", "ledger-bulk-1", body);
+  assert.equal((replay as { readonly upsertedRowCount: number }).upsertedRowCount, 1);
+});
+
+// Regression: the office role is (correctly) 403 on cc/v1 since the domain-authz fix, so the Office
+// UI must read the write gate from the office-scoped route or it stays locked even when writes are on.
+test("office reads the write gate from eof/v1/status while cc/v1 stays 403 for office", async () => {
+  const app = createWriteEnabledFixtureApiService();
+  const ccStatus = await app.request("/cc/v1/status?workspaceId=workspace_1", {
+    headers: authHeadersForToken("fixture-office-token")
+  });
+  assert.equal(ccStatus.status, 403);
+  const officeStatus = await app.request("/eof/v1/status?workspaceId=workspace_1", {
+    headers: authHeadersForToken("fixture-office-token")
+  });
+  assert.equal(officeStatus.status, 200);
+  assert.equal(((await officeStatus.json()) as { readonly writesEnabled: boolean }).writesEnabled, true);
+});
+
 test("office bank import confirm persists lines once and replays idempotent responses", async () => {
   const app = createWriteEnabledFixtureApiService();
   const preview = await app.request("/eof/v1/bank-import/preview", {

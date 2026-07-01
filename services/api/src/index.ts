@@ -465,6 +465,10 @@ const currencyCodePattern = /^[A-Z]{3}$/u;
 const moneyStringPattern = /^-?\d+(?:\.\d+)?$/u;
 
 const nullableStringSchema = z.string().min(1).nullable();
+const optionalNullableStringSchema = z.preprocess(
+  (value: unknown): unknown => value === undefined || value === "" ? null : value,
+  z.string().min(1).nullable()
+);
 const workspaceBodySchema = z.object({ workspaceId: z.string().min(1) });
 const jsonRecordSchema = z.record(z.string(), z.unknown());
 const commandCenterSettingUpdateSchema = workspaceBodySchema.extend({
@@ -551,6 +555,60 @@ interface ParsedCashflowRow {
   readonly outflowMinor: bigint;
   readonly closingBalanceMinor: bigint;
   readonly currency: string;
+}
+// Bulk push of an already-classified ledger (Sophie): each row carries the legacy WordPress
+// tx_id (idempotency key = legacyId) plus the classification by NAME (department/division/category),
+// resolved server-side to the new plan comptable UUIDs. Rows whose names do not resolve are rejected.
+const officeLedgerBulkRowSchema = z.object({
+  legacyId: z.coerce.number().int().optional(),
+  externalId: z.coerce.number().int().optional(),
+  occurredOn: z.string().regex(isoDatePattern),
+  type: z.enum(["income", "expense"]),
+  amount: z.string().regex(moneyStringPattern),
+  currency: z.string().regex(currencyCodePattern),
+  description: z.string().min(1),
+  departmentId: optionalNullableStringSchema,
+  divisionId: optionalNullableStringSchema,
+  categoryId: optionalNullableStringSchema,
+  departmentName: optionalNullableStringSchema,
+  divisionName: optionalNullableStringSchema,
+  categoryName: optionalNullableStringSchema,
+  partnerName: optionalNullableStringSchema,
+  accountCode: optionalNullableStringSchema,
+  accountLabel: optionalNullableStringSchema,
+  projectId: optionalNullableStringSchema
+}).transform((row, issueContext) => {
+  const legacyId = row.legacyId ?? row.externalId;
+  if (legacyId === undefined) {
+    issueContext.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "legacyId or externalId is required"
+    });
+    return { ...row, legacyId: 0 };
+  }
+
+  return { ...row, legacyId };
+});
+const officeLedgerBulkSchema = workspaceBodySchema.extend({
+  rows: z.array(officeLedgerBulkRowSchema).min(1)
+});
+type OfficeLedgerBulkRequest = z.infer<typeof officeLedgerBulkSchema>;
+type OfficeLedgerBulkRow = z.infer<typeof officeLedgerBulkRowSchema>;
+interface ResolvedLedgerRow {
+  readonly legacyId: number;
+  readonly rowNumber: number;
+  readonly occurredOn: string;
+  readonly type: "income" | "expense";
+  readonly amountMinor: bigint;
+  readonly currency: string;
+  readonly description: string;
+  readonly categoryId: string | null;
+  readonly partnerId: string | null;
+  readonly projectId: string | null;
+  readonly accountCode: string | null;
+  readonly accountLabel: string | null;
+  readonly status: "validated" | "draft";
+  readonly issues: readonly string[];
 }
 const officePartnerPayeeUnlinkSchema = workspaceBodySchema.extend({
   payeeId: z.null()
@@ -958,6 +1016,29 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
 
   app.post("/eof/v1/cashflow/confirm", async (context) => {
     return officeCashflowConfirmResponse(context, dependencies);
+  });
+
+  app.post("/eof/v1/transactions/bulk-preview", async (context) => {
+    return officeLedgerBulkPreviewResponse(context, dependencies);
+  });
+
+  app.post("/eof/v1/transactions/bulk-confirm", async (context) => {
+    return officeLedgerBulkConfirmResponse(context, dependencies);
+  });
+
+  app.post("/eof/v1/transactions/bulk-upsert/preview", async (context) => {
+    return officeLedgerBulkPreviewResponse(context, dependencies);
+  });
+
+  app.post("/eof/v1/transactions/bulk-upsert/confirm", async (context) => {
+    return officeLedgerBulkConfirmResponse(context, dependencies);
+  });
+
+  // Office-scoped write-gate read: the office role is (correctly) 403 on cc/v1 since the domain-authz
+  // fix, so the Office UI must read writesEnabled from here — not from cc/v1/status.
+  app.get("/eof/v1/status", (context) => {
+    resolveWorkspaceId(context);
+    return context.json({ writesEnabled: dependencies.persistence.writesEnabled });
   });
 
   app.get("/eof/v1/audit-log", (context) => {
@@ -1488,6 +1569,13 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
     return context.json(pageItems(context, toDistributionAuditLog(dependencies.fixtures)));
   });
 
+  // Distribution-scoped write-gate read (same reason as eof/v1/status: the distribution role is
+  // 403 on cc/v1 since the domain-authz fix, so it must not read writesEnabled from cc/v1/status).
+  app.get("/erh/v1/status", (context) => {
+    requireQuery(context, "workspaceId");
+    return context.json({ writesEnabled: dependencies.persistence.writesEnabled });
+  });
+
   app.get("/erh/v1/settings", (context) => {
     requireQuery(context, "workspaceId");
     assertNonBotRouteAccess(context, "distribution_settings_read");
@@ -1649,7 +1737,12 @@ function optionalCompatQuery(context: ApiContext, keys: readonly string[]): stri
 }
 
 function resolveWorkspaceId(context: ApiContext): string {
-  return optionalCompatQuery(context, ["workspaceId", "workspace_id"]) ?? DEFAULT_WORKSPACE_ID;
+  const workspaceId = optionalCompatQuery(context, ["workspaceId", "workspace_id"]);
+  if (workspaceId === null || workspaceId === "office") {
+    return DEFAULT_WORKSPACE_ID;
+  }
+
+  return workspaceId;
 }
 
 function requirePositiveInteger(context: ApiContext, value: string | null, key: string): number {
@@ -1980,11 +2073,10 @@ function requireOfficeBankLine(dataset: OfficeAnalyticsDataset, statementLineId:
   return line;
 }
 
-// Bank lines store a positive magnitude plus a direction; ledger transactions store a signed
-// amount (credit = money in = positive, debit = money out = negative).
-function bankLineSignedAmount(line: OfficeBankStatementLineRow): string {
-  const magnitude = line.amountMurMinor ?? line.amountMinor;
-  return eofMoney.format(line.direction === "credit" ? magnitude : -magnitude);
+// Ledger transactions store a POSITIVE magnitude; the `type` (income/expense) carries the sign
+// for P&L. So a bank line's amount maps to a positive amount + a direction-derived type.
+function bankLineAmountText(line: OfficeBankStatementLineRow): string {
+  return eofMoney.format(line.amountMurMinor ?? line.amountMinor);
 }
 
 async function officeReconciliationMatchResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
@@ -2092,11 +2184,15 @@ async function officeReconciliationCreateTransactionResponse(context: ApiContext
     categoryId: request.categoryId,
     projectId: request.projectId,
     description: line.description ?? line.reference ?? "Ligne bancaire",
-    amountMicro: bankLineSignedAmount(line),
+    amountMicro: bankLineAmountText(line),
     currency: line.currency
   };
   const amountMinor = normalizeEofAmountField(context, writeRequest.amountMicro, "amountMicro");
-  const transactionType = officeTransactionType(dependencies.fixtures.office, request.categoryId, writeRequest.amountMicro);
+  // With no category the type comes from the bank direction (credit = income, debit = expense);
+  // with a category it comes from the category's own type.
+  const transactionType: OfficeTransactionRow["type"] = request.categoryId !== null
+    ? officeTransactionType(dependencies.fixtures.office, request.categoryId, writeRequest.amountMicro)
+    : line.direction === "credit" ? "income" : "expense";
   const transactionStatus: OfficeTransactionRow["status"] = request.categoryId === null ? "draft" : "validated";
   const idempotencyKey = requireIdempotencyKey(context);
   const actor = context.get("authUser");
@@ -2652,6 +2748,343 @@ function upsertOfficeCashflowFixture(fixtures: ApiFixtureStore, workspaceId: str
     currency: row.currency as CurrencyCode
   }));
   mutableOffice.cashflowProjectionRows = [...kept, ...added];
+}
+
+function safeEofParse(value: string): bigint | null {
+  try {
+    return eofMoney.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+interface LedgerCategoryResolutionInput {
+  readonly categoryId: string | null;
+  readonly accountCode: string | null;
+  readonly accountLabel: string | null;
+  readonly categoryName: string | null;
+  readonly divisionId: string | null;
+  readonly divisionName: string | null;
+  readonly departmentId: string | null;
+  readonly departmentName: string | null;
+}
+
+type LedgerCategoryResolution =
+  | { readonly category: OfficeCategoryRow }
+  | { readonly issue: string };
+
+// Resolve a category by UUID first, then statutory account code/label, then the
+// department -> division -> category name path. Department/division values only constrain the match.
+function resolveLedgerCategory(dataset: OfficeAnalyticsDataset, input: LedgerCategoryResolutionInput): LedgerCategoryResolution {
+  if (input.categoryId !== null) {
+    const category = dataset.categories.find((candidate): boolean => candidate.id === input.categoryId);
+    if (category === undefined) {
+      return { issue: "category_not_found" };
+    }
+
+    const dimensionIssue = validateLedgerCategoryDimensions(dataset, category, input);
+    return dimensionIssue === null ? { category } : { issue: dimensionIssue };
+  }
+
+  const statutoryMatch = resolveLedgerCategoryByStatutoryAccount(dataset, input);
+  if ("category" in statutoryMatch) {
+    const dimensionIssue = validateLedgerCategoryDimensions(dataset, statutoryMatch.category, input);
+    return dimensionIssue === null ? statutoryMatch : { issue: dimensionIssue };
+  }
+
+  if (input.categoryName === null || input.categoryName.trim().length === 0) {
+    return { issue: "category_not_provided" };
+  }
+
+  const categoryName = input.categoryName;
+  const namedMatches = dataset.categories.filter((category): boolean => textEquals(category.name, categoryName));
+  const constrainedMatches = namedMatches.filter((category): boolean =>
+    validateLedgerCategoryDimensions(dataset, category, input) === null
+  );
+
+  if (constrainedMatches.length === 1) {
+    const category = constrainedMatches[0];
+    if (category === undefined) {
+      throw new Error("Ledger category resolution narrowed to one match, but no category was present.");
+    }
+
+    return { category };
+  }
+
+  if (constrainedMatches.length > 1) {
+    return { issue: "category_ambiguous" };
+  }
+
+  return namedMatches.length > 0 ? { issue: "category_dimension_mismatch" } : { issue: "category_not_found" };
+}
+
+function resolveLedgerCategoryByStatutoryAccount(
+  dataset: OfficeAnalyticsDataset,
+  input: LedgerCategoryResolutionInput
+): LedgerCategoryResolution {
+  const accountCode = input.accountCode?.trim() ?? "";
+  const accountLabel = input.accountLabel?.trim() ?? "";
+  if (accountCode.length === 0 && accountLabel.length === 0) {
+    return { issue: "category_not_provided" };
+  }
+
+  const matches = dataset.categories.filter((category): boolean =>
+    (accountCode.length > 0 && category.accountCode !== undefined && category.accountCode !== null && category.accountCode.trim() === accountCode) ||
+    (accountLabel.length > 0 && category.accountLabel !== undefined && category.accountLabel !== null && textEquals(category.accountLabel, accountLabel))
+  );
+
+  if (matches.length === 1) {
+    const category = matches[0];
+    if (category === undefined) {
+      throw new Error("Ledger account-code resolution narrowed to one match, but no category was present.");
+    }
+
+    return { category };
+  }
+
+  if (matches.length > 1) {
+    return { issue: "category_ambiguous" };
+  }
+
+  return { issue: "category_not_provided" };
+}
+
+function validateLedgerCategoryDimensions(
+  dataset: OfficeAnalyticsDataset,
+  category: OfficeCategoryRow,
+  input: LedgerCategoryResolutionInput
+): string | null {
+  const division = category.divisionId === null
+    ? undefined
+    : dataset.divisions.find((candidate): boolean => candidate.id === category.divisionId);
+  const department = division === undefined
+    ? undefined
+    : dataset.departments.find((candidate): boolean => candidate.id === division.departmentId);
+
+  if (input.divisionId !== null && division?.id !== input.divisionId) {
+    return "category_dimension_mismatch";
+  }
+
+  if (input.departmentId !== null && department?.id !== input.departmentId) {
+    return "category_dimension_mismatch";
+  }
+
+  if (!matchesOptionalText(division?.name ?? null, input.divisionName)) {
+    return "category_dimension_mismatch";
+  }
+
+  if (!matchesOptionalText(department?.name ?? null, input.departmentName)) {
+    return "category_dimension_mismatch";
+  }
+
+  return null;
+}
+
+function matchesOptionalText(candidate: string | null, value: string | null): boolean {
+  return value === null || value.trim().length === 0 || (candidate !== null && textEquals(candidate, value));
+}
+
+function textEquals(left: string, right: string): boolean {
+  return left.trim().toLowerCase() === right.trim().toLowerCase();
+}
+
+// Turn one bulk row into a resolved ledger transaction (or an issue list). Classification is optional:
+// a row with no category becomes a draft; a row whose stated category cannot be resolved is rejected.
+function resolveLedgerBulkRow(row: OfficeLedgerBulkRow, rowNumber: number, dataset: OfficeAnalyticsDataset): ResolvedLedgerRow {
+  const issues: string[] = [];
+  const amountMinor = safeEofParse(row.amount);
+  if (amountMinor === null || amountMinor <= 0n) {
+    issues.push("amount_missing_or_invalid");
+  }
+  if (row.currency.trim().toUpperCase() !== "MUR") {
+    issues.push("currency_not_mur");
+  }
+
+  let categoryId: string | null = null;
+  let resolvedType: "income" | "expense" = row.type;
+  if (
+    row.categoryId !== null ||
+    row.accountCode !== null ||
+    row.accountLabel !== null ||
+    (row.categoryName !== null && row.categoryName.trim().length > 0)
+  ) {
+    const resolution = resolveLedgerCategory(dataset, {
+      categoryId: row.categoryId,
+      accountCode: row.accountCode,
+      accountLabel: row.accountLabel,
+      categoryName: row.categoryName,
+      divisionId: row.divisionId,
+      divisionName: row.divisionName,
+      departmentId: row.departmentId,
+      departmentName: row.departmentName
+    });
+    if ("issue" in resolution) {
+      issues.push(resolution.issue);
+    } else {
+      categoryId = resolution.category.id;
+      resolvedType = resolution.category.type;
+    }
+  }
+
+  const partnerName = row.partnerName;
+  const partnerId = partnerName !== null && partnerName.trim().length > 0
+    ? (dataset.partners.find((partner): boolean => partner.name.trim().toLowerCase() === partnerName.trim().toLowerCase())?.id ?? null)
+    : null;
+
+  return {
+    legacyId: row.legacyId,
+    rowNumber,
+    occurredOn: row.occurredOn,
+    type: resolvedType,
+    amountMinor: amountMinor ?? 0n,
+    currency: row.currency.trim().toUpperCase(),
+    description: row.description.trim(),
+    categoryId,
+    partnerId,
+    projectId: row.projectId,
+    accountCode: row.accountCode,
+    accountLabel: row.accountLabel,
+    status: categoryId !== null ? "validated" : "draft",
+    issues
+  };
+}
+
+async function officeLedgerBulkPreviewResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const request = await readZodBody<OfficeLedgerBulkRequest>(context, officeLedgerBulkSchema as z.ZodType<OfficeLedgerBulkRequest>);
+  resolveWorkspaceId(context);
+  const resolved = request.rows.map((row: OfficeLedgerBulkRow, index: number): ResolvedLedgerRow =>
+    resolveLedgerBulkRow(row, index + 1, dependencies.fixtures.office)
+  );
+  const accepted = resolved.filter((row: ResolvedLedgerRow): boolean => row.issues.length === 0);
+  const rejectionCounts = new Map<string, number>();
+  for (const row of resolved) {
+    for (const issue of row.issues) {
+      rejectionCounts.set(issue, (rejectionCounts.get(issue) ?? 0) + 1);
+    }
+  }
+  return context.json({
+    acceptedRowCount: accepted.length,
+    rejectedRowCount: resolved.length - accepted.length,
+    validatedRowCount: accepted.filter((row: ResolvedLedgerRow): boolean => row.status === "validated").length,
+    draftRowCount: accepted.filter((row: ResolvedLedgerRow): boolean => row.status === "draft").length,
+    rejectionReasons: [...rejectionCounts.entries()]
+      .map(([reason, count]: readonly [string, number]) => ({ reason, count }))
+      .sort((left, right) => right.count - left.count),
+    rows: resolved.map((row: ResolvedLedgerRow) => ({
+      legacyId: row.legacyId,
+      rowNumber: row.rowNumber,
+      status: row.issues.length === 0 ? "accepted" : "rejected",
+      willValidate: row.issues.length === 0 && row.status === "validated",
+      categoryId: row.categoryId,
+      issues: row.issues
+    }))
+  });
+}
+
+async function officeLedgerBulkConfirmResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const request = await readZodBody<OfficeLedgerBulkRequest>(context, officeLedgerBulkSchema as z.ZodType<OfficeLedgerBulkRequest>);
+  resolveWorkspaceId(context);
+  const accepted = request.rows
+    .map((row: OfficeLedgerBulkRow, index: number): ResolvedLedgerRow => resolveLedgerBulkRow(row, index + 1, dependencies.fixtures.office))
+    .filter((row: ResolvedLedgerRow): boolean => row.issues.length === 0);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const batchId = randomUUID();
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse & { readonly upsertedRowCount: number }>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_ledger_bulk_confirm",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string) => {
+      await persistOfficeLedgerBulk(tx, accepted, actor.userId);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_ledger_bulk_confirm",
+        targetType: "office_ledger_bulk",
+        targetId: batchId,
+        before: {},
+        after: {
+          upsertedRowCount: accepted.length,
+          validatedRowCount: accepted.filter((row: ResolvedLedgerRow): boolean => row.status === "validated").length
+        },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      upsertOfficeLedgerBulkFixture(dependencies.fixtures, accepted);
+      return { ...mutationReceipt(batchId, auditEventId), upsertedRowCount: accepted.length };
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+// Idempotent by legacy tx_id: `on conflict (legacy_id)` updates in place, so re-pushing a batch
+// never duplicates. Also back-fills each resolved category's Mauritian statutory account code.
+async function persistOfficeLedgerBulk(tx: ApiWriteTransaction, rows: readonly ResolvedLedgerRow[], actorUserId: string): Promise<void> {
+  if (tx.kind === "memory" || rows.length === 0) {
+    return;
+  }
+  for (const row of rows) {
+    const occurredAt = `${row.occurredOn}T00:00:00.000Z`;
+    const approvedBy = row.status === "validated" ? actorUserId : null;
+    const approvedAt = row.status === "validated" ? new Date().toISOString() : null;
+    const amount = row.amountMinor.toString();
+    await tx.executor.execute(sql`
+      insert into transactions (
+        id, legacy_id, transaction_date, type, status, is_active, description,
+        category_id, partner_id, project_id, amount_minor, original_amount_minor, original_currency,
+        total_amount_minor, source, created_by_user_id, approved_by_user_id, approved_at
+      )
+      values (
+        ${randomUUID()}, ${row.legacyId}, ${occurredAt}, ${row.type}, ${row.status}, true, ${row.description},
+        ${row.categoryId}, ${row.partnerId}, ${row.projectId}, ${amount}, ${amount}, ${row.currency === "MUR" ? null : row.currency},
+        ${amount}, 'ledger_import', ${actorUserId}, ${approvedBy}, ${approvedAt}
+      )
+      on conflict (legacy_id) do update set
+        transaction_date = excluded.transaction_date,
+        type = excluded.type,
+        status = excluded.status,
+        description = excluded.description,
+        category_id = excluded.category_id,
+        partner_id = excluded.partner_id,
+        project_id = excluded.project_id,
+        amount_minor = excluded.amount_minor,
+        original_amount_minor = excluded.original_amount_minor,
+        total_amount_minor = excluded.total_amount_minor,
+        source = excluded.source,
+        approved_by_user_id = excluded.approved_by_user_id,
+        approved_at = excluded.approved_at,
+        updated_at = now()
+    `);
+    if (row.categoryId !== null && row.accountCode !== null) {
+      await tx.executor.execute(sql`
+        update categories set account_code = ${row.accountCode}, account_label = ${row.accountLabel}
+        where id = ${row.categoryId} and account_code is null
+      `);
+    }
+  }
+}
+
+function upsertOfficeLedgerBulkFixture(fixtures: ApiFixtureStore, rows: readonly ResolvedLedgerRow[]): void {
+  if (rows.length === 0) {
+    return;
+  }
+  const mutableOffice = fixtures.office as Mutable<OfficeAnalyticsDataset>;
+  const added = rows.map((row: ResolvedLedgerRow): OfficeTransactionRow => ({
+    id: randomUUID(),
+    transactionDate: `${row.occurredOn}T00:00:00.000Z`,
+    type: row.type,
+    status: row.status,
+    isActive: true,
+    description: row.description,
+    categoryId: row.categoryId,
+    partnerId: row.partnerId,
+    projectId: row.projectId,
+    amountMinor: row.amountMinor,
+    originalCurrency: row.currency === "MUR" ? null : (row.currency as CurrencyCode),
+    exchangeRateE10: null
+  }));
+  mutableOffice.transactions = [...fixtures.office.transactions, ...added];
 }
 
 async function officePartnerPayeeUnlinkResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {

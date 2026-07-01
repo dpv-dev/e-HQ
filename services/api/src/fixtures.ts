@@ -72,9 +72,9 @@ function createOfficeFixture(): OfficeAnalyticsDataset {
       { id: "div_admin", departmentId: "dept_ops", name: "Administration", isActive: true }
     ],
     categories: [
-      { id: "cat_live_income", divisionId: "div_live", name: "Live income", type: "income", isActive: true },
-      { id: "cat_rental_expense", divisionId: "div_live", name: "Equipment rental", type: "expense", isActive: true },
-      { id: "cat_bank_fee", divisionId: "div_admin", name: "Bank fees", type: "expense", isActive: true }
+      { id: "cat_live_income", divisionId: "div_live", name: "Live income", type: "income", accountCode: null, accountLabel: null, isActive: true },
+      { id: "cat_rental_expense", divisionId: "div_live", name: "Equipment rental", type: "expense", accountCode: null, accountLabel: null, isActive: true },
+      { id: "cat_bank_fee", divisionId: "div_admin", name: "Bank fees", type: "expense", accountCode: "6150", accountLabel: "Bank Charges", isActive: true }
     ],
     partners: [
       { id: "partner_bedouin", name: "Bedouin Ltd", type: "both", isActive: true },

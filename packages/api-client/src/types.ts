@@ -191,6 +191,10 @@ export interface OfficeDashboardResponse {
   readonly recentImports?: readonly OfficeRecentImport[];
 }
 
+export interface OfficeWriteStatusResponse {
+  readonly writesEnabled: boolean;
+}
+
 export interface OfficePnlProjectionQuery extends PeriodQuery {
   readonly departmentId: EntityId | null;
 }
@@ -232,7 +236,7 @@ export interface OfficeGlobalPnl {
   readonly lines: readonly OfficePnlLine[];
 }
 
-export interface OfficeDivisionPnlQuery extends PeriodQuery {}
+export interface OfficeDivisionPnlQuery extends PeriodQuery, PageQuery {}
 
 export interface OfficeDivisionPnl {
   readonly id: EntityId;
@@ -422,6 +426,58 @@ export interface BankImportConfirmRequest {
 
 export interface BankImportConfirmResponse extends ApiMutationReceipt {
   readonly importedTransactionCount: number;
+}
+
+export interface OfficeLedgerBulkRow {
+  readonly legacyId?: number;
+  readonly externalId?: number;
+  readonly occurredOn: IsoDateString;
+  readonly type: OfficeCategoryType;
+  readonly amount: DecimalString;
+  readonly currency: CurrencyCode;
+  readonly description: string;
+  readonly departmentId?: EntityId | null;
+  readonly divisionId?: EntityId | null;
+  readonly categoryId?: EntityId | null;
+  readonly departmentName?: string | null;
+  readonly divisionName?: string | null;
+  readonly categoryName?: string | null;
+  readonly partnerName?: string | null;
+  readonly accountCode?: string | null;
+  readonly accountLabel?: string | null;
+  readonly projectId?: EntityId | null;
+}
+
+export interface OfficeLedgerBulkRequest {
+  readonly workspaceId: EntityId;
+  readonly rows: readonly OfficeLedgerBulkRow[];
+}
+
+export interface OfficeLedgerBulkRejectionReason {
+  readonly reason: string;
+  readonly count: number;
+}
+
+export interface OfficeLedgerBulkRowResult {
+  readonly legacyId: number;
+  readonly rowNumber: number;
+  readonly status: "accepted" | "rejected";
+  readonly willValidate: boolean;
+  readonly categoryId: EntityId | null;
+  readonly issues: readonly string[];
+}
+
+export interface OfficeLedgerBulkPreviewResponse {
+  readonly acceptedRowCount: number;
+  readonly rejectedRowCount: number;
+  readonly validatedRowCount: number;
+  readonly draftRowCount: number;
+  readonly rejectionReasons: readonly OfficeLedgerBulkRejectionReason[];
+  readonly rows: readonly OfficeLedgerBulkRowResult[];
+}
+
+export interface OfficeLedgerBulkConfirmResponse extends ApiMutationReceipt {
+  readonly upsertedRowCount: number;
 }
 
 export interface OfficeReconciliationsQuery extends PageQuery {
@@ -690,9 +746,8 @@ export interface OfficeBankQualityResponse {
   readonly lastImportAt: IsoDateTimeString | null;
 }
 
-export interface OfficeBankAccountsQuery {
+export interface OfficeBankAccountsQuery extends PageQuery {
   readonly workspaceId: EntityId;
-  readonly limit: number;
 }
 
 export interface OfficeCashflowImportRequest {

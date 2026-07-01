@@ -6,6 +6,7 @@
     Loader,
     Table,
     type ChartPoint,
+    type TablePagination,
     type TableRow,
     type Tone
   } from "@ehq/ui";
@@ -27,6 +28,7 @@
   } from "@ehq/api-client";
   import { formatDateOnly } from "../../date-format.js";
   import { formatMoneyValue, moneyToneForValue } from "../../money-format.js";
+  import { createTablePagination, loadPageResult, readPageItems, TABLE_PAGE_SIZE, type PageLoadMode } from "../../table-pagination.js";
 
   interface Props {
     readonly client: OfficeApiClient;
@@ -56,6 +58,10 @@
   let auditState = $state<ApiRequestState<PageResult<AuditLogEntry>>>(
     createIdleState<PageResult<AuditLogEntry>>()
   );
+  let pendingLoadingMore = $state(false);
+  let pendingLoadMoreError = $state<string | null>(null);
+  let auditLoadingMore = $state(false);
+  let auditLoadMoreError = $state<string | null>(null);
   let dashboardState = $state<ApiRequestState<OfficeDashboardResponse>>(createIdleState<OfficeDashboardResponse>());
 
   const pendingRows = $derived(readPageItems(pendingState));
@@ -68,6 +74,12 @@
   const pendingTableRows = $derived(createPendingTableRows(pendingRows));
   const auditTableRows = $derived(createAuditTableRows(auditRows));
   const importTableRows = $derived(createImportTableRows(recentImports));
+  const pendingPagination = $derived<TablePagination | null>(
+    createTablePagination(pendingState, pendingLoadingMore, pendingLoadMoreError, loadMorePending, loadAllPending)
+  );
+  const auditPagination = $derived<TablePagination | null>(
+    createTablePagination(auditState, auditLoadingMore, auditLoadMoreError, loadMoreAudit, loadAllAudit)
+  );
 
   onMount((): void => {
     void loadMonitoring();
@@ -91,7 +103,7 @@
       type: null,
       status: "pending" as const,
       cursor: null,
-      limit: 50
+      limit: TABLE_PAGE_SIZE
     };
 
     try {
@@ -111,7 +123,7 @@
           actorId: null,
           entityType: null,
           cursor: null,
-          limit: 50
+          limit: TABLE_PAGE_SIZE
         }),
         props.client.getDashboard({
           workspaceId: props.workspaceId,
@@ -121,7 +133,9 @@
       integrityState = createSuccessState<OfficeIntegrityCheckAllResponse>(integrity);
       bankQualityState = createSuccessState<OfficeBankQualityResponse>(bankQuality);
       pendingState = createSuccessState<PageResult<OfficeTransaction>>(pending);
+      pendingLoadMoreError = null;
       auditState = createSuccessState<PageResult<AuditLogEntry>>(audit);
+      auditLoadMoreError = null;
       dashboardState = createSuccessState<OfficeDashboardResponse>(dashboard);
     } catch (error: unknown) {
       integrityState = createErrorState<OfficeIntegrityCheckAllResponse>(error);
@@ -132,12 +146,76 @@
     }
   }
 
-  function readPageItems<TItem>(state: ApiRequestState<PageResult<TItem>>): readonly TItem[] {
-    if (state.status === "success") {
-      return state.data.items;
-    }
+  async function loadMorePending(): Promise<void> {
+    await loadPendingPage("one");
+  }
 
-    return [];
+  async function loadAllPending(): Promise<void> {
+    await loadPendingPage("all");
+  }
+
+  async function loadPendingPage(mode: PageLoadMode): Promise<void> {
+    await loadPageResult(mode, {
+      state: pendingState,
+      loading: pendingLoadingMore,
+      setLoading: (loading: boolean): void => {
+        pendingLoadingMore = loading;
+      },
+      setError: (error: string | null): void => {
+        pendingLoadMoreError = error;
+      },
+      setState: (state: ApiRequestState<PageResult<OfficeTransaction>>): void => {
+        pendingState = state;
+      },
+      fetchPage: (cursor: string): Promise<PageResult<OfficeTransaction>> =>
+        props.client.listTransactions({
+          workspaceId: props.workspaceId,
+          period: props.period,
+          accountId: null,
+          departmentId: null,
+          divisionId: null,
+          categoryId: null,
+          projectId: null,
+          type: null,
+          status: "pending",
+          cursor,
+          limit: TABLE_PAGE_SIZE
+        })
+    });
+  }
+
+  async function loadMoreAudit(): Promise<void> {
+    await loadAuditPage("one");
+  }
+
+  async function loadAllAudit(): Promise<void> {
+    await loadAuditPage("all");
+  }
+
+  async function loadAuditPage(mode: PageLoadMode): Promise<void> {
+    await loadPageResult(mode, {
+      state: auditState,
+      loading: auditLoadingMore,
+      setLoading: (loading: boolean): void => {
+        auditLoadingMore = loading;
+      },
+      setError: (error: string | null): void => {
+        auditLoadMoreError = error;
+      },
+      setState: (state: ApiRequestState<PageResult<AuditLogEntry>>): void => {
+        auditState = state;
+      },
+      fetchPage: (cursor: string): Promise<PageResult<AuditLogEntry>> =>
+        props.client.listAuditLog({
+          workspaceId: props.workspaceId,
+          from: null,
+          to: null,
+          actorId: null,
+          entityType: null,
+          cursor,
+          limit: TABLE_PAGE_SIZE
+        })
+    });
   }
 
   function readIntegrityRows(state: ApiRequestState<OfficeIntegrityCheckAllResponse>): readonly OfficeIntegrityCheck[] {
@@ -386,9 +464,9 @@
   </section>
 
   <Table title="Integrity checks" columns={integrityColumns} rows={integrityTableRows} state={integrityState.status === "loading" ? "loading" : integrityState.status === "error" ? "error" : integrityTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
-  <Table title="Pending transactions" columns={pendingColumns} rows={pendingTableRows} state={pendingState.status === "loading" ? "loading" : pendingState.status === "error" ? "error" : pendingTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
+  <Table title="Pending transactions" columns={pendingColumns} rows={pendingTableRows} state={pendingState.status === "loading" ? "loading" : pendingState.status === "error" ? "error" : pendingTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={pendingPagination} />
   <Table title="Recent imports" columns={importColumns} rows={importTableRows} state={dashboardState.status === "loading" ? "loading" : dashboardState.status === "error" ? "error" : importTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
-  <Table title="Audit log" columns={auditColumns} rows={auditTableRows} state={auditState.status === "loading" ? "loading" : auditState.status === "error" ? "error" : auditTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
+  <Table title="Audit log" columns={auditColumns} rows={auditTableRows} state={auditState.status === "loading" ? "loading" : auditState.status === "error" ? "error" : auditTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={auditPagination} />
 </section>
 
 <script module lang="ts">

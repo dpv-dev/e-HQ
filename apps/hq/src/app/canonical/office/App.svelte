@@ -13,6 +13,7 @@
     type ChartPoint,
     type DivergePoint,
     type SelectOption,
+    type TablePagination,
     type TableRowAction,
     type Tone,
     type WorkspaceNavGroup,
@@ -55,6 +56,7 @@
   import { apiMoneyToMicroUnits, formatMoneyValue, formatSignedMoneyValue, moneyToneForValue } from "../../money-format.js";
   import { createPeriodOptions, getLatestDataPeriod, periodLabel, rangeForScope, rangeLabel, todayIso, type DateRange, type PeriodScope } from "../../period-controls.js";
   import { normalizeRoutePath } from "../../route-utils.js";
+  import { createTablePagination, loadPageResult, readPageItems, TABLE_PAGE_SIZE, type PageLoadMode } from "../../table-pagination.js";
   import BankView from "./BankView.svelte";
   import CeoView from "./CeoView.svelte";
   import MonitoringView from "./MonitoringView.svelte";
@@ -85,6 +87,7 @@
   type SelectFilterValue = string;
   type ImportSource = "mcb" | "sbi" | "csv" | "cashflow" | "pdf";
   type RequestStatus = "idle" | "loading" | "success" | "error";
+  type OfficePagedTableId = "divisionPnl" | "transactions" | "pending" | "reconciliation" | "audit";
 
   interface Props {
     readonly session: AuthSession;
@@ -365,6 +368,8 @@
   let auditState = $state<ApiRequestState<PageResult<AuditLogEntry>>>(
     createIdleState<PageResult<AuditLogEntry>>()
   );
+  let tablePaginationLoading = $state<OfficePagedTableId | null>(null);
+  let tablePaginationErrors = $state<Partial<Record<OfficePagedTableId, string | null>>>({});
   let actionReceipt = $state<ApiMutationReceipt | null>(null);
   let writesEnabled = $state(false);
   let writeGateMessage = $state("Checking write gate.");
@@ -480,6 +485,27 @@
   const transactionTableRows = $derived(createTransactionTableRows(transactionRows));
   const pendingTableRows = $derived(createPendingTableRows(pendingRows, selectedPendingIds));
   const reconciliationTableRows = $derived(createReconciliationTableRows(reconciliationRows));
+  const divisionPnlPagination = $derived<TablePagination | null>(
+    createTablePagination(divisionPnlState, tablePaginationLoading === "divisionPnl", tablePaginationError("divisionPnl"), loadMoreDivisionPnl, loadAllDivisionPnl)
+  );
+  const transactionPagination = $derived<TablePagination | null>(
+    createTablePagination(transactionsState, tablePaginationLoading === "transactions", tablePaginationError("transactions"), loadMoreTransactions, loadAllTransactions)
+  );
+  const pendingPagination = $derived<TablePagination | null>(
+    createTablePagination(pendingState, tablePaginationLoading === "pending", tablePaginationError("pending"), loadMorePendingTransactions, loadAllPendingTransactions)
+  );
+  const reconciliationPagination = $derived<TablePagination | null>(
+    createTablePagination(
+      reconciliationState,
+      tablePaginationLoading === "reconciliation",
+      tablePaginationError("reconciliation"),
+      loadMoreReconciliations,
+      loadAllReconciliations
+    )
+  );
+  const auditPagination = $derived<TablePagination | null>(
+    createTablePagination(auditState, tablePaginationLoading === "audit", tablePaginationError("audit"), loadMoreAuditLog, loadAllAuditLog)
+  );
   const cashflowInflowPoints = $derived(createCashflowPoints(cashflowRows, "inflow"));
   const cashflowOutflowPoints = $derived(createCashflowPoints(cashflowRows, "outflow"));
   const cashflowTableRows = $derived(createCashflowTableRows(cashflowRows));
@@ -518,12 +544,199 @@
     ]);
   }
 
+  function tablePaginationError(tableId: OfficePagedTableId): string | null {
+    return tablePaginationErrors[tableId] ?? null;
+  }
+
+  function setTablePaginationError(tableId: OfficePagedTableId, error: string | null): void {
+    tablePaginationErrors = {
+      ...tablePaginationErrors,
+      [tableId]: error
+    };
+  }
+
+  async function loadOfficePageResult<TItem>(
+    tableId: OfficePagedTableId,
+    state: ApiRequestState<PageResult<TItem>>,
+    setState: (state: ApiRequestState<PageResult<TItem>>) => void,
+    fetchPage: (cursor: string) => Promise<PageResult<TItem>>,
+    mode: PageLoadMode
+  ): Promise<void> {
+    await loadPageResult(mode, {
+      state,
+      loading: tablePaginationLoading === tableId,
+      setLoading: (loading: boolean): void => {
+        tablePaginationLoading = loading ? tableId : null;
+      },
+      setError: (error: string | null): void => {
+        setTablePaginationError(tableId, error);
+      },
+      setState,
+      fetchPage
+    });
+  }
+
+  async function loadMoreDivisionPnl(): Promise<void> {
+    await loadDivisionPnlPage("one");
+  }
+
+  async function loadAllDivisionPnl(): Promise<void> {
+    await loadDivisionPnlPage("all");
+  }
+
+  async function loadDivisionPnlPage(mode: PageLoadMode): Promise<void> {
+    await loadOfficePageResult(
+      "divisionPnl",
+      divisionPnlState,
+      (state: ApiRequestState<PageResult<OfficeDivisionPnl>>): void => {
+        divisionPnlState = state;
+      },
+      (cursor: string): Promise<PageResult<OfficeDivisionPnl>> =>
+        client.office.getDivisionPnl({
+          workspaceId: officeWorkspaceId,
+          period,
+          dateFrom: activeRange.from,
+          dateTo: activeRange.to,
+          cursor,
+          limit: TABLE_PAGE_SIZE
+        }),
+      mode
+    );
+  }
+
+  async function loadMoreTransactions(): Promise<void> {
+    await loadTransactionsPage("one");
+  }
+
+  async function loadAllTransactions(): Promise<void> {
+    await loadTransactionsPage("all");
+  }
+
+  async function loadTransactionsPage(mode: PageLoadMode): Promise<void> {
+    await loadOfficePageResult(
+      "transactions",
+      transactionsState,
+      (state: ApiRequestState<PageResult<OfficeTransaction>>): void => {
+        transactionsState = state;
+      },
+      (cursor: string): Promise<PageResult<OfficeTransaction>> =>
+        client.office.listTransactions({
+          workspaceId: officeWorkspaceId,
+          period,
+          dateFrom: activeRange.from,
+          dateTo: activeRange.to,
+          accountId: toNullableFilter(accountFilter),
+          departmentId: toNullableFilter(departmentFilter),
+          divisionId: toNullableFilter(divisionFilter),
+          categoryId: toNullableFilter(categoryFilter),
+          projectId: toNullableFilter(projectFilter),
+          type: toNullableCategoryType(typeFilter),
+          status: toNullableTransactionStatus(transactionStatusFilter),
+          cursor,
+          limit: TABLE_PAGE_SIZE
+        }),
+      mode
+    );
+  }
+
+  async function loadMorePendingTransactions(): Promise<void> {
+    await loadPendingTransactionsPage("one");
+  }
+
+  async function loadAllPendingTransactions(): Promise<void> {
+    await loadPendingTransactionsPage("all");
+  }
+
+  async function loadPendingTransactionsPage(mode: PageLoadMode): Promise<void> {
+    await loadOfficePageResult(
+      "pending",
+      pendingState,
+      (state: ApiRequestState<PageResult<OfficeTransaction>>): void => {
+        pendingState = state;
+      },
+      (cursor: string): Promise<PageResult<OfficeTransaction>> =>
+        client.office.listTransactions({
+          workspaceId: officeWorkspaceId,
+          period,
+          accountId: null,
+          departmentId: null,
+          divisionId: null,
+          categoryId: null,
+          projectId: null,
+          type: null,
+          status: "pending",
+          cursor,
+          limit: TABLE_PAGE_SIZE
+        }),
+      mode
+    );
+  }
+
+  async function loadMoreReconciliations(): Promise<void> {
+    await loadReconciliationsPage("one");
+  }
+
+  async function loadAllReconciliations(): Promise<void> {
+    await loadReconciliationsPage("all");
+  }
+
+  async function loadReconciliationsPage(mode: PageLoadMode): Promise<void> {
+    await loadOfficePageResult(
+      "reconciliation",
+      reconciliationState,
+      (state: ApiRequestState<PageResult<OfficeReconciliationCandidate>>): void => {
+        reconciliationState = state;
+      },
+      (cursor: string): Promise<PageResult<OfficeReconciliationCandidate>> =>
+        client.office.listReconciliations({
+          workspaceId: officeWorkspaceId,
+          accountId: toNullableFilter(accountFilter),
+          period,
+          dateFrom: activeRange.from,
+          dateTo: activeRange.to,
+          status: toNullableReconciliationStatus(reconciliationStatusFilter),
+          cursor,
+          limit: TABLE_PAGE_SIZE
+        }),
+      mode
+    );
+  }
+
+  async function loadMoreAuditLog(): Promise<void> {
+    await loadAuditLogPage("one");
+  }
+
+  async function loadAllAuditLog(): Promise<void> {
+    await loadAuditLogPage("all");
+  }
+
+  async function loadAuditLogPage(mode: PageLoadMode): Promise<void> {
+    await loadOfficePageResult(
+      "audit",
+      auditState,
+      (state: ApiRequestState<PageResult<AuditLogEntry>>): void => {
+        auditState = state;
+      },
+      (cursor: string): Promise<PageResult<AuditLogEntry>> =>
+        client.office.listAuditLog({
+          workspaceId: officeWorkspaceId,
+          from: activeRange.from,
+          to: activeRange.to,
+          actorId: null,
+          entityType: null,
+          cursor,
+          limit: TABLE_PAGE_SIZE
+        }),
+      mode
+    );
+  }
+
   // Bank statements import into one existing account, so the importer needs the
   // workspace's accounts to send an explicit accountId — the API rejects every row
   // with "account_not_found" when no target account is resolved.
   async function loadImportAccounts(): Promise<void> {
     try {
-      const accounts = await client.office.listBankAccounts({ workspaceId: officeWorkspaceId, limit: 100 });
+      const accounts = await client.office.listBankAccounts({ workspaceId: officeWorkspaceId, cursor: null, limit: TABLE_PAGE_SIZE });
       importAccounts = accounts.items;
       if (selectedImportAccountId.length === 0) {
         selectedImportAccountId = defaultImportAccountId(importAccounts, null);
@@ -547,7 +760,9 @@
 
   async function loadWriteGate(): Promise<void> {
     try {
-      const status = await client.commandCenter.getStatus({
+      // Read the write gate from the office-scoped route: the office role is 403 on cc/v1 since the
+      // domain-authz fix, so reading it from cc/v1/status would leave the UI locked forever.
+      const status = await client.office.getStatus({
         workspaceId: officeWorkspaceId
       });
       writesEnabled = status.writesEnabled;
@@ -569,9 +784,10 @@
         actorId: null,
         entityType: null,
         cursor: null,
-        limit: 50
+        limit: TABLE_PAGE_SIZE
       });
       auditState = createSuccessState<PageResult<AuditLogEntry>>(page);
+      setTablePaginationError("audit", null);
     } catch (error: unknown) {
       auditState = createErrorState<PageResult<AuditLogEntry>>(error);
     }
@@ -617,11 +833,14 @@
           workspaceId: officeWorkspaceId,
           period,
           dateFrom: activeRange.from,
-          dateTo: activeRange.to
+          dateTo: activeRange.to,
+          cursor: null,
+          limit: TABLE_PAGE_SIZE
         })
       ]);
       pnlState = createSuccessState<OfficeGlobalPnl | OfficeDepartmentPnl>(pnl);
       divisionPnlState = createSuccessState<PageResult<OfficeDivisionPnl>>(divisions);
+      setTablePaginationError("divisionPnl", null);
     } catch (error: unknown) {
       pnlState = createErrorState<OfficeGlobalPnl | OfficeDepartmentPnl>(error);
       divisionPnlState = createErrorState<PageResult<OfficeDivisionPnl>>(error);
@@ -659,9 +878,10 @@
         type: toNullableCategoryType(typeFilter),
         status: toNullableTransactionStatus(transactionStatusFilter),
         cursor: null,
-        limit: 50
+        limit: TABLE_PAGE_SIZE
       });
       transactionsState = createSuccessState<PageResult<OfficeTransaction>>(page);
+      setTablePaginationError("transactions", null);
     } catch (error: unknown) {
       transactionsState = createErrorState<PageResult<OfficeTransaction>>(error);
     }
@@ -977,9 +1197,10 @@
         type: null,
         status: "pending",
         cursor: null,
-        limit: 50
+        limit: TABLE_PAGE_SIZE
       });
       pendingState = createSuccessState<PageResult<OfficeTransaction>>(page);
+      setTablePaginationError("pending", null);
       selectedPendingIds = selectedPendingIds.filter((id: string): boolean =>
         page.items.some((transaction: OfficeTransaction): boolean => transaction.id === id)
       );
@@ -1000,9 +1221,10 @@
         dateTo: activeRange.to,
         status: toNullableReconciliationStatus(reconciliationStatusFilter),
         cursor: null,
-        limit: 50
+        limit: TABLE_PAGE_SIZE
       });
       reconciliationState = createSuccessState<PageResult<OfficeReconciliationCandidate>>(page);
+      setTablePaginationError("reconciliation", null);
     } catch (error: unknown) {
       reconciliationState = createErrorState<PageResult<OfficeReconciliationCandidate>>(error);
     }
@@ -2050,14 +2272,6 @@
     return [];
   }
 
-  function readPageItems<TItem>(state: ApiRequestState<PageResult<TItem>>): readonly TItem[] {
-    if (state.status === "success") {
-      return state.data.items;
-    }
-
-    return [];
-  }
-
   function readPnlResult(state: ApiRequestState<OfficeGlobalPnl | OfficeDepartmentPnl>): OfficeGlobalPnl | OfficeDepartmentPnl | null {
     if (state.status === "success") {
       return state.data;
@@ -2794,7 +3008,7 @@
         <section class="dashboard-grid">
           <div class="panel-card ehq-edge-surface">
             <SectionTemplate eyebrow="reconciliation" title="Recent reconciliation" detail="Bank and ledger candidates for the selected period." state="ready">
-              <Table title="Reconciliation" columns={reconciliationColumns} rows={reconciliationTableRows} state={reconciliationState.status === "loading" ? "loading" : reconciliationState.status === "error" ? "error" : "default"} actionLabel="" />
+              <Table title="Reconciliation" columns={reconciliationColumns} rows={reconciliationTableRows} state={reconciliationState.status === "loading" ? "loading" : reconciliationState.status === "error" ? "error" : "default"} actionLabel="" pagination={reconciliationPagination} />
             </SectionTemplate>
           </div>
 
@@ -2831,7 +3045,7 @@
             <DivergeChart title="Revenue and expenses by department" points={pnlChartPoints} />
             <Table title="Result by department" columns={pnlColumns} rows={pnlTableRows} state={pnlState.status === "error" ? "error" : pnlTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
           </section>
-          <Table title="Result by division" columns={divisionPnlColumns} rows={divisionPnlTableRows} state={divisionPnlState.status === "loading" ? "loading" : divisionPnlState.status === "error" ? "error" : divisionPnlTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
+          <Table title="Result by division" columns={divisionPnlColumns} rows={divisionPnlTableRows} state={divisionPnlState.status === "loading" ? "loading" : divisionPnlState.status === "error" ? "error" : divisionPnlTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={divisionPnlPagination} />
           <Table title="Result by category" columns={pnlLineColumns} rows={pnlLineTableRows} state={pnlLineTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
         {/if}
       {:else if activePageId === "coa"}
@@ -2979,7 +3193,7 @@
           </section>
         {/if}
 
-        <Table title="Ledger · May 2026" columns={transactionColumns} rows={transactionTableRows} state={transactionsState.status === "loading" ? "loading" : transactionsState.status === "error" ? "error" : transactionRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={ledgerRowActions} />
+        <Table title="Ledger · May 2026" columns={transactionColumns} rows={transactionTableRows} state={transactionsState.status === "loading" ? "loading" : transactionsState.status === "error" ? "error" : transactionRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={ledgerRowActions} pagination={transactionPagination} />
       {:else if activePageId === "clients"}
         <PartnersView
           facet="client"
@@ -3181,7 +3395,7 @@
           <button class="office-action ehq-type-heading primary" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={approveSuggestedReconciliations}>Approve batch</button>
         </section>
 
-        <Table title="Bank ↔ ledger matching" columns={reconciliationColumns} rows={reconciliationTableRows} state={reconciliationState.status === "loading" ? "loading" : reconciliationState.status === "error" ? "error" : reconciliationRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={reconciliationRowActions} />
+        <Table title="Bank ↔ ledger matching" columns={reconciliationColumns} rows={reconciliationTableRows} state={reconciliationState.status === "loading" ? "loading" : reconciliationState.status === "error" ? "error" : reconciliationRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={reconciliationRowActions} pagination={reconciliationPagination} />
 
         {#if reconcileDrawerLineId !== null}
           <section class="reconcile-drawer ehq-edge-surface" aria-label="Action de rapprochement">
@@ -3268,7 +3482,7 @@
           {/each}
         </div>
 
-        <Table title="Queue pending" columns={pendingColumns} rows={pendingTableRows} state={pendingState.status === "loading" ? "loading" : pendingState.status === "error" ? "error" : pendingRows.length === 0 ? "empty" : "default"} actionLabel="" />
+        <Table title="Queue pending" columns={pendingColumns} rows={pendingTableRows} state={pendingState.status === "loading" ? "loading" : pendingState.status === "error" ? "error" : pendingRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={pendingPagination} />
       {:else if activePageId === "cashflow"}
         <section class="filter-strip ehq-edge-surface" aria-label="Cash-flow filters">
           <label>
@@ -3306,7 +3520,7 @@
       {:else if activePageId === "bank"}
         <BankView client={client.office} workspaceId={officeWorkspaceId} {period} writesEnabled={writesEnabled} />
       {:else if activePageId === "audit"}
-        <Table title="Audit log" columns={auditColumns} rows={auditTableRows} state={auditState.status === "loading" ? "loading" : auditState.status === "error" ? "error" : auditTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
+        <Table title="Audit log" columns={auditColumns} rows={auditTableRows} state={auditState.status === "loading" ? "loading" : auditState.status === "error" ? "error" : auditTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={auditPagination} />
       {:else if activePageId === "vat"}
         <VatView client={client.office} workspaceId={officeWorkspaceId} {period} />
       {:else if activePageId === "settings"}

@@ -22,7 +22,7 @@ export const departmentTypeEnum = pgEnum("department_type", ["income", "expense"
 export const partnerTypeEnum = pgEnum("partner_type", ["client", "supplier", "both"]);
 export const projectStatusEnum = pgEnum("project_status", ["draft", "active", "paused", "completed", "cancelled", "archived"]);
 export const transactionStatusEnum = pgEnum("transaction_status", ["validated", "draft", "cancelled"]);
-export const transactionSourceEnum = pgEnum("transaction_source", ["manual", "bank_import", "cashflow_import", "invoice_import", "adjustment"]);
+export const transactionSourceEnum = pgEnum("transaction_source", ["manual", "bank_import", "cashflow_import", "invoice_import", "adjustment", "ledger_import"]);
 export const officeBankImportSourceEnum = pgEnum("office_bank_import_source", ["sbi", "mcb", "csv", "cashflow", "pdf"]);
 export const officeBankImportStatusEnum = pgEnum("office_bank_import_status", ["previewed", "confirmed", "failed", "void"]);
 export const officeBankLineDirectionEnum = pgEnum("office_bank_line_direction", ["credit", "debit"]);
@@ -89,6 +89,10 @@ export const categories = pgTable(
     name: text("name").notNull(),
     type: financialTypeEnum("type").notNull(),
     divisionId: uuid("division_id").references(() => divisions.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    // Mauritian statutory chart-of-accounts mapping (e.g. code "6150" / "Bank Charges"),
+    // populated when a classified ledger is pushed. Nullable — internal categories exist first.
+    accountCode: text("account_code"),
+    accountLabel: text("account_label"),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: createdAtColumn()
   },

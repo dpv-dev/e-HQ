@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Tone, TableColumn, TableRow, TableRowAction, TableState } from "./types.js";
+  import type { Tone, TableColumn, TablePagination, TableRow, TableRowAction, TableState } from "./types.js";
   import Badge from "./Badge.svelte";
   import Button from "./Button.svelte";
   import Loader from "./Loader.svelte";
@@ -13,11 +13,20 @@
     // Optional per-row action buttons (e.g. "Éditer", "Annuler"): rendered in a trailing
     // column, each calling its onAction with the row id. Absent on most tables.
     readonly rowActions?: readonly TableRowAction[];
+    readonly pagination?: TablePagination | null;
   }
 
   const props: Props = $props();
 
   const hasRowActions = $derived((props.rowActions?.length ?? 0) > 0);
+  const pagination = $derived(props.pagination ?? null);
+  const showPagination = $derived(pagination !== null && props.state === "default");
+  const paginationDetail = $derived(pagination === null
+    ? ""
+    : pagination.hasMore
+      ? `${String(pagination.loadedCount)} rows loaded. More rows are available.`
+      : `${String(pagination.loadedCount)} rows loaded. All rows are visible.`
+  );
 
   // Money cells follow the tone the caller assigns (usually sign-based via
   // moneyToneForValue): positive → green, negative → red, zero/neutral → muted.
@@ -117,6 +126,40 @@
         </tbody>
       </table>
     </div>
+    {#if showPagination && pagination !== null}
+      <footer class="table-pagination" aria-label="Table pagination">
+        <span>{paginationDetail}</span>
+        <div class="pagination-actions">
+          <Button
+            label={pagination.loading ? "Loading..." : "Load more"}
+            variant="secondary"
+            size="small"
+            type="button"
+            disabled={!pagination.hasMore}
+            loading={pagination.loading}
+            locked={false}
+            focus={false}
+            ariaLabel="Load more rows"
+            onclick={pagination.onLoadMore}
+          />
+          <Button
+            label={pagination.loading ? "Loading..." : "Load all"}
+            variant="secondary"
+            size="small"
+            type="button"
+            disabled={!pagination.hasMore}
+            loading={pagination.loading}
+            locked={false}
+            focus={false}
+            ariaLabel="Load all rows"
+            onclick={pagination.onLoadAll}
+          />
+        </div>
+        {#if pagination.error !== null}
+          <small>{pagination.error}</small>
+        {/if}
+      </footer>
+    {/if}
   {/if}
 </section>
 
@@ -160,6 +203,34 @@
   .table-frame {
     width: 100%;
     overflow-x: auto;
+  }
+
+  .table-pagination {
+    padding: var(--ehq-space-3);
+    border-top: 1px solid var(--ehq-border-soft);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ehq-space-3);
+  }
+
+  .table-pagination span,
+  .table-pagination small {
+    color: var(--ehq-text-soft);
+    font-family: var(--ehq-font);
+    font-size: var(--ehq-type-ui-size);
+    line-height: var(--ehq-type-ui-line);
+  }
+
+  .table-pagination small {
+    color: var(--ehq-error);
+  }
+
+  .pagination-actions {
+    display: flex;
+    gap: var(--ehq-space-2);
+    flex-wrap: wrap;
+    justify-content: flex-end;
   }
 
   table {
@@ -285,5 +356,16 @@
   .error-copy strong,
   .locked-copy strong {
     color: var(--ehq-error);
+  }
+
+  @media (max-width: 760px) {
+    .table-pagination {
+      align-items: stretch;
+      flex-direction: column;
+    }
+
+    .pagination-actions {
+      justify-content: stretch;
+    }
   }
 </style>

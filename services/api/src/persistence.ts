@@ -357,7 +357,8 @@ const ALLOWED_MUTATING_ACTIONS = new Set<string>([
   "office_reconciliation_match",
   "office_reconciliation_unmatch",
   "office_reconciliation_reject",
-  "office_reconciliation_create_transaction"
+  "office_reconciliation_create_transaction",
+  "office_ledger_bulk_confirm"
 ]);
 
 const OFFICE_BOT_ACTIONS = new Set<string>([
@@ -376,7 +377,8 @@ const OFFICE_BOT_ACTIONS = new Set<string>([
   "office_reconciliation_match",
   "office_reconciliation_unmatch",
   "office_reconciliation_reject",
-  "office_reconciliation_create_transaction"
+  "office_reconciliation_create_transaction",
+  "office_ledger_bulk_confirm"
 ]);
 
 const DISTRIBUTION_BOT_ACTIONS = new Set<string>([

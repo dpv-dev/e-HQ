@@ -6,6 +6,7 @@
     Loader,
     Table,
     type DivergePoint,
+    type TablePagination,
     type TableRow,
     type Tone
   } from "@ehq/ui";
@@ -24,6 +25,7 @@
     type PageResult
   } from "@ehq/api-client";
   import { formatMoneyValue, formatSignedMoneyValue, moneyToneForValue } from "../../money-format.js";
+  import { createTablePagination, loadPageResult, readPageItems, TABLE_PAGE_SIZE, type PageLoadMode } from "../../table-pagination.js";
 
   interface Props {
     readonly client: OfficeApiClient;
@@ -44,12 +46,17 @@
   let dashboardState = $state<ApiRequestState<OfficeDashboardResponse>>(createIdleState<OfficeDashboardResponse>());
   let globalPnlState = $state<ApiRequestState<OfficeGlobalPnl>>(createIdleState<OfficeGlobalPnl>());
   let divisionState = $state<ApiRequestState<PageResult<OfficeDivisionPnl>>>(createIdleState<PageResult<OfficeDivisionPnl>>());
+  let divisionLoadingMore = $state(false);
+  let divisionLoadMoreError = $state<string | null>(null);
 
   const divisionRows = $derived(readPageItems(divisionState));
   const ceoKpis = $derived(createCeoKpis(dashboardState, globalPnlState));
   const departmentChartPoints = $derived(createDepartmentChartPoints(globalPnlState));
   const departmentTableRows = $derived(createDepartmentTableRows(globalPnlState));
   const divisionTableRows = $derived(createDivisionTableRows(divisionRows));
+  const divisionPagination = $derived<TablePagination | null>(
+    createTablePagination(divisionState, divisionLoadingMore, divisionLoadMoreError, loadMoreDivisions, loadAllDivisions)
+  );
 
   onMount((): void => {
     void loadCeo();
@@ -64,11 +71,12 @@
       const [dashboard, globalPnl, divisions] = await Promise.all([
         props.client.getDashboard({ workspaceId: props.workspaceId, period: props.period }),
         props.client.getGlobalPnl({ workspaceId: props.workspaceId, period: props.period }),
-        props.client.getDivisionPnl({ workspaceId: props.workspaceId, period: props.period })
+        props.client.getDivisionPnl({ workspaceId: props.workspaceId, period: props.period, cursor: null, limit: TABLE_PAGE_SIZE })
       ]);
       dashboardState = createSuccessState<OfficeDashboardResponse>(dashboard);
       globalPnlState = createSuccessState<OfficeGlobalPnl>(globalPnl);
       divisionState = createSuccessState<PageResult<OfficeDivisionPnl>>(divisions);
+      divisionLoadMoreError = null;
     } catch (error: unknown) {
       dashboardState = createErrorState<OfficeDashboardResponse>(error);
       globalPnlState = createErrorState<OfficeGlobalPnl>(error);
@@ -76,12 +84,35 @@
     }
   }
 
-  function readPageItems<TItem>(state: ApiRequestState<PageResult<TItem>>): readonly TItem[] {
-    if (state.status === "success") {
-      return state.data.items;
-    }
+  async function loadMoreDivisions(): Promise<void> {
+    await loadDivisionPage("one");
+  }
 
-    return [];
+  async function loadAllDivisions(): Promise<void> {
+    await loadDivisionPage("all");
+  }
+
+  async function loadDivisionPage(mode: PageLoadMode): Promise<void> {
+    await loadPageResult(mode, {
+      state: divisionState,
+      loading: divisionLoadingMore,
+      setLoading: (loading: boolean): void => {
+        divisionLoadingMore = loading;
+      },
+      setError: (error: string | null): void => {
+        divisionLoadMoreError = error;
+      },
+      setState: (state: ApiRequestState<PageResult<OfficeDivisionPnl>>): void => {
+        divisionState = state;
+      },
+      fetchPage: (cursor: string): Promise<PageResult<OfficeDivisionPnl>> =>
+        props.client.getDivisionPnl({
+          workspaceId: props.workspaceId,
+          period: props.period,
+          cursor,
+          limit: TABLE_PAGE_SIZE
+        })
+    });
   }
 
   function createCeoKpis(
@@ -221,7 +252,7 @@
   {:else}
     <DivergeChart title="Revenue and expenses by department" points={departmentChartPoints} />
     <Table title="Result by category" columns={categoryColumns} rows={departmentTableRows} state={departmentTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
-    <Table title="Result by division" columns={divisionColumns} rows={divisionTableRows} state={divisionState.status === "loading" ? "loading" : divisionState.status === "error" ? "error" : divisionTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
+    <Table title="Result by division" columns={divisionColumns} rows={divisionTableRows} state={divisionState.status === "loading" ? "loading" : divisionState.status === "error" ? "error" : divisionTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={divisionPagination} />
   {/if}
 </section>
 

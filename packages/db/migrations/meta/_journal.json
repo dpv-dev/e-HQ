@@ -85,6 +85,13 @@
       "when": 1782461206529,
       "tag": "0011_command_center_writes",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1782903695735,
+      "tag": "0012_rare_swordsman",
+      "breakpoints": true
     }
   ]
 }

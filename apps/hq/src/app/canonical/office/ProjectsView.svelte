@@ -5,6 +5,7 @@
     KPI,
     Loader,
     Table,
+    type TablePagination,
     type TableRow,
     type Tone
   } from "@ehq/ui";
@@ -27,6 +28,7 @@
   } from "@ehq/api-client";
   import { formatDateOnly } from "../../date-format.js";
   import { formatMoneyValue, moneyToneForValue } from "../../money-format.js";
+  import { createTablePagination, loadPageResult, readPageItems, TABLE_PAGE_SIZE, type PageLoadMode } from "../../table-pagination.js";
 
   interface Props {
     readonly client: OfficeApiClient;
@@ -55,6 +57,10 @@
   let violationsState = $state<ApiRequestState<PageResult<OfficeProjectCoherenceViolation>>>(
     createIdleState<PageResult<OfficeProjectCoherenceViolation>>()
   );
+  let projectsLoadingMore = $state(false);
+  let projectsLoadMoreError = $state<string | null>(null);
+  let violationsLoadingMore = $state(false);
+  let violationsLoadMoreError = $state<string | null>(null);
   let selectedProjectId = $state<EntityId | null>(null);
   let projectFormName = $state("");
   let projectFormStatus = $state<OfficeProjectWriteStatus>("active");
@@ -117,6 +123,12 @@
   const projectRows = $derived(createProjectRows(projects, selectedProjectId));
   const pnlRows = $derived(createPnlRows(projectPnl));
   const violationRows = $derived(createViolationRows(violations));
+  const projectsPagination = $derived<TablePagination | null>(
+    createTablePagination(projectsState, projectsLoadingMore, projectsLoadMoreError, loadMoreProjects, loadAllProjects)
+  );
+  const violationsPagination = $derived<TablePagination | null>(
+    createTablePagination(violationsState, violationsLoadingMore, violationsLoadMoreError, loadMoreViolations, loadAllViolations)
+  );
 
   onMount((): void => {
     void loadProjects();
@@ -130,9 +142,10 @@
         workspaceId: props.workspaceId,
         status: "active",
         cursor: null,
-        limit: 50
+        limit: TABLE_PAGE_SIZE
       });
       projectsState = createSuccessState<PageResult<OfficeProjectSummary>>(page);
+      projectsLoadMoreError = null;
       const firstProject = page.items[0] ?? null;
 
       if (firstProject !== null) {
@@ -159,23 +172,82 @@
         props.client.listProjectCoherenceViolations(projectId, {
           workspaceId: props.workspaceId,
           cursor: null,
-          limit: 50
+          limit: TABLE_PAGE_SIZE
         })
       ]);
       projectPnlState = createSuccessState<OfficeProjectPnl>(projectPnlResult);
       violationsState = createSuccessState<PageResult<OfficeProjectCoherenceViolation>>(violationsResult);
+      violationsLoadMoreError = null;
     } catch (error: unknown) {
       projectPnlState = createErrorState<OfficeProjectPnl>(error);
       violationsState = createErrorState<PageResult<OfficeProjectCoherenceViolation>>(error);
     }
   }
 
-  function readPageItems<TItem>(state: ApiRequestState<PageResult<TItem>>): readonly TItem[] {
-    if (state.status === "success") {
-      return state.data.items;
-    }
+  async function loadMoreProjects(): Promise<void> {
+    await loadProjectsPage("one");
+  }
 
-    return [];
+  async function loadAllProjects(): Promise<void> {
+    await loadProjectsPage("all");
+  }
+
+  async function loadProjectsPage(mode: PageLoadMode): Promise<void> {
+    await loadPageResult(mode, {
+      state: projectsState,
+      loading: projectsLoadingMore,
+      setLoading: (loading: boolean): void => {
+        projectsLoadingMore = loading;
+      },
+      setError: (error: string | null): void => {
+        projectsLoadMoreError = error;
+      },
+      setState: (state: ApiRequestState<PageResult<OfficeProjectSummary>>): void => {
+        projectsState = state;
+      },
+      fetchPage: (cursor: string): Promise<PageResult<OfficeProjectSummary>> =>
+        props.client.listProjects({
+          workspaceId: props.workspaceId,
+          status: "active",
+          cursor,
+          limit: TABLE_PAGE_SIZE
+        })
+    });
+  }
+
+  async function loadMoreViolations(): Promise<void> {
+    await loadViolationsPage("one");
+  }
+
+  async function loadAllViolations(): Promise<void> {
+    await loadViolationsPage("all");
+  }
+
+  async function loadViolationsPage(mode: PageLoadMode): Promise<void> {
+    if (selectedProjectId === null) {
+      return;
+    }
+    const projectId = selectedProjectId;
+
+    await loadPageResult(mode, {
+      state: violationsState,
+      loading: violationsLoadingMore,
+      setLoading: (loading: boolean): void => {
+        violationsLoadingMore = loading;
+      },
+      setError: (error: string | null): void => {
+        violationsLoadMoreError = error;
+      },
+      setState: (state: ApiRequestState<PageResult<OfficeProjectCoherenceViolation>>): void => {
+        violationsState = state;
+      },
+      fetchPage: (cursor: string): Promise<PageResult<OfficeProjectCoherenceViolation>> =>
+        props.client.listProjectCoherenceViolations(projectId, {
+          workspaceId: props.workspaceId,
+          cursor,
+          limit: TABLE_PAGE_SIZE
+        })
+    });
   }
 
   function readProjectPnl(state: ApiRequestState<OfficeProjectPnl>): OfficeProjectPnl | null {
@@ -417,8 +489,8 @@
     </section>
   </section>
 
-  <Table title="Active projects" columns={projectColumns} rows={projectRows} state={projectsState.status === "loading" ? "loading" : projectsState.status === "error" ? "error" : projectRows.length === 0 ? "empty" : "default"} actionLabel="" />
-  <Table title="Coherence violations" columns={violationColumns} rows={violationRows} state={violationsState.status === "loading" ? "loading" : violationsState.status === "error" ? "error" : violationRows.length === 0 ? "empty" : "default"} actionLabel="" />
+  <Table title="Active projects" columns={projectColumns} rows={projectRows} state={projectsState.status === "loading" ? "loading" : projectsState.status === "error" ? "error" : projectRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={projectsPagination} />
+  <Table title="Coherence violations" columns={violationColumns} rows={violationRows} state={violationsState.status === "loading" ? "loading" : violationsState.status === "error" ? "error" : violationRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={violationsPagination} />
 </section>
 
 <script module lang="ts">

@@ -3,6 +3,7 @@
   import {
     Loader,
     Table,
+    type TablePagination,
     type TableRow
   } from "@ehq/ui";
   import {
@@ -17,6 +18,7 @@
   } from "@ehq/api-client";
   import { formatDateOnly } from "../../date-format.js";
   import { formatMoneyValue } from "../../money-format.js";
+  import { createTablePagination, loadPageResult, readPageItems, TABLE_PAGE_SIZE, type PageLoadMode } from "../../table-pagination.js";
 
   interface Props {
     readonly client: OfficeApiClient;
@@ -29,9 +31,14 @@
   let accountsState = $state<ApiRequestState<PageResult<OfficeBankAccountSummary>>>(
     createIdleState<PageResult<OfficeBankAccountSummary>>()
   );
+  let accountsLoadingMore = $state(false);
+  let accountsLoadMoreError = $state<string | null>(null);
 
   const accountRows = $derived(readPageItems(accountsState));
   const currencyTableRows = $derived(createCurrencyTableRows(accountRows));
+  const accountPagination = $derived<TablePagination | null>(
+    createTablePagination(accountsState, accountsLoadingMore, accountsLoadMoreError, loadMoreAccounts, loadAllAccounts)
+  );
 
   onMount((): void => {
     void loadSettings();
@@ -41,19 +48,42 @@
     accountsState = createLoadingState<PageResult<OfficeBankAccountSummary>>();
 
     try {
-      const accounts = await props.client.listBankAccounts({ workspaceId: props.workspaceId, limit: 50 });
+      const accounts = await props.client.listBankAccounts({ workspaceId: props.workspaceId, cursor: null, limit: TABLE_PAGE_SIZE });
       accountsState = createSuccessState<PageResult<OfficeBankAccountSummary>>(accounts);
+      accountsLoadMoreError = null;
     } catch (error: unknown) {
       accountsState = createErrorState<PageResult<OfficeBankAccountSummary>>(error);
     }
   }
 
-  function readPageItems<TItem>(state: ApiRequestState<PageResult<TItem>>): readonly TItem[] {
-    if (state.status === "success") {
-      return state.data.items;
-    }
+  async function loadMoreAccounts(): Promise<void> {
+    await loadAccountsPage("one");
+  }
 
-    return [];
+  async function loadAllAccounts(): Promise<void> {
+    await loadAccountsPage("all");
+  }
+
+  async function loadAccountsPage(mode: PageLoadMode): Promise<void> {
+    await loadPageResult(mode, {
+      state: accountsState,
+      loading: accountsLoadingMore,
+      setLoading: (loading: boolean): void => {
+        accountsLoadingMore = loading;
+      },
+      setError: (error: string | null): void => {
+        accountsLoadMoreError = error;
+      },
+      setState: (state: ApiRequestState<PageResult<OfficeBankAccountSummary>>): void => {
+        accountsState = state;
+      },
+      fetchPage: (cursor: string): Promise<PageResult<OfficeBankAccountSummary>> =>
+        props.client.listBankAccounts({
+          workspaceId: props.workspaceId,
+          cursor,
+          limit: TABLE_PAGE_SIZE
+        })
+    });
   }
 
   function createCurrencyTableRows(rows: readonly OfficeBankAccountSummary[]): readonly TableRow[] {
@@ -116,7 +146,7 @@
       <span class="ehq-type-body">{getErrorMessage(accountsState.error)}</span>
     </div>
   {:else}
-    <Table title="Currency configuration" columns={currencyColumns} rows={currencyTableRows} state={currencyTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
+    <Table title="Currency configuration" columns={currencyColumns} rows={currencyTableRows} state={currencyTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={accountPagination} />
   {/if}
 </section>
 

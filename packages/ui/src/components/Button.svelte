@@ -11,7 +11,7 @@
     readonly locked: boolean;
     readonly focus: boolean;
     readonly ariaLabel: string | null;
-    readonly onclick?: (() => void) | null;
+    readonly onclick?: (() => void | Promise<void>) | null;
   }
 
   const props: Props = $props();

@@ -87,8 +87,17 @@ export interface TableRow {
 // Optional per-row action button rendered in a trailing column (e.g. "Éditer", "Annuler").
 export interface TableRowAction {
   readonly label: string;
-  readonly onAction: (rowId: string) => void;
+  readonly onAction: (rowId: string) => void | Promise<void>;
   readonly danger?: boolean;
+}
+
+export interface TablePagination {
+  readonly loadedCount: number;
+  readonly hasMore: boolean;
+  readonly loading: boolean;
+  readonly error: string | null;
+  readonly onLoadMore: (() => void | Promise<void>) | null;
+  readonly onLoadAll: (() => void | Promise<void>) | null;
 }
 
 export interface ChartPoint {

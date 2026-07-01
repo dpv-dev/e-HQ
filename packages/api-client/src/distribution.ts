@@ -58,6 +58,7 @@ import type {
 } from "./types.js";
 
 export interface DistributionApiClient {
+  readonly getStatus: (query: { readonly workspaceId: EntityId }) => Promise<{ readonly writesEnabled: boolean }>;
   readonly getDashboard: (query: DistributionDashboardQuery) => Promise<DistributionDashboardResponse>;
   readonly listImportBatches: (query: DistributionImportBatchesQuery) => Promise<PageResult<DistributionImportBatch>>;
   readonly previewImport: (
@@ -139,6 +140,8 @@ export function createDistributionApiClient(config: ApiClientConfig): Distributi
   const transport = createRestTransport(config, "erh/v1");
 
   return {
+    getStatus: (query: { readonly workspaceId: EntityId }): Promise<{ readonly writesEnabled: boolean }> =>
+      transport.get<{ readonly writesEnabled: boolean }>("status", { workspaceId: query.workspaceId }),
     getDashboard: (query: DistributionDashboardQuery): Promise<DistributionDashboardResponse> =>
       transport.get<DistributionDashboardResponse>("dashboard", {
         workspaceId: query.workspaceId,

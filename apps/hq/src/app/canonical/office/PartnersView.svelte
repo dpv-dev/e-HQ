@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Badge, Loader, type Tone } from "@ehq/ui";
+  import { Badge, Loader, Table, type TableColumn, type TablePagination, type TableRow, type TableRowAction, type Tone } from "@ehq/ui";
   import {
     createErrorState,
     createIdleState,
@@ -20,6 +20,7 @@
   } from "@ehq/api-client";
   import { formatDateOnly } from "../../date-format.js";
   import { formatMoneyValue, moneySignForValue, moneyToneForValue } from "../../money-format.js";
+  import { createTablePagination, loadPageResult, readPageItems, TABLE_PAGE_SIZE, type PageLoadMode } from "../../table-pagination.js";
 
   type DrawerMode = "closed" | "detail" | "create" | "edit";
   type RequestStatus = "idle" | "loading" | "success" | "error";
@@ -78,11 +79,20 @@
   let linkPayeeId = $state<string>("");
   let linkStatus = $state<RequestStatus>("idle");
   let actionMessage = $state<string>("Select a partner to see the full relationship.");
+  let partnersLoadingMore = $state(false);
+  let partnersLoadMoreError = $state<string | null>(null);
 
   const copy = $derived(createFacetCopy(props.facet));
-  const partners = $derived(readPartnerItems(partnersState));
+  const partners = $derived(readPageItems(partnersState));
   const selectedPartner = $derived(readPartnerDetail(detailState));
   const drawerOpen = $derived(drawerMode !== "closed");
+  const partnerTableRows = $derived(createPartnerTableRows(partners, copy));
+  const partnerRowActions = $derived<readonly TableRowAction[]>([
+    { label: "Open", onAction: openPartner }
+  ]);
+  const partnersPagination = $derived<TablePagination | null>(
+    createTablePagination(partnersState, partnersLoadingMore, partnersLoadMoreError, loadMorePartners, loadAllPartners)
+  );
 
   onMount((): void => {
     void loadPartners();
@@ -99,9 +109,10 @@
         dateTo: props.dateTo,
         facet: props.facet,
         cursor: null,
-        limit: 50
+        limit: TABLE_PAGE_SIZE
       });
       partnersState = createSuccessState<PageResult<OfficePartnerListItem>>(page);
+      partnersLoadMoreError = null;
     } catch (error: unknown) {
       partnersState = createErrorState<PageResult<OfficePartnerListItem>>(error);
     }
@@ -302,12 +313,38 @@
     void submitPartnerForm();
   }
 
-  function readPartnerItems(state: ApiRequestState<PageResult<OfficePartnerListItem>>): readonly OfficePartnerListItem[] {
-    if (state.status === "success") {
-      return state.data.items;
-    }
+  async function loadMorePartners(): Promise<void> {
+    await loadPartnersPage("one");
+  }
 
-    return [];
+  async function loadAllPartners(): Promise<void> {
+    await loadPartnersPage("all");
+  }
+
+  async function loadPartnersPage(mode: PageLoadMode): Promise<void> {
+    await loadPageResult(mode, {
+      state: partnersState,
+      loading: partnersLoadingMore,
+      setLoading: (loading: boolean): void => {
+        partnersLoadingMore = loading;
+      },
+      setError: (error: string | null): void => {
+        partnersLoadMoreError = error;
+      },
+      setState: (state: ApiRequestState<PageResult<OfficePartnerListItem>>): void => {
+        partnersState = state;
+      },
+      fetchPage: (cursor: string): Promise<PageResult<OfficePartnerListItem>> =>
+        props.client.listPartners({
+          workspaceId: props.workspaceId,
+          period: props.period,
+          dateFrom: props.dateFrom,
+          dateTo: props.dateTo,
+          facet: props.facet,
+          cursor,
+          limit: TABLE_PAGE_SIZE
+        })
+    });
   }
 
   function readPartnerDetail(state: ApiRequestState<OfficePartnerDetail>): OfficePartnerDetail | null {
@@ -342,6 +379,34 @@
       emptyLabel: "No partners have expense-side activity in this period.",
       drawerContext: "Opened from Suppliers"
     };
+  }
+
+  function createPartnerTableRows(
+    rows: readonly OfficePartnerListItem[],
+    facetCopy: FacetCopy
+  ): readonly TableRow[] {
+    return rows.map((partner: OfficePartnerListItem): TableRow => ({
+      id: partner.id,
+      cells: [
+        { kind: "text", value: partner.name, strong: false },
+        { kind: "money", value: formatMoneyMicro(facetActivity(partner).periodTotalMicro), tone: netTone(facetActivity(partner).periodTotalMicro) },
+        { kind: "money", value: formatMoneyMicro(facetActivity(partner).openBalanceMicro), tone: netTone(facetActivity(partner).openBalanceMicro) },
+        { kind: "text", value: lastActivityLabel(partner), strong: false },
+        { kind: "badge", value: hasAlsoActivity(partner) ? facetCopy.alsoLabel : "—", tone: hasAlsoActivity(partner) ? "info" : "muted" },
+        { kind: "badge", value: partner.status, tone: partner.status === "active" ? "success" : "muted" }
+      ]
+    }));
+  }
+
+  function partnerColumns(facetCopy: FacetCopy): readonly TableColumn[] {
+    return [
+      { label: "Name", align: "left", sortable: true },
+      { label: facetCopy.amountLabel, align: "right", sortable: true },
+      { label: facetCopy.balanceLabel, align: "right", sortable: true },
+      { label: "Last activity", align: "left", sortable: true },
+      { label: "Other side", align: "left", sortable: true },
+      { label: "Status", align: "left", sortable: true }
+    ];
   }
 
   function createFormStateFromDetail(partner: OfficePartnerDetail): PartnerFormState {
@@ -486,8 +551,8 @@
   </header>
 
   <div class="partners-layout">
-    <section class="partners-table ehq-edge-surface" aria-label={copy.tableTitle}>
-      <header>
+    <section class="partners-list" aria-label={copy.tableTitle}>
+      <header class="partners-toolbar ehq-edge-surface">
         <div>
           <p>{copy.tableTitle}</p>
           <strong>{partners.length} visible</strong>
@@ -495,56 +560,15 @@
         <button type="button" onclick={loadPartners}>Refresh</button>
       </header>
 
-      {#if partnersState.status === "loading"}
-        <Loader label="Loading partners" detail="Reading partner activity sides." size="medium" />
-      {:else if partnersState.status === "error"}
-        <div class="empty-state error-state">
-          <strong>Partners unavailable</strong>
-          <span>{getErrorMessage(partnersState.error)}</span>
-        </div>
-      {:else if partners.length === 0}
-        <div class="empty-state">
-          <strong>No activity</strong>
-          <span>{copy.emptyLabel}</span>
-        </div>
-      {:else}
-        <div class="table-frame">
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th class="right">{copy.amountLabel}</th>
-                <th class="right">{copy.balanceLabel}</th>
-                <th>Last activity</th>
-                <th>Other side</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each partners as partner (partner.id)}
-                <tr>
-                  <td>
-                    <button class="partner-row-button" type="button" onclick={() => openPartner(partner.id)}>
-                      {partner.name}
-                    </button>
-                  </td>
-                  <td class="right money">{formatMoneyMicro(facetActivity(partner).periodTotalMicro)}</td>
-                  <td class="right money">{formatMoneyMicro(facetActivity(partner).openBalanceMicro)}</td>
-                  <td>{lastActivityLabel(partner)}</td>
-                  <td>
-                    {#if hasAlsoActivity(partner)}
-                      <Badge label={copy.alsoLabel} tone="info" />
-                    {:else}
-                      <span class="muted">—</span>
-                    {/if}
-                  </td>
-                  <td><Badge label={partner.status} tone={partner.status === "active" ? "success" : "muted"} /></td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
-      {/if}
+      <Table
+        title={copy.tableTitle}
+        columns={partnerColumns(copy)}
+        rows={partnerTableRows}
+        state={partnersState.status === "loading" ? "loading" : partnersState.status === "error" ? "error" : partnerTableRows.length === 0 ? "empty" : "default"}
+        actionLabel=""
+        rowActions={partnerRowActions}
+        pagination={partnersPagination}
+      />
     </section>
 
     <aside class="partner-drawer ehq-edge-surface" class:open={drawerOpen} aria-label="Partner relationship drawer">
@@ -669,7 +693,7 @@
   }
 
   .partners-head,
-  .partners-table > header,
+  .partners-toolbar,
   .drawer-head,
   .drawer-actions {
     display: flex;
@@ -693,7 +717,7 @@
     align-items: start;
   }
 
-  .partners-table,
+  .partners-list,
   .partner-drawer {
     min-width: 0;
     border: 0;
@@ -702,40 +726,13 @@
     overflow: visible;
   }
 
-  .partners-table > header {
+  .partners-list {
+    display: grid;
+    gap: var(--ehq-space-3);
+  }
+
+  .partners-toolbar {
     padding: var(--ehq-space-3);
-    border-bottom: 1px solid var(--ehq-border-soft);
-  }
-
-  .table-frame {
-    width: 100%;
-    overflow-x: auto;
-  }
-
-  table {
-    width: 100%;
-    min-width: 720px;
-    border-collapse: collapse;
-  }
-
-  th,
-  td {
-    padding: var(--ehq-space-3);
-    border-bottom: 1px solid var(--ehq-border-soft);
-    text-align: left;
-    vertical-align: middle;
-  }
-
-  th {
-    color: var(--ehq-text-muted);
-    font-family: var(--ehq-mono);
-    font-size: var(--ehq-type-label-size);
-    font-weight: var(--ehq-type-label-weight);
-    text-transform: uppercase;
-  }
-
-  tr:last-child td {
-    border-bottom: 0;
   }
 
   p,
@@ -769,7 +766,6 @@
   }
 
   .partners-head span,
-  .empty-state span,
   .drawer-empty span,
   .side-grid span,
   .link-panel strong {
@@ -780,11 +776,6 @@
     line-height: var(--ehq-type-ui-line);
   }
 
-  .right {
-    text-align: right;
-  }
-
-  .money,
   .tone-success,
   .tone-error,
   .tone-muted {
@@ -805,15 +796,13 @@
     color: var(--ehq-text-muted);
   }
 
-  .partner-row-button,
   button,
   input,
   textarea {
     font: inherit;
   }
 
-  button,
-  .partner-row-button {
+  button {
     min-height: 34px;
     padding: 0 var(--ehq-space-3);
     border: 1px solid var(--ehq-border);
@@ -826,8 +815,7 @@
     text-transform: uppercase;
   }
 
-  button:hover,
-  .partner-row-button:hover {
+  button:hover {
     border-color: var(--ehq-yellow-border);
     box-shadow: 0 0 0 3px var(--ehq-yellow-muted);
   }
@@ -835,15 +823,6 @@
   button:disabled {
     color: var(--ehq-text-disabled);
     cursor: not-allowed;
-  }
-
-  .partner-row-button {
-    width: 100%;
-    justify-content: flex-start;
-    text-align: left;
-    font-size: var(--ehq-type-ui-size);
-    font-weight: var(--ehq-type-body-weight);
-    text-transform: none;
   }
 
   .head-action {
@@ -951,16 +930,12 @@
 
   @media (max-width: 680px) {
     .partners-head,
-    .partners-table > header,
+    .partners-toolbar,
     .drawer-head,
     .drawer-actions,
     .suggestions div {
       align-items: stretch;
       flex-direction: column;
-    }
-
-    table {
-      min-width: 640px;
     }
   }
 </style>

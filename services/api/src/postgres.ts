@@ -142,7 +142,7 @@ async function readPostgresHealth(pool: Pool): Promise<ApiPostgresHealth> {
 async function readOfficeDataset(pool: Pool): Promise<OfficeAnalyticsDataset> {
   const departments = await queryRows(pool, "select id::text, name, type, color, is_active from departments order by legacy_id nulls last, id", []);
   const divisions = await queryRows(pool, "select id::text, department_id::text, name, is_active from divisions order by legacy_id nulls last, id", []);
-  const categories = await queryRows(pool, "select id::text, division_id::text, name, type, is_active from categories order by legacy_id nulls last, id", []);
+  const categories = await queryRows(pool, "select id::text, division_id::text, name, type, account_code, account_label, is_active from categories order by legacy_id nulls last, id", []);
   const partners = await queryRows(pool, "select id::text, name, type, is_active from partners order by legacy_id nulls last, id", []);
   const projects = await queryRows(pool, "select id::text, name, status, state, is_active from projects order by legacy_id nulls last, id", []);
   const projectBudgetLines = await queryRows(pool, "select id::text, project_id::text, category_id::text, type, planned_amount_minor::text from project_budget_lines order by legacy_id nulls last, id", []);
@@ -448,6 +448,8 @@ function toOfficeCategory(row: PgRow): OfficeCategoryRow {
     divisionId: nullableStringCell(row, "division_id"),
     name: stringCell(row, "name"),
     type: enumCell(row, "type", ["income", "expense"]),
+    accountCode: nullableStringCell(row, "account_code"),
+    accountLabel: nullableStringCell(row, "account_label"),
     isActive: booleanCell(row, "is_active")
   };
 }

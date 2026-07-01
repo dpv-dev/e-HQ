@@ -30,6 +30,9 @@ import type {
   OfficeGlobalPnlQuery,
   OfficeIntegrityCheckAllResponse,
   OfficeIntegrityCheckQuery,
+  OfficeLedgerBulkConfirmResponse,
+  OfficeLedgerBulkPreviewResponse,
+  OfficeLedgerBulkRequest,
   OfficePartnerClassificationSuggestion,
   OfficePartnerDetailQuery,
   OfficePartnerListItem,
@@ -66,6 +69,7 @@ import type {
 } from "./types.js";
 
 export interface OfficeApiClient {
+  readonly getStatus: (query: { readonly workspaceId: EntityId }) => Promise<{ readonly writesEnabled: boolean }>;
   readonly getDashboard: (query: OfficeDashboardQuery) => Promise<OfficeDashboardResponse>;
   readonly getGlobalPnl: (query: OfficeGlobalPnlQuery) => Promise<OfficeGlobalPnl>;
   readonly getDepartmentPnl: (departmentId: EntityId, query: OfficeDepartmentPnlQuery) => Promise<OfficeDepartmentPnl>;
@@ -108,6 +112,14 @@ export interface OfficeApiClient {
     request: BankImportConfirmRequest,
     options: WriteRequestOptions
   ) => Promise<BankImportConfirmResponse>;
+  readonly previewLedgerBulkUpsert: (
+    request: OfficeLedgerBulkRequest,
+    options: WriteRequestOptions
+  ) => Promise<OfficeLedgerBulkPreviewResponse>;
+  readonly confirmLedgerBulkUpsert: (
+    request: OfficeLedgerBulkRequest,
+    options: WriteRequestOptions
+  ) => Promise<OfficeLedgerBulkConfirmResponse>;
   readonly reverseBankImportBatch: (
     batchId: EntityId,
     request: { readonly workspaceId: EntityId },
@@ -188,6 +200,8 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
   const transport = createRestTransport(config, "eof/v1");
 
   return {
+    getStatus: (query: { readonly workspaceId: EntityId }): Promise<{ readonly writesEnabled: boolean }> =>
+      transport.get<{ readonly writesEnabled: boolean }>("status", { workspaceId: query.workspaceId }),
     getDashboard: (query: OfficeDashboardQuery): Promise<OfficeDashboardResponse> =>
       transport.get<OfficeDashboardResponse>("dashboard", {
         workspaceId: query.workspaceId,
@@ -214,7 +228,9 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
         workspaceId: query.workspaceId,
         period: query.period,
         dateFrom: query.dateFrom ?? null,
-        dateTo: query.dateTo ?? null
+        dateTo: query.dateTo ?? null,
+        cursor: query.cursor,
+        limit: query.limit
       }),
     listTransactions: (query: OfficeTransactionsQuery): Promise<PageResult<OfficeTransaction>> =>
       transport.get<PageResult<OfficeTransaction>>("transactions", {
@@ -297,6 +313,16 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
       options: WriteRequestOptions
     ): Promise<BankImportConfirmResponse> =>
       transport.post<BankImportConfirmResponse>("bank-import/confirm", request, options.idempotencyKey),
+    previewLedgerBulkUpsert: (
+      request: OfficeLedgerBulkRequest,
+      options: WriteRequestOptions
+    ): Promise<OfficeLedgerBulkPreviewResponse> =>
+      transport.post<OfficeLedgerBulkPreviewResponse>("transactions/bulk-upsert/preview", request, options.idempotencyKey),
+    confirmLedgerBulkUpsert: (
+      request: OfficeLedgerBulkRequest,
+      options: WriteRequestOptions
+    ): Promise<OfficeLedgerBulkConfirmResponse> =>
+      transport.post<OfficeLedgerBulkConfirmResponse>("transactions/bulk-upsert/confirm", request, options.idempotencyKey),
     reverseBankImportBatch: (
       batchId: EntityId,
       request: { readonly workspaceId: EntityId },
@@ -475,6 +501,7 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
     listBankAccounts: (query: OfficeBankAccountsQuery): Promise<PageResult<OfficeBankAccountSummary>> =>
       transport.get<PageResult<OfficeBankAccountSummary>>("bank/accounts", {
         workspaceId: query.workspaceId,
+        cursor: query.cursor,
         limit: query.limit
       }),
     createBankAccount: (request: OfficeBankAccountWriteRequest, options: WriteRequestOptions): Promise<ApiMutationReceipt> =>

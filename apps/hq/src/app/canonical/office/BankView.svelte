@@ -4,6 +4,7 @@
     KPI,
     Loader,
     Table,
+    type TablePagination,
     type TableRow,
     type TableRowAction,
     type Tone
@@ -25,6 +26,7 @@
   } from "@ehq/api-client";
   import { formatDateOnly } from "../../date-format.js";
   import { formatMoneyValue, formatSignedMoneyValue, moneyToneForValue } from "../../money-format.js";
+  import { appendPageResult, createTablePagination, readPageItems, TABLE_PAGE_SIZE } from "../../table-pagination.js";
 
   interface Props {
     readonly client: OfficeApiClient;
@@ -68,6 +70,15 @@
   let bankFormCurrency = $state<CurrencyCode>("MUR");
   let bankFormActive = $state(true);
   let editingAccountId = $state<string | null>(null);
+  let accountsNextCursor = $state<string | null>(null);
+  let accountsLoadingMore = $state(false);
+  let accountsLoadMoreError = $state<string | null>(null);
+  let rawNextCursor = $state<string | null>(null);
+  let rawLoadingMore = $state(false);
+  let rawLoadMoreError = $state<string | null>(null);
+  let reconciliationNextCursor = $state<string | null>(null);
+  let reconciliationLoadingMore = $state(false);
+  let reconciliationLoadMoreError = $state<string | null>(null);
 
   function accountWriteRequest(): OfficeBankAccountWriteRequest {
     return {
@@ -117,7 +128,22 @@
     }
   }
   const rawTableRows = $derived(createRawTableRows(rawRows));
+  const accountsPagination = $derived<TablePagination | null>(
+    createTablePagination(accountsState, accountsLoadingMore, accountsLoadMoreError, loadMoreAccounts, loadAllAccounts)
+  );
+  const rawPagination = $derived<TablePagination | null>(
+    createTablePagination(rawState, rawLoadingMore, rawLoadMoreError, loadMoreRawLines, loadAllRawLines)
+  );
   const reconciliationTableRows = $derived(createReconciliationTableRows(reconciliationRows));
+  const reconciliationPagination = $derived<TablePagination | null>(
+    createTablePagination(
+      reconciliationState,
+      reconciliationLoadingMore,
+      reconciliationLoadMoreError,
+      loadMoreReconciliations,
+      loadAllReconciliations
+    )
+  );
 
   onMount((): void => {
     void loadBank();
@@ -131,13 +157,13 @@
 
     try {
       const [accounts, raw, quality, reconciliations] = await Promise.all([
-        props.client.listBankAccounts({ workspaceId: props.workspaceId, limit: 50 }),
+        props.client.listBankAccounts({ workspaceId: props.workspaceId, cursor: null, limit: TABLE_PAGE_SIZE }),
         props.client.listBankRawLines({
           workspaceId: props.workspaceId,
           period: null,
           accountId: null,
           cursor: null,
-          limit: 50
+          limit: TABLE_PAGE_SIZE
         }),
         props.client.getBankQuality({ workspaceId: props.workspaceId, period: props.period }),
         props.client.listReconciliations({
@@ -146,13 +172,19 @@
           period: props.period,
           status: null,
           cursor: null,
-          limit: 50
+          limit: TABLE_PAGE_SIZE
         })
       ]);
       accountsState = createSuccessState<PageResult<OfficeBankAccountSummary>>(accounts);
+      accountsNextCursor = accounts.nextCursor;
+      accountsLoadMoreError = null;
       rawState = createSuccessState<PageResult<OfficeBankRawLine>>(raw);
+      rawNextCursor = raw.nextCursor;
+      rawLoadMoreError = null;
       qualityState = createSuccessState<OfficeBankQualityResponse>(quality);
       reconciliationState = createSuccessState<PageResult<OfficeReconciliationCandidate>>(reconciliations);
+      reconciliationNextCursor = reconciliations.nextCursor;
+      reconciliationLoadMoreError = null;
     } catch (error: unknown) {
       accountsState = createErrorState<PageResult<OfficeBankAccountSummary>>(error);
       rawState = createErrorState<PageResult<OfficeBankRawLine>>(error);
@@ -161,12 +193,135 @@
     }
   }
 
-  function readPageItems<TItem>(state: ApiRequestState<PageResult<TItem>>): readonly TItem[] {
-    if (state.status === "success") {
-      return state.data.items;
+  async function loadMoreAccounts(): Promise<void> {
+    await loadAccountsPage("one");
+  }
+
+  async function loadAllAccounts(): Promise<void> {
+    await loadAccountsPage("all");
+  }
+
+  async function loadAccountsPage(mode: "one" | "all"): Promise<void> {
+    if (accountsState.status !== "success" || accountsNextCursor === null || accountsLoadingMore) {
+      return;
     }
 
-    return [];
+    accountsLoadingMore = true;
+    accountsLoadMoreError = null;
+
+    try {
+      let nextCursor: string | null = accountsNextCursor;
+      let loaded: PageResult<OfficeBankAccountSummary> = accountsState.data;
+
+      while (nextCursor !== null) {
+        const nextPage = await props.client.listBankAccounts({
+          workspaceId: props.workspaceId,
+          cursor: nextCursor,
+          limit: TABLE_PAGE_SIZE
+        });
+        loaded = appendPageResult(loaded, nextPage);
+        accountsState = createSuccessState<PageResult<OfficeBankAccountSummary>>(loaded);
+        accountsNextCursor = nextPage.nextCursor;
+        nextCursor = nextPage.nextCursor;
+
+        if (mode === "one") {
+          break;
+        }
+      }
+    } catch (error: unknown) {
+      accountsLoadMoreError = getErrorMessage(error);
+    } finally {
+      accountsLoadingMore = false;
+    }
+  }
+
+  async function loadMoreRawLines(): Promise<void> {
+    await loadRawLinesPage("one");
+  }
+
+  async function loadAllRawLines(): Promise<void> {
+    await loadRawLinesPage("all");
+  }
+
+  async function loadRawLinesPage(mode: "one" | "all"): Promise<void> {
+    if (rawState.status !== "success" || rawNextCursor === null || rawLoadingMore) {
+      return;
+    }
+
+    rawLoadingMore = true;
+    rawLoadMoreError = null;
+
+    try {
+      let nextCursor: string | null = rawNextCursor;
+      let loaded: PageResult<OfficeBankRawLine> = rawState.data;
+
+      while (nextCursor !== null) {
+        const nextPage = await props.client.listBankRawLines({
+          workspaceId: props.workspaceId,
+          period: null,
+          accountId: null,
+          cursor: nextCursor,
+          limit: TABLE_PAGE_SIZE
+        });
+        loaded = appendPageResult(loaded, nextPage);
+        rawState = createSuccessState<PageResult<OfficeBankRawLine>>(loaded);
+        rawNextCursor = nextPage.nextCursor;
+        nextCursor = nextPage.nextCursor;
+
+        if (mode === "one") {
+          break;
+        }
+      }
+    } catch (error: unknown) {
+      rawLoadMoreError = getErrorMessage(error);
+    } finally {
+      rawLoadingMore = false;
+    }
+  }
+
+  async function loadMoreReconciliations(): Promise<void> {
+    await loadReconciliationsPage("one");
+  }
+
+  async function loadAllReconciliations(): Promise<void> {
+    await loadReconciliationsPage("all");
+  }
+
+  async function loadReconciliationsPage(mode: "one" | "all"): Promise<void> {
+    if (reconciliationState.status !== "success" || reconciliationNextCursor === null || reconciliationLoadingMore) {
+      return;
+    }
+
+    reconciliationLoadingMore = true;
+    reconciliationLoadMoreError = null;
+
+    try {
+      let nextCursor: string | null = reconciliationNextCursor;
+      let loaded: PageResult<OfficeReconciliationCandidate> = reconciliationState.data;
+
+      while (nextCursor !== null) {
+        const nextPage = await props.client.listReconciliations({
+          workspaceId: props.workspaceId,
+          accountId: null,
+          period: props.period,
+          status: null,
+          cursor: nextCursor,
+          limit: TABLE_PAGE_SIZE
+        });
+        loaded = appendPageResult(loaded, nextPage);
+        reconciliationState = createSuccessState<PageResult<OfficeReconciliationCandidate>>(loaded);
+        reconciliationNextCursor = nextPage.nextCursor;
+        nextCursor = nextPage.nextCursor;
+
+        if (mode === "one") {
+          break;
+        }
+      }
+    } catch (error: unknown) {
+      reconciliationLoadMoreError = getErrorMessage(error);
+    } finally {
+      reconciliationLoadingMore = false;
+    }
   }
 
   function createBankKpis(
@@ -365,9 +520,9 @@
         {/if}
       </div>
     </section>
-    <Table title="Bank accounts" columns={accountColumns} rows={accountTableRows} state={accountTableRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={accountRowActions} />
-    <Table title="Raw bank lines" columns={rawColumns} rows={rawTableRows} state={rawState.status === "loading" ? "loading" : rawState.status === "error" ? "error" : rawTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
-    <Table title="Reconciliation candidates" columns={reconciliationColumns} rows={reconciliationTableRows} state={reconciliationState.status === "loading" ? "loading" : reconciliationState.status === "error" ? "error" : reconciliationTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
+    <Table title="Bank accounts" columns={accountColumns} rows={accountTableRows} state={accountTableRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={accountRowActions} pagination={accountsPagination} />
+    <Table title="Raw bank lines" columns={rawColumns} rows={rawTableRows} state={rawState.status === "loading" ? "loading" : rawState.status === "error" ? "error" : rawTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={rawPagination} />
+    <Table title="Reconciliation candidates" columns={reconciliationColumns} rows={reconciliationTableRows} state={reconciliationState.status === "loading" ? "loading" : reconciliationState.status === "error" ? "error" : reconciliationTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={reconciliationPagination} />
   {/if}
 </section>
 

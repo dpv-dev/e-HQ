@@ -40,6 +40,7 @@ export type {
   SurfaceState,
   TableCell,
   TableColumn,
+  TablePagination,
   TableRow,
   TableRowAction,
   TableState,

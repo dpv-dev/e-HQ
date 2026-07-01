@@ -38087,7 +38087,8 @@ var ALLOWED_MUTATING_ACTIONS = /* @__PURE__ */ new Set([
   "office_reconciliation_match",
   "office_reconciliation_unmatch",
   "office_reconciliation_reject",
-  "office_reconciliation_create_transaction"
+  "office_reconciliation_create_transaction",
+  "office_ledger_bulk_confirm"
 ]);
 var OFFICE_BOT_ACTIONS = /* @__PURE__ */ new Set([
   "office_bank_import_preview",
@@ -38105,7 +38106,8 @@ var OFFICE_BOT_ACTIONS = /* @__PURE__ */ new Set([
   "office_reconciliation_match",
   "office_reconciliation_unmatch",
   "office_reconciliation_reject",
-  "office_reconciliation_create_transaction"
+  "office_reconciliation_create_transaction",
+  "office_ledger_bulk_confirm"
 ]);
 var DISTRIBUTION_BOT_ACTIONS = /* @__PURE__ */ new Set([
   "distribution_contract_expense_create",
@@ -39226,6 +39228,10 @@ var isoDateTimePattern = /^\d{4}-\d{2}-\d{2}T/u;
 var currencyCodePattern = /^[A-Z]{3}$/u;
 var moneyStringPattern = /^-?\d+(?:\.\d+)?$/u;
 var nullableStringSchema = external_exports.string().min(1).nullable();
+var optionalNullableStringSchema = external_exports.preprocess(
+  (value) => value === void 0 || value === "" ? null : value,
+  external_exports.string().min(1).nullable()
+);
 var workspaceBodySchema = external_exports.object({ workspaceId: external_exports.string().min(1) });
 var jsonRecordSchema = external_exports.record(external_exports.string(), external_exports.unknown());
 var commandCenterSettingUpdateSchema = workspaceBodySchema.extend({
@@ -39302,6 +39308,38 @@ var officeProjectWriteSchema = workspaceBodySchema.extend({
 });
 var officeCashflowImportSchema = workspaceBodySchema.extend({
   rows: external_exports.array(external_exports.record(external_exports.string()))
+});
+var officeLedgerBulkRowSchema = external_exports.object({
+  legacyId: external_exports.coerce.number().int().optional(),
+  externalId: external_exports.coerce.number().int().optional(),
+  occurredOn: external_exports.string().regex(isoDatePattern),
+  type: external_exports.enum(["income", "expense"]),
+  amount: external_exports.string().regex(moneyStringPattern),
+  currency: external_exports.string().regex(currencyCodePattern),
+  description: external_exports.string().min(1),
+  departmentId: optionalNullableStringSchema,
+  divisionId: optionalNullableStringSchema,
+  categoryId: optionalNullableStringSchema,
+  departmentName: optionalNullableStringSchema,
+  divisionName: optionalNullableStringSchema,
+  categoryName: optionalNullableStringSchema,
+  partnerName: optionalNullableStringSchema,
+  accountCode: optionalNullableStringSchema,
+  accountLabel: optionalNullableStringSchema,
+  projectId: optionalNullableStringSchema
+}).transform((row, issueContext) => {
+  const legacyId = row.legacyId ?? row.externalId;
+  if (legacyId === void 0) {
+    issueContext.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      message: "legacyId or externalId is required"
+    });
+    return { ...row, legacyId: 0 };
+  }
+  return { ...row, legacyId };
+});
+var officeLedgerBulkSchema = workspaceBodySchema.extend({
+  rows: external_exports.array(officeLedgerBulkRowSchema).min(1)
 });
 var officePartnerPayeeUnlinkSchema = workspaceBodySchema.extend({
   payeeId: external_exports.null()
@@ -39585,6 +39623,22 @@ function registerOfficeRoutes(app, dependencies) {
   });
   app.post("/eof/v1/cashflow/confirm", async (context) => {
     return officeCashflowConfirmResponse(context, dependencies);
+  });
+  app.post("/eof/v1/transactions/bulk-preview", async (context) => {
+    return officeLedgerBulkPreviewResponse(context, dependencies);
+  });
+  app.post("/eof/v1/transactions/bulk-confirm", async (context) => {
+    return officeLedgerBulkConfirmResponse(context, dependencies);
+  });
+  app.post("/eof/v1/transactions/bulk-upsert/preview", async (context) => {
+    return officeLedgerBulkPreviewResponse(context, dependencies);
+  });
+  app.post("/eof/v1/transactions/bulk-upsert/confirm", async (context) => {
+    return officeLedgerBulkConfirmResponse(context, dependencies);
+  });
+  app.get("/eof/v1/status", (context) => {
+    resolveWorkspaceId(context);
+    return context.json({ writesEnabled: dependencies.persistence.writesEnabled });
   });
   app.get("/eof/v1/audit-log", (context) => {
     resolveWorkspaceId(context);
@@ -40008,6 +40062,10 @@ function registerDistributionRoutes(app, dependencies) {
     requireQuery(context, "workspaceId");
     return context.json(pageItems(context, toDistributionAuditLog(dependencies.fixtures)));
   });
+  app.get("/erh/v1/status", (context) => {
+    requireQuery(context, "workspaceId");
+    return context.json({ writesEnabled: dependencies.persistence.writesEnabled });
+  });
   app.get("/erh/v1/settings", (context) => {
     requireQuery(context, "workspaceId");
     assertNonBotRouteAccess(context, "distribution_settings_read");
@@ -40144,7 +40202,11 @@ function optionalCompatQuery(context, keys) {
   return null;
 }
 function resolveWorkspaceId(context) {
-  return optionalCompatQuery(context, ["workspaceId", "workspace_id"]) ?? DEFAULT_WORKSPACE_ID;
+  const workspaceId = optionalCompatQuery(context, ["workspaceId", "workspace_id"]);
+  if (workspaceId === null || workspaceId === "office") {
+    return DEFAULT_WORKSPACE_ID;
+  }
+  return workspaceId;
 }
 function requirePositiveInteger(context, value, key) {
   if (value === null) {
@@ -40455,9 +40517,8 @@ function requireOfficeBankLine(dataset, statementLineId) {
   }
   return line;
 }
-function bankLineSignedAmount(line) {
-  const magnitude = line.amountMurMinor ?? line.amountMinor;
-  return eofMoney.format(line.direction === "credit" ? magnitude : -magnitude);
+function bankLineAmountText(line) {
+  return eofMoney.format(line.amountMurMinor ?? line.amountMinor);
 }
 async function officeReconciliationMatchResponse(context, dependencies) {
   const request = await readZodBody(context, officeReconciliationMatchSchema);
@@ -40561,11 +40622,11 @@ async function officeReconciliationCreateTransactionResponse(context, dependenci
     categoryId: request.categoryId,
     projectId: request.projectId,
     description: line.description ?? line.reference ?? "Ligne bancaire",
-    amountMicro: bankLineSignedAmount(line),
+    amountMicro: bankLineAmountText(line),
     currency: line.currency
   };
   const amountMinor = normalizeEofAmountField(context, writeRequest.amountMicro, "amountMicro");
-  const transactionType = officeTransactionType(dependencies.fixtures.office, request.categoryId, writeRequest.amountMicro);
+  const transactionType = request.categoryId !== null ? officeTransactionType(dependencies.fixtures.office, request.categoryId, writeRequest.amountMicro) : line.direction === "credit" ? "income" : "expense";
   const transactionStatus = request.categoryId === null ? "draft" : "validated";
   const idempotencyKey = requireIdempotencyKey(context);
   const actor = context.get("authUser");
@@ -41071,6 +41132,267 @@ function upsertOfficeCashflowFixture(fixtures, workspaceId, rows) {
     currency: row.currency
   }));
   mutableOffice.cashflowProjectionRows = [...kept, ...added];
+}
+function safeEofParse(value) {
+  try {
+    return eofMoney.parse(value);
+  } catch {
+    return null;
+  }
+}
+function resolveLedgerCategory(dataset, input) {
+  if (input.categoryId !== null) {
+    const category = dataset.categories.find((candidate) => candidate.id === input.categoryId);
+    if (category === void 0) {
+      return { issue: "category_not_found" };
+    }
+    const dimensionIssue = validateLedgerCategoryDimensions(dataset, category, input);
+    return dimensionIssue === null ? { category } : { issue: dimensionIssue };
+  }
+  const statutoryMatch = resolveLedgerCategoryByStatutoryAccount(dataset, input);
+  if ("category" in statutoryMatch) {
+    const dimensionIssue = validateLedgerCategoryDimensions(dataset, statutoryMatch.category, input);
+    return dimensionIssue === null ? statutoryMatch : { issue: dimensionIssue };
+  }
+  if (input.categoryName === null || input.categoryName.trim().length === 0) {
+    return { issue: "category_not_provided" };
+  }
+  const categoryName = input.categoryName;
+  const namedMatches = dataset.categories.filter((category) => textEquals(category.name, categoryName));
+  const constrainedMatches = namedMatches.filter(
+    (category) => validateLedgerCategoryDimensions(dataset, category, input) === null
+  );
+  if (constrainedMatches.length === 1) {
+    const category = constrainedMatches[0];
+    if (category === void 0) {
+      throw new Error("Ledger category resolution narrowed to one match, but no category was present.");
+    }
+    return { category };
+  }
+  if (constrainedMatches.length > 1) {
+    return { issue: "category_ambiguous" };
+  }
+  return namedMatches.length > 0 ? { issue: "category_dimension_mismatch" } : { issue: "category_not_found" };
+}
+function resolveLedgerCategoryByStatutoryAccount(dataset, input) {
+  const accountCode = input.accountCode?.trim() ?? "";
+  const accountLabel = input.accountLabel?.trim() ?? "";
+  if (accountCode.length === 0 && accountLabel.length === 0) {
+    return { issue: "category_not_provided" };
+  }
+  const matches = dataset.categories.filter(
+    (category) => accountCode.length > 0 && category.accountCode !== void 0 && category.accountCode !== null && category.accountCode.trim() === accountCode || accountLabel.length > 0 && category.accountLabel !== void 0 && category.accountLabel !== null && textEquals(category.accountLabel, accountLabel)
+  );
+  if (matches.length === 1) {
+    const category = matches[0];
+    if (category === void 0) {
+      throw new Error("Ledger account-code resolution narrowed to one match, but no category was present.");
+    }
+    return { category };
+  }
+  if (matches.length > 1) {
+    return { issue: "category_ambiguous" };
+  }
+  return { issue: "category_not_provided" };
+}
+function validateLedgerCategoryDimensions(dataset, category, input) {
+  const division = category.divisionId === null ? void 0 : dataset.divisions.find((candidate) => candidate.id === category.divisionId);
+  const department = division === void 0 ? void 0 : dataset.departments.find((candidate) => candidate.id === division.departmentId);
+  if (input.divisionId !== null && division?.id !== input.divisionId) {
+    return "category_dimension_mismatch";
+  }
+  if (input.departmentId !== null && department?.id !== input.departmentId) {
+    return "category_dimension_mismatch";
+  }
+  if (!matchesOptionalText(division?.name ?? null, input.divisionName)) {
+    return "category_dimension_mismatch";
+  }
+  if (!matchesOptionalText(department?.name ?? null, input.departmentName)) {
+    return "category_dimension_mismatch";
+  }
+  return null;
+}
+function matchesOptionalText(candidate, value) {
+  return value === null || value.trim().length === 0 || candidate !== null && textEquals(candidate, value);
+}
+function textEquals(left, right) {
+  return left.trim().toLowerCase() === right.trim().toLowerCase();
+}
+function resolveLedgerBulkRow(row, rowNumber, dataset) {
+  const issues = [];
+  const amountMinor = safeEofParse(row.amount);
+  if (amountMinor === null || amountMinor <= 0n) {
+    issues.push("amount_missing_or_invalid");
+  }
+  if (row.currency.trim().toUpperCase() !== "MUR") {
+    issues.push("currency_not_mur");
+  }
+  let categoryId = null;
+  let resolvedType = row.type;
+  if (row.categoryId !== null || row.accountCode !== null || row.accountLabel !== null || row.categoryName !== null && row.categoryName.trim().length > 0) {
+    const resolution = resolveLedgerCategory(dataset, {
+      categoryId: row.categoryId,
+      accountCode: row.accountCode,
+      accountLabel: row.accountLabel,
+      categoryName: row.categoryName,
+      divisionId: row.divisionId,
+      divisionName: row.divisionName,
+      departmentId: row.departmentId,
+      departmentName: row.departmentName
+    });
+    if ("issue" in resolution) {
+      issues.push(resolution.issue);
+    } else {
+      categoryId = resolution.category.id;
+      resolvedType = resolution.category.type;
+    }
+  }
+  const partnerName = row.partnerName;
+  const partnerId = partnerName !== null && partnerName.trim().length > 0 ? dataset.partners.find((partner) => partner.name.trim().toLowerCase() === partnerName.trim().toLowerCase())?.id ?? null : null;
+  return {
+    legacyId: row.legacyId,
+    rowNumber,
+    occurredOn: row.occurredOn,
+    type: resolvedType,
+    amountMinor: amountMinor ?? 0n,
+    currency: row.currency.trim().toUpperCase(),
+    description: row.description.trim(),
+    categoryId,
+    partnerId,
+    projectId: row.projectId,
+    accountCode: row.accountCode,
+    accountLabel: row.accountLabel,
+    status: categoryId !== null ? "validated" : "draft",
+    issues
+  };
+}
+async function officeLedgerBulkPreviewResponse(context, dependencies) {
+  const request = await readZodBody(context, officeLedgerBulkSchema);
+  resolveWorkspaceId(context);
+  const resolved = request.rows.map(
+    (row, index) => resolveLedgerBulkRow(row, index + 1, dependencies.fixtures.office)
+  );
+  const accepted = resolved.filter((row) => row.issues.length === 0);
+  const rejectionCounts = /* @__PURE__ */ new Map();
+  for (const row of resolved) {
+    for (const issue of row.issues) {
+      rejectionCounts.set(issue, (rejectionCounts.get(issue) ?? 0) + 1);
+    }
+  }
+  return context.json({
+    acceptedRowCount: accepted.length,
+    rejectedRowCount: resolved.length - accepted.length,
+    validatedRowCount: accepted.filter((row) => row.status === "validated").length,
+    draftRowCount: accepted.filter((row) => row.status === "draft").length,
+    rejectionReasons: [...rejectionCounts.entries()].map(([reason, count]) => ({ reason, count })).sort((left, right) => right.count - left.count),
+    rows: resolved.map((row) => ({
+      legacyId: row.legacyId,
+      rowNumber: row.rowNumber,
+      status: row.issues.length === 0 ? "accepted" : "rejected",
+      willValidate: row.issues.length === 0 && row.status === "validated",
+      categoryId: row.categoryId,
+      issues: row.issues
+    }))
+  });
+}
+async function officeLedgerBulkConfirmResponse(context, dependencies) {
+  const request = await readZodBody(context, officeLedgerBulkSchema);
+  resolveWorkspaceId(context);
+  const accepted = request.rows.map((row, index) => resolveLedgerBulkRow(row, index + 1, dependencies.fixtures.office)).filter((row) => row.issues.length === 0);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const batchId = randomUUID2();
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_ledger_bulk_confirm",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await persistOfficeLedgerBulk(tx, accepted, actor.userId);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_ledger_bulk_confirm",
+        targetType: "office_ledger_bulk",
+        targetId: batchId,
+        before: {},
+        after: {
+          upsertedRowCount: accepted.length,
+          validatedRowCount: accepted.filter((row) => row.status === "validated").length
+        },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      upsertOfficeLedgerBulkFixture(dependencies.fixtures, accepted);
+      return { ...mutationReceipt(batchId, auditEventId), upsertedRowCount: accepted.length };
+    }
+  });
+  return context.json(result.body, result.status);
+}
+async function persistOfficeLedgerBulk(tx, rows, actorUserId) {
+  if (tx.kind === "memory" || rows.length === 0) {
+    return;
+  }
+  for (const row of rows) {
+    const occurredAt = `${row.occurredOn}T00:00:00.000Z`;
+    const approvedBy = row.status === "validated" ? actorUserId : null;
+    const approvedAt = row.status === "validated" ? (/* @__PURE__ */ new Date()).toISOString() : null;
+    const amount = row.amountMinor.toString();
+    await tx.executor.execute(sql`
+      insert into transactions (
+        id, legacy_id, transaction_date, type, status, is_active, description,
+        category_id, partner_id, project_id, amount_minor, original_amount_minor, original_currency,
+        total_amount_minor, source, created_by_user_id, approved_by_user_id, approved_at
+      )
+      values (
+        ${randomUUID2()}, ${row.legacyId}, ${occurredAt}, ${row.type}, ${row.status}, true, ${row.description},
+        ${row.categoryId}, ${row.partnerId}, ${row.projectId}, ${amount}, ${amount}, ${row.currency === "MUR" ? null : row.currency},
+        ${amount}, 'ledger_import', ${actorUserId}, ${approvedBy}, ${approvedAt}
+      )
+      on conflict (legacy_id) do update set
+        transaction_date = excluded.transaction_date,
+        type = excluded.type,
+        status = excluded.status,
+        description = excluded.description,
+        category_id = excluded.category_id,
+        partner_id = excluded.partner_id,
+        project_id = excluded.project_id,
+        amount_minor = excluded.amount_minor,
+        original_amount_minor = excluded.original_amount_minor,
+        total_amount_minor = excluded.total_amount_minor,
+        source = excluded.source,
+        approved_by_user_id = excluded.approved_by_user_id,
+        approved_at = excluded.approved_at,
+        updated_at = now()
+    `);
+    if (row.categoryId !== null && row.accountCode !== null) {
+      await tx.executor.execute(sql`
+        update categories set account_code = ${row.accountCode}, account_label = ${row.accountLabel}
+        where id = ${row.categoryId} and account_code is null
+      `);
+    }
+  }
+}
+function upsertOfficeLedgerBulkFixture(fixtures, rows) {
+  if (rows.length === 0) {
+    return;
+  }
+  const mutableOffice = fixtures.office;
+  const added = rows.map((row) => ({
+    id: randomUUID2(),
+    transactionDate: `${row.occurredOn}T00:00:00.000Z`,
+    type: row.type,
+    status: row.status,
+    isActive: true,
+    description: row.description,
+    categoryId: row.categoryId,
+    partnerId: row.partnerId,
+    projectId: row.projectId,
+    amountMinor: row.amountMinor,
+    originalCurrency: row.currency === "MUR" ? null : row.currency,
+    exchangeRateE10: null
+  }));
+  mutableOffice.transactions = [...fixtures.office.transactions, ...added];
 }
 async function officePartnerPayeeUnlinkResponse(context, dependencies) {
   const partnerId = requirePathParam(context, "partnerId");
@@ -45917,7 +46239,7 @@ async function readPostgresHealth(pool) {
 async function readOfficeDataset(pool) {
   const departments = await queryRows(pool, "select id::text, name, type, color, is_active from departments order by legacy_id nulls last, id", []);
   const divisions = await queryRows(pool, "select id::text, department_id::text, name, is_active from divisions order by legacy_id nulls last, id", []);
-  const categories = await queryRows(pool, "select id::text, division_id::text, name, type, is_active from categories order by legacy_id nulls last, id", []);
+  const categories = await queryRows(pool, "select id::text, division_id::text, name, type, account_code, account_label, is_active from categories order by legacy_id nulls last, id", []);
   const partners = await queryRows(pool, "select id::text, name, type, is_active from partners order by legacy_id nulls last, id", []);
   const projects = await queryRows(pool, "select id::text, name, status, state, is_active from projects order by legacy_id nulls last, id", []);
   const projectBudgetLines = await queryRows(pool, "select id::text, project_id::text, category_id::text, type, planned_amount_minor::text from project_budget_lines order by legacy_id nulls last, id", []);
@@ -46209,6 +46531,8 @@ function toOfficeCategory(row) {
     divisionId: nullableStringCell(row, "division_id"),
     name: stringCell(row, "name"),
     type: enumCell(row, "type", ["income", "expense"]),
+    accountCode: nullableStringCell(row, "account_code"),
+    accountLabel: nullableStringCell(row, "account_label"),
     isActive: booleanCell(row, "is_active")
   };
 }
