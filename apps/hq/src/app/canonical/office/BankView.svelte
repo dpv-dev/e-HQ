@@ -226,19 +226,25 @@
   }
 
   function createRawTableRows(rows: readonly OfficeBankRawLine[]): readonly TableRow[] {
-    return rows.map((line: OfficeBankRawLine): TableRow => ({
-      id: line.id,
-      cells: [
-        { kind: "text", value: formatDateOnly(line.occurredOn), strong: false },
-        { kind: "text", value: line.description, strong: true },
-        { kind: "text", value: line.reference === "" ? "—" : line.reference, strong: false },
-        { kind: "badge", value: line.direction, tone: line.direction === "credit" ? "success" : "warning" },
-        { kind: "money", value: formatSignedMoney(line.amountMicro, line.currency), tone: moneyTone(line.amountMicro) },
-        { kind: "money", value: formatMoney(line.amountMurMicro, "MUR"), tone: "muted" },
-        { kind: "badge", value: line.isDuplicateCandidate ? "duplicate" : "unique", tone: line.isDuplicateCandidate ? "warning" : "muted" },
-        { kind: "badge", value: line.reconciliationStatus, tone: reconciliationTone(line.reconciliationStatus) }
-      ]
-    }));
+    return rows.map((line: OfficeBankRawLine): TableRow => {
+      // A debit leaves the account (money out) -> shown negative (red); a credit is money in -> positive (green).
+      const directionalAmount = line.direction === "debit" ? `-${line.amountMicro.replace(/^[+-]/u, "")}` : line.amountMicro;
+      const directionalMurAmount = line.direction === "debit" ? `-${line.amountMurMicro.replace(/^[+-]/u, "")}` : line.amountMurMicro;
+
+      return {
+        id: line.id,
+        cells: [
+          { kind: "text", value: formatDateOnly(line.occurredOn), strong: false },
+          { kind: "text", value: line.description, strong: true },
+          { kind: "text", value: line.reference === "" ? "—" : line.reference, strong: false },
+          { kind: "badge", value: line.direction, tone: line.direction === "credit" ? "success" : "warning" },
+          { kind: "money", value: formatSignedMoney(directionalAmount, line.currency), tone: moneyTone(directionalAmount) },
+          { kind: "money", value: formatMoney(directionalMurAmount, "MUR"), tone: "muted" },
+          { kind: "badge", value: line.isDuplicateCandidate ? "duplicate" : "unique", tone: line.isDuplicateCandidate ? "warning" : "muted" },
+          { kind: "badge", value: line.reconciliationStatus, tone: reconciliationTone(line.reconciliationStatus) }
+        ]
+      };
+    });
   }
 
   function createReconciliationTableRows(rows: readonly OfficeReconciliationCandidate[]): readonly TableRow[] {
