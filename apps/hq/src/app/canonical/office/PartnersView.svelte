@@ -32,6 +32,7 @@
     readonly period: string;
     readonly dateFrom: string;
     readonly dateTo: string;
+    readonly writesEnabled: boolean;
     readonly onReceipt: (receipt: ApiMutationReceipt) => void;
   }
 
@@ -58,7 +59,6 @@
 
   const props: Props = $props();
   const currency = "MUR";
-  const writesEnabled = true;
   const emptyFormState: PartnerFormState = {
     name: "",
     email: "",
@@ -536,7 +536,7 @@
   }
 
   function writeDisabledTitle(): string {
-    return writesEnabled ? "" : "enable writes";
+    return props.writesEnabled ? "" : "enable writes";
   }
 </script>
 
@@ -547,7 +547,7 @@
       <h2>{copy.title}</h2>
       <span>{copy.subtitle}</span>
     </div>
-    <button class="head-action" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={openCreateDrawer}>Create partner</button>
+    <button class="head-action" type="button" disabled={!props.writesEnabled} title={writeDisabledTitle()} onclick={openCreateDrawer}>Create partner</button>
   </header>
 
   <div class="partners-layout">
@@ -631,15 +631,15 @@
               <input value={linkPayeeId} oninput={updateLinkPayeeId} placeholder="payee_..." />
             </label>
             <div class="drawer-actions">
-              <button type="button" disabled={linkStatus === "loading" || !writesEnabled} title={writeDisabledTitle()} onclick={linkPartnerPayee}>Idempotent link</button>
-              <button type="button" disabled={linkStatus === "loading" || !writesEnabled} title={writeDisabledTitle()} onclick={unlinkPartnerPayee}>Idempotent unlink</button>
+              <button type="button" disabled={linkStatus === "loading" || !props.writesEnabled} title={writeDisabledTitle()} onclick={linkPartnerPayee}>Idempotent link</button>
+              <button type="button" disabled={linkStatus === "loading" || !props.writesEnabled} title={writeDisabledTitle()} onclick={unlinkPartnerPayee}>Idempotent unlink</button>
             </div>
           </section>
         {/if}
 
         {#if drawerMode === "detail" && selectedPartner !== null}
           <div class="drawer-actions">
-            <button type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={openEditDrawer}>Edit partner</button>
+            <button type="button" disabled={!props.writesEnabled} title={writeDisabledTitle()} onclick={openEditDrawer}>Edit partner</button>
           </div>
         {/if}
 
@@ -674,7 +674,7 @@
               <span>Active partner</span>
             </label>
             <div class="drawer-actions">
-              <button type="submit" disabled={linkStatus === "loading" || !writesEnabled} title={writeDisabledTitle()}>{drawerMode === "create" ? "Create partner" : "Save partner"}</button>
+              <button type="submit" disabled={linkStatus === "loading" || !props.writesEnabled} title={writeDisabledTitle()}>{drawerMode === "create" ? "Create partner" : "Save partner"}</button>
             </div>
           </form>
         {/if}

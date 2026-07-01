@@ -16,16 +16,13 @@
   } from "@ehq/api-client";
   import {
     Badge,
-    BarsChart,
     DonutChart,
     KPI,
-    LineChart,
     PageHeader,
     Panel,
     Table,
     Toolbar,
     WorkspaceShell,
-    type ChartPoint,
     type SelectOption,
     type TableColumn,
     type TableRow,
@@ -244,23 +241,6 @@
     { id: "navigation", key: "Navigation scope", value: "Command Center only", status: "Enforced", tone: "success" },
     { id: "release", key: "Release gate", value: "Manual approval", status: "Required", tone: "warning" }
   ];
-  const revenuePoints: readonly ChartPoint[] = [
-    { label: "Q1", value: 52 },
-    { label: "Q2", value: 66 },
-    { label: "Q3", value: 82 },
-    { label: "Q4", value: 100 },
-    { label: "YTD", value: 76 },
-    { label: "Run", value: 88 }
-  ];
-  const healthPoints: readonly ChartPoint[] = [
-    { label: "Mon", value: 72 },
-    { label: "Tue", value: 78 },
-    { label: "Wed", value: 74 },
-    { label: "Thu", value: 86 },
-    { label: "Fri", value: 83 },
-    { label: "Sat", value: 91 }
-  ];
-
   let activePageId = $state<CommandCenterPageId>("dashboard");
   const shellNavGroups = $derived<readonly WorkspaceNavGroup[]>(
     navGroups.map((group: NavGroup): WorkspaceNavGroup => ({
@@ -295,7 +275,9 @@
   const canUseCommandCenter = $derived(commandAccess.status === "allowed");
   const systemStatusLabel = $derived(createSystemStatusLabel(session));
   const readinessItems = $derived(createReadinessItems(officeDashboardState, distributionDashboardState));
-  const dashboardKpis = $derived(createDashboardKpis(permissionUsers, integrations));
+  const readinessOkCount = $derived(countReadyChecks(readinessItems));
+  const readinessPercent = $derived(Math.round((readinessOkCount / readinessItems.length) * 100));
+  const dashboardKpis = $derived(createDashboardKpis(readinessItems, permissionUsers, integrations));
   const usersKpis = $derived(createUsersKpis(permissionUsers));
   const integrationKpis = $derived(createIntegrationKpis(integrations, writesEnabled, writeGateMessage));
   const settingsKpis = $derived(createSettingsKpis(settingRows));
@@ -586,15 +568,28 @@
     return "warning";
   }
 
+  function countReadyChecks(items: readonly ReadinessItem[]): number {
+    return items.filter((item: ReadinessItem): boolean => item.tone === "success").length;
+  }
+
   function createDashboardKpis(
+    checks: readonly ReadinessItem[],
     users: readonly CommandPermissionUser[],
     rows: readonly IntegrationRow[]
   ): readonly CommandKpi[] {
+    const readyCount = countReadyChecks(checks);
+    const readyPercent = Math.round((readyCount / checks.length) * 100);
     const deniedCount = countDeniedAccess(users);
     const connectedCount = rows.filter((row: IntegrationRow): boolean => row.status === "connected").length;
 
     return [
-      { label: "Readiness", value: "86%", detail: "all workspaces visible", tone: "success", accent: true },
+      {
+        label: "Readiness",
+        value: `${String(readyPercent)}%`,
+        detail: `${String(readyCount)}/${String(checks.length)} checks ok`,
+        tone: readyCount === checks.length ? "success" : "warning",
+        accent: true
+      },
       { label: "Permission profiles", value: String(users.length), detail: "from @ehq/auth", tone: "info", accent: false },
       { label: "Denied cards", value: String(deniedCount), detail: "locked, never hidden", tone: "error", accent: false },
       { label: "Connectors", value: `${String(connectedCount)}/${String(rows.length)}`, detail: "healthy", tone: "success", accent: false }
@@ -848,26 +843,18 @@
     await persistCommandSetting("workspace_name", { name: workspaceName }, "reviewed");
   }
 
-  async function persistIntegrationStatus(integrationId: string, enabled: boolean, status: string): Promise<void> {
-    commandBusy = true;
-    try {
-      const receipt = await client.commandCenter.toggleIntegration(
-        {
-          workspaceId,
-          integrationId,
-          enabled,
-          status
-        },
-        {
-          idempotencyKey: createCommandIdempotencyKey(`command-center-integration-${integrationId}`)
-        }
-      );
-      commandNotice = `${integrationId} status persisted · audit ${receipt.auditEventId ?? "missing"}.`;
-    } catch (error: unknown) {
-      commandNotice = `${integrationId} write failed · ${errorMessage(error)}.`;
-    } finally {
-      commandBusy = false;
+  function showIntegrationDetail(integrationId: string): void {
+    const row = integrations.find((integration: IntegrationRow): boolean => integration.id === integrationId);
+
+    if (row === undefined) {
+      throw new Error(`Unknown integration: ${integrationId}.`);
     }
+
+    commandNotice = `${row.connector} · ${row.kind} · ${row.scope} · status ${row.status}.`;
+  }
+
+  function openOfficeBankStatus(): void {
+    window.location.assign("/console/office/bank");
   }
 
   function createCommandIdempotencyKey(action: string): string {
@@ -968,13 +955,14 @@
           {/each}
         </section>
 
-        <section class="dashboard-grid">
-          <BarsChart title="Readiness by quarter" points={revenuePoints} tone="active" />
-          <DonutChart title="Release readiness" value={86} label="Ready with manual release approval." tone="success" />
-          <LineChart title="Health trend" points={healthPoints} tone="info" />
-        </section>
-
         <section class="split-grid">
+          <DonutChart
+            title="Release readiness"
+            value={readinessPercent}
+            label={`${String(readinessOkCount)}/${String(readinessItems.length)} readiness checks ok.`}
+            tone={readinessOkCount === readinessItems.length ? "success" : "warning"}
+          />
+
           <section class="readiness-panel ehq-edge-surface" aria-label="Readiness checks">
             <header>
               <h2>Readiness</h2>
@@ -1054,28 +1042,28 @@
             title="Supabase runtime"
             subtitle="Auth, Postgres, and Hono API"
             body="Office eof/v1 and Distribution erh/v1 are compatibility route names on the new Hono API. The app does not use WordPress as a backend."
-            state={writesEnabled ? "default" : "locked"}
+            state="default"
             primaryAction="Inspect"
             secondaryAction=""
-            onPrimaryAction={() => persistIntegrationStatus("supabase-runtime", true, "connected")}
+            onPrimaryAction={() => showIntegrationDetail("supabase-runtime")}
           />
           <Panel
             title="MCP"
             subtitle="Project-scoped tools"
             body="Enterprise context stays scoped to this repository. No global connector leak is introduced by the app shell."
-            state={writesEnabled ? "default" : "locked"}
+            state="default"
             primaryAction="View scope"
             secondaryAction=""
-            onPrimaryAction={() => persistIntegrationStatus("mcp", true, "connected")}
+            onPrimaryAction={() => showIntegrationDetail("mcp")}
           />
           <Panel
             title="Bank connectors"
             subtitle="Office import scope"
             body="MCB and SBI statement import status belongs to Office. Command Center watches readiness without parsing bank files."
-            state={writesEnabled ? "default" : "locked"}
+            state="default"
             primaryAction="Open status"
             secondaryAction=""
-            onPrimaryAction={() => persistIntegrationStatus("bank-connectors", true, "reviewed")}
+            onPrimaryAction={openOfficeBankStatus}
           />
         </section>
 
@@ -1187,7 +1175,6 @@
   }
 
   .kpi-grid,
-  .dashboard-grid,
   .integration-grid,
   .settings-grid,
   .split-grid,
@@ -1201,11 +1188,10 @@
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
-  .dashboard-grid {
-    grid-template-columns: minmax(0, 1.2fr) minmax(220px, 0.8fr) minmax(0, 1fr);
+  .split-grid {
+    grid-template-columns: minmax(220px, 0.7fr) minmax(0, 0.9fr) minmax(0, 1.4fr);
   }
 
-  .split-grid,
   .settings-grid,
   .permission-workbench {
     grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
@@ -1371,7 +1357,6 @@
 
   @media (max-width: 1180px) {
     .kpi-grid,
-    .dashboard-grid,
     .integration-grid,
     .settings-grid,
     .split-grid,
@@ -1386,7 +1371,6 @@
     }
 
     .kpi-grid,
-    .dashboard-grid,
     .integration-grid,
     .settings-grid,
     .split-grid,

@@ -35,8 +35,9 @@
     type TrackSummary
   } from "@ehq/api-client";
   import { BarsChart, KPI, Loader, PageHeader, SectionTemplate, Table, Toolbar, WorkspaceShell } from "@ehq/ui";
-  import type { ChartPoint, SelectOption, TableColumn, TablePagination, TableRow, Tone, ToolbarFilter, WorkspaceNavGroup, WorkspaceNavItem } from "@ehq/ui";
+  import type { ChartPoint, SelectOption, TableColumn, TablePagination, TableRow, TableRowAction, Tone, ToolbarFilter, WorkspaceNavGroup, WorkspaceNavItem } from "@ehq/ui";
   import { createShellApiClient } from "../../app-shell-data.js";
+  import { parseCsvRecords } from "../../bank-parser.js";
   import { formatDateOnly, formatDateRange } from "../../date-format.js";
   import { formatMoneyValue, moneyToneForValue } from "../../money-format.js";
   import { createPeriodOptions, getLatestDataPeriod, periodLabel, rangeForScope, rangeLabel, todayIso, type DateRange, type PeriodScope } from "../../period-controls.js";
@@ -106,10 +107,14 @@
     readonly status: RequestStatus;
     readonly source: ImportSource;
     readonly fileName: string;
+    readonly rows: readonly Readonly<Record<string, string>>[];
+    readonly checksum: string;
     readonly preview: DistributionImportPreviewResponse | null;
     readonly confirm: DistributionImportConfirmResponse | null;
     readonly message: string;
   }
+
+  type PaymentPanelMode = "edit" | "reconcile" | "void";
 
   interface DistributionKpi {
     readonly label: string;
@@ -410,10 +415,12 @@
   let importState = $state<ImportUiState>({
     status: "idle",
     source: "routenote",
-    fileName: "RNSales_Jan2026_eeeemusic.xlsx",
+    fileName: "",
+    rows: [],
+    checksum: "",
     preview: null,
     confirm: null,
-    message: "RouteNote or Kontor export ready for preview."
+    message: "Select a Kontor or RouteNote export (CSV/TSV) to preview."
   });
   let runReceipt = $state<ApiRunReceipt | null>(null);
   let mutationReceipt = $state<ApiMutationReceipt | null>(null);
@@ -423,6 +430,18 @@
   let writeGateMessage = $state("Checking write gate.");
   let tablePaginationLoading = $state<DistributionPagedTableId | null>(null);
   let tablePaginationErrors = $state<Partial<Record<DistributionPagedTableId, string | null>>>({});
+  let selectedPaymentId = $state<string | null>(null);
+  let paymentPanelMode = $state<PaymentPanelMode | null>(null);
+  let paymentReferenceInput = $state("");
+  let paymentBankTransactionInput = $state("");
+  let recordStatementId = $state("");
+  let recordPaymentReference = $state("");
+  let selectedSuspenseId = $state<string | null>(null);
+  let suspenseTargetTrackId = $state("");
+  let suspenseTrackOptions = $state<readonly TrackSummary[] | null>(null);
+  let suspenseTrackOptionsError = $state<string | null>(null);
+  let selectedRunId = $state<string | null>(null);
+  let unpostReasonInput = $state("");
 
   const activePage = $derived(getNavItem(activePageId));
   const distributionPeriod = $derived(selectedPeriod);
@@ -505,8 +524,30 @@
   );
   const settings = $derived(settingsState.status === "success" ? settingsState.data : null);
   const importToolbarFilters = $derived(createImportToolbarFilters(importState));
+  const canPreviewImport = $derived(importState.rows.length > 0 && importState.status !== "loading");
   const canConfirmImport = $derived(importState.preview !== null && importState.status !== "loading");
   const statementPreview = $derived(statements[0] ?? null);
+  const selectedPayment = $derived(payments.find((payment: PaymentSummary): boolean => payment.id === selectedPaymentId) ?? null);
+  const openStatements = $derived(statements.filter((statement: StatementSummary): boolean => statement.status !== "paid"));
+  const recordStatement = $derived(openStatements.find((statement: StatementSummary): boolean => statement.id === recordStatementId) ?? null);
+  const selectedSuspenseItem = $derived(suspenseItems.find((item: SuspenseItem): boolean => item.id === selectedSuspenseId) ?? null);
+  const selectedSuspenseResolution = $derived(selectedSuspenseItem === null ? null : suspenseResolutionFor(selectedSuspenseItem));
+  const selectedSuspenseTrack = $derived(
+    (suspenseTrackOptions ?? []).find((track: TrackSummary): boolean => track.id === suspenseTargetTrackId) ?? null
+  );
+  const suspenseResolveTarget = $derived(resolveSuspenseTargetFor(selectedSuspenseResolution, selectedSuspenseTrack));
+  const selectedRun = $derived(allocationRuns.find((run: AllocationRunSummary): boolean => run.id === selectedRunId) ?? null);
+  const paymentRowActions: readonly TableRowAction[] = [
+    { label: "Edit reference", onAction: (rowId: string): void => openPaymentPanel(rowId, "edit") },
+    { label: "Reconcile", onAction: (rowId: string): void => openPaymentPanel(rowId, "reconcile") },
+    { label: "Void", onAction: (rowId: string): void => openPaymentPanel(rowId, "void"), danger: true }
+  ];
+  const suspenseRowActions: readonly TableRowAction[] = [
+    { label: "Resolve", onAction: openSuspenseResolution }
+  ];
+  const allocationRowActions: readonly TableRowAction[] = [
+    { label: "Request unpost", onAction: selectRunForUnpost, danger: true }
+  ];
 
   onMount((): (() => void) => {
     syncPageFromLocation();
@@ -1551,21 +1592,79 @@
     importState = {
       ...importState,
       source,
-      fileName: sampleFileNameForImportSource(source),
       preview: null,
       confirm: null,
       message: "Source changed, run preview again."
     };
   }
 
-  function updateImportFile(event: Event): void {
-    importState = {
-      ...importState,
-      fileName: readInputValue(event),
-      preview: null,
-      confirm: null,
-      message: "File ready for preview."
-    };
+  async function handleImportFile(event: Event): Promise<void> {
+    const input = event.currentTarget;
+
+    if (!(input instanceof HTMLInputElement)) {
+      throw new Error("Expected file input event target.");
+    }
+
+    const file = input.files?.item(0) ?? null;
+
+    if (file === null) {
+      return;
+    }
+
+    if (/\.xlsx?$/iu.test(file.name)) {
+      importState = {
+        ...importState,
+        status: "error",
+        fileName: file.name,
+        rows: [],
+        checksum: "",
+        preview: null,
+        confirm: null,
+        message: `${file.name} is a binary Excel export and cannot be parsed here. Re-export it as CSV, then retry.`
+      };
+      return;
+    }
+
+    try {
+      const text = await file.text();
+      const rows = file.name.toLowerCase().endsWith(".tsv") ? parseTsvRecords(text) : parseCsvRecords(text);
+
+      if (rows.length === 0) {
+        importState = {
+          ...importState,
+          status: "error",
+          fileName: file.name,
+          rows: [],
+          checksum: "",
+          preview: null,
+          confirm: null,
+          message: "No parseable rows in this file. Expecting a header line followed by data rows."
+        };
+        return;
+      }
+
+      importState = {
+        ...importState,
+        status: "idle",
+        fileName: file.name,
+        rows,
+        checksum: importContentChecksum(text),
+        preview: null,
+        confirm: null,
+        message: `${String(rows.length)} rows parsed, ready for preview.`
+      };
+    } catch (error: unknown) {
+      importState = {
+        ...importState,
+        status: "error",
+        fileName: file.name,
+        rows: [],
+        checksum: "",
+        preview: null,
+        confirm: null,
+        message: getErrorMessage(error)
+      };
+    }
   }
 
   function selectImportToolbarFilter(filter: ToolbarFilter): void {
@@ -1575,7 +1674,7 @@
     }
 
     if (filter.actionId === "file") {
-      resetImportFileName();
+      clearImportFile();
       return;
     }
 
@@ -1600,20 +1699,22 @@
     importState = {
       ...importState,
       source,
-      fileName: sampleFileNameForImportSource(source),
       preview: null,
       confirm: null,
       message: "Source changed, run preview again."
     };
   }
 
-  function resetImportFileName(): void {
+  function clearImportFile(): void {
     importState = {
       ...importState,
-      fileName: sampleFileNameForImportSource(importState.source),
+      status: "idle",
+      fileName: "",
+      rows: [],
+      checksum: "",
       preview: null,
       confirm: null,
-      message: "Sample file restored, run preview again."
+      message: "Select a Kontor or RouteNote export (CSV/TSV) to preview."
     };
   }
 
@@ -1631,6 +1732,30 @@
 
   function updateRevenueGroup(event: Event): void {
     revenueGroupBy = readSelectValue(event) as RevenueGroupBy;
+  }
+
+  function updateRecordStatement(event: Event): void {
+    recordStatementId = readSelectValue(event);
+  }
+
+  function updateRecordPaymentReference(event: Event): void {
+    recordPaymentReference = readInputValue(event);
+  }
+
+  function updatePaymentReferenceInput(event: Event): void {
+    paymentReferenceInput = readInputValue(event);
+  }
+
+  function updatePaymentBankTransactionInput(event: Event): void {
+    paymentBankTransactionInput = readInputValue(event);
+  }
+
+  function updateSuspenseTargetTrack(event: Event): void {
+    suspenseTargetTrackId = readSelectValue(event);
+  }
+
+  function updateUnpostReason(event: Event): void {
+    unpostReasonInput = readInputValue(event);
   }
 
   function updatePeriodScope(event: Event): void {
@@ -1663,6 +1788,17 @@
   }
 
   async function previewImport(): Promise<void> {
+    if (importState.rows.length === 0) {
+      importState = {
+        ...importState,
+        status: "error",
+        preview: null,
+        confirm: null,
+        message: "Select a CSV/TSV export file before running the preview."
+      };
+      return;
+    }
+
     importState = {
       ...importState,
       status: "loading",
@@ -1676,12 +1812,8 @@
         workspaceId: distributionWorkspaceId,
         source: importState.source,
         fileName: importState.fileName,
-        checksum: `checksum-${importState.source}-${importState.fileName}`,
-        rows: [
-          { row: "1", title: "Alma", store: importState.source },
-          { row: "2", title: "Redlight", store: importState.source },
-          { row: "3", title: "Untitled 03", store: importState.source }
-        ]
+        checksum: importState.checksum,
+        rows: importState.rows
       };
       const preview = await client.distribution.previewImport(request, {
         idempotencyKey: createIdempotencyKey("import-preview")
@@ -1717,11 +1849,17 @@
     };
 
     try {
+      // The preview endpoint enumerates the submitted rows as row_1..row_N (in submission
+      // order) and reports how many it accepted; rebuild those ids from the response.
+      const acceptedRowIds = Array.from(
+        { length: preview.acceptedRowCount },
+        (_: unknown, index: number): string => `row_${String(index + 1)}`
+      );
       const confirm = await client.distribution.confirmImport(
         {
           workspaceId: distributionWorkspaceId,
           previewId: preview.previewId,
-          acceptedRowIds: ["row_1", "row_2", "row_3"],
+          acceptedRowIds,
           rejectedRowIds: []
         },
         {
@@ -1734,6 +1872,7 @@
         confirm,
         message: "Import confirmed."
       };
+      await loadImportBatches();
     } catch (error: unknown) {
       importState = {
         ...importState,
@@ -1764,10 +1903,7 @@
         }
       );
       mutationReceiptPageId = activePageId;
-      mappingState = createSuccessState<PageResult<DistributionMappingRow>>({
-        items: mappingRows.map((row: DistributionMappingRow): DistributionMappingRow => ({ ...row, status: "mapped" })),
-        nextCursor: null
-      });
+      await loadMappingRows();
     } catch (error: unknown) {
       mappingState = createErrorState<PageResult<DistributionMappingRow>>(error);
     }
@@ -1844,10 +1980,27 @@
     }
   }
 
-  async function unpostAllocationRun(): Promise<void> {
-    const run = allocationRuns[0];
+  function selectRunForUnpost(runId: string): void {
+    const run = allocationRuns.find((candidate: AllocationRunSummary): boolean => candidate.id === runId);
 
     if (run === undefined) {
+      return;
+    }
+
+    selectedRunId = runId;
+    unpostReasonInput = "";
+  }
+
+  function closeUnpostPanel(): void {
+    selectedRunId = null;
+    unpostReasonInput = "";
+  }
+
+  async function unpostAllocationRun(): Promise<void> {
+    const run = selectedRun;
+    const reason = unpostReasonInput.trim();
+
+    if (run === null || reason === "") {
       return;
     }
 
@@ -1858,23 +2011,109 @@
         run.id,
         {
           workspaceId: distributionWorkspaceId,
-          reason: "Preview unpost request",
-          lockToken: "preview-lock-token"
+          reason,
+          // The server re-acquires the advisory lock under the run's own lock key
+          // ("distribution:allocation:<runId>", surfaced as AllocationRunSummary.lockKey),
+          // so that key is the real token to hand back on unpost.
+          lockToken: run.lockKey
         },
         {
           idempotencyKey: createIdempotencyKey("allocation-unpost")
         }
       );
       runReceiptPageId = activePageId;
+      closeUnpostPanel();
+      await loadAllocationRuns();
     } catch (error: unknown) {
       allocationsState = createErrorState<PageResult<AllocationRunSummary>>(error);
     }
   }
 
-  async function resolveFirstSuspense(): Promise<void> {
-    const item = suspenseItems[0];
+  function openSuspenseResolution(rowId: string): void {
+    const item = suspenseItems.find((candidate: SuspenseItem): boolean => candidate.id === rowId);
 
-    if (item === undefined) {
+    if (item === undefined || item.status !== "open") {
+      return;
+    }
+
+    selectedSuspenseId = rowId;
+    suspenseTargetTrackId = "";
+    void ensureSuspenseTrackOptions();
+  }
+
+  function closeSuspensePanel(): void {
+    selectedSuspenseId = null;
+    suspenseTargetTrackId = "";
+  }
+
+  async function ensureSuspenseTrackOptions(): Promise<void> {
+    // The catalog can span several pages; fetch it once and cache it for later panels.
+    if (suspenseTrackOptions !== null) {
+      return;
+    }
+
+    suspenseTrackOptionsError = null;
+
+    try {
+      const items: TrackSummary[] = [];
+      let cursor: string | null = null;
+
+      do {
+        const page: PageResult<TrackSummary> = await client.distribution.listTracks({
+          workspaceId: distributionWorkspaceId,
+          releaseId: null,
+          status: null,
+          cursor,
+          limit: TABLE_PAGE_SIZE
+        });
+        items.push(...page.items);
+        cursor = page.nextCursor;
+      } while (cursor !== null);
+
+      suspenseTrackOptions = items;
+    } catch (error: unknown) {
+      suspenseTrackOptionsError = getErrorMessage(error);
+    }
+  }
+
+  interface SuspenseResolveTarget {
+    readonly ready: boolean;
+    readonly targetId: string | null;
+    readonly hint: string;
+  }
+
+  function resolveSuspenseTargetFor(
+    resolution: "map_to_release" | "map_to_track" | "hold" | null,
+    track: TrackSummary | null
+  ): SuspenseResolveTarget {
+    if (resolution === null) {
+      return { ready: false, targetId: null, hint: "Select a suspense item first." };
+    }
+
+    if (resolution === "hold") {
+      return { ready: true, targetId: null, hint: "" };
+    }
+
+    if (track === null) {
+      return { ready: false, targetId: null, hint: "Pick the target track first." };
+    }
+
+    if (resolution === "map_to_track") {
+      return { ready: true, targetId: track.id, hint: "" };
+    }
+
+    if (track.releaseId === null) {
+      return { ready: false, targetId: null, hint: "This track has no release; pick a track attached to a release." };
+    }
+
+    return { ready: true, targetId: track.releaseId, hint: "" };
+  }
+
+  async function resolveSelectedSuspense(): Promise<void> {
+    const item = selectedSuspenseItem;
+    const target = suspenseResolveTarget;
+
+    if (item === null || !target.ready) {
       return;
     }
 
@@ -1886,7 +2125,7 @@
           workspaceId: distributionWorkspaceId,
           suspenseId: item.id,
           resolution: suspenseResolutionFor(item),
-          targetId: "track_alma",
+          targetId: target.targetId,
           note: `Resolved through ${item.exactFixPath}`
         },
         {
@@ -1894,12 +2133,8 @@
         }
       );
       mutationReceiptPageId = activePageId;
-      suspenseState = createSuccessState<PageResult<SuspenseItem>>({
-        items: suspenseItems.map((candidate: SuspenseItem): SuspenseItem =>
-          candidate.id === item.id ? { ...candidate, status: "resolved" } : candidate
-        ),
-        nextCursor: null
-      });
+      closeSuspensePanel();
+      await loadSuspense();
     } catch (error: unknown) {
       suspenseState = createErrorState<PageResult<SuspenseItem>>(error);
     }
@@ -1926,10 +2161,31 @@
     }
   }
 
-  async function recordPayment(): Promise<void> {
-    const statement = statements[0];
+  function openPaymentPanel(paymentId: string, mode: PaymentPanelMode): void {
+    const payment = payments.find((candidate: PaymentSummary): boolean => candidate.id === paymentId);
 
-    if (statement === undefined) {
+    if (payment === undefined) {
+      return;
+    }
+
+    selectedPaymentId = paymentId;
+    paymentPanelMode = mode;
+    paymentReferenceInput = payment.reference ?? "";
+    paymentBankTransactionInput = "";
+  }
+
+  function closePaymentPanel(): void {
+    selectedPaymentId = null;
+    paymentPanelMode = null;
+    paymentReferenceInput = "";
+    paymentBankTransactionInput = "";
+  }
+
+  async function recordPayment(): Promise<void> {
+    const statement = recordStatement;
+    const reference = recordPaymentReference.trim();
+
+    if (statement === null || reference === "") {
       return;
     }
 
@@ -1944,22 +2200,26 @@
           amountMicro: statement.netPayableMicro,
           currency: statement.currency,
           paidAt: new Date().toISOString(),
-          reference: "MU-PAY-PREVIEW"
+          reference
         },
         {
           idempotencyKey: createIdempotencyKey("payment-record")
         }
       );
       mutationReceiptPageId = activePageId;
+      recordStatementId = "";
+      recordPaymentReference = "";
+      await Promise.all([loadPayments(), loadStatements()]);
     } catch (error: unknown) {
       paymentsState = createErrorState<PageResult<PaymentSummary>>(error);
     }
   }
 
   async function editPayment(): Promise<void> {
-    const payment = payments[0];
+    const payment = selectedPayment;
+    const reference = paymentReferenceInput.trim();
 
-    if (payment === undefined) {
+    if (payment === null || reference === "") {
       return;
     }
 
@@ -1972,22 +2232,25 @@
           workspaceId: distributionWorkspaceId,
           amountMicro: payment.amountMicro,
           currency: payment.currency,
-          reference: "MU-PAY-UPDATED"
+          reference
         },
         {
           idempotencyKey: createIdempotencyKey("payment-edit")
         }
       );
       mutationReceiptPageId = activePageId;
+      closePaymentPanel();
+      await loadPayments();
     } catch (error: unknown) {
       paymentsState = createErrorState<PageResult<PaymentSummary>>(error);
     }
   }
 
   async function reconcilePayment(): Promise<void> {
-    const payment = payments[0];
+    const payment = selectedPayment;
+    const bankTransactionId = paymentBankTransactionInput.trim();
 
-    if (payment === undefined) {
+    if (payment === null || bankTransactionId === "") {
       return;
     }
 
@@ -1998,7 +2261,7 @@
         payment.id,
         {
           workspaceId: distributionWorkspaceId,
-          bankTransactionId: "bank_tx_preview",
+          bankTransactionId,
           reconciledAt: new Date().toISOString()
         },
         {
@@ -2006,15 +2269,18 @@
         }
       );
       mutationReceiptPageId = activePageId;
+      closePaymentPanel();
+      await loadPayments();
     } catch (error: unknown) {
       paymentsState = createErrorState<PageResult<PaymentSummary>>(error);
     }
   }
 
   async function voidPayment(): Promise<void> {
-    const payment = payments[0];
+    const payment = selectedPayment;
+    const reference = paymentReferenceInput.trim();
 
-    if (payment === undefined) {
+    if (payment === null || reference === "") {
       return;
     }
 
@@ -2027,13 +2293,15 @@
           workspaceId: distributionWorkspaceId,
           amountMicro: "0",
           currency: payment.currency,
-          reference: "VOID-PREVIEW"
+          reference
         },
         {
           idempotencyKey: createIdempotencyKey("payment-void")
         }
       );
       mutationReceiptPageId = activePageId;
+      closePaymentPanel();
+      await Promise.all([loadPayments(), loadStatements()]);
     } catch (error: unknown) {
       paymentsState = createErrorState<PageResult<PaymentSummary>>(error);
     }
@@ -2496,7 +2764,7 @@
   function createImportToolbarFilters(state: ImportUiState): readonly ToolbarFilter[] {
     return [
       { label: "Source", value: state.source, active: true, disabled: false, actionId: "source", title: "Cycle import source" },
-      { label: "File", value: state.fileName, active: false, disabled: false, actionId: "file", title: "Restore sample file" },
+      { label: "File", value: state.fileName === "" ? "no file selected" : state.fileName, active: false, disabled: false, actionId: "file", title: "Clear selected file" },
       { label: "State", value: state.status, active: false, disabled: false, actionId: "status", title: "Run import preview" }
     ];
   }
@@ -2577,12 +2845,45 @@
     throw new Error(`Unknown Distribution import source: ${value}.`);
   }
 
-  function sampleFileNameForImportSource(source: ImportSource): string {
-    if (source === "kontor") {
-      return "Kontor_Music_Report_Jan2026.csv";
+  // TSV twin of parseCsvRecords (bank-parser handles comma-separated files only):
+  // first non-empty line is the header, remaining lines become keyed records.
+  function parseTsvRecords(text: string): readonly Readonly<Record<string, string>>[] {
+    const lines = text.split(/\r\n|\r|\n/u).filter((line: string): boolean => line.trim().length > 0);
+    const headerLine = lines[0];
+
+    if (lines.length < 2 || headerLine === undefined) {
+      return [];
     }
 
-    return "RNSales_Jan2026_eeeemusic.xlsx";
+    const header = headerLine.split("\t").map((value: string): string => value.trim());
+
+    return lines.slice(1).map((line: string): Readonly<Record<string, string>> => {
+      const cells = line.split("\t").map((value: string): string => value.trim());
+      const record: Record<string, string> = {};
+
+      for (let index = 0; index < header.length; index += 1) {
+        const key = header[index];
+
+        if (key !== undefined && key.length > 0) {
+          record[key] = cells[index] ?? "";
+        }
+      }
+
+      return record;
+    });
+  }
+
+  // FNV-1a 32-bit over the raw file text: a stable client-side content fingerprint
+  // used as the preview checksum (the server folds it into its idempotency fingerprint).
+  function importContentChecksum(text: string): string {
+    let hash = 0x811c9dc5;
+
+    for (let index = 0; index < text.length; index += 1) {
+      hash ^= text.charCodeAt(index);
+      hash = Math.imul(hash, 0x01000193);
+    }
+
+    return (hash >>> 0).toString(16).padStart(8, "0");
   }
 
   function formatMicro(amountMicro: string): string {
@@ -2850,9 +3151,9 @@
           </label>
           <label>
             <span>Export file</span>
-            <input value={importState.fileName} oninput={updateImportFile} />
+            <input type="file" accept="text/csv,.csv,.tsv,text/tab-separated-values" onchange={handleImportFile} />
           </label>
-          <button class="distribution-action" type="button" onclick={previewImport}>Preview export</button>
+          <button class="distribution-action" type="button" disabled={!canPreviewImport} title={canPreviewImport ? "" : "Select a CSV/TSV export file first"} onclick={previewImport}>Preview export</button>
           <button class="distribution-action primary" type="button" disabled={!canConfirmImport || !writesEnabled} title={writeDisabledTitle()} onclick={confirmImport}>Validate import</button>
         </section>
         <section class="filter-strip ehq-edge-surface" aria-label="Import filters">
@@ -2925,12 +3226,25 @@
             {#snippet action()}
               <button class="distribution-action" type="button" onclick={previewAllocationRun}>Preview locked run</button>
               <button class="distribution-action primary" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={startCadencedAllocationRun}>Post cadence wave</button>
-              <button class="distribution-action danger" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={unpostAllocationRun}>Request unpost run</button>
             {/snippet}
             <p class="lock-key">{allocationLockKey}</p>
           </SectionTemplate>
         </section>
-        <Table title="Allocation runs" columns={allocationColumns} rows={allocationRows} state={tableStateFor(allocationsState.status, allocationRuns.length)} actionLabel="" pagination={allocationsPagination} />
+        {#if selectedRun !== null}
+          <section class="form-panel ehq-edge-surface" aria-label="Request unpost run">
+            <div class="panel-context">
+              <strong>{selectedRun.runReference}</strong>
+              <span>{selectedRun.period} · {selectedRun.status} · lock {selectedRun.lockKey}</span>
+            </div>
+            <label>
+              <span>Unpost reason</span>
+              <input value={unpostReasonInput} oninput={updateUnpostReason} />
+            </label>
+            <button class="distribution-action danger" type="button" disabled={!writesEnabled || unpostReasonInput.trim() === ""} title={writesEnabled ? (unpostReasonInput.trim() === "" ? "Enter an unpost reason first" : "") : writeGateMessage} onclick={unpostAllocationRun}>Request unpost run</button>
+            <button class="distribution-action" type="button" onclick={closeUnpostPanel}>Cancel</button>
+          </section>
+        {/if}
+        <Table title="Allocation runs" columns={allocationColumns} rows={allocationRows} state={tableStateFor(allocationsState.status, allocationRuns.length)} actionLabel="" rowActions={allocationRowActions} pagination={allocationsPagination} />
       {:else if activePageId === "suspense"}
         <section class="filter-strip ehq-edge-surface" aria-label="Suspense filters">
           <label>
@@ -2942,9 +3256,32 @@
             </select>
           </label>
           <button class="distribution-action" type="button" onclick={loadSuspense}>Filter</button>
-          <button class="distribution-action primary" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={resolveFirstSuspense}>Resolve first exact path</button>
         </section>
-        <Table title="Suspense grouped by reason" columns={suspenseColumns} rows={suspenseTableRows} state={suspenseState.status === "loading" ? "loading" : suspenseState.status === "error" ? "error" : suspenseItems.length === 0 ? "empty" : "default"} actionLabel="" pagination={suspensePagination} />
+        {#if selectedSuspenseItem !== null}
+          <section class="form-panel ehq-edge-surface" aria-label="Resolve suspense item">
+            <div class="panel-context">
+              <strong>{selectedSuspenseItem.sourceReference}</strong>
+              <span>{suspenseReason(selectedSuspenseItem.reason)} · {formatMoney(selectedSuspenseItem.amountMicro, selectedSuspenseItem.currency)} · resolution {selectedSuspenseResolution}</span>
+            </div>
+            {#if selectedSuspenseResolution !== "hold"}
+              <label>
+                <span>Target track</span>
+                <select value={suspenseTargetTrackId} onchange={updateSuspenseTargetTrack}>
+                  <option value="">Select a track</option>
+                  {#each suspenseTrackOptions ?? [] as track (track.id)}
+                    <option value={track.id}>{track.title} · {track.artistName}</option>
+                  {/each}
+                </select>
+              </label>
+              {#if suspenseTrackOptionsError !== null}
+                <span class="panel-error">{suspenseTrackOptionsError}</span>
+              {/if}
+            {/if}
+            <button class="distribution-action primary" type="button" disabled={!writesEnabled || !suspenseResolveTarget.ready} title={writesEnabled ? suspenseResolveTarget.hint : writeGateMessage} onclick={resolveSelectedSuspense}>Resolve</button>
+            <button class="distribution-action" type="button" onclick={closeSuspensePanel}>Cancel</button>
+          </section>
+        {/if}
+        <Table title="Suspense grouped by reason" columns={suspenseColumns} rows={suspenseTableRows} state={suspenseState.status === "loading" ? "loading" : suspenseState.status === "error" ? "error" : suspenseItems.length === 0 ? "empty" : "default"} actionLabel="" rowActions={suspenseRowActions} pagination={suspensePagination} />
       {:else if activePageId === "statements"}
         <section class="statement-summary ehq-edge-surface">
           {#if statementPreview !== null}
@@ -2982,12 +3319,56 @@
             </select>
           </label>
           <button class="distribution-action" type="button" onclick={loadPayments}>Filter</button>
-          <button class="distribution-action primary" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={recordPayment}>Record payment</button>
-          <button class="distribution-action" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={editPayment}>Edit reference</button>
-          <button class="distribution-action" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={reconcilePayment}>Reconcile payment</button>
-          <button class="distribution-action danger" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={voidPayment}>Void payment</button>
         </section>
-        <Table title="Payments" columns={paymentColumns} rows={paymentRows} state={paymentsState.status === "loading" ? "loading" : paymentsState.status === "error" ? "error" : payments.length === 0 ? "empty" : "default"} actionLabel="" pagination={paymentsPagination} />
+        <section class="form-panel ehq-edge-surface" aria-label="Record payment">
+          <label>
+            <span>Statement</span>
+            <select value={recordStatementId} onchange={updateRecordStatement}>
+              <option value="">Select an open statement</option>
+              {#each openStatements as statement (statement.id)}
+                <option value={statement.id}>{statement.payeeName} · {statement.period} · {formatMoney(statement.netPayableMicro, statement.currency)}</option>
+              {/each}
+            </select>
+          </label>
+          <label>
+            <span>Amount (from statement)</span>
+            <input value={recordStatement === null ? "" : formatMoney(recordStatement.netPayableMicro, recordStatement.currency)} readonly />
+          </label>
+          <label>
+            <span>Reference</span>
+            <input value={recordPaymentReference} oninput={updateRecordPaymentReference} />
+          </label>
+          <button class="distribution-action primary" type="button" disabled={!writesEnabled || recordStatement === null || recordPaymentReference.trim() === ""} title={writesEnabled ? (recordStatement === null ? "Select an open statement first" : recordPaymentReference.trim() === "" ? "Enter a payment reference first" : "") : writeGateMessage} onclick={recordPayment}>Record payment</button>
+        </section>
+        {#if selectedPayment !== null && paymentPanelMode !== null}
+          <section class="form-panel ehq-edge-surface" aria-label="Payment action">
+            <div class="panel-context">
+              <strong>{selectedPayment.payeeName}</strong>
+              <span>{formatMoney(selectedPayment.amountMicro, selectedPayment.currency)} · {selectedPayment.status} · {selectedPayment.reference ?? "no reference"}</span>
+            </div>
+            {#if paymentPanelMode === "edit"}
+              <label>
+                <span>New reference</span>
+                <input value={paymentReferenceInput} oninput={updatePaymentReferenceInput} />
+              </label>
+              <button class="distribution-action primary" type="button" disabled={!writesEnabled || paymentReferenceInput.trim() === ""} title={writesEnabled ? (paymentReferenceInput.trim() === "" ? "Enter the new reference first" : "") : writeGateMessage} onclick={editPayment}>Save reference</button>
+            {:else if paymentPanelMode === "reconcile"}
+              <label>
+                <span>Bank transaction ID</span>
+                <input value={paymentBankTransactionInput} oninput={updatePaymentBankTransactionInput} />
+              </label>
+              <button class="distribution-action primary" type="button" disabled={!writesEnabled || paymentBankTransactionInput.trim() === ""} title={writesEnabled ? (paymentBankTransactionInput.trim() === "" ? "Enter the bank transaction ID first" : "") : writeGateMessage} onclick={reconcilePayment}>Reconcile payment</button>
+            {:else}
+              <label>
+                <span>Void reference</span>
+                <input value={paymentReferenceInput} oninput={updatePaymentReferenceInput} />
+              </label>
+              <button class="distribution-action danger" type="button" disabled={!writesEnabled || paymentReferenceInput.trim() === ""} title={writesEnabled ? (paymentReferenceInput.trim() === "" ? "Enter a void reference first" : "") : writeGateMessage} onclick={voidPayment}>Void payment</button>
+            {/if}
+            <button class="distribution-action" type="button" onclick={closePaymentPanel}>Cancel</button>
+          </section>
+        {/if}
+        <Table title="Payments" columns={paymentColumns} rows={paymentRows} state={paymentsState.status === "loading" ? "loading" : paymentsState.status === "error" ? "error" : payments.length === 0 ? "empty" : "default"} actionLabel="" rowActions={paymentRowActions} pagination={paymentsPagination} />
       {:else if activePageId === "revenue"}
         <section class="filter-strip ehq-edge-surface" aria-label="Revenue filters">
           <label>
@@ -3273,6 +3654,28 @@
   .import-result {
     display: grid;
     gap: var(--ehq-space-1);
+  }
+
+  .panel-context {
+    display: grid;
+    gap: var(--ehq-space-1);
+  }
+
+  .panel-context strong {
+    font-size: var(--ehq-type-ui-size);
+    font-weight: var(--ehq-type-heading-weight);
+  }
+
+  .panel-context span {
+    color: var(--ehq-text-muted);
+    font-family: var(--ehq-mono);
+    font-size: var(--ehq-type-caption-size);
+  }
+
+  .panel-error {
+    color: var(--ehq-error);
+    font-family: var(--ehq-mono);
+    font-size: var(--ehq-type-caption-size);
   }
 
   .import-result.error {

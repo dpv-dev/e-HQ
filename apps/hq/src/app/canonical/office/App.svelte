@@ -287,11 +287,6 @@
   ];
   const officeNavItems: readonly OfficeNavItem[] = officeNavGroups.flatMap((group: OfficeNavGroup): readonly OfficeNavItem[] => group.items);
 
-  const accountOptions: readonly SelectOption[] = [
-    { label: "All accounts", value: allValue },
-    { label: "MCB main", value: "mcb-main" },
-    { label: "SBI operating", value: "sbi-operating" }
-  ];
   const typeOptions: readonly SelectOption[] = [
     { label: "All types", value: allValue },
     { label: "Income", value: "income" },
@@ -396,6 +391,14 @@
   let editAmount = $state("");
   let editCategoryId = $state("");
   let editProjectId = $state("");
+  let creatingTransaction = $state(false);
+  let createOccurredOn = $state("");
+  let createDescription = $state("");
+  let createAccountId = $state("");
+  let createCategoryId = $state("");
+  let createProjectId = $state("");
+  let createAmount = $state("");
+  let createDirection = $state<"expense" | "income">("expense");
   let cashflowImportRecords = $state<readonly Readonly<Record<string, string>>[]>([]);
   let cashflowImportMessage = $state("Importer un cashflow CSV (Month, Inflow, Outflow, ClosingBalance, Currency).");
   let importState = $state<ImportUiState>({
@@ -451,6 +454,21 @@
   );
   const editProjectOptions = $derived(
     createProjectOptions(transactionRows).filter((option: SelectOption): boolean => option.value !== allValue)
+  );
+  // Account filter options come from the workspace's real bank accounts (loaded once at
+  // mount via loadImportAccounts) so filter values always match server-side account ids.
+  const accountOptions = $derived<readonly SelectOption[]>([
+    { label: "All accounts", value: allValue },
+    ...importAccounts.map((account: OfficeBankAccountSummary): SelectOption => ({
+      label: `${account.bankName} · ${account.accountLabel} (${account.currency})`,
+      value: account.id
+    }))
+  ]);
+  const canSubmitTransactionCreate = $derived(
+    createOccurredOn.trim().length > 0 &&
+    createDescription.trim().length > 0 &&
+    createAccountId.length > 0 &&
+    createAmount.trim().length > 0
   );
   const ledgerRowActions = $derived<readonly TableRowAction[]>([
     { label: "Éditer", onAction: openTransactionEditor },
@@ -923,6 +941,7 @@
     if (transaction === undefined) {
       return;
     }
+    creatingTransaction = false;
     editingTransaction = transaction;
     editOccurredOn = transaction.occurredOn.slice(0, 10);
     editDescription = transaction.description;
@@ -2118,23 +2137,50 @@
     }
   }
 
-  async function createTransactionDraft(): Promise<void> {
-    const request: OfficeTransactionWriteRequest = {
-      workspaceId: officeWorkspaceId,
-      occurredOn: `${period}-14`,
-      accountId: "mcb-main",
-      categoryId: "cat_print",
-      projectId: "project_album_posters",
-      description: "Draft Office preview",
-      amountMicro: "-1200000000",
-      currency: "MUR"
-    };
+  function openTransactionCreate(): void {
+    editingTransaction = null;
+    creatingTransaction = true;
+    createOccurredOn = today;
+    createDescription = "";
+    createAccountId = defaultImportAccountId(importAccounts, null);
+    createCategoryId = "";
+    createProjectId = "";
+    createAmount = "";
+    createDirection = "expense";
+  }
 
+  function closeTransactionCreate(): void {
+    creatingTransaction = false;
+  }
+
+  // The signed amount is derived from the user's decimal input plus the income/expense
+  // direction, and the currency from the selected bank account — nothing is fabricated.
+  async function submitTransactionCreate(): Promise<void> {
     try {
+      const account = importAccounts.find((candidate: OfficeBankAccountSummary): boolean => candidate.id === createAccountId);
+      if (account === undefined) {
+        throw new Error("Choisis un compte bancaire pour la nouvelle écriture.");
+      }
+      const magnitudeMicro = BigInt(decimalAmountToMicro(createAmount));
+      const absoluteMicro = magnitudeMicro < 0n ? -magnitudeMicro : magnitudeMicro;
+      if (absoluteMicro === 0n) {
+        throw new Error("Le montant doit être différent de zéro.");
+      }
+      const request: OfficeTransactionWriteRequest = {
+        workspaceId: officeWorkspaceId,
+        occurredOn: createOccurredOn,
+        accountId: account.id,
+        categoryId: createCategoryId.length > 0 ? createCategoryId : null,
+        projectId: createProjectId.length > 0 ? createProjectId : null,
+        description: createDescription.trim(),
+        amountMicro: (createDirection === "expense" ? -absoluteMicro : absoluteMicro).toString(),
+        currency: account.currency
+      };
       const receipt = await client.office.createTransaction(request, {
         idempotencyKey: createIdempotencyKey("transaction-create")
       });
       actionReceipt = receipt;
+      creatingTransaction = false;
       await loadTransactions();
     } catch (error: unknown) {
       transactionsState = createErrorState<PageResult<OfficeTransaction>>(error);
@@ -3147,9 +3193,69 @@
             </select>
           </label>
           <button class="office-action ehq-type-heading primary" type="button" onclick={applyTransactionFilters}>Filter</button>
-          <button class="office-action ehq-type-heading" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={createTransactionDraft}>New entry</button>
+          <button class="office-action ehq-type-heading" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={openTransactionCreate}>New entry</button>
           <button class="office-action ehq-type-heading" type="button" disabled={transactionRows.length === 0} onclick={exportTransactionsCsv}>Export CSV</button>
         </section>
+
+        {#if creatingTransaction}
+          <section class="office-edit-panel ehq-edge-surface" aria-label="Nouvelle écriture">
+            <div class="office-edit-grid">
+              <label>
+                <span class="ehq-type-label-mono">Date</span>
+                <input type="date" bind:value={createOccurredOn} />
+              </label>
+              <label class="office-edit-wide">
+                <span class="ehq-type-label-mono">Description</span>
+                <input type="text" bind:value={createDescription} />
+              </label>
+              <label>
+                <span class="ehq-type-label-mono">Compte</span>
+                <select bind:value={createAccountId} disabled={importAccounts.length === 0}>
+                  {#if importAccounts.length === 0}
+                    <option value="">Aucun compte bancaire chargé</option>
+                  {:else}
+                    {#each importAccounts as account (account.id)}
+                      <option value={account.id}>{account.bankName} · {account.accountLabel} ({account.currency}){account.isActive ? "" : " — inactif"}</option>
+                    {/each}
+                  {/if}
+                </select>
+              </label>
+              <label>
+                <span class="ehq-type-label-mono">Montant</span>
+                <input type="text" inputmode="decimal" bind:value={createAmount} placeholder="1200.00" />
+              </label>
+              <label>
+                <span class="ehq-type-label-mono">Sens</span>
+                <select bind:value={createDirection}>
+                  <option value="expense">Dépense</option>
+                  <option value="income">Revenu</option>
+                </select>
+              </label>
+              <label>
+                <span class="ehq-type-label-mono">Catégorie</span>
+                <select bind:value={createCategoryId}>
+                  <option value="">— Aucune —</option>
+                  {#each editCategoryOptions as option (option.value)}
+                    <option value={option.value}>{option.label}</option>
+                  {/each}
+                </select>
+              </label>
+              <label>
+                <span class="ehq-type-label-mono">Projet</span>
+                <select bind:value={createProjectId}>
+                  <option value="">— Aucun —</option>
+                  {#each editProjectOptions as option (option.value)}
+                    <option value={option.value}>{option.label}</option>
+                  {/each}
+                </select>
+              </label>
+            </div>
+            <div class="office-edit-actions">
+              <button class="office-action ehq-type-heading primary" type="button" disabled={!writesEnabled || !canSubmitTransactionCreate} title={writeDisabledTitle()} onclick={submitTransactionCreate}>Créer l'écriture</button>
+              <button class="office-action ehq-type-heading" type="button" onclick={closeTransactionCreate}>Fermer</button>
+            </div>
+          </section>
+        {/if}
 
         {#if editingTransaction !== null}
           <section class="office-edit-panel ehq-edge-surface" aria-label="Éditer la transaction">
@@ -3202,6 +3308,7 @@
           {period}
           dateFrom={activeRange.from}
           dateTo={activeRange.to}
+          writesEnabled={writesEnabled}
           onReceipt={receivePartnerReceipt}
         />
       {:else if activePageId === "suppliers"}
@@ -3212,6 +3319,7 @@
           {period}
           dateFrom={activeRange.from}
           dateTo={activeRange.to}
+          writesEnabled={writesEnabled}
           onReceipt={receivePartnerReceipt}
         />
       {:else if activePageId === "projects"}
