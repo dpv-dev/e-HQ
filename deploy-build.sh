@@ -26,6 +26,9 @@ echo "==> Frontend (apps/hq): typecheck + build"
 corepack pnpm --filter @ehq/hq check
 corepack pnpm --filter @ehq/hq build
 
+echo "==> Anti-regression gate (audit lock-in)"
+bash scripts/check-regressions.sh
+
 echo "==> Package upload zips (deterministic, secret-guarded)"
 bash deploy-zip.sh
 
