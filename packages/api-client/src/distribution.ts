@@ -10,11 +10,13 @@ import type {
   AuditLogQuery,
   ApiMutationReceipt,
   ApiRunReceipt,
+  ContractRoyaltyRulesUpdateRequest,
   DistributionContract,
   DistributionContractExpense,
   DistributionContractExpenseQuery,
   DistributionContractExpenseRecordRequest,
   DistributionContractsQuery,
+  DistributionContractUpsertRequest,
   DistributionDashboardQuery,
   DistributionDashboardResponse,
   DistributionImportBatchesQuery,
@@ -29,9 +31,11 @@ import type {
   DistributionAlias,
   DistributionDuplicate,
   DistributionReconciliationResponse,
+  DistributionReleaseUpsertRequest,
   DistributionRevenueQuery,
   DistributionRevenueRow,
   DistributionSettingsResponse,
+  DistributionTrackUpsertRequest,
   DistributionWorkspacePageQuery,
   DistributionWorkspaceQuery,
   EntityId,
@@ -43,9 +47,12 @@ import type {
   PaymentSummary,
   PaymentsQuery,
   PaymentUpdateRequest,
+  PaymentVoidRequest,
   ReleaseSummary,
   ReleasesQuery,
   StatementGenerateRequest,
+  StatementPrintQuery,
+  StatementPrintResponse,
   StatementVoidRequest,
   StatementSummary,
   StatementsQuery,
@@ -75,6 +82,15 @@ export interface DistributionApiClient {
     options: WriteRequestOptions
   ) => Promise<ApiMutationReceipt>;
   readonly listContracts: (query: DistributionContractsQuery) => Promise<PageResult<DistributionContract>>;
+  readonly createContract: (
+    request: DistributionContractUpsertRequest,
+    options: WriteRequestOptions
+  ) => Promise<ApiMutationReceipt>;
+  readonly updateContractRules: (
+    contractId: EntityId,
+    request: ContractRoyaltyRulesUpdateRequest,
+    options: WriteRequestOptions
+  ) => Promise<ApiMutationReceipt>;
   readonly listContractExpenses: (
     query: DistributionContractExpenseQuery
   ) => Promise<PageResult<DistributionContractExpense>>;
@@ -84,7 +100,15 @@ export interface DistributionApiClient {
   ) => Promise<ApiMutationReceipt>;
   readonly listPayees: (query: PayeesQuery) => Promise<PageResult<PayeeSummary>>;
   readonly listReleases: (query: ReleasesQuery) => Promise<PageResult<ReleaseSummary>>;
+  readonly createRelease: (
+    request: DistributionReleaseUpsertRequest,
+    options: WriteRequestOptions
+  ) => Promise<ApiMutationReceipt>;
   readonly listTracks: (query: TracksQuery) => Promise<PageResult<TrackSummary>>;
+  readonly createTrack: (
+    request: DistributionTrackUpsertRequest,
+    options: WriteRequestOptions
+  ) => Promise<ApiMutationReceipt>;
   readonly listAllocationRuns: (query: AllocationRunQuery) => Promise<PageResult<AllocationRunSummary>>;
   readonly previewAllocationRun: (
     request: AllocationRunPreviewRequest,
@@ -114,6 +138,7 @@ export interface DistributionApiClient {
     request: StatementVoidRequest,
     options: WriteRequestOptions
   ) => Promise<ApiMutationReceipt>;
+  readonly printStatement: (query: StatementPrintQuery) => Promise<StatementPrintResponse>;
   readonly listPayments: (query: PaymentsQuery) => Promise<PageResult<PaymentSummary>>;
   readonly recordPayment: (request: PaymentRecordRequest, options: WriteRequestOptions) => Promise<ApiMutationReceipt>;
   readonly updatePayment: (
@@ -124,6 +149,11 @@ export interface DistributionApiClient {
   readonly reconcilePayment: (
     paymentId: EntityId,
     request: PaymentReconcileRequest,
+    options: WriteRequestOptions
+  ) => Promise<ApiMutationReceipt>;
+  readonly voidPayment: (
+    paymentId: EntityId,
+    request: PaymentVoidRequest,
     options: WriteRequestOptions
   ) => Promise<ApiMutationReceipt>;
   readonly getRevenue: (query: DistributionRevenueQuery) => Promise<PageResult<DistributionRevenueRow>>;
@@ -186,6 +216,21 @@ export function createDistributionApiClient(config: ApiClientConfig): Distributi
         cursor: query.cursor,
         limit: query.limit
       }),
+    createContract: (
+      request: DistributionContractUpsertRequest,
+      options: WriteRequestOptions
+    ): Promise<ApiMutationReceipt> =>
+      transport.post<ApiMutationReceipt>("contracts", request, options.idempotencyKey),
+    updateContractRules: (
+      contractId: EntityId,
+      request: ContractRoyaltyRulesUpdateRequest,
+      options: WriteRequestOptions
+    ): Promise<ApiMutationReceipt> =>
+      transport.post<ApiMutationReceipt>(
+        `contracts/${encodePathSegment(contractId)}/rules`,
+        request,
+        options.idempotencyKey
+      ),
     listContractExpenses: (
       query: DistributionContractExpenseQuery
     ): Promise<PageResult<DistributionContractExpense>> =>
@@ -221,6 +266,11 @@ export function createDistributionApiClient(config: ApiClientConfig): Distributi
         cursor: query.cursor,
         limit: query.limit
       }),
+    createRelease: (
+      request: DistributionReleaseUpsertRequest,
+      options: WriteRequestOptions
+    ): Promise<ApiMutationReceipt> =>
+      transport.post<ApiMutationReceipt>("releases", request, options.idempotencyKey),
     listTracks: (query: TracksQuery): Promise<PageResult<TrackSummary>> =>
       transport.get<PageResult<TrackSummary>>("tracks", {
         workspaceId: query.workspaceId,
@@ -229,6 +279,11 @@ export function createDistributionApiClient(config: ApiClientConfig): Distributi
         cursor: query.cursor,
         limit: query.limit
       }),
+    createTrack: (
+      request: DistributionTrackUpsertRequest,
+      options: WriteRequestOptions
+    ): Promise<ApiMutationReceipt> =>
+      transport.post<ApiMutationReceipt>("tracks", request, options.idempotencyKey),
     listAllocationRuns: (query: AllocationRunQuery): Promise<PageResult<AllocationRunSummary>> =>
       transport.get<PageResult<AllocationRunSummary>>("allocations/runs", {
         workspaceId: query.workspaceId,
@@ -292,6 +347,10 @@ export function createDistributionApiClient(config: ApiClientConfig): Distributi
         request,
         options.idempotencyKey
       ),
+    printStatement: (query: StatementPrintQuery): Promise<StatementPrintResponse> =>
+      transport.get<StatementPrintResponse>(`statements/${encodePathSegment(query.statementId)}/print`, {
+        workspaceId: query.workspaceId
+      }),
     listPayments: (query: PaymentsQuery): Promise<PageResult<PaymentSummary>> =>
       transport.get<PageResult<PaymentSummary>>("payments", {
         workspaceId: query.workspaceId,
@@ -320,6 +379,16 @@ export function createDistributionApiClient(config: ApiClientConfig): Distributi
     ): Promise<ApiMutationReceipt> =>
       transport.post<ApiMutationReceipt>(
         `payments/${encodePathSegment(paymentId)}/reconcile`,
+        request,
+        options.idempotencyKey
+      ),
+    voidPayment: (
+      paymentId: EntityId,
+      request: PaymentVoidRequest,
+      options: WriteRequestOptions
+    ): Promise<ApiMutationReceipt> =>
+      transport.post<ApiMutationReceipt>(
+        `payments/${encodePathSegment(paymentId)}/void`,
         request,
         options.idempotencyKey
       ),

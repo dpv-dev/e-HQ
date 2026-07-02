@@ -222,6 +222,10 @@ export interface PersistDistributionPaymentReconcileInput {
   readonly reconciledAt: string;
 }
 
+export interface PersistDistributionPaymentVoidInput {
+  readonly paymentId: string;
+}
+
 export interface PersistedDistributionRoyaltyRule {
   readonly id: string;
   readonly contractId: string;
@@ -325,6 +329,7 @@ const SENSITIVE_ACTIONS = new Set<string>([
   "distribution_payment_record",
   "distribution_payment_reconcile",
   "distribution_payment_update",
+  "distribution_payment_void",
   "distribution_payee_upsert",
   "distribution_release_upsert",
   "distribution_statement_generate",
@@ -1241,6 +1246,20 @@ export async function persistDistributionPaymentReconcile(tx: ApiWriteTransactio
     )
     on conflict (statement_id, payment_id) do update
     set amount_applied = excluded.amount_applied
+  `);
+}
+
+export async function persistDistributionPaymentVoid(tx: ApiWriteTransaction, input: PersistDistributionPaymentVoidInput): Promise<void> {
+  if (tx.kind === "memory") {
+    return;
+  }
+
+  // The payment row is kept and flipped to 'void'; balance reads already treat
+  // void payments as zero applied, so the statement balance self-corrects.
+  await tx.executor.execute(sql`
+    update payments
+    set status = 'void', updated_at = now()
+    where id = ${input.paymentId}
   `);
 }
 

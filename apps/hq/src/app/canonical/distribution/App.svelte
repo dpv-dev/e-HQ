@@ -30,6 +30,8 @@
     type PayeeSummary,
     type PaymentSummary,
     type ReleaseSummary,
+    type StatementPrintLine,
+    type StatementPrintResponse,
     type StatementSummary,
     type SuspenseItem,
     type TrackSummary
@@ -115,6 +117,9 @@
   }
 
   type PaymentPanelMode = "edit" | "reconcile" | "void";
+  type CatalogPanelMode = "release" | "track";
+  type CatalogEntryStatus = "draft" | "released" | "archived";
+  type ContractStatus = "draft" | "active" | "paused" | "ended";
 
   interface DistributionKpi {
     readonly label: string;
@@ -197,6 +202,17 @@
     { label: "Queued", value: "queued" },
     { label: "Paid", value: "paid" },
     { label: "Voided", value: "voided" }
+  ];
+  const catalogStatusOptions: readonly SelectOption[] = [
+    { label: "Draft", value: "draft" },
+    { label: "Released", value: "released" },
+    { label: "Archived", value: "archived" }
+  ];
+  const contractStatusOptions: readonly SelectOption[] = [
+    { label: "Draft", value: "draft" },
+    { label: "Active", value: "active" },
+    { label: "Paused", value: "paused" },
+    { label: "Ended", value: "ended" }
   ];
   const revenueGroupOptions: readonly SelectOption[] = [
     { label: "Store", value: "store" },
@@ -442,6 +458,30 @@
   let suspenseTrackOptionsError = $state<string | null>(null);
   let selectedRunId = $state<string | null>(null);
   let unpostReasonInput = $state("");
+  let catalogPanelMode = $state<CatalogPanelMode | null>(null);
+  let releaseTitleInput = $state("");
+  let releaseArtistInput = $state("");
+  let releaseUpcInput = $state("");
+  let releaseStatusInput = $state<CatalogEntryStatus>("draft");
+  let releaseDateInput = $state("");
+  let trackTitleInput = $state("");
+  let trackArtistInput = $state("");
+  let trackIsrcInput = $state("");
+  let trackReleaseIdInput = $state("");
+  let trackStatusInput = $state<CatalogEntryStatus>("draft");
+  let contractPanelOpen = $state(false);
+  let contractTitleInput = $state("");
+  let contractPayeeIdInput = $state("");
+  let contractStatusInput = $state<ContractStatus>("draft");
+  let contractEffectiveFromInput = $state("");
+  let contractEffectiveToInput = $state("");
+  let contractSplitPercentInput = $state("");
+  let contractCurrencyInput = $state("");
+  let ruleContractId = $state<string | null>(null);
+  let rulePayeeIdInput = $state("");
+  let rulePercentageInput = $state("");
+  let printingStatementId = $state<string | null>(null);
+  let statementPrintError = $state<string | null>(null);
 
   const activePage = $derived(getNavItem(activePageId));
   const distributionPeriod = $derived(selectedPeriod);
@@ -537,10 +577,18 @@
   );
   const suspenseResolveTarget = $derived(resolveSuspenseTargetFor(selectedSuspenseResolution, selectedSuspenseTrack));
   const selectedRun = $derived(allocationRuns.find((run: AllocationRunSummary): boolean => run.id === selectedRunId) ?? null);
+  const selectedRuleContract = $derived(contracts.find((contract: DistributionContract): boolean => contract.id === ruleContractId) ?? null);
+  const contractSplitBp = $derived(parseSplitBasisPoints(contractSplitPercentInput));
   const paymentRowActions: readonly TableRowAction[] = [
     { label: "Edit reference", onAction: (rowId: string): void => openPaymentPanel(rowId, "edit") },
     { label: "Reconcile", onAction: (rowId: string): void => openPaymentPanel(rowId, "reconcile") },
     { label: "Void", onAction: (rowId: string): void => openPaymentPanel(rowId, "void"), danger: true }
+  ];
+  const contractRowActions: readonly TableRowAction[] = [
+    { label: "Add rule", onAction: openContractRulePanel }
+  ];
+  const statementRowActions: readonly TableRowAction[] = [
+    { label: "Print PDF", onAction: printStatementPdf }
   ];
   const suspenseRowActions: readonly TableRowAction[] = [
     { label: "Resolve", onAction: openSuspenseResolution }
@@ -1758,6 +1806,82 @@
     unpostReasonInput = readInputValue(event);
   }
 
+  function updateReleaseTitle(event: Event): void {
+    releaseTitleInput = readInputValue(event);
+  }
+
+  function updateReleaseArtist(event: Event): void {
+    releaseArtistInput = readInputValue(event);
+  }
+
+  function updateReleaseUpc(event: Event): void {
+    releaseUpcInput = readInputValue(event);
+  }
+
+  function updateReleaseStatus(event: Event): void {
+    releaseStatusInput = readSelectValue(event) as CatalogEntryStatus;
+  }
+
+  function updateReleaseDate(event: Event): void {
+    releaseDateInput = readInputValue(event);
+  }
+
+  function updateTrackTitle(event: Event): void {
+    trackTitleInput = readInputValue(event);
+  }
+
+  function updateTrackArtist(event: Event): void {
+    trackArtistInput = readInputValue(event);
+  }
+
+  function updateTrackIsrc(event: Event): void {
+    trackIsrcInput = readInputValue(event);
+  }
+
+  function updateTrackRelease(event: Event): void {
+    trackReleaseIdInput = readSelectValue(event);
+  }
+
+  function updateTrackStatus(event: Event): void {
+    trackStatusInput = readSelectValue(event) as CatalogEntryStatus;
+  }
+
+  function updateContractTitle(event: Event): void {
+    contractTitleInput = readInputValue(event);
+  }
+
+  function updateContractPayee(event: Event): void {
+    contractPayeeIdInput = readSelectValue(event);
+  }
+
+  function updateContractStatus(event: Event): void {
+    contractStatusInput = readSelectValue(event) as ContractStatus;
+  }
+
+  function updateContractEffectiveFrom(event: Event): void {
+    contractEffectiveFromInput = readInputValue(event);
+  }
+
+  function updateContractEffectiveTo(event: Event): void {
+    contractEffectiveToInput = readInputValue(event);
+  }
+
+  function updateContractSplitPercent(event: Event): void {
+    contractSplitPercentInput = readInputValue(event);
+  }
+
+  function updateContractCurrency(event: Event): void {
+    contractCurrencyInput = readInputValue(event);
+  }
+
+  function updateRulePayee(event: Event): void {
+    rulePayeeIdInput = readSelectValue(event);
+  }
+
+  function updateRulePercentage(event: Event): void {
+    rulePercentageInput = readInputValue(event);
+  }
+
   function updatePeriodScope(event: Event): void {
     periodScope = readSelectValue(event) as PeriodScope;
     if (periodScope === "custom" && customRange === null) {
@@ -1936,6 +2060,217 @@
       mutationReceiptPageId = activePageId;
     } catch (error: unknown) {
       expensesState = createErrorState<PageResult<DistributionContractExpense>>(error);
+    }
+  }
+
+  function openCatalogPanel(mode: CatalogPanelMode): void {
+    catalogPanelMode = mode;
+    releaseTitleInput = "";
+    releaseArtistInput = "";
+    releaseUpcInput = "";
+    releaseStatusInput = "draft";
+    releaseDateInput = "";
+    trackTitleInput = "";
+    trackArtistInput = "";
+    trackIsrcInput = "";
+    trackReleaseIdInput = "";
+    trackStatusInput = "draft";
+  }
+
+  function closeCatalogPanel(): void {
+    catalogPanelMode = null;
+  }
+
+  async function createRelease(): Promise<void> {
+    const title = releaseTitleInput.trim();
+    const artistName = releaseArtistInput.trim();
+
+    if (title === "" || artistName === "") {
+      return;
+    }
+
+    clearRunReceipt();
+
+    try {
+      mutationReceipt = await client.distribution.createRelease(
+        {
+          workspaceId: distributionWorkspaceId,
+          id: null,
+          title,
+          artistName,
+          upc: releaseUpcInput.trim() === "" ? null : releaseUpcInput.trim(),
+          status: releaseStatusInput,
+          releaseDate: releaseDateInput === "" ? null : releaseDateInput
+        },
+        {
+          idempotencyKey: createIdempotencyKey("release-create")
+        }
+      );
+      mutationReceiptPageId = activePageId;
+      closeCatalogPanel();
+      await loadCatalog();
+    } catch (error: unknown) {
+      releasesState = createErrorState<PageResult<ReleaseSummary>>(error);
+    }
+  }
+
+  async function createTrack(): Promise<void> {
+    const title = trackTitleInput.trim();
+    const artistName = trackArtistInput.trim();
+
+    if (title === "" || artistName === "") {
+      return;
+    }
+
+    clearRunReceipt();
+
+    try {
+      mutationReceipt = await client.distribution.createTrack(
+        {
+          workspaceId: distributionWorkspaceId,
+          id: null,
+          releaseId: trackReleaseIdInput === "" ? null : trackReleaseIdInput,
+          title,
+          artistName,
+          isrc: trackIsrcInput.trim() === "" ? null : trackIsrcInput.trim(),
+          status: trackStatusInput
+        },
+        {
+          idempotencyKey: createIdempotencyKey("track-create")
+        }
+      );
+      mutationReceiptPageId = activePageId;
+      closeCatalogPanel();
+      await loadCatalog();
+    } catch (error: unknown) {
+      tracksState = createErrorState<PageResult<TrackSummary>>(error);
+    }
+  }
+
+  function openContractPanel(): void {
+    contractPanelOpen = true;
+    contractTitleInput = "";
+    contractPayeeIdInput = "";
+    contractStatusInput = "draft";
+    contractEffectiveFromInput = today;
+    contractEffectiveToInput = "";
+    contractSplitPercentInput = "";
+    contractCurrencyInput = "";
+  }
+
+  function closeContractPanel(): void {
+    contractPanelOpen = false;
+  }
+
+  // Split percent is typed as a human percentage (e.g. "80" or "12.5") and
+  // stored as basis points; null means the input is not a valid percentage yet.
+  function parseSplitBasisPoints(value: string): number | null {
+    const trimmed = value.trim();
+
+    if (!/^\d+(\.\d{1,2})?$/u.test(trimmed)) {
+      return null;
+    }
+
+    const basisPoints = Math.round(Number(trimmed) * 100);
+
+    if (basisPoints <= 0 || basisPoints > 10000) {
+      return null;
+    }
+
+    return basisPoints;
+  }
+
+  async function createContract(): Promise<void> {
+    const title = contractTitleInput.trim();
+    const currency = contractCurrencyInput.trim().toUpperCase();
+    const splitBp = contractSplitBp;
+
+    if (title === "" || contractPayeeIdInput === "" || contractEffectiveFromInput === "" || splitBp === null || currency === "") {
+      return;
+    }
+
+    clearRunReceipt();
+
+    try {
+      mutationReceipt = await client.distribution.createContract(
+        {
+          workspaceId: distributionWorkspaceId,
+          id: null,
+          payeeId: contractPayeeIdInput,
+          title,
+          status: contractStatusInput,
+          effectiveFrom: contractEffectiveFromInput,
+          effectiveTo: contractEffectiveToInput === "" ? null : contractEffectiveToInput,
+          splitBp,
+          currency
+        },
+        {
+          idempotencyKey: createIdempotencyKey("contract-create")
+        }
+      );
+      mutationReceiptPageId = activePageId;
+      closeContractPanel();
+      await loadContracts();
+    } catch (error: unknown) {
+      contractsState = createErrorState<PageResult<DistributionContract>>(error);
+    }
+  }
+
+  function openContractRulePanel(rowId: string): void {
+    const contract = contracts.find((candidate: DistributionContract): boolean => candidate.id === rowId);
+
+    if (contract === undefined) {
+      return;
+    }
+
+    ruleContractId = rowId;
+    rulePayeeIdInput = contract.payeeId;
+    rulePercentageInput = "";
+  }
+
+  function closeContractRulePanel(): void {
+    ruleContractId = null;
+    rulePayeeIdInput = "";
+    rulePercentageInput = "";
+  }
+
+  async function addContractRule(): Promise<void> {
+    const contract = selectedRuleContract;
+    const percentage = rulePercentageInput.trim();
+
+    if (contract === null || rulePayeeIdInput === "" || percentage === "") {
+      return;
+    }
+
+    clearRunReceipt();
+
+    try {
+      // The rules route replaces the full royalty rule set and the server
+      // rejects any set that does not total exactly 100 percent.
+      mutationReceipt = await client.distribution.updateContractRules(
+        contract.id,
+        {
+          workspaceId: distributionWorkspaceId,
+          rules: [
+            {
+              payeeId: rulePayeeIdInput,
+              percentage,
+              scopeType: null,
+              scopeId: null,
+              effectiveFrom: null,
+              effectiveTo: null
+            }
+          ]
+        },
+        {
+          idempotencyKey: createIdempotencyKey("contract-rules")
+        }
+      );
+      mutationReceiptPageId = activePageId;
+      closeContractRulePanel();
+      await loadContracts();
+    } catch (error: unknown) {
+      contractsState = createErrorState<PageResult<DistributionContract>>(error);
     }
   }
 
@@ -2161,6 +2496,113 @@
     }
   }
 
+  async function printStatementPdf(statementId: string): Promise<void> {
+    if (printingStatementId !== null) {
+      return;
+    }
+
+    printingStatementId = statementId;
+    statementPrintError = null;
+
+    try {
+      // The print endpoint returns a typed JSON payload (header + per-track
+      // lines); render it into a printable A4 HTML page on the client.
+      const payload = await client.distribution.printStatement({
+        workspaceId: distributionWorkspaceId,
+        statementId
+      });
+      const html = renderStatementPrintHtml(payload, tracks);
+      const url = URL.createObjectURL(new Blob([html], { type: "text/html" }));
+      const printWindow = window.open(url, "_blank");
+
+      if (printWindow === null) {
+        URL.revokeObjectURL(url);
+        throw new Error("The print tab was blocked by the browser; allow pop-ups for this console and retry.");
+      }
+    } catch (error: unknown) {
+      statementPrintError = getErrorMessage(error);
+    } finally {
+      printingStatementId = null;
+    }
+  }
+
+  function renderStatementPrintHtml(payload: StatementPrintResponse, trackItems: readonly TrackSummary[]): string {
+    const statement = payload.statement;
+    const lineRows = payload.lines
+      .map((line: StatementPrintLine): string => `
+        <tr>
+          <td>${escapeHtml(printTrackLabel(line.trackId, trackItems))}</td>
+          <td class="num">${escapeHtml(line.quantity)}</td>
+          <td class="num">${escapeHtml(formatPrintAmount(line.grossShare, line.currency))}</td>
+          <td class="num">${escapeHtml(formatPrintAmount(line.recoupmentApplied, line.currency))}</td>
+          <td class="num">${escapeHtml(formatPrintAmount(line.netPayable, line.currency))}</td>
+        </tr>`)
+      .join("");
+
+    return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Statement ${escapeHtml(statement.payeeName)}</title>
+<style>
+  @page { size: A4; margin: 18mm; }
+  body { font-family: "Helvetica Neue", Arial, sans-serif; color: #111; margin: 0; }
+  header { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 2px solid #111; padding-bottom: 8px; }
+  h1 { font-size: 18px; margin: 16px 0 4px; }
+  dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; margin: 16px 0; font-size: 12px; }
+  dt { font-weight: 700; }
+  dd { margin: 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { border-bottom: 1px solid #ccc; padding: 6px 8px; text-align: left; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<header><strong>ë • Distribution</strong><span>Royalty statement · A4</span></header>
+<h1>${escapeHtml(statement.payeeName)}</h1>
+<p>Period ${escapeHtml(statement.periodStart)} → ${escapeHtml(statement.periodEnd)} · status ${escapeHtml(statement.status)} · version ${escapeHtml(String(statement.version))}</p>
+<dl>
+  <dt>Gross</dt><dd>${escapeHtml(formatPrintAmount(statement.grossTotal, statement.currency))}</dd>
+  <dt>Recoupment</dt><dd>${escapeHtml(formatPrintAmount(statement.recoupmentTotal, statement.currency))}</dd>
+  <dt>Net payable</dt><dd>${escapeHtml(formatPrintAmount(statement.netPayable, statement.currency))}</dd>
+  <dt>Amount due</dt><dd>${escapeHtml(formatPrintAmount(statement.amountDue, statement.currency))}</dd>
+</dl>
+<table>
+  <thead><tr><th>Track</th><th class="num">Quantity</th><th class="num">Gross share</th><th class="num">Recoupment</th><th class="num">Net payable</th></tr></thead>
+  <tbody>${lineRows}</tbody>
+</table>
+<script>window.addEventListener("load", function () { window.print(); });</${"script"}>
+</body>
+</html>`;
+  }
+
+  function printTrackLabel(trackId: string | null, trackItems: readonly TrackSummary[]): string {
+    if (trackId === null) {
+      return "Unallocated";
+    }
+
+    const track = trackItems.find((candidate: TrackSummary): boolean => candidate.id === trackId);
+
+    if (track === undefined) {
+      return trackId;
+    }
+
+    return `${track.title} · ${track.artistName}`;
+  }
+
+  // The print payload carries 10-decimal money strings; round to cents for A4 output.
+  function formatPrintAmount(value: string, currency: CurrencyCode): string {
+    return `${currency} ${Number(value).toFixed(2)}`;
+  }
+
+  function escapeHtml(value: string): string {
+    return value
+      .replace(/&/gu, "&amp;")
+      .replace(/</gu, "&lt;")
+      .replace(/>/gu, "&gt;")
+      .replace(/"/gu, "&quot;");
+  }
+
   function openPaymentPanel(paymentId: string, mode: PaymentPanelMode): void {
     const payment = payments.find((candidate: PaymentSummary): boolean => candidate.id === paymentId);
 
@@ -2170,7 +2612,8 @@
 
     selectedPaymentId = paymentId;
     paymentPanelMode = mode;
-    paymentReferenceInput = payment.reference ?? "";
+    // Void asks for an audit reason, not the wire reference, so it starts empty.
+    paymentReferenceInput = mode === "void" ? "" : payment.reference ?? "";
     paymentBankTransactionInput = "";
   }
 
@@ -2278,22 +2721,20 @@
 
   async function voidPayment(): Promise<void> {
     const payment = selectedPayment;
-    const reference = paymentReferenceInput.trim();
+    const reason = paymentReferenceInput.trim();
 
-    if (payment === null || reference === "") {
+    if (payment === null || reason === "") {
       return;
     }
 
     clearRunReceipt();
 
     try {
-      mutationReceipt = await client.distribution.updatePayment(
+      mutationReceipt = await client.distribution.voidPayment(
         payment.id,
         {
           workspaceId: distributionWorkspaceId,
-          amountMicro: "0",
-          currency: payment.currency,
-          reference
+          reason
         },
         {
           idempotencyKey: createIdempotencyKey("payment-void")
@@ -3193,6 +3634,75 @@
         </section>
         <Table title="Kontor / RouteNote rows to map" columns={mappingColumns} rows={mappingTableRows} state={mappingState.status === "loading" ? "loading" : mappingState.status === "error" ? "error" : mappingRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={mappingPagination} />
       {:else if activePageId === "catalog"}
+        <section class="contracts-actions ehq-edge-surface">
+          <button class="distribution-action primary" type="button" onclick={() => openCatalogPanel("release")}>New release</button>
+          <button class="distribution-action primary" type="button" onclick={() => openCatalogPanel("track")}>New track</button>
+          <span>Releases and tracks are source records; edits later become audited overrides.</span>
+        </section>
+        {#if catalogPanelMode === "release"}
+          <section class="form-panel ehq-edge-surface" aria-label="New release">
+            <label>
+              <span>Title</span>
+              <input value={releaseTitleInput} oninput={updateReleaseTitle} />
+            </label>
+            <label>
+              <span>Artist</span>
+              <input value={releaseArtistInput} oninput={updateReleaseArtist} />
+            </label>
+            <label>
+              <span>UPC (optional)</span>
+              <input value={releaseUpcInput} oninput={updateReleaseUpc} />
+            </label>
+            <label>
+              <span>Status</span>
+              <select value={releaseStatusInput} onchange={updateReleaseStatus}>
+                {#each catalogStatusOptions as option (option.value)}
+                  <option value={option.value}>{option.label}</option>
+                {/each}
+              </select>
+            </label>
+            <label>
+              <span>Release date (optional)</span>
+              <input type="date" value={releaseDateInput} onchange={updateReleaseDate} />
+            </label>
+            <button class="distribution-action primary" type="button" disabled={!writesEnabled || releaseTitleInput.trim() === "" || releaseArtistInput.trim() === ""} title={writesEnabled ? (releaseTitleInput.trim() === "" ? "Enter a release title first" : releaseArtistInput.trim() === "" ? "Enter an artist name first" : "") : writeGateMessage} onclick={createRelease}>Create release</button>
+            <button class="distribution-action" type="button" onclick={closeCatalogPanel}>Cancel</button>
+          </section>
+        {:else if catalogPanelMode === "track"}
+          <section class="form-panel ehq-edge-surface" aria-label="New track">
+            <label>
+              <span>Title</span>
+              <input value={trackTitleInput} oninput={updateTrackTitle} />
+            </label>
+            <label>
+              <span>Artist</span>
+              <input value={trackArtistInput} oninput={updateTrackArtist} />
+            </label>
+            <label>
+              <span>ISRC (optional)</span>
+              <input value={trackIsrcInput} oninput={updateTrackIsrc} />
+            </label>
+            <label>
+              <span>Release</span>
+              <select value={trackReleaseIdInput} onchange={updateTrackRelease}>
+                <option value="">No release</option>
+                {#each releases as release (release.id)}
+                  <option value={release.id}>{release.title} · {release.artistName}</option>
+                {/each}
+              </select>
+            </label>
+            <label>
+              <span>Status</span>
+              <select value={trackStatusInput} onchange={updateTrackStatus}>
+                {#each catalogStatusOptions as option (option.value)}
+                  <option value={option.value}>{option.label}</option>
+                {/each}
+              </select>
+            </label>
+            <button class="distribution-action primary" type="button" disabled={!writesEnabled || trackTitleInput.trim() === "" || trackArtistInput.trim() === ""} title={writesEnabled ? (trackTitleInput.trim() === "" ? "Enter a track title first" : trackArtistInput.trim() === "" ? "Enter an artist name first" : "") : writeGateMessage} onclick={createTrack}>Create track</button>
+            <button class="distribution-action" type="button" onclick={closeCatalogPanel}>Cancel</button>
+          </section>
+        {/if}
         <section class="dashboard-grid">
           <Table title="Catalog canonical + contributors" columns={catalogColumns} rows={catalogRows} state={tableStateFor(tracksState.status, catalogRows.length)} actionLabel="" pagination={catalogPagination} />
           <div class="command-card ehq-edge-surface">
@@ -3208,11 +3718,78 @@
         </section>
       {:else if activePageId === "contracts"}
         <section class="contracts-actions ehq-edge-surface">
+          <button class="distribution-action primary" type="button" onclick={openContractPanel}>New contract</button>
           <button class="distribution-action primary" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={recordExpense}>Record recoupable expense</button>
           <span>Expenses remain source records; corrections later become audited overrides.</span>
         </section>
+        {#if contractPanelOpen}
+          <section class="form-panel ehq-edge-surface" aria-label="New contract">
+            <label>
+              <span>Title</span>
+              <input value={contractTitleInput} oninput={updateContractTitle} />
+            </label>
+            <label>
+              <span>Payee</span>
+              <select value={contractPayeeIdInput} onchange={updateContractPayee}>
+                <option value="">Select a payee</option>
+                {#each payees as payee (payee.id)}
+                  <option value={payee.id}>{payee.displayName} · {payee.defaultCurrency}</option>
+                {/each}
+              </select>
+            </label>
+            <label>
+              <span>Status</span>
+              <select value={contractStatusInput} onchange={updateContractStatus}>
+                {#each contractStatusOptions as option (option.value)}
+                  <option value={option.value}>{option.label}</option>
+                {/each}
+              </select>
+            </label>
+            <label>
+              <span>Effective from</span>
+              <input type="date" value={contractEffectiveFromInput} onchange={updateContractEffectiveFrom} />
+            </label>
+            <label>
+              <span>Effective to (optional)</span>
+              <input type="date" value={contractEffectiveToInput} min={contractEffectiveFromInput} onchange={updateContractEffectiveTo} />
+            </label>
+            <label>
+              <span>Split (%)</span>
+              <input value={contractSplitPercentInput} oninput={updateContractSplitPercent} placeholder="80" />
+            </label>
+            <label>
+              <span>Currency</span>
+              <input value={contractCurrencyInput} oninput={updateContractCurrency} placeholder="MUR" />
+            </label>
+            <button class="distribution-action primary" type="button" disabled={!writesEnabled || contractTitleInput.trim() === "" || contractPayeeIdInput === "" || contractEffectiveFromInput === "" || contractSplitBp === null || contractCurrencyInput.trim() === ""} title={writesEnabled ? (contractTitleInput.trim() === "" ? "Enter a contract title first" : contractPayeeIdInput === "" ? "Select a payee first" : contractEffectiveFromInput === "" ? "Pick the effective-from date first" : contractSplitBp === null ? "Enter a split between 0.01 and 100 percent" : contractCurrencyInput.trim() === "" ? "Enter a currency code first" : "") : writeGateMessage} onclick={createContract}>Create contract</button>
+            <button class="distribution-action" type="button" onclick={closeContractPanel}>Cancel</button>
+          </section>
+        {/if}
+        {#if selectedRuleContract !== null}
+          <section class="form-panel ehq-edge-surface" aria-label="Add royalty rule">
+            <div class="panel-context">
+              <strong>{selectedRuleContract.title}</strong>
+              <span>Rules replace the previous set and must total exactly 100%.</span>
+            </div>
+            <label>
+              <span>Payee</span>
+              <select value={rulePayeeIdInput} onchange={updateRulePayee}>
+                <option value="">Select a payee</option>
+                {#each payees as payee (payee.id)}
+                  <option value={payee.id}>{payee.displayName} · {payee.defaultCurrency}</option>
+                {/each}
+              </select>
+            </label>
+            <label>
+              <span>Percentage</span>
+              <input value={rulePercentageInput} oninput={updateRulePercentage} placeholder="100" />
+            </label>
+            <button class="distribution-action primary" type="button" disabled={!writesEnabled || rulePayeeIdInput === "" || rulePercentageInput.trim() === ""} title={writesEnabled ? (rulePayeeIdInput === "" ? "Select a payee first" : rulePercentageInput.trim() === "" ? "Enter the rule percentage first" : "") : writeGateMessage} onclick={addContractRule}>Save rule set</button>
+            <button class="distribution-action" type="button" onclick={closeContractRulePanel}>Cancel</button>
+          </section>
+        {/if}
         <section class="dashboard-grid">
-          <Table title="Splits / contracts" columns={contractColumns} rows={contractRows} state={tableStateFor(contractsState.status, contracts.length)} actionLabel="" pagination={contractsPagination} />
+          <Table title="Splits / contracts" columns={contractColumns} rows={contractRows} state={tableStateFor(contractsState.status, contracts.length)} actionLabel="" rowActions={contractRowActions} pagination={contractsPagination} />
           <Table title="Expenses / recoupments" columns={expenseColumns} rows={expenseRows} state={tableStateFor(expensesState.status, expenses.length)} actionLabel="" pagination={expensesPagination} />
         </section>
       {:else if activePageId === "allocations"}
@@ -3306,7 +3883,13 @@
           </header>
           <h2>{statementPreview?.payeeName ?? "Payee"} Statement</h2>
           <p>Period {statementPreview === null ? periodLabel(distributionPeriod) : formatDateRange(statementPreview.period_start, statementPreview.period_end)} · currency {statementPreview?.currency ?? "MUR"}</p>
-          <Table title="Statements" columns={statementColumns} rows={statementRows} state={tableStateFor(statementsState.status, statements.length)} actionLabel="" pagination={statementsPagination} />
+          {#if printingStatementId !== null}
+            <p class="receipt" role="status">Preparing the print view…</p>
+          {/if}
+          {#if statementPrintError !== null}
+            <span class="panel-error" role="alert">{statementPrintError}</span>
+          {/if}
+          <Table title="Statements" columns={statementColumns} rows={statementRows} state={tableStateFor(statementsState.status, statements.length)} actionLabel="" rowActions={statementRowActions} pagination={statementsPagination} />
         </section>
       {:else if activePageId === "payments"}
         <section class="filter-strip ehq-edge-surface" aria-label="Payment filters">
@@ -3360,10 +3943,10 @@
               <button class="distribution-action primary" type="button" disabled={!writesEnabled || paymentBankTransactionInput.trim() === ""} title={writesEnabled ? (paymentBankTransactionInput.trim() === "" ? "Enter the bank transaction ID first" : "") : writeGateMessage} onclick={reconcilePayment}>Reconcile payment</button>
             {:else}
               <label>
-                <span>Void reference</span>
+                <span>Void reason</span>
                 <input value={paymentReferenceInput} oninput={updatePaymentReferenceInput} />
               </label>
-              <button class="distribution-action danger" type="button" disabled={!writesEnabled || paymentReferenceInput.trim() === ""} title={writesEnabled ? (paymentReferenceInput.trim() === "" ? "Enter a void reference first" : "") : writeGateMessage} onclick={voidPayment}>Void payment</button>
+              <button class="distribution-action danger" type="button" disabled={!writesEnabled || paymentReferenceInput.trim() === ""} title={writesEnabled ? (paymentReferenceInput.trim() === "" ? "Enter a void reason first" : "") : writeGateMessage} onclick={voidPayment}>Void payment</button>
             {/if}
             <button class="distribution-action" type="button" onclick={closePaymentPanel}>Cancel</button>
           </section>

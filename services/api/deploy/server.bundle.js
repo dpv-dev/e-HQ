@@ -38056,6 +38056,7 @@ var SENSITIVE_ACTIONS = /* @__PURE__ */ new Set([
   "distribution_payment_record",
   "distribution_payment_reconcile",
   "distribution_payment_update",
+  "distribution_payment_void",
   "distribution_payee_upsert",
   "distribution_release_upsert",
   "distribution_statement_generate",
@@ -38842,6 +38843,16 @@ async function persistDistributionPaymentReconcile(tx, input) {
     )
     on conflict (statement_id, payment_id) do update
     set amount_applied = excluded.amount_applied
+  `);
+}
+async function persistDistributionPaymentVoid(tx, input) {
+  if (tx.kind === "memory") {
+    return;
+  }
+  await tx.executor.execute(sql`
+    update payments
+    set status = 'void', updated_at = now()
+    where id = ${input.paymentId}
   `);
 }
 async function persistDistributionRoyaltyRules(tx, input) {
@@ -40019,6 +40030,9 @@ function registerDistributionRoutes(app, dependencies) {
   });
   app.post("/erh/v1/payments/:paymentId/reconcile", async (context) => {
     return distributionPaymentReconcileResponse(context, dependencies);
+  });
+  app.post("/erh/v1/payments/:paymentId/void", async (context) => {
+    return distributionPaymentVoidResponse(context, dependencies);
   });
   app.get("/erh/v1/revenue", (context) => {
     requireQuery(context, "workspaceId");
@@ -43054,6 +43068,54 @@ async function distributionPaymentReconcileResponse(context, dependencies) {
   });
   return context.json(result.body, result.status);
 }
+async function distributionPaymentVoidResponse(context, dependencies) {
+  const paymentId = requirePathParam(context, "paymentId");
+  const request = await readJsonBody(context);
+  assertPaymentVoidRequest(context, request);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "distribution_payment_void",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      const payment = requireDistributionPayment(dependencies.fixtures.distribution, paymentId);
+      const link = requireDistributionPaymentLink(dependencies.fixtures.distribution, paymentId);
+      assertPaymentIsMutable(context, payment);
+      await acquireAdvisoryLock(tx, `distribution:payment:void:${paymentId}`);
+      const persistInput = { paymentId };
+      await persistDistributionPaymentVoid(tx, persistInput);
+      const patch = paymentVoidFixturePatch(payment, link);
+      const projected = distributionDatasetWithPaymentPatch(dependencies.fixtures.distribution, patch);
+      const balances = computePaymentBalances(projected, link.statementId);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_payment_void",
+        targetType: "payment",
+        targetId: paymentId,
+        before: {
+          payment,
+          statementPaymentLink: link,
+          statementBalance: computePaymentBalances(dependencies.fixtures.distribution, link.statementId).statementBalance
+        },
+        after: {
+          payment: patch.payment,
+          reason: request.reason,
+          statementBalance: balances.statementBalance,
+          groupTotals: balances.groupTotals,
+          note: "Payment void only; no external money movement is triggered."
+        },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      applyDistributionPaymentPatchFixture(dependencies.fixtures, patch);
+      return paymentMutationResponse(paymentId, link.statementId, payment.amount, payment.currency, "voided", balances, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
 async function distributionContractRulesUpdateResponse(context, dependencies) {
   const contractId = requirePathParam(context, "contractId");
   const request = await readJsonBody(context);
@@ -43652,6 +43714,10 @@ function assertPaymentReconcileRequest(context, request) {
   assertStringField(context, request.workspaceId, "workspaceId");
   assertStringField(context, request.bankTransactionId, "bankTransactionId");
   assertIsoDateTimeField(context, request.reconciledAt, "reconciledAt");
+}
+function assertPaymentVoidRequest(context, request) {
+  assertStringField(context, request.workspaceId, "workspaceId");
+  assertStringField(context, request.reason, "reason");
 }
 function assertContractRoyaltyRulesUpdateRequest(context, request) {
   assertStringField(context, request.workspaceId, "workspaceId");
@@ -44579,6 +44645,15 @@ function paymentReconcileFixturePatch(payment, link, input) {
       statementId: input.statementId,
       amountApplied: input.amountApplied
     }
+  };
+}
+function paymentVoidFixturePatch(payment, link) {
+  return {
+    payment: {
+      ...payment,
+      status: "void"
+    },
+    link
   };
 }
 function applyDistributionPaymentPatchFixture(fixtures, patch) {

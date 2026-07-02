@@ -150,6 +150,7 @@ import type {
   PaymentReconcileRequest,
   PaymentSummary,
   PaymentUpdateRequest,
+  PaymentVoidRequest,
   ReleaseSummary,
   StatementGenerateRequest,
   StatementSummary,
@@ -183,6 +184,7 @@ import {
   persistDistributionPaymentReconcile,
   persistDistributionPaymentRecord,
   persistDistributionPaymentUpdate,
+  persistDistributionPaymentVoid,
   persistDistributionRoyaltyRules,
   persistDistributionStatements,
   persistDistributionStatementVoid,
@@ -205,6 +207,7 @@ import {
   type PersistDistributionPaymentReconcileInput,
   type PersistDistributionPaymentRecordInput,
   type PersistDistributionPaymentUpdateInput,
+  type PersistDistributionPaymentVoidInput,
   type PersistDistributionRoyaltyRulesInput,
   type PersistDistributionStatementVoidInput,
   type PersistIdentityLinkInput,
@@ -316,7 +319,7 @@ interface PaymentMutationResponse extends ApiMutationReceipt, ApiMutationRespons
   readonly statementId: string;
   readonly amountMicro: string;
   readonly currency: string;
-  readonly paymentStatus: "recorded" | "edited" | "reconciled";
+  readonly paymentStatus: "recorded" | "edited" | "reconciled" | "voided";
   readonly statementBalance: StatementBalanceResult;
   readonly groupTotals: readonly StatementGroupTotal[];
 }
@@ -1513,6 +1516,10 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
 
   app.post("/erh/v1/payments/:paymentId/reconcile", async (context) => {
     return distributionPaymentReconcileResponse(context, dependencies);
+  });
+
+  app.post("/erh/v1/payments/:paymentId/void", async (context) => {
+    return distributionPaymentVoidResponse(context, dependencies);
   });
 
   app.get("/erh/v1/revenue", (context) => {
@@ -4965,6 +4972,55 @@ async function distributionPaymentReconcileResponse(context: ApiContext, depende
   return context.json(result.body, result.status);
 }
 
+async function distributionPaymentVoidResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const paymentId = requirePathParam(context, "paymentId");
+  const request = await readJsonBody<PaymentVoidRequest>(context);
+  assertPaymentVoidRequest(context, request);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<PaymentMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "distribution_payment_void",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<PaymentMutationResponse> => {
+      const payment = requireDistributionPayment(dependencies.fixtures.distribution, paymentId);
+      const link = requireDistributionPaymentLink(dependencies.fixtures.distribution, paymentId);
+      assertPaymentIsMutable(context, payment);
+      await acquireAdvisoryLock(tx, `distribution:payment:void:${paymentId}`);
+      const persistInput: PersistDistributionPaymentVoidInput = { paymentId };
+      await persistDistributionPaymentVoid(tx, persistInput);
+      const patch = paymentVoidFixturePatch(payment, link);
+      const projected = distributionDatasetWithPaymentPatch(dependencies.fixtures.distribution, patch);
+      const balances = computePaymentBalances(projected, link.statementId);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_payment_void",
+        targetType: "payment",
+        targetId: paymentId,
+        before: {
+          payment,
+          statementPaymentLink: link,
+          statementBalance: computePaymentBalances(dependencies.fixtures.distribution, link.statementId).statementBalance
+        },
+        after: {
+          payment: patch.payment,
+          reason: request.reason,
+          statementBalance: balances.statementBalance,
+          groupTotals: balances.groupTotals,
+          note: "Payment void only; no external money movement is triggered."
+        },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      applyDistributionPaymentPatchFixture(dependencies.fixtures, patch);
+      return paymentMutationResponse(paymentId, link.statementId, payment.amount, payment.currency, "voided", balances, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
 async function distributionContractRulesUpdateResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
   const contractId = requirePathParam(context, "contractId");
   const request = await readJsonBody<ContractRoyaltyRulesUpdateRequest>(context);
@@ -5602,6 +5658,11 @@ function assertPaymentReconcileRequest(context: ApiContext, request: PaymentReco
   assertStringField(context, request.workspaceId, "workspaceId");
   assertStringField(context, request.bankTransactionId, "bankTransactionId");
   assertIsoDateTimeField(context, request.reconciledAt, "reconciledAt");
+}
+
+function assertPaymentVoidRequest(context: ApiContext, request: PaymentVoidRequest): void {
+  assertStringField(context, request.workspaceId, "workspaceId");
+  assertStringField(context, request.reason, "reason");
 }
 
 function assertContractRoyaltyRulesUpdateRequest(context: ApiContext, request: ContractRoyaltyRulesUpdateRequest): void {
@@ -6796,6 +6857,21 @@ function paymentReconcileFixturePatch(
   };
 }
 
+function paymentVoidFixturePatch(
+  payment: DistributionReadDataset["payments"][number],
+  link: DistributionReadDataset["statementPaymentLinks"][number]
+): DistributionPaymentFixturePatch {
+  // The link is kept untouched: balance projections zero out applied amounts
+  // for void payments, so the statement balance recomputes without deletion.
+  return {
+    payment: {
+      ...payment,
+      status: "void"
+    },
+    link
+  };
+}
+
 function applyDistributionPaymentPatchFixture(fixtures: ApiFixtureStore, patch: DistributionPaymentFixturePatch): void {
   const mutableDistribution = fixtures.distribution as Mutable<DistributionReadDataset>;
   mutableDistribution.payments = upsertPayment(fixtures.distribution.payments, patch.payment);
@@ -6883,7 +6959,7 @@ function paymentMutationResponse(
   statementId: string,
   amount: string,
   currency: string,
-  paymentStatus: "recorded" | "edited" | "reconciled",
+  paymentStatus: "recorded" | "edited" | "reconciled" | "voided",
   balances: PaymentBalanceProjection,
   auditEventId: string
 ): PaymentMutationResponse {

@@ -966,6 +966,34 @@ export interface DistributionContractExpense {
   readonly status: "open" | "recouped" | "waived";
 }
 
+export interface DistributionContractUpsertRequest {
+  readonly workspaceId: EntityId;
+  readonly id: EntityId | null;
+  readonly payeeId: EntityId | null;
+  readonly title: string;
+  readonly status: "draft" | "active" | "paused" | "ended";
+  readonly effectiveFrom: IsoDateString;
+  readonly effectiveTo: IsoDateString | null;
+  readonly splitBp: BasisPoints;
+  readonly currency: CurrencyCode;
+}
+
+export interface ContractRoyaltyRuleInput {
+  readonly payeeId: EntityId;
+  readonly percentage: DecimalString;
+  readonly scopeType: string | null;
+  readonly scopeId: EntityId | null;
+  readonly effectiveFrom: IsoDateString | null;
+  readonly effectiveTo: IsoDateString | null;
+}
+
+// Replaces the full royalty rule set of a contract: the server archives the
+// previous rules and inserts this list, which must total exactly 100 percent.
+export interface ContractRoyaltyRulesUpdateRequest {
+  readonly workspaceId: EntityId;
+  readonly rules: readonly ContractRoyaltyRuleInput[];
+}
+
 export interface DistributionContractExpenseRecordRequest {
   readonly workspaceId: EntityId;
   readonly contractId: EntityId;
@@ -1004,6 +1032,16 @@ export interface ReleaseSummary {
   readonly trackCount: number;
 }
 
+export interface DistributionReleaseUpsertRequest {
+  readonly workspaceId: EntityId;
+  readonly id: EntityId | null;
+  readonly title: string;
+  readonly artistName: string;
+  readonly upc: string | null;
+  readonly status: "draft" | "released" | "archived";
+  readonly releaseDate: IsoDateString | null;
+}
+
 export interface TracksQuery extends PageQuery {
   readonly workspaceId: EntityId;
   readonly releaseId: EntityId | null;
@@ -1019,6 +1057,16 @@ export interface TrackSummary {
   readonly status: "draft" | "released" | "archived";
   readonly splitStatus: "balanced" | "needs_review";
   readonly contributorCount: number;
+}
+
+export interface DistributionTrackUpsertRequest {
+  readonly workspaceId: EntityId;
+  readonly id: EntityId | null;
+  readonly releaseId: EntityId | null;
+  readonly title: string;
+  readonly artistName: string;
+  readonly isrc: string | null;
+  readonly status: "draft" | "released" | "archived";
 }
 
 export interface AllocationRunQuery extends PageQuery {
@@ -1118,6 +1166,43 @@ export interface StatementVoidRequest {
   readonly reason: string;
 }
 
+export interface StatementPrintQuery {
+  readonly workspaceId: EntityId;
+  readonly statementId: EntityId;
+}
+
+// Printable payload of a single statement: header plus per-track lines,
+// exposed as domain amounts (10-decimal money strings) for A4 rendering.
+export interface StatementPrintStatement {
+  readonly id: EntityId;
+  readonly periodStart: IsoDateString;
+  readonly periodEnd: IsoDateString;
+  readonly payeeId: EntityId;
+  readonly payeeName: string;
+  readonly currency: CurrencyCode;
+  readonly grossTotal: MoneyMicroString;
+  readonly recoupmentTotal: MoneyMicroString;
+  readonly netPayable: MoneyMicroString;
+  readonly amountDue: MoneyMicroString;
+  readonly status: "draft" | "generated" | "locked" | "sent" | "paid" | "void";
+  readonly version: number;
+}
+
+export interface StatementPrintLine {
+  readonly id: EntityId;
+  readonly trackId: EntityId | null;
+  readonly grossShare: MoneyMicroString;
+  readonly recoupmentApplied: MoneyMicroString;
+  readonly netPayable: MoneyMicroString;
+  readonly quantity: DecimalString;
+  readonly currency: CurrencyCode;
+}
+
+export interface StatementPrintResponse {
+  readonly statement: StatementPrintStatement;
+  readonly lines: readonly StatementPrintLine[];
+}
+
 export interface PaymentsQuery extends PageQuery {
   readonly workspaceId: EntityId;
   readonly period: IsoMonthString | null;
@@ -1158,6 +1243,11 @@ export interface PaymentReconcileRequest {
   readonly workspaceId: EntityId;
   readonly bankTransactionId: EntityId;
   readonly reconciledAt: IsoDateTimeString;
+}
+
+export interface PaymentVoidRequest {
+  readonly workspaceId: EntityId;
+  readonly reason: string;
 }
 
 export interface DistributionRevenueQuery extends PageQuery {

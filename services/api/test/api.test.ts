@@ -11,7 +11,7 @@ import { createDrizzlePersistenceRuntime, createMemoryPersistenceRuntime } from 
 interface PaymentReceipt {
   readonly paymentId: string;
   readonly auditEventId: string | null;
-  readonly paymentStatus: "recorded" | "edited" | "reconciled";
+  readonly paymentStatus: "recorded" | "edited" | "reconciled" | "voided";
   readonly statementBalance: {
     readonly paymentsApplied: string;
     readonly statementBalance: string;
@@ -1296,6 +1296,70 @@ test("payment record, update, and reconcile recompute balances exactly and read 
   assert.equal(payment?.status, "paid");
   assert.equal(payment?.reference, "PAY-DRIFT-EDITED");
   assert.equal(paymentPage.items.filter((item) => item.id === receipt.paymentId).length, 1);
+});
+
+test("payment void sets status voided, restores the balance, replays idempotently, and denies double void", async () => {
+  const app = createWriteEnabledFixtureApiService();
+  const record = await app.request("/erh/v1/payments", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "payment-void-record-1" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      statementId: "statement_alma",
+      payeeId: "payee_alma",
+      amountMicro: "5.0000000000",
+      currency: "USD",
+      paidAt: "2026-06-21T10:00:00.000Z",
+      reference: "PAY-VOID-TARGET"
+    })
+  });
+  assert.equal(record.status, 200);
+  const receipt = (await record.json()) as PaymentReceipt;
+  assert.equal(receipt.statementBalance.paymentsApplied, "20.1000000000");
+
+  const voidBody = { workspaceId: "workspace_1", reason: "duplicate payment" };
+  const voided = await app.request(`/erh/v1/payments/${receipt.paymentId}/void`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "payment-void-memory-1" },
+    body: JSON.stringify(voidBody)
+  });
+  assert.equal(voided.status, 200);
+  const voidReceipt = (await voided.json()) as PaymentReceipt;
+  assert.equal(voidReceipt.paymentStatus, "voided");
+  assert.ok(voidReceipt.auditEventId !== null);
+  assert.equal(voidReceipt.statementBalance.paymentsApplied, "15.1000000000");
+  assert.equal(voidReceipt.statementBalance.statementBalance, "44.9000000000");
+
+  const replay = await app.request(`/erh/v1/payments/${receipt.paymentId}/void`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "payment-void-memory-1" },
+    body: JSON.stringify(voidBody)
+  });
+  assert.equal(replay.status, 200);
+  const replayReceipt = (await replay.json()) as PaymentReceipt;
+  assert.equal(replayReceipt.paymentId, receipt.paymentId);
+  assert.equal(replayReceipt.paymentStatus, "voided");
+
+  const doubleVoid = await app.request(`/erh/v1/payments/${receipt.paymentId}/void`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "payment-void-memory-2" },
+    body: JSON.stringify({ workspaceId: "workspace_1", reason: "void twice" })
+  });
+  assert.equal(doubleVoid.status, 409);
+
+  const viewerDenied = await app.request(`/erh/v1/payments/${receipt.paymentId}/void`, {
+    method: "POST",
+    headers: { ...authHeadersForToken("fixture-viewer-token"), "Content-Type": "application/json", "Idempotency-Key": "payment-void-viewer-1" },
+    body: JSON.stringify(voidBody)
+  });
+  assert.equal(viewerDenied.status, 403);
+
+  const payments = await app.request("/erh/v1/payments?workspaceId=workspace_1&payeeId=payee_alma&limit=10", {
+    headers: authHeaders()
+  });
+  assert.equal(payments.status, 200);
+  const paymentPage = (await payments.json()) as { readonly items: readonly { readonly id: string; readonly status: string }[] };
+  assert.equal(paymentPage.items.find((item) => item.id === receipt.paymentId)?.status, "voided");
 });
 
 test("payment writes persist, replay idempotently, reconcile, audit, and rollback in PGlite", async () => {
