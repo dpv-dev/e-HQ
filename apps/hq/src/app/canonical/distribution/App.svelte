@@ -36,7 +36,7 @@
     type SuspenseItem,
     type TrackSummary
   } from "@ehq/api-client";
-  import { BarsChart, KPI, Loader, PageHeader, SectionTemplate, Table, Toolbar, WorkspaceShell } from "@ehq/ui";
+  import { BarsChart, Button, Input, KPI, Loader, PageHeader, SectionTemplate, Select, Table, Toolbar, WorkspaceShell } from "@ehq/ui";
   import type { ChartPoint, SelectOption, TableColumn, TablePagination, TableRow, TableRowAction, Tone, ToolbarFilter, WorkspaceNavGroup, WorkspaceNavItem } from "@ehq/ui";
   import { createShellApiClient } from "../../app-shell-data.js";
   import { parseCsvRecords } from "../../bank-parser.js";
@@ -579,6 +579,30 @@
   const selectedRun = $derived(allocationRuns.find((run: AllocationRunSummary): boolean => run.id === selectedRunId) ?? null);
   const selectedRuleContract = $derived(contracts.find((contract: DistributionContract): boolean => contract.id === ruleContractId) ?? null);
   const contractSplitBp = $derived(parseSplitBasisPoints(contractSplitPercentInput));
+  const payeeSelectOptions = $derived<readonly SelectOption[]>([
+    { label: "Select a payee", value: "" },
+    ...payees.map((payee: PayeeSummary): SelectOption => ({ label: `${payee.displayName} · ${payee.defaultCurrency}`, value: payee.id }))
+  ]);
+  const trackReleaseSelectOptions = $derived<readonly SelectOption[]>([
+    { label: "No release", value: "" },
+    ...releases.map((release: ReleaseSummary): SelectOption => ({ label: `${release.title} · ${release.artistName}`, value: release.id }))
+  ]);
+  const suspenseTrackSelectOptions = $derived<readonly SelectOption[]>([
+    { label: "Select a track", value: "" },
+    ...(suspenseTrackOptions ?? []).map((track: TrackSummary): SelectOption => ({ label: `${track.title} · ${track.artistName}`, value: track.id }))
+  ]);
+  const openStatementSelectOptions = $derived<readonly SelectOption[]>([
+    { label: "Select an open statement", value: "" },
+    ...openStatements.map((statement: StatementSummary): SelectOption => ({
+      label: `${statement.payeeName} · ${statement.period} · ${formatMoney(statement.netPayableMicro, statement.currency)}`,
+      value: statement.id
+    }))
+  ]);
+  // The dashboard action list derives from suspense, statements, and payments;
+  // its table state must reflect those source requests instead of a frozen default.
+  const dashboardActionListStatus = $derived(
+    combineRequestStatuses([suspenseState.status, statementsState.status, paymentsState.status])
+  );
   const paymentRowActions: readonly TableRowAction[] = [
     { label: "Edit reference", onAction: (rowId: string): void => openPaymentPanel(rowId, "edit") },
     { label: "Reconcile", onAction: (rowId: string): void => openPaymentPanel(rowId, "reconcile") },
@@ -1630,12 +1654,12 @@
     runReceiptPageId = null;
   }
 
-  function updateImportFilter(event: Event): void {
-    importSourceFilter = readSelectValue(event) as ImportSourceFilter;
+  function updateImportFilter(value: string): void {
+    importSourceFilter = value as ImportSourceFilter;
   }
 
-  function updateImportSource(event: Event): void {
-    const source = distributionImportSourceFromValue(readSelectValue(event));
+  function updateImportSource(value: string): void {
+    const source = distributionImportSourceFromValue(value);
 
     importState = {
       ...importState,
@@ -1766,96 +1790,96 @@
     };
   }
 
-  function updateMappingStatus(event: Event): void {
-    mappingStatusFilter = readSelectValue(event) as MappingStatusFilter;
+  function updateMappingStatus(value: string): void {
+    mappingStatusFilter = value as MappingStatusFilter;
   }
 
-  function updateSuspenseStatus(event: Event): void {
-    suspenseStatusFilter = readSelectValue(event) as SuspenseStatusFilter;
+  function updateSuspenseStatus(value: string): void {
+    suspenseStatusFilter = value as SuspenseStatusFilter;
   }
 
-  function updatePaymentStatus(event: Event): void {
-    paymentStatusFilter = readSelectValue(event) as PaymentStatusFilter;
+  function updatePaymentStatus(value: string): void {
+    paymentStatusFilter = value as PaymentStatusFilter;
   }
 
-  function updateRevenueGroup(event: Event): void {
-    revenueGroupBy = readSelectValue(event) as RevenueGroupBy;
+  function updateRevenueGroup(value: string): void {
+    revenueGroupBy = value as RevenueGroupBy;
   }
 
-  function updateRecordStatement(event: Event): void {
-    recordStatementId = readSelectValue(event);
+  function updateRecordStatement(value: string): void {
+    recordStatementId = value;
   }
 
-  function updateRecordPaymentReference(event: Event): void {
-    recordPaymentReference = readInputValue(event);
+  function updateRecordPaymentReference(value: string): void {
+    recordPaymentReference = value;
   }
 
-  function updatePaymentReferenceInput(event: Event): void {
-    paymentReferenceInput = readInputValue(event);
+  function updatePaymentReferenceInput(value: string): void {
+    paymentReferenceInput = value;
   }
 
-  function updatePaymentBankTransactionInput(event: Event): void {
-    paymentBankTransactionInput = readInputValue(event);
+  function updatePaymentBankTransactionInput(value: string): void {
+    paymentBankTransactionInput = value;
   }
 
-  function updateSuspenseTargetTrack(event: Event): void {
-    suspenseTargetTrackId = readSelectValue(event);
+  function updateSuspenseTargetTrack(value: string): void {
+    suspenseTargetTrackId = value;
   }
 
-  function updateUnpostReason(event: Event): void {
-    unpostReasonInput = readInputValue(event);
+  function updateUnpostReason(value: string): void {
+    unpostReasonInput = value;
   }
 
-  function updateReleaseTitle(event: Event): void {
-    releaseTitleInput = readInputValue(event);
+  function updateReleaseTitle(value: string): void {
+    releaseTitleInput = value;
   }
 
-  function updateReleaseArtist(event: Event): void {
-    releaseArtistInput = readInputValue(event);
+  function updateReleaseArtist(value: string): void {
+    releaseArtistInput = value;
   }
 
-  function updateReleaseUpc(event: Event): void {
-    releaseUpcInput = readInputValue(event);
+  function updateReleaseUpc(value: string): void {
+    releaseUpcInput = value;
   }
 
-  function updateReleaseStatus(event: Event): void {
-    releaseStatusInput = readSelectValue(event) as CatalogEntryStatus;
+  function updateReleaseStatus(value: string): void {
+    releaseStatusInput = value as CatalogEntryStatus;
   }
 
   function updateReleaseDate(event: Event): void {
     releaseDateInput = readInputValue(event);
   }
 
-  function updateTrackTitle(event: Event): void {
-    trackTitleInput = readInputValue(event);
+  function updateTrackTitle(value: string): void {
+    trackTitleInput = value;
   }
 
-  function updateTrackArtist(event: Event): void {
-    trackArtistInput = readInputValue(event);
+  function updateTrackArtist(value: string): void {
+    trackArtistInput = value;
   }
 
-  function updateTrackIsrc(event: Event): void {
-    trackIsrcInput = readInputValue(event);
+  function updateTrackIsrc(value: string): void {
+    trackIsrcInput = value;
   }
 
-  function updateTrackRelease(event: Event): void {
-    trackReleaseIdInput = readSelectValue(event);
+  function updateTrackRelease(value: string): void {
+    trackReleaseIdInput = value;
   }
 
-  function updateTrackStatus(event: Event): void {
-    trackStatusInput = readSelectValue(event) as CatalogEntryStatus;
+  function updateTrackStatus(value: string): void {
+    trackStatusInput = value as CatalogEntryStatus;
   }
 
-  function updateContractTitle(event: Event): void {
-    contractTitleInput = readInputValue(event);
+  function updateContractTitle(value: string): void {
+    contractTitleInput = value;
   }
 
-  function updateContractPayee(event: Event): void {
-    contractPayeeIdInput = readSelectValue(event);
+  function updateContractPayee(value: string): void {
+    contractPayeeIdInput = value;
   }
 
-  function updateContractStatus(event: Event): void {
-    contractStatusInput = readSelectValue(event) as ContractStatus;
+  function updateContractStatus(value: string): void {
+    contractStatusInput = value as ContractStatus;
   }
 
   function updateContractEffectiveFrom(event: Event): void {
@@ -1866,24 +1890,24 @@
     contractEffectiveToInput = readInputValue(event);
   }
 
-  function updateContractSplitPercent(event: Event): void {
-    contractSplitPercentInput = readInputValue(event);
+  function updateContractSplitPercent(value: string): void {
+    contractSplitPercentInput = value;
   }
 
-  function updateContractCurrency(event: Event): void {
-    contractCurrencyInput = readInputValue(event);
+  function updateContractCurrency(value: string): void {
+    contractCurrencyInput = value;
   }
 
-  function updateRulePayee(event: Event): void {
-    rulePayeeIdInput = readSelectValue(event);
+  function updateRulePayee(value: string): void {
+    rulePayeeIdInput = value;
   }
 
-  function updateRulePercentage(event: Event): void {
-    rulePercentageInput = readInputValue(event);
+  function updateRulePercentage(value: string): void {
+    rulePercentageInput = value;
   }
 
-  function updatePeriodScope(event: Event): void {
-    periodScope = readSelectValue(event) as PeriodScope;
+  function updatePeriodScope(value: string): void {
+    periodScope = value as PeriodScope;
     if (periodScope === "custom" && customRange === null) {
       customRange = activeRange;
     }
@@ -3186,6 +3210,24 @@
     }));
   }
 
+  // Combines several request statuses into one: any error wins, then any
+  // loading, then idle while nothing has succeeded yet, else success.
+  function combineRequestStatuses(statuses: readonly RequestStatus[]): RequestStatus {
+    if (statuses.includes("error")) {
+      return "error";
+    }
+
+    if (statuses.includes("loading")) {
+      return "loading";
+    }
+
+    if (statuses.every((status: RequestStatus): boolean => status === "idle")) {
+      return "idle";
+    }
+
+    return "success";
+  }
+
   function tableStateFor(status: RequestStatus, count: number): "loading" | "error" | "empty" | "default" {
     if (status === "loading") {
       return "loading";
@@ -3256,16 +3298,6 @@
     }
 
     return null;
-  }
-
-  function readSelectValue(event: Event): string {
-    const target = event.currentTarget;
-
-    if (!(target instanceof HTMLSelectElement)) {
-      throw new Error("Expected select event target.");
-    }
-
-    return target.value;
   }
 
   function readInputValue(event: Event): string {
@@ -3541,7 +3573,7 @@
         <section class="period-control ehq-edge-surface" aria-label="Period control">
           <label>
             <span>Period</span>
-            <select value={periodScope} onchange={updatePeriodScope}>
+            <select value={periodScope} onchange={(event) => updatePeriodScope(event.currentTarget.value)}>
               {#each periodOptions as option (option.value)}
                 <option value={option.value}>{option.label}</option>
               {/each}
@@ -3577,14 +3609,14 @@
         </section>
         <section class="dashboard-grid">
           <BarsChart title="Revenue by source" points={revenueChartPoints} tone="active" />
-          <Table title="Action list" columns={dashboardColumns} rows={dashboardRows} state="default" actionLabel="" />
+          <Table title="Action list" columns={dashboardColumns} rows={dashboardRows} state={tableStateFor(dashboardActionListStatus, dashboardRows.length)} actionLabel="" />
         </section>
       {:else if activePageId === "imports"}
         <Toolbar label="Kontor RouteNote import" filters={importToolbarFilters} actionLabel="" loading={importState.status === "loading"} onFilterSelect={selectImportToolbarFilter} />
         <section class="form-panel ehq-edge-surface" aria-label="Import Kontor RouteNote">
           <label>
             <span>Source</span>
-            <select value={importState.source} onchange={updateImportSource}>
+            <select value={importState.source} onchange={(event) => updateImportSource(event.currentTarget.value)}>
               {#each importSourceOptions as option (option.value)}
                 <option value={option.value}>{option.label}</option>
               {/each}
@@ -3600,7 +3632,7 @@
         <section class="filter-strip ehq-edge-surface" aria-label="Import filters">
           <label>
             <span>Source filter</span>
-            <select value={importSourceFilter} onchange={updateImportFilter}>
+            <select value={importSourceFilter} onchange={(event) => updateImportFilter(event.currentTarget.value)}>
               {#each importFilterOptions as option (option.value)}
                 <option value={option.value}>{option.label}</option>
               {/each}
@@ -3623,7 +3655,7 @@
         <section class="filter-strip ehq-edge-surface" aria-label="Mapping filters">
           <label>
             <span>Status</span>
-            <select value={mappingStatusFilter} onchange={updateMappingStatus}>
+            <select value={mappingStatusFilter} onchange={(event) => updateMappingStatus(event.currentTarget.value)}>
               {#each mappingStatusOptions as option (option.value)}
                 <option value={option.value}>{option.label}</option>
               {/each}
@@ -3643,19 +3675,19 @@
           <section class="form-panel ehq-edge-surface" aria-label="New release">
             <label>
               <span>Title</span>
-              <input value={releaseTitleInput} oninput={updateReleaseTitle} />
+              <input value={releaseTitleInput} oninput={(event) => updateReleaseTitle(event.currentTarget.value)} />
             </label>
             <label>
               <span>Artist</span>
-              <input value={releaseArtistInput} oninput={updateReleaseArtist} />
+              <input value={releaseArtistInput} oninput={(event) => updateReleaseArtist(event.currentTarget.value)} />
             </label>
             <label>
               <span>UPC (optional)</span>
-              <input value={releaseUpcInput} oninput={updateReleaseUpc} />
+              <input value={releaseUpcInput} oninput={(event) => updateReleaseUpc(event.currentTarget.value)} />
             </label>
             <label>
               <span>Status</span>
-              <select value={releaseStatusInput} onchange={updateReleaseStatus}>
+              <select value={releaseStatusInput} onchange={(event) => updateReleaseStatus(event.currentTarget.value)}>
                 {#each catalogStatusOptions as option (option.value)}
                   <option value={option.value}>{option.label}</option>
                 {/each}
@@ -3672,19 +3704,19 @@
           <section class="form-panel ehq-edge-surface" aria-label="New track">
             <label>
               <span>Title</span>
-              <input value={trackTitleInput} oninput={updateTrackTitle} />
+              <input value={trackTitleInput} oninput={(event) => updateTrackTitle(event.currentTarget.value)} />
             </label>
             <label>
               <span>Artist</span>
-              <input value={trackArtistInput} oninput={updateTrackArtist} />
+              <input value={trackArtistInput} oninput={(event) => updateTrackArtist(event.currentTarget.value)} />
             </label>
             <label>
               <span>ISRC (optional)</span>
-              <input value={trackIsrcInput} oninput={updateTrackIsrc} />
+              <input value={trackIsrcInput} oninput={(event) => updateTrackIsrc(event.currentTarget.value)} />
             </label>
             <label>
               <span>Release</span>
-              <select value={trackReleaseIdInput} onchange={updateTrackRelease}>
+              <select value={trackReleaseIdInput} onchange={(event) => updateTrackRelease(event.currentTarget.value)}>
                 <option value="">No release</option>
                 {#each releases as release (release.id)}
                   <option value={release.id}>{release.title} · {release.artistName}</option>
@@ -3693,7 +3725,7 @@
             </label>
             <label>
               <span>Status</span>
-              <select value={trackStatusInput} onchange={updateTrackStatus}>
+              <select value={trackStatusInput} onchange={(event) => updateTrackStatus(event.currentTarget.value)}>
                 {#each catalogStatusOptions as option (option.value)}
                   <option value={option.value}>{option.label}</option>
                 {/each}
@@ -3726,11 +3758,11 @@
           <section class="form-panel ehq-edge-surface" aria-label="New contract">
             <label>
               <span>Title</span>
-              <input value={contractTitleInput} oninput={updateContractTitle} />
+              <input value={contractTitleInput} oninput={(event) => updateContractTitle(event.currentTarget.value)} />
             </label>
             <label>
               <span>Payee</span>
-              <select value={contractPayeeIdInput} onchange={updateContractPayee}>
+              <select value={contractPayeeIdInput} onchange={(event) => updateContractPayee(event.currentTarget.value)}>
                 <option value="">Select a payee</option>
                 {#each payees as payee (payee.id)}
                   <option value={payee.id}>{payee.displayName} · {payee.defaultCurrency}</option>
@@ -3739,7 +3771,7 @@
             </label>
             <label>
               <span>Status</span>
-              <select value={contractStatusInput} onchange={updateContractStatus}>
+              <select value={contractStatusInput} onchange={(event) => updateContractStatus(event.currentTarget.value)}>
                 {#each contractStatusOptions as option (option.value)}
                   <option value={option.value}>{option.label}</option>
                 {/each}
@@ -3755,11 +3787,11 @@
             </label>
             <label>
               <span>Split (%)</span>
-              <input value={contractSplitPercentInput} oninput={updateContractSplitPercent} placeholder="80" />
+              <input value={contractSplitPercentInput} oninput={(event) => updateContractSplitPercent(event.currentTarget.value)} placeholder="80" />
             </label>
             <label>
               <span>Currency</span>
-              <input value={contractCurrencyInput} oninput={updateContractCurrency} placeholder="MUR" />
+              <input value={contractCurrencyInput} oninput={(event) => updateContractCurrency(event.currentTarget.value)} placeholder="MUR" />
             </label>
             <button class="distribution-action primary" type="button" disabled={!writesEnabled || contractTitleInput.trim() === "" || contractPayeeIdInput === "" || contractEffectiveFromInput === "" || contractSplitBp === null || contractCurrencyInput.trim() === ""} title={writesEnabled ? (contractTitleInput.trim() === "" ? "Enter a contract title first" : contractPayeeIdInput === "" ? "Select a payee first" : contractEffectiveFromInput === "" ? "Pick the effective-from date first" : contractSplitBp === null ? "Enter a split between 0.01 and 100 percent" : contractCurrencyInput.trim() === "" ? "Enter a currency code first" : "") : writeGateMessage} onclick={createContract}>Create contract</button>
             <button class="distribution-action" type="button" onclick={closeContractPanel}>Cancel</button>
@@ -3773,7 +3805,7 @@
             </div>
             <label>
               <span>Payee</span>
-              <select value={rulePayeeIdInput} onchange={updateRulePayee}>
+              <select value={rulePayeeIdInput} onchange={(event) => updateRulePayee(event.currentTarget.value)}>
                 <option value="">Select a payee</option>
                 {#each payees as payee (payee.id)}
                   <option value={payee.id}>{payee.displayName} · {payee.defaultCurrency}</option>
@@ -3782,7 +3814,7 @@
             </label>
             <label>
               <span>Percentage</span>
-              <input value={rulePercentageInput} oninput={updateRulePercentage} placeholder="100" />
+              <input value={rulePercentageInput} oninput={(event) => updateRulePercentage(event.currentTarget.value)} placeholder="100" />
             </label>
             <button class="distribution-action primary" type="button" disabled={!writesEnabled || rulePayeeIdInput === "" || rulePercentageInput.trim() === ""} title={writesEnabled ? (rulePayeeIdInput === "" ? "Select a payee first" : rulePercentageInput.trim() === "" ? "Enter the rule percentage first" : "") : writeGateMessage} onclick={addContractRule}>Save rule set</button>
             <button class="distribution-action" type="button" onclick={closeContractRulePanel}>Cancel</button>
@@ -3815,7 +3847,7 @@
             </div>
             <label>
               <span>Unpost reason</span>
-              <input value={unpostReasonInput} oninput={updateUnpostReason} />
+              <input value={unpostReasonInput} oninput={(event) => updateUnpostReason(event.currentTarget.value)} />
             </label>
             <button class="distribution-action danger" type="button" disabled={!writesEnabled || unpostReasonInput.trim() === ""} title={writesEnabled ? (unpostReasonInput.trim() === "" ? "Enter an unpost reason first" : "") : writeGateMessage} onclick={unpostAllocationRun}>Request unpost run</button>
             <button class="distribution-action" type="button" onclick={closeUnpostPanel}>Cancel</button>
@@ -3826,7 +3858,7 @@
         <section class="filter-strip ehq-edge-surface" aria-label="Suspense filters">
           <label>
             <span>Status</span>
-            <select value={suspenseStatusFilter} onchange={updateSuspenseStatus}>
+            <select value={suspenseStatusFilter} onchange={(event) => updateSuspenseStatus(event.currentTarget.value)}>
               {#each suspenseStatusOptions as option (option.value)}
                 <option value={option.value}>{option.label}</option>
               {/each}
@@ -3843,7 +3875,7 @@
             {#if selectedSuspenseResolution !== "hold"}
               <label>
                 <span>Target track</span>
-                <select value={suspenseTargetTrackId} onchange={updateSuspenseTargetTrack}>
+                <select value={suspenseTargetTrackId} onchange={(event) => updateSuspenseTargetTrack(event.currentTarget.value)}>
                   <option value="">Select a track</option>
                   {#each suspenseTrackOptions ?? [] as track (track.id)}
                     <option value={track.id}>{track.title} · {track.artistName}</option>
@@ -3895,7 +3927,7 @@
         <section class="filter-strip ehq-edge-surface" aria-label="Payment filters">
           <label>
             <span>Status</span>
-            <select value={paymentStatusFilter} onchange={updatePaymentStatus}>
+            <select value={paymentStatusFilter} onchange={(event) => updatePaymentStatus(event.currentTarget.value)}>
               {#each paymentStatusOptions as option (option.value)}
                 <option value={option.value}>{option.label}</option>
               {/each}
@@ -3906,7 +3938,7 @@
         <section class="form-panel ehq-edge-surface" aria-label="Record payment">
           <label>
             <span>Statement</span>
-            <select value={recordStatementId} onchange={updateRecordStatement}>
+            <select value={recordStatementId} onchange={(event) => updateRecordStatement(event.currentTarget.value)}>
               <option value="">Select an open statement</option>
               {#each openStatements as statement (statement.id)}
                 <option value={statement.id}>{statement.payeeName} · {statement.period} · {formatMoney(statement.netPayableMicro, statement.currency)}</option>
@@ -3919,7 +3951,7 @@
           </label>
           <label>
             <span>Reference</span>
-            <input value={recordPaymentReference} oninput={updateRecordPaymentReference} />
+            <input value={recordPaymentReference} oninput={(event) => updateRecordPaymentReference(event.currentTarget.value)} />
           </label>
           <button class="distribution-action primary" type="button" disabled={!writesEnabled || recordStatement === null || recordPaymentReference.trim() === ""} title={writesEnabled ? (recordStatement === null ? "Select an open statement first" : recordPaymentReference.trim() === "" ? "Enter a payment reference first" : "") : writeGateMessage} onclick={recordPayment}>Record payment</button>
         </section>
@@ -3932,19 +3964,19 @@
             {#if paymentPanelMode === "edit"}
               <label>
                 <span>New reference</span>
-                <input value={paymentReferenceInput} oninput={updatePaymentReferenceInput} />
+                <input value={paymentReferenceInput} oninput={(event) => updatePaymentReferenceInput(event.currentTarget.value)} />
               </label>
               <button class="distribution-action primary" type="button" disabled={!writesEnabled || paymentReferenceInput.trim() === ""} title={writesEnabled ? (paymentReferenceInput.trim() === "" ? "Enter the new reference first" : "") : writeGateMessage} onclick={editPayment}>Save reference</button>
             {:else if paymentPanelMode === "reconcile"}
               <label>
                 <span>Bank transaction ID</span>
-                <input value={paymentBankTransactionInput} oninput={updatePaymentBankTransactionInput} />
+                <input value={paymentBankTransactionInput} oninput={(event) => updatePaymentBankTransactionInput(event.currentTarget.value)} />
               </label>
               <button class="distribution-action primary" type="button" disabled={!writesEnabled || paymentBankTransactionInput.trim() === ""} title={writesEnabled ? (paymentBankTransactionInput.trim() === "" ? "Enter the bank transaction ID first" : "") : writeGateMessage} onclick={reconcilePayment}>Reconcile payment</button>
             {:else}
               <label>
                 <span>Void reason</span>
-                <input value={paymentReferenceInput} oninput={updatePaymentReferenceInput} />
+                <input value={paymentReferenceInput} oninput={(event) => updatePaymentReferenceInput(event.currentTarget.value)} />
               </label>
               <button class="distribution-action danger" type="button" disabled={!writesEnabled || paymentReferenceInput.trim() === ""} title={writesEnabled ? (paymentReferenceInput.trim() === "" ? "Enter a void reason first" : "") : writeGateMessage} onclick={voidPayment}>Void payment</button>
             {/if}
@@ -3956,7 +3988,7 @@
         <section class="filter-strip ehq-edge-surface" aria-label="Revenue filters">
           <label>
             <span>Group by</span>
-            <select value={revenueGroupBy} onchange={updateRevenueGroup}>
+            <select value={revenueGroupBy} onchange={(event) => updateRevenueGroup(event.currentTarget.value)}>
               {#each revenueGroupOptions as option (option.value)}
                 <option value={option.value}>{option.label}</option>
               {/each}
