@@ -43,6 +43,8 @@
     readonly accent: boolean;
   }
 
+  type RequestStatus = "idle" | "loading" | "success" | "error";
+
   const props: Props = $props();
 
   let accountsState = $state<ApiRequestState<PageResult<OfficeBankAccountSummary>>>(
@@ -70,6 +72,8 @@
   let bankFormCurrency = $state<CurrencyCode>("MUR");
   let bankFormActive = $state(true);
   let editingAccountId = $state<string | null>(null);
+  let accountSubmitStatus = $state<RequestStatus>("idle");
+  let accountSubmitMessage = $state<string | null>(null);
   let accountsNextCursor = $state<string | null>(null);
   let accountsLoadingMore = $state(false);
   let accountsLoadMoreError = $state<string | null>(null);
@@ -90,12 +94,20 @@
     };
   }
 
-  function resetAccountForm(): void {
+  // Clears the input fields only; the submit status/message stay owned by the
+  // submit flow so the button remains disabled through the post-write reload.
+  function resetAccountFormFields(): void {
     editingAccountId = null;
     bankFormName = "";
     bankFormLabel = "";
     bankFormCurrency = "MUR";
     bankFormActive = true;
+  }
+
+  function resetAccountForm(): void {
+    resetAccountFormFields();
+    accountSubmitStatus = "idle";
+    accountSubmitMessage = null;
   }
 
   function startEditAccount(accountId: string): void {
@@ -111,21 +123,46 @@
   }
 
   async function submitAccountForm(): Promise<void> {
+    if (accountSubmitStatus === "loading") {
+      return;
+    }
     if (bankFormName.trim().length === 0 || bankFormLabel.trim().length === 0) {
       return;
     }
     const accountId = editingAccountId;
+    // One idempotency key per submit attempt; transport-level retries reuse it.
+    const idempotencyKey = crypto.randomUUID();
+    accountSubmitStatus = "loading";
+    accountSubmitMessage = null;
     try {
       if (accountId === null) {
-        await props.client.createBankAccount(accountWriteRequest(), { idempotencyKey: crypto.randomUUID() });
+        await props.client.createBankAccount(accountWriteRequest(), { idempotencyKey });
       } else {
-        await props.client.updateBankAccount(accountId, accountWriteRequest(), { idempotencyKey: crypto.randomUUID() });
+        await props.client.updateBankAccount(accountId, accountWriteRequest(), { idempotencyKey });
       }
-      resetAccountForm();
+      // Keep the status at "loading" through the reload so the submit button
+      // stays disabled and the progress label holds until the list refreshes.
+      resetAccountFormFields();
       await loadBank();
+      accountSubmitStatus = "success";
+      accountSubmitMessage = accountId === null ? "Compte bancaire créé." : "Compte bancaire mis à jour.";
     } catch (error: unknown) {
-      accountsState = createErrorState<PageResult<OfficeBankAccountSummary>>(error);
+      // Write failures stay on the form; accountsState keeps the loaded list.
+      accountSubmitStatus = "error";
+      accountSubmitMessage = getErrorMessage(error);
     }
+  }
+
+  function accountSubmitTitle(): string {
+    if (!props.writesEnabled) {
+      return "Activez les écritures pour modifier les comptes bancaires.";
+    }
+
+    if (accountSubmitStatus === "loading") {
+      return "Enregistrement en cours.";
+    }
+
+    return "";
   }
   const rawTableRows = $derived(createRawTableRows(rawRows));
   const accountsPagination = $derived<TablePagination | null>(
@@ -512,13 +549,22 @@
         <span class="ehq-type-label-mono">Actif</span>
       </label>
       <div class="bank-account-actions">
-        <button type="button" class="office-action ehq-type-heading primary" disabled={!props.writesEnabled} onclick={submitAccountForm}>
-          {editingAccountId === null ? "Ajouter le compte" : "Enregistrer"}
+        <button
+          type="button"
+          class="office-action ehq-type-heading primary"
+          disabled={!props.writesEnabled || accountSubmitStatus === "loading"}
+          title={accountSubmitTitle()}
+          onclick={submitAccountForm}
+        >
+          {accountSubmitStatus === "loading" ? "Enregistrement…" : editingAccountId === null ? "Ajouter le compte" : "Enregistrer"}
         </button>
         {#if editingAccountId !== null}
           <button type="button" class="office-action ehq-type-heading" onclick={resetAccountForm}>Annuler</button>
         {/if}
       </div>
+      {#if accountSubmitMessage !== null}
+        <p class="form-message ehq-type-body" class:error={accountSubmitStatus === "error"} role="status">{accountSubmitMessage}</p>
+      {/if}
     </section>
     <Table title="Bank accounts" columns={accountColumns} rows={accountTableRows} state={accountTableRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={accountRowActions} pagination={accountsPagination} />
     <Table title="Raw bank lines" columns={rawColumns} rows={rawTableRows} state={rawState.status === "loading" ? "loading" : rawState.status === "error" ? "error" : rawTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={rawPagination} />
@@ -626,6 +672,16 @@
     display: flex;
     gap: var(--ehq-space-2);
     margin-left: auto;
+  }
+
+  .form-message {
+    flex-basis: 100%;
+    margin: 0;
+    color: var(--ehq-success);
+  }
+
+  .form-message.error {
+    color: var(--ehq-error);
   }
 
   .office-action {

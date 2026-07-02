@@ -77,8 +77,13 @@
   let selectedPartnerId = $state<EntityId | null>(null);
   let partnerForm = $state<PartnerFormState>(emptyFormState);
   let linkPayeeId = $state<string>("");
-  let linkStatus = $state<RequestStatus>("idle");
+  let formStatus = $state<RequestStatus>("idle");
+  let payeeLinkStatus = $state<RequestStatus>("idle");
+  // Drawer-level status line; form and payee-link outcomes have their own
+  // messages rendered next to the action they belong to.
   let actionMessage = $state<string>("Select a partner to see the full relationship.");
+  let formMessage = $state<string | null>(null);
+  let payeeLinkMessage = $state<string | null>(null);
   let partnersLoadingMore = $state(false);
   let partnersLoadMoreError = $state<string | null>(null);
 
@@ -121,6 +126,10 @@
   async function openPartner(partnerId: EntityId): Promise<void> {
     selectedPartnerId = partnerId;
     drawerMode = "detail";
+    formStatus = "idle";
+    payeeLinkStatus = "idle";
+    formMessage = null;
+    payeeLinkMessage = null;
     detailState = createLoadingState<OfficePartnerDetail>();
     actionMessage = "Loading full partner relationship.";
 
@@ -169,6 +178,10 @@
   function openCreateDrawer(): void {
     selectedPartnerId = null;
     drawerMode = "create";
+    formStatus = "idle";
+    payeeLinkStatus = "idle";
+    formMessage = null;
+    payeeLinkMessage = null;
     detailState = createIdleState<OfficePartnerDetail>();
     partnerForm = emptyFormState;
     linkPayeeId = "";
@@ -181,6 +194,8 @@
     }
 
     drawerMode = "edit";
+    formStatus = "idle";
+    formMessage = null;
     partnerForm = createFormStateFromDetail(selectedPartner);
     actionMessage = "Editing partner details. Activity sides remain derived.";
   }
@@ -188,13 +203,22 @@
   function closeDrawer(): void {
     drawerMode = "closed";
     selectedPartnerId = null;
+    formStatus = "idle";
+    payeeLinkStatus = "idle";
+    formMessage = null;
+    payeeLinkMessage = null;
     detailState = createIdleState<OfficePartnerDetail>();
     actionMessage = "Select a partner to see the full relationship.";
   }
 
   async function submitPartnerForm(): Promise<void> {
+    if (formStatus === "loading") {
+      return;
+    }
+
     const request = createPartnerWriteRequest(partnerForm, props.workspaceId);
-    linkStatus = "loading";
+    formStatus = "loading";
+    formMessage = null;
 
     try {
       if (drawerMode === "create") {
@@ -202,29 +226,43 @@
           idempotencyKey: createIdempotencyKey("partner-create")
         });
         props.onReceipt(receipt);
+        // receipt.id is the created partner id. openPartner flips the drawer
+        // to the detail view synchronously, unmounting the create form so a
+        // second click cannot re-create the partner under a fresh
+        // idempotency key.
+        await openPartner(receipt.id);
         actionMessage = "Partner create request accepted.";
-      } else if (selectedPartnerId !== null) {
-        const receipt = await props.client.updatePartner(selectedPartnerId, request, {
-          idempotencyKey: createIdempotencyKey("partner-update")
-        });
-        props.onReceipt(receipt);
-        actionMessage = "Partner update request accepted.";
+        await loadPartners();
+        return;
       }
 
-      linkStatus = "success";
+      if (selectedPartnerId === null) {
+        formStatus = "idle";
+        return;
+      }
+
+      const receipt = await props.client.updatePartner(selectedPartnerId, request, {
+        idempotencyKey: createIdempotencyKey("partner-update")
+      });
+      props.onReceipt(receipt);
+      // Keep the status at "loading" through the list reload so the submit
+      // button stays disabled until the refreshed data is visible.
       await loadPartners();
+      formStatus = "success";
+      formMessage = "Partner update request accepted.";
     } catch (error: unknown) {
-      linkStatus = "error";
-      actionMessage = getErrorMessage(error);
+      formStatus = "error";
+      formMessage = getErrorMessage(error);
     }
   }
 
   async function linkPartnerPayee(): Promise<void> {
-    if (selectedPartnerId === null) {
+    if (selectedPartnerId === null || payeeLinkStatus === "loading") {
       return;
     }
 
-    linkStatus = "loading";
+    payeeLinkStatus = "loading";
+    payeeLinkMessage = null;
     try {
       const receipt = await props.client.linkPartnerPayee(
         selectedPartnerId,
@@ -237,20 +275,21 @@
         }
       );
       props.onReceipt(receipt);
-      linkStatus = "success";
-      actionMessage = "Distribution payee link request accepted.";
+      payeeLinkStatus = "success";
+      payeeLinkMessage = "Distribution payee link request accepted.";
     } catch (error: unknown) {
-      linkStatus = "error";
-      actionMessage = getErrorMessage(error);
+      payeeLinkStatus = "error";
+      payeeLinkMessage = getErrorMessage(error);
     }
   }
 
   async function unlinkPartnerPayee(): Promise<void> {
-    if (selectedPartnerId === null) {
+    if (selectedPartnerId === null || payeeLinkStatus === "loading") {
       return;
     }
 
-    linkStatus = "loading";
+    payeeLinkStatus = "loading";
+    payeeLinkMessage = null;
     try {
       const receipt = await props.client.unlinkPartnerPayee(
         selectedPartnerId,
@@ -263,11 +302,11 @@
         }
       );
       props.onReceipt(receipt);
-      linkStatus = "success";
-      actionMessage = "Distribution payee unlink request accepted.";
+      payeeLinkStatus = "success";
+      payeeLinkMessage = "Distribution payee unlink request accepted.";
     } catch (error: unknown) {
-      linkStatus = "error";
-      actionMessage = getErrorMessage(error);
+      payeeLinkStatus = "error";
+      payeeLinkMessage = getErrorMessage(error);
     }
   }
 
@@ -538,6 +577,18 @@
   function writeDisabledTitle(): string {
     return props.writesEnabled ? "" : "enable writes";
   }
+
+  function writeActionTitle(status: RequestStatus): string {
+    if (!props.writesEnabled) {
+      return "enable writes";
+    }
+
+    if (status === "loading") {
+      return "request in progress";
+    }
+
+    return "";
+  }
 </script>
 
 <section class="partners-view">
@@ -631,9 +682,12 @@
               <input value={linkPayeeId} oninput={updateLinkPayeeId} placeholder="payee_..." />
             </label>
             <div class="drawer-actions">
-              <button type="button" disabled={linkStatus === "loading" || !props.writesEnabled} title={writeDisabledTitle()} onclick={linkPartnerPayee}>Idempotent link</button>
-              <button type="button" disabled={linkStatus === "loading" || !props.writesEnabled} title={writeDisabledTitle()} onclick={unlinkPartnerPayee}>Idempotent unlink</button>
+              <button type="button" disabled={payeeLinkStatus === "loading" || !props.writesEnabled} title={writeActionTitle(payeeLinkStatus)} onclick={linkPartnerPayee}>Idempotent link</button>
+              <button type="button" disabled={payeeLinkStatus === "loading" || !props.writesEnabled} title={writeActionTitle(payeeLinkStatus)} onclick={unlinkPartnerPayee}>Idempotent unlink</button>
             </div>
+            {#if payeeLinkMessage !== null}
+              <p class="outcome-message" class:error={payeeLinkStatus === "error"} role="status">{payeeLinkMessage}</p>
+            {/if}
           </section>
         {/if}
 
@@ -674,8 +728,13 @@
               <span>Active partner</span>
             </label>
             <div class="drawer-actions">
-              <button type="submit" disabled={linkStatus === "loading" || !props.writesEnabled} title={writeDisabledTitle()}>{drawerMode === "create" ? "Create partner" : "Save partner"}</button>
+              <button type="submit" disabled={formStatus === "loading" || !props.writesEnabled} title={writeActionTitle(formStatus)}>
+                {formStatus === "loading" ? "Saving…" : drawerMode === "create" ? "Create partner" : "Save partner"}
+              </button>
             </div>
+            {#if formMessage !== null}
+              <p class="outcome-message" class:error={formStatus === "error"} role="status">{formMessage}</p>
+            {/if}
           </form>
         {/if}
 
@@ -842,6 +901,21 @@
   }
 
   .error-state strong {
+    color: var(--ehq-error);
+  }
+
+  /* Per-action outcome line (form submit or payee link), rendered next to the
+     action it belongs to; the drawer-level .action-message stays contextual. */
+  .outcome-message {
+    margin: 0;
+    color: var(--ehq-success);
+    font-family: var(--ehq-mono);
+    font-size: var(--ehq-type-label-size);
+    font-weight: var(--ehq-type-label-weight);
+    text-transform: none;
+  }
+
+  .outcome-message.error {
     color: var(--ehq-error);
   }
 

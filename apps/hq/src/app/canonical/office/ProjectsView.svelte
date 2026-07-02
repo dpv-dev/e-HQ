@@ -47,6 +47,8 @@
     readonly accent: boolean;
   }
 
+  type RequestStatus = "idle" | "loading" | "success" | "error";
+
   const props: Props = $props();
   const currency: CurrencyCode = "MUR";
 
@@ -67,6 +69,8 @@
   let projectFormDescription = $state("");
   let projectFormActive = $state(true);
   let editingProjectId = $state<string | null>(null);
+  let projectSubmitStatus = $state<RequestStatus>("idle");
+  let projectSubmitMessage = $state<string | null>(null);
 
   function projectWriteRequest(): OfficeProjectWriteRequest {
     return {
@@ -78,12 +82,20 @@
     };
   }
 
-  function resetProjectForm(): void {
+  // Clears the input fields only; the submit status/message stay owned by the
+  // submit flow so the button remains disabled through the post-write reload.
+  function resetProjectFormFields(): void {
     editingProjectId = null;
     projectFormName = "";
     projectFormStatus = "active";
     projectFormDescription = "";
     projectFormActive = true;
+  }
+
+  function resetProjectForm(): void {
+    resetProjectFormFields();
+    projectSubmitStatus = "idle";
+    projectSubmitMessage = null;
   }
 
   function startEditProject(projectId: string): void {
@@ -94,25 +106,57 @@
     editingProjectId = project.id;
     projectFormName = project.label;
     projectFormStatus = project.status;
+    // OfficeProjectSummary exposes neither description nor active, and no read
+    // in the client returns them, while OfficeProjectWriteRequest requires both.
+    // The form therefore shows both fields at their defaults with an explicit
+    // warning that saving overwrites the stored values.
+    projectFormDescription = "";
     projectFormActive = true;
+    projectSubmitStatus = "idle";
+    projectSubmitMessage = null;
   }
 
   async function submitProjectForm(): Promise<void> {
+    if (projectSubmitStatus === "loading") {
+      return;
+    }
     if (projectFormName.trim().length === 0) {
       return;
     }
     const projectId = editingProjectId;
+    // One idempotency key per submit attempt; every call made for this attempt reuses it.
+    const idempotencyKey = crypto.randomUUID();
+    projectSubmitStatus = "loading";
+    projectSubmitMessage = null;
     try {
       if (projectId === null) {
-        await props.client.createProject(projectWriteRequest(), { idempotencyKey: crypto.randomUUID() });
+        await props.client.createProject(projectWriteRequest(), { idempotencyKey });
       } else {
-        await props.client.updateProject(projectId, projectWriteRequest(), { idempotencyKey: crypto.randomUUID() });
+        await props.client.updateProject(projectId, projectWriteRequest(), { idempotencyKey });
       }
-      resetProjectForm();
+      // Keep the status at "loading" through the reload so the submit button
+      // stays disabled and the progress label holds until the list refreshes.
+      resetProjectFormFields();
       await loadProjects();
+      projectSubmitStatus = "success";
+      projectSubmitMessage = projectId === null ? "Projet créé." : "Projet mis à jour.";
     } catch (error: unknown) {
-      projectsState = createErrorState<PageResult<OfficeProjectSummary>>(error);
+      // Write failures stay on the form; projectsState keeps the loaded list.
+      projectSubmitStatus = "error";
+      projectSubmitMessage = getErrorMessage(error);
     }
+  }
+
+  function projectSubmitTitle(): string {
+    if (!props.writesEnabled) {
+      return "Activez les écritures pour modifier les projets.";
+    }
+
+    if (projectSubmitStatus === "loading") {
+      return "Enregistrement en cours.";
+    }
+
+    return "";
   }
 
   const projects = $derived(readPageItems(projectsState));
@@ -426,14 +470,36 @@
             <option value="archived">archived</option>
           </select>
         </label>
+        <label>
+          <span class="ehq-type-label-mono">Description</span>
+          <input type="text" bind:value={projectFormDescription} placeholder="Optionnelle" />
+        </label>
+        <label class="project-form-active">
+          <input type="checkbox" bind:checked={projectFormActive} />
+          <span class="ehq-type-label-mono">Actif</span>
+        </label>
+        {#if editingProjectId !== null}
+          <p class="form-warning" role="note">
+            La description et l'indicateur actif ne sont pas relus depuis l'API : les valeurs ci-dessus remplaceront celles enregistrées.
+          </p>
+        {/if}
         <div class="project-form-actions">
-          <button type="button" class="project-submit" disabled={!props.writesEnabled} onclick={submitProjectForm}>
-            {editingProjectId === null ? "Créer le projet" : "Enregistrer"}
+          <button
+            type="button"
+            class="project-submit"
+            disabled={!props.writesEnabled || projectSubmitStatus === "loading"}
+            title={projectSubmitTitle()}
+            onclick={submitProjectForm}
+          >
+            {projectSubmitStatus === "loading" ? "Enregistrement…" : editingProjectId === null ? "Créer le projet" : "Enregistrer"}
           </button>
           {#if editingProjectId !== null}
             <button type="button" class="project-cancel" onclick={resetProjectForm}>Annuler</button>
           {/if}
         </div>
+        {#if projectSubmitMessage !== null}
+          <p class="form-message" class:error={projectSubmitStatus === "error"} role="status">{projectSubmitMessage}</p>
+        {/if}
       </section>
 
       {#if projectsState.status === "loading"}
@@ -568,6 +634,26 @@
   .project-form label {
     display: grid;
     gap: var(--ehq-space-1);
+  }
+
+  .project-form .project-form-active {
+    display: flex;
+    align-items: center;
+    gap: var(--ehq-space-1);
+  }
+
+  .project-form .form-warning {
+    color: var(--ehq-warning);
+    text-transform: none;
+  }
+
+  .project-form .form-message {
+    color: var(--ehq-success);
+    text-transform: none;
+  }
+
+  .project-form .form-message.error {
+    color: var(--ehq-error);
   }
 
   .project-form-actions,
