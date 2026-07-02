@@ -36,6 +36,17 @@ export async function signInWithSupabasePassword(input: SupabasePasswordSignInIn
   return createAuthSessionFromSupabaseSession(data.session);
 }
 
+export async function sendSupabasePasswordReset(email: string): Promise<void> {
+  const client = requireSupabaseClient();
+  const { error } = await client.auth.resetPasswordForEmail(email, {
+    redirectTo: `${window.location.origin}/login`
+  });
+
+  if (error !== null) {
+    throw new Error(`Supabase password reset failed for email=${email}: ${error.message}`);
+  }
+}
+
 export async function restoreSupabaseAuthSession(): Promise<AuthSession | null> {
   const client = getSupabaseClient();
 

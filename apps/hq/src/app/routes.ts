@@ -367,6 +367,16 @@ export const resolveBareWorkspaceRedirect = (path: string): AppRoute | null => {
   return bareWorkspaceRedirects[normalizeRoutePath(path)] ?? null;
 };
 
+export const isProtectedRoute = (route: AppRoute): boolean => {
+  return route === "/app" || route === "/console" || route.startsWith("/console/");
+};
+
+// URL (path + query) sent to the login page so it can return to the denied route
+// after sign-in. The route itself stays "/login"; the query is read separately.
+export const buildLoginRouteWithNext = (nextRoute: AppRoute): string => {
+  return `/login?next=${encodeURIComponent(nextRoute)}`;
+};
+
 export const normalizeRoute = (path: string): AppRoute => {
   const normalizedPath = normalizeRoutePath(path);
 

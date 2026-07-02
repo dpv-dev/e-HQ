@@ -7,18 +7,31 @@
   import PlatformShell from "./PlatformShell.svelte";
   import type { PlatformPageId } from "./platform-data.js";
   import {
+    buildLoginRouteWithNext,
+    isProtectedRoute,
     normalizeRoute,
     resolveBareWorkspaceRedirect,
     resolveConsoleRouteForWorkspace,
     resolveConsoleTarget,
     type AppRoute
   } from "./routes.js";
-  import { normalizeRoutePath } from "./route-utils.js";
   import { restoreSupabaseAuthSession, signOutOfSupabase, subscribeToSupabaseAuthSession } from "./supabase.js";
 
-  let route = $state<AppRoute>("/");
+  // Resolve a location pathname to a route without touching history. Used at
+  // component init so protected deep links — including bare workspace aliases
+  // like /office — never flash the landing page before onMount runs, and by
+  // readRouteFromLocation, which additionally rewrites the URL for aliases.
+  const resolveRouteFromPath = (pathname: string): AppRoute => {
+    return resolveBareWorkspaceRedirect(pathname) ?? normalizeRoute(pathname);
+  };
+
+  let route = $state<AppRoute>(resolveRouteFromPath(window.location.pathname));
   let session = $state<AuthSession | null>(null);
-  let isRestoringSession = $state<boolean>(false);
+  // Session restoration always runs on mount; start true to cover that window.
+  let isRestoringSession = $state<boolean>(true);
+  // True while an intentional logout is in flight so the session-loss redirect
+  // (subscription branch and route guard) lets clearSession land on "/".
+  let isSigningOut = $state<boolean>(false);
   let initialWorkspaceId = $state<WorkspaceAppId>("command-center");
   let initialPageId = $state<PlatformPageId | null>(null);
   let loginNextRoute = $state<AppRoute | null>(null);
@@ -28,8 +41,16 @@
     route = nextRoute;
   };
 
+  const redirectToLogin = (deniedRoute: AppRoute): void => {
+    // Replace the history entry so "back" does not return to the protected route.
+    window.history.replaceState({}, "", buildLoginRouteWithNext(deniedRoute));
+    loginNextRoute = deniedRoute;
+    route = "/login";
+  };
+
   const setSession = (nextSession: AuthSession): void => {
     session = nextSession;
+    completeLogin();
   };
 
   const readLoginNextRoute = (): AppRoute | null => {
@@ -44,7 +65,9 @@
       return null;
     }
 
-    const nextRoute = normalizeRoutePath(rawNextRoute);
+    // normalizeRoute maps unknown paths to "/", which is rejected below, so the
+    // query can only ever produce a valid in-app destination.
+    const nextRoute = normalizeRoute(rawNextRoute);
 
     if (nextRoute === "/") {
       return null;
@@ -54,7 +77,7 @@
       return null;
     }
 
-    return nextRoute as AppRoute;
+    return nextRoute;
   };
 
   const resolveWorkspaceFromConsoleRoute = (consoleRoute: AppRoute): WorkspaceAppId => {
@@ -93,6 +116,33 @@
     }
   };
 
+  // Single owner of the login -> destination transition. Every auth-success
+  // path (LoginPage submit via setSession, the auth subscription, session
+  // restore) funnels through here; the route guard makes it idempotent, so
+  // concurrent callers cannot stack duplicate history entries. replaceState
+  // swaps the /login entry for the destination so Back never returns to the
+  // login form.
+  const completeLogin = (): void => {
+    if (route !== "/login") {
+      return;
+    }
+
+    const destination: AppRoute = loginNextRoute ?? "/";
+    loginNextRoute = null;
+
+    const target = resolveConsoleTarget(destination);
+    if (target !== null) {
+      initialWorkspaceId = target.workspaceId;
+      initialPageId = target.pageId ?? null;
+    } else {
+      syncWorkspaceFromRoute(destination);
+      initialPageId = null;
+    }
+
+    window.history.replaceState({}, "", destination);
+    route = destination;
+  };
+
   const clearSessionState = (): void => {
     session = null;
     initialWorkspaceId = "command-center";
@@ -102,12 +152,19 @@
 
   const clearSession = (): void => {
     void (async (): Promise<void> => {
+      // Intentional logout: signOutOfSupabase fires SIGNED_OUT before
+      // clearSessionState runs, so without this guard the session-loss branch
+      // would redirect to /login?next=<protected route> first.
+      isSigningOut = true;
       try {
         await signOutOfSupabase();
       } catch (error: unknown) {
         console.error("Supabase sign-out failed.", { error });
       } finally {
+        // Navigate to "/" before releasing the guard so the route guard never
+        // observes an unauthenticated protected route during logout.
         clearSessionState();
+        isSigningOut = false;
       }
     })();
   };
@@ -131,6 +188,16 @@
 
     return normalizeRoute(window.location.pathname);
   };
+
+  // Route guard: any transition that lands on a protected route without a
+  // session (in-app navigation, Back/Forward, session loss) redirects to
+  // login once restoration has settled. Intentional logout is excluded via
+  // isSigningOut so clearSession can land on "/" instead of /login?next=....
+  $effect((): void => {
+    if (!isRestoringSession && !isSigningOut && session === null && isProtectedRoute(route)) {
+      redirectToLogin(route);
+    }
+  });
 
   onMount((): (() => void) => {
     let cancelled = false;
@@ -162,7 +229,7 @@
       }
 
       if (route !== "/login") {
-        if (route.startsWith("/console/") && session === null && !isRestoringSession) {
+        if (isProtectedRoute(route) && session === null && !isRestoringSession) {
           void restoreSession();
         }
 
@@ -179,15 +246,25 @@
 
       try {
         const restoredSession = await restoreSupabaseAuthSession();
-        if (!cancelled && restoredSession !== null) {
-          session = restoredSession;
+        if (cancelled) {
+          return;
+        }
 
-          if (route === "/login" && loginNextRoute !== null) {
-            navigate(loginNextRoute);
-          }
+        if (restoredSession !== null) {
+          session = restoredSession;
+          completeLogin();
+          return;
+        }
+
+        if (isProtectedRoute(route)) {
+          redirectToLogin(route);
         }
       } catch (error: unknown) {
         console.error("Supabase session restore failed.", { error });
+
+        if (!cancelled && session === null && isProtectedRoute(route)) {
+          redirectToLogin(route);
+        }
       } finally {
         isRestoringSession = false;
       }
@@ -196,14 +273,19 @@
     const authState = subscribeToSupabaseAuthSession((nextSession: AuthSession | null): void => {
       if (nextSession === null) {
         session = null;
+
+        // Losing the session (expiry, remote sign-out) on a protected route
+        // sends the user to login instead of falling through to the landing
+        // page. Intentional logout is excluded: clearSession navigates to "/".
+        if (!isSigningOut && !isRestoringSession && isProtectedRoute(route)) {
+          redirectToLogin(route);
+        }
+
         return;
       }
 
       session = nextSession;
-
-      if (route === "/login" && loginNextRoute !== null) {
-        navigate(loginNextRoute);
-      }
+      completeLogin();
     });
 
     void restoreSession();
@@ -218,8 +300,8 @@
 </script>
 
 {#if route === "/login"}
-  <LoginPage onLogin={setSession} onNavigate={navigate} nextRoute={loginNextRoute} />
-{:else if session !== null && (route === "/app" || route === "/console" || route.startsWith("/console/"))}
+  <LoginPage onLogin={setSession} onNavigate={navigate} />
+{:else if session !== null && isProtectedRoute(route)}
   <PlatformShell
     initialWorkspaceId={initialWorkspaceId}
     initialPageId={initialPageId}
@@ -229,7 +311,7 @@
   />
 {:else if route === "/design"}
   <DesignSystemPage onNavigate={navigate} />
-{:else if isRestoringSession && (route === "/app" || route.startsWith("/console/"))}
+{:else if isRestoringSession && isProtectedRoute(route)}
   <main class="auth-recovery">
     <p>Restoring your session…</p>
   </main>

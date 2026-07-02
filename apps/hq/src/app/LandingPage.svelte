@@ -19,7 +19,7 @@
   import officePhoto from "../../../../packages/ui/assets/backgrounds/hq-card-office.jpg?url";
   import { createShellApiClient } from "./app-shell-data.js";
   import type { AppRoute } from "./routes.js";
-  import { signInWithSupabasePassword } from "./supabase.js";
+  import { sendSupabasePasswordReset, signInWithSupabasePassword } from "./supabase.js";
 
   interface Props {
     readonly session: AuthSession | null;
@@ -40,7 +40,6 @@
   const { session, onLogin, onLogout, onNavigate, onOpenWorkspace }: Props = $props();
   const client = createShellApiClient();
 
-  let accessRequestedFor = $state<string | null>(null);
   let loginOpen = $state(false);
   let notificationsOpen = $state(false);
   let sessionMenuOpen = $state(false);
@@ -54,6 +53,7 @@
   let rememberSession = $state(true);
   let loginMessage = $state("");
   let signingIn = $state(false);
+  let resettingPassword = $state(false);
 
   const cards: readonly WorkspaceCard[] = [
     {
@@ -158,7 +158,6 @@
       loginOpen = false;
       loginTarget = null;
       loginMessage = "";
-      accessRequestedFor = null;
     } catch (error: unknown) {
       loginMessage = error instanceof Error ? error.message : "Supabase sign-in failed.";
     } finally {
@@ -171,12 +170,25 @@
     void applyLogin(resolveEmail());
   };
 
-  const continueWithSso = (): void => {
-    void applyLogin(resolveEmail());
-  };
+  const forgotPassword = async (): Promise<void> => {
+    const trimmedEmail = loginEmail.trim();
 
-  const forgotPassword = (): void => {
-    loginMessage = "Password reset is ready for this account.";
+    if (trimmedEmail.length === 0) {
+      loginMessage = "Enter your email above to receive a reset link.";
+      return;
+    }
+
+    resettingPassword = true;
+    loginMessage = "";
+
+    try {
+      await sendSupabasePasswordReset(trimmedEmail);
+      loginMessage = `Password reset email sent to ${trimmedEmail}.`;
+    } catch (error: unknown) {
+      loginMessage = error instanceof Error ? error.message : "Supabase password reset failed.";
+    } finally {
+      resettingPassword = false;
+    }
   };
 
   const toggleNotifications = (): void => {
@@ -239,10 +251,7 @@
 
     if (isAllowed(card.workspaceId)) {
       onOpenWorkspace(card.workspaceId);
-      return;
     }
-
-    accessRequestedFor = card.title;
   };
 </script>
 
@@ -278,32 +287,32 @@
           <header>
             <div>
               <p>notifications</p>
-              <strong>{isLoggedIn ? "Centre opérationnel" : "Connexion requise"}</strong>
+              <strong>{isLoggedIn ? "Operations center" : "Sign-in required"}</strong>
             </div>
             <button class="panel-link" type="button" onclick={loadNotifications} disabled={!isLoggedIn || notificationsState.status === "loading"}>
-              actualiser
+              refresh
             </button>
           </header>
 
           {#if !isLoggedIn}
             <article class="notification-item muted">
-              <strong>Session requise</strong>
-              <span>Connecte-toi pour charger les alertes live du Command Center.</span>
+              <strong>Session required</strong>
+              <span>Sign in to load live Command Center alerts.</span>
             </article>
           {:else if notificationsState.status === "loading"}
             <article class="notification-item muted">
-              <strong>Chargement</strong>
-              <span>Lecture des notifications API.</span>
+              <strong>Loading</strong>
+              <span>Reading API notifications.</span>
             </article>
           {:else if notificationsState.status === "error"}
             <article class="notification-item error">
-              <strong>Notifications indisponibles</strong>
-              <span>{notificationsState.error instanceof Error ? notificationsState.error.message : "Erreur inconnue."}</span>
+              <strong>Notifications unavailable</strong>
+              <span>{notificationsState.error instanceof Error ? notificationsState.error.message : "Unknown error."}</span>
             </article>
           {:else if notificationItems.length === 0}
             <article class="notification-item muted">
-              <strong>Aucune notification</strong>
-              <span>Le panneau est prêt.</span>
+              <strong>No notifications</strong>
+              <span>The panel is ready.</span>
             </article>
           {:else}
             {#each notificationItems as notification (notification.id)}
@@ -373,11 +382,16 @@
           <p class="card-desc">{card.description}</p>
           <div class="workspace-actions">
             {#if locked}
-              <button class="locked-button" type="button" onclick={() => openWorkspace(card)}>
+              <button
+                class="locked-button"
+                type="button"
+                disabled
+                title="Access is managed by your administrator — Command Center → Users & permissions."
+              >
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
                 access denied
               </button>
-              <button class="request-link" type="button" onclick={() => openWorkspace(card)}>request access →</button>
+              <p class="locked-hint">Access is managed by your administrator — Command Center → Users & permissions.</p>
             {:else}
               <button class="enter-button" type="button" onclick={() => openWorkspace(card)}>
                 Enter {card.title} <span aria-hidden="true">→</span>
@@ -394,9 +408,6 @@
     <span>Privacy Policy · Terms of Service</span>
   </footer>
 
-  {#if accessRequestedFor !== null}
-    <p class="request-note" role="status">Access request prepared for {accessRequestedFor}.</p>
-  {/if}
 </main>
 
 {#if loginOpen}
@@ -433,14 +444,20 @@
           <input bind:checked={rememberSession} type="checkbox" />
           remember me
         </label>
-        <button class="plain-link" type="button" onclick={forgotPassword}>forgot password?</button>
+        <button
+          class="plain-link"
+          type="button"
+          disabled={resettingPassword}
+          title={resettingPassword ? "Password reset email is being sent." : "Send a password reset link to the email above."}
+          onclick={forgotPassword}
+        >
+          {resettingPassword ? "sending reset link…" : "forgot password?"}
+        </button>
       </div>
 
       <button class="submit-button" type="submit" disabled={signingIn}>
         {signingIn ? "signing in" : "sign in"} <span aria-hidden="true">→</span>
       </button>
-      <div class="separator">or</div>
-      <button class="sso-button" type="button" disabled={signingIn} onclick={continueWithSso}>continue with ë sso</button>
 
       {#if loginMessage.length > 0}
         <p class="login-message" role="status">{loginMessage}</p>
@@ -506,17 +523,14 @@
   }
 
   .eyebrow,
-  .request-link,
-  .request-note,
+  .locked-hint,
   footer,
   .locked-button,
   .enter-button,
   .field span,
   .form-row,
   .plain-link,
-  .separator,
   .submit-button,
-  .sso-button,
   .login-message,
   .close-button,
   .notification-panel p,
@@ -992,6 +1006,7 @@
     border: 1px solid var(--ehq-error);
     background: var(--ehq-error-bg);
     color: var(--ehq-error);
+    cursor: not-allowed;
   }
 
   .locked-button svg,
@@ -1003,18 +1018,13 @@
     fill: none;
   }
 
-  .request-link {
-    width: fit-content;
-    padding: 0;
-    border: 0;
-    background: transparent;
+  /* Honest static hint: workspace access is granted by an administrator. */
+  .locked-hint {
+    margin: 0;
     color: var(--ehq-text-muted);
     font-size: var(--ehq-type-caption-size);
+    line-height: 1.45;
     text-align: left;
-  }
-
-  .request-link:hover {
-    color: var(--ehq-error);
   }
 
   .cross {
@@ -1035,20 +1045,6 @@
   footer {
     padding-top: clamp(var(--ehq-space-2), 1.6vh, var(--ehq-space-4));
     color: var(--ehq-text-muted);
-    font-size: var(--ehq-type-caption-size);
-  }
-
-  .request-note {
-    position: fixed;
-    right: var(--ehq-space-5);
-    bottom: var(--ehq-space-5);
-    z-index: 5;
-    margin: 0;
-    padding: var(--ehq-space-2) var(--ehq-space-3);
-    border: 1px solid var(--ehq-yellow-border);
-    border-radius: var(--ehq-radius-sm);
-    background: var(--ehq-surface);
-    color: var(--ehq-yellow);
     font-size: var(--ehq-type-caption-size);
   }
 
@@ -1178,8 +1174,12 @@
     color: var(--ehq-yellow);
   }
 
-  .submit-button,
-  .sso-button {
+  .plain-link:disabled {
+    color: var(--ehq-text-disabled);
+    cursor: not-allowed;
+  }
+
+  .submit-button {
     width: 100%;
     min-height: 44px;
     border-radius: var(--ehq-radius-sm);
@@ -1188,42 +1188,10 @@
     font-weight: var(--ehq-type-heading-weight);
     letter-spacing: 0.08em;
     text-transform: uppercase;
-  }
-
-  .submit-button {
     margin-top: var(--ehq-space-4);
     border: 1px solid var(--ehq-yellow);
     background: var(--ehq-yellow);
     color: var(--ehq-text-on-yellow);
-  }
-
-  .separator {
-    margin: var(--ehq-space-4) 0;
-    color: var(--ehq-text-muted);
-    display: flex;
-    align-items: center;
-    gap: var(--ehq-space-3);
-    font-size: var(--ehq-type-label-size);
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-  }
-
-  .separator::before,
-  .separator::after {
-    content: "";
-    height: 1px;
-    flex: 1;
-    background: var(--ehq-border);
-  }
-
-  .sso-button {
-    border: 1px solid var(--ehq-border);
-    background: transparent;
-    color: var(--ehq-text);
-  }
-
-  .sso-button:hover {
-    border-color: var(--ehq-yellow-border);
   }
 
   .login-message {

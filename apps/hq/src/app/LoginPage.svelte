@@ -2,21 +2,21 @@
   import type { AuthSession } from "@ehq/auth";
   import sceneCommandCenter from "../../../../packages/ui/assets/backgrounds/scene-command-center.svg?url";
   import type { AppRoute } from "./routes.js";
-  import { signInWithSupabasePassword } from "./supabase.js";
+  import { sendSupabasePasswordReset, signInWithSupabasePassword } from "./supabase.js";
 
   interface Props {
     readonly onLogin: (session: AuthSession) => void;
     readonly onNavigate: (route: AppRoute) => void;
-    readonly nextRoute: AppRoute | null;
   }
 
-  const { onLogin, onNavigate, nextRoute }: Props = $props();
+  const { onLogin, onNavigate }: Props = $props();
 
   let email = $state("david@eeee.mu");
   let password = $state("");
   let rememberSession = $state(true);
   let statusMessage = $state("");
   let signingIn = $state(false);
+  let resettingPassword = $state(false);
 
   const signIn = async (): Promise<void> => {
     if (email.trim().length === 0 || password.trim().length === 0) {
@@ -35,8 +35,10 @@
       statusMessage = rememberSession
         ? "Session ready. Opening your available workspaces."
         : "Sign-in validated for this session.";
+      // App.svelte owns the post-login navigation (completeLogin replaces the
+      // /login history entry with the ?next= destination); navigating here as
+      // well would push a duplicate history entry.
       onLogin(session);
-      onNavigate(nextRoute ?? "/");
     } catch (error: unknown) {
       statusMessage = error instanceof Error ? error.message : "Supabase sign-in failed.";
     } finally {
@@ -49,8 +51,25 @@
     void signIn();
   };
 
-  const forgotPassword = (): void => {
-    statusMessage = "Password reset is ready for the selected account.";
+  const forgotPassword = async (): Promise<void> => {
+    const trimmedEmail = email.trim();
+
+    if (trimmedEmail.length === 0) {
+      statusMessage = "Enter your email above to receive a reset link.";
+      return;
+    }
+
+    resettingPassword = true;
+    statusMessage = "";
+
+    try {
+      await sendSupabasePasswordReset(trimmedEmail);
+      statusMessage = `Password reset email sent to ${trimmedEmail}.`;
+    } catch (error: unknown) {
+      statusMessage = error instanceof Error ? error.message : "Supabase password reset failed.";
+    } finally {
+      resettingPassword = false;
+    }
   };
 </script>
 
@@ -109,15 +128,19 @@
           <input bind:checked={rememberSession} type="checkbox" />
           remember me
         </label>
-        <button class="plain-link" type="button" onclick={forgotPassword}>forgot password?</button>
+        <button
+          class="plain-link"
+          type="button"
+          disabled={resettingPassword}
+          title={resettingPassword ? "Password reset email is being sent." : "Send a password reset link to the email above."}
+          onclick={forgotPassword}
+        >
+          {resettingPassword ? "sending reset link…" : "forgot password?"}
+        </button>
       </div>
 
       <button class="submit-button" type="submit" disabled={signingIn}>
         {signingIn ? "signing in" : "sign in"} <span aria-hidden="true">→</span>
-      </button>
-      <div class="separator">or</div>
-      <button class="sso-button" type="button" disabled={signingIn} onclick={() => void signIn()}>
-        continue with ë sso
       </button>
 
       {#if statusMessage.length > 0}
@@ -185,9 +208,7 @@
   .field span,
   .form-row,
   .plain-link,
-  .separator,
   .submit-button,
-  .sso-button,
   .foot,
   .status {
     font-family: var(--ehq-mono);
@@ -362,8 +383,12 @@
     color: var(--ehq-yellow);
   }
 
-  .submit-button,
-  .sso-button {
+  .plain-link:disabled {
+    color: var(--ehq-text-disabled);
+    cursor: not-allowed;
+  }
+
+  .submit-button {
     width: 100%;
     min-height: 46px;
     border-radius: var(--ehq-radius-sm);
@@ -372,9 +397,6 @@
     font-weight: var(--ehq-type-heading-weight);
     letter-spacing: 0.08em;
     text-transform: uppercase;
-  }
-
-  .submit-button {
     margin-top: var(--ehq-space-4);
     border: 1px solid var(--ehq-yellow);
     background: var(--ehq-yellow);
@@ -388,35 +410,6 @@
 
   .submit-button:hover span {
     transform: translateX(var(--ehq-space-1));
-  }
-
-  .separator {
-    margin: var(--ehq-space-4) 0;
-    color: var(--ehq-text-muted);
-    display: flex;
-    align-items: center;
-    gap: var(--ehq-space-3);
-    font-size: var(--ehq-type-label-size);
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-  }
-
-  .separator::before,
-  .separator::after {
-    content: "";
-    height: 1px;
-    flex: 1;
-    background: var(--ehq-border);
-  }
-
-  .sso-button {
-    border: 1px solid var(--ehq-border);
-    background: transparent;
-    color: var(--ehq-text);
-  }
-
-  .sso-button:hover {
-    border-color: var(--ehq-yellow-border);
   }
 
   .status,

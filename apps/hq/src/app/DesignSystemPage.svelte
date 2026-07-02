@@ -161,6 +161,7 @@
           locked={false}
           focus={false}
           ariaLabel="Back to shell"
+          onclick={() => onNavigate("/app")}
         />
       </div>
     </header>
