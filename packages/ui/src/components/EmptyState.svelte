@@ -14,12 +14,14 @@
 
   const props: Props = $props();
 
+  // English: every current consumer (PlatformShell, CeoView, VatView,
+  // PartnersView, design-system page) is an English-labelled surface.
   const stateLabels: Record<OperatorState, string> = {
-    ready: "Prêt",
-    loading: "Chargement",
-    empty: "Vide",
-    error: "Erreur",
-    disabled: "Désactivé"
+    ready: "Ready",
+    loading: "Loading",
+    empty: "Empty",
+    error: "Error",
+    disabled: "Disabled"
   };
 </script>
 

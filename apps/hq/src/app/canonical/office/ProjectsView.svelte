@@ -2,9 +2,13 @@
   import { onMount } from "svelte";
   import {
     Badge,
+    Button,
+    Input,
     KPI,
     Loader,
+    Select,
     Table,
+    type SelectOption,
     type TablePagination,
     type TableRow,
     type Tone
@@ -51,6 +55,14 @@
 
   const props: Props = $props();
   const currency: CurrencyCode = "MUR";
+  const projectStatusOptions: readonly SelectOption[] = [
+    { label: "draft", value: "draft" },
+    { label: "active", value: "active" },
+    { label: "paused", value: "paused" },
+    { label: "completed", value: "completed" },
+    { label: "cancelled", value: "cancelled" },
+    { label: "archived", value: "archived" }
+  ];
 
   let projectsState = $state<ApiRequestState<PageResult<OfficeProjectSummary>>>(
     createIdleState<PageResult<OfficeProjectSummary>>()
@@ -147,6 +159,10 @@
     }
   }
 
+  // The submit button is disabled while the name is empty, so the empty guard
+  // inside submitProjectForm can no longer be hit silently.
+  const projectFormComplete = $derived(projectFormName.trim().length > 0);
+
   function projectSubmitTitle(): string {
     if (!props.writesEnabled) {
       return "Activez les écritures pour modifier les projets.";
@@ -156,7 +172,20 @@
       return "Enregistrement en cours.";
     }
 
+    if (!projectFormComplete) {
+      return "Renseignez le nom du projet.";
+    }
+
     return "";
+  }
+
+  function setProjectFormStatus(value: string): void {
+    const allowed: readonly OfficeProjectWriteStatus[] = ["draft", "active", "paused", "completed", "cancelled", "archived"];
+    const match = allowed.find((status: OfficeProjectWriteStatus): boolean => status === value);
+    if (match === undefined) {
+      throw new Error(`Unsupported project status option: ${value}`);
+    }
+    projectFormStatus = match;
   }
 
   const projects = $derived(readPageItems(projectsState));
@@ -398,8 +427,7 @@
         { kind: "badge", value: violation.severity, tone: violation.severity === "error" ? "error" : "warning" },
         { kind: "text", value: violation.rule, strong: true },
         { kind: "text", value: violation.message, strong: false },
-        { kind: "badge", value: violation.exactFixPath, tone: "info" },
-        { kind: "text", value: violation.exactFixPath, strong: false }
+        { kind: "badge", value: violation.exactFixPath, tone: "info" }
       ]
     }));
   }
@@ -451,29 +479,50 @@
           <p>Projects</p>
           <strong>{projects.length} active</strong>
         </div>
-        <button type="button" onclick={loadProjects}>Refresh</button>
+        <Button
+          label="Refresh"
+          variant="secondary"
+          size="small"
+          type="button"
+          disabled={false}
+          loading={false}
+          locked={false}
+          focus={false}
+          ariaLabel="Refresh projects"
+          onclick={loadProjects}
+        />
       </header>
 
       <section class="project-form ehq-edge-surface" aria-label={editingProjectId === null ? "Créer un projet" : "Éditer le projet"}>
-        <label>
-          <span class="ehq-type-label-mono">Nom du projet</span>
-          <input type="text" bind:value={projectFormName} placeholder="Album launch" />
-        </label>
-        <label>
-          <span class="ehq-type-label-mono">Statut</span>
-          <select bind:value={projectFormStatus}>
-            <option value="draft">draft</option>
-            <option value="active">active</option>
-            <option value="paused">paused</option>
-            <option value="completed">completed</option>
-            <option value="cancelled">cancelled</option>
-            <option value="archived">archived</option>
-          </select>
-        </label>
-        <label>
-          <span class="ehq-type-label-mono">Description</span>
-          <input type="text" bind:value={projectFormDescription} placeholder="Optionnelle" />
-        </label>
+        <Input
+          id="project-form-name"
+          label="Nom du projet"
+          value={projectFormName}
+          placeholder="Album launch"
+          type="text"
+          state="default"
+          message=""
+          oninput={(value: string): void => { projectFormName = value; }}
+        />
+        <Select
+          id="project-form-status"
+          label="Statut"
+          value={projectFormStatus}
+          options={projectStatusOptions}
+          state="default"
+          message=""
+          onchange={setProjectFormStatus}
+        />
+        <Input
+          id="project-form-description"
+          label="Description"
+          value={projectFormDescription}
+          placeholder="Optionnelle"
+          type="text"
+          state="default"
+          message=""
+          oninput={(value: string): void => { projectFormDescription = value; }}
+        />
         <label class="project-form-active">
           <input type="checkbox" bind:checked={projectFormActive} />
           <span class="ehq-type-label-mono">Actif</span>
@@ -484,17 +533,32 @@
           </p>
         {/if}
         <div class="project-form-actions">
-          <button
+          <Button
+            label={projectSubmitStatus === "loading" ? "Enregistrement…" : editingProjectId === null ? "Créer le projet" : "Enregistrer"}
+            variant="primary"
+            size="medium"
             type="button"
-            class="project-submit"
-            disabled={!props.writesEnabled || projectSubmitStatus === "loading"}
+            disabled={!props.writesEnabled || !projectFormComplete}
+            loading={projectSubmitStatus === "loading"}
+            locked={false}
+            focus={false}
+            ariaLabel={editingProjectId === null ? "Créer le projet" : "Enregistrer le projet"}
             title={projectSubmitTitle()}
             onclick={submitProjectForm}
-          >
-            {projectSubmitStatus === "loading" ? "Enregistrement…" : editingProjectId === null ? "Créer le projet" : "Enregistrer"}
-          </button>
+          />
           {#if editingProjectId !== null}
-            <button type="button" class="project-cancel" onclick={resetProjectForm}>Annuler</button>
+            <Button
+              label="Annuler"
+              variant="secondary"
+              size="medium"
+              type="button"
+              disabled={false}
+              loading={false}
+              locked={false}
+              focus={false}
+              ariaLabel="Annuler l'édition du projet"
+              onclick={resetProjectForm}
+            />
           {/if}
         </div>
         {#if projectSubmitMessage !== null}
@@ -503,7 +567,7 @@
       </section>
 
       {#if projectsState.status === "loading"}
-        <Loader label="Loading projects" detail="Reading eof/v1/projects." size="medium" />
+        <Loader label="Loading projects" detail="Reading active projects." size="medium" />
       {:else if projectsState.status === "error"}
         <div class="state-copy error">
           <strong>Projects unavailable</strong>
@@ -537,7 +601,18 @@
         {#if selectedProject !== null}
           <div class="project-detail-actions">
             <Badge label={selectedProject.status} tone="info" />
-            <button type="button" class="project-edit" onclick={() => startEditProject(selectedProject.id)}>Éditer</button>
+            <Button
+              label="Éditer"
+              variant="secondary"
+              size="small"
+              type="button"
+              disabled={false}
+              loading={false}
+              locked={false}
+              focus={false}
+              ariaLabel="Éditer le projet sélectionné"
+              onclick={() => startEditProject(selectedProject.id)}
+            />
           </div>
         {/if}
       </header>
@@ -582,8 +657,7 @@
     { label: "Severity", align: "left", sortable: true },
     { label: "Rule", align: "left", sortable: true },
     { label: "Message", align: "left", sortable: false },
-    { label: "Fix path", align: "left", sortable: true },
-    { label: "Route", align: "left", sortable: true }
+    { label: "Fix path", align: "left", sortable: true }
   ];
 
   function projectReferenceLabel(project: OfficeProjectSummary): string {
@@ -631,11 +705,6 @@
     margin-bottom: var(--ehq-space-3);
   }
 
-  .project-form label {
-    display: grid;
-    gap: var(--ehq-space-1);
-  }
-
   .project-form .project-form-active {
     display: flex;
     align-items: center;
@@ -661,33 +730,6 @@
     display: flex;
     gap: var(--ehq-space-2);
     align-items: center;
-  }
-
-  .project-submit,
-  .project-cancel,
-  .project-edit {
-    min-height: 32px;
-    padding: 0 var(--ehq-space-3);
-    border: 1px solid var(--ehq-border);
-    border-radius: var(--ehq-radius-sm);
-    background: transparent;
-    color: var(--ehq-text);
-    font-family: var(--ehq-mono);
-    font-size: var(--ehq-type-label-size);
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    cursor: pointer;
-  }
-
-  .project-submit {
-    border-color: var(--ehq-yellow);
-    background: var(--ehq-yellow);
-    color: var(--ehq-text-on-yellow);
-  }
-
-  .project-submit:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
   }
 
   .project-detail {
@@ -718,21 +760,14 @@
     gap: var(--ehq-space-2);
   }
 
-  .project-buttons button,
-  .project-list > header button {
-    border: 1px solid var(--ehq-border);
-    border-radius: var(--ehq-radius-sm);
-    background: transparent;
-    color: var(--ehq-text);
-    font: inherit;
-  }
-
   .project-buttons button {
     min-width: 0;
     min-height: 92px;
     padding: var(--ehq-space-3);
     border: 0;
     background: transparent;
+    color: var(--ehq-text);
+    font: inherit;
     display: grid;
     gap: var(--ehq-space-1);
     text-align: left;
@@ -741,20 +776,6 @@
   .project-buttons button:hover,
   .project-buttons button.selected {
     --ehq-edge-border-color: var(--ehq-yellow-border);
-  }
-
-  .project-list > header button:hover {
-    border-color: var(--ehq-yellow-border);
-    box-shadow: 0 0 0 3px var(--ehq-yellow-muted);
-  }
-
-  .project-list > header button {
-    min-height: 34px;
-    padding: 0 var(--ehq-space-3);
-    font-family: var(--ehq-mono);
-    font-size: var(--ehq-type-label-size);
-    font-weight: var(--ehq-type-label-weight);
-    text-transform: uppercase;
   }
 
   p,

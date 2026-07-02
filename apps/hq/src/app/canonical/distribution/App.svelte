@@ -480,8 +480,17 @@
   let ruleContractId = $state<string | null>(null);
   let rulePayeeIdInput = $state("");
   let rulePercentageInput = $state("");
+  let expensePanelOpen = $state(false);
+  let expenseContractIdInput = $state("");
+  let expenseLabelInput = $state("");
+  let expenseAmountInput = $state("");
+  let expenseDateInput = $state("");
   let printingStatementId = $state<string | null>(null);
   let statementPrintError = $state<string | null>(null);
+  // Write failures land here (per page) so a transient mutation error never
+  // clobbers the loaded list states rendered by the tables.
+  let actionError = $state<string | null>(null);
+  let actionErrorPageId = $state<DistributionPageId | null>(null);
 
   const activePage = $derived(getNavItem(activePageId));
   const distributionPeriod = $derived(selectedPeriod);
@@ -579,6 +588,14 @@
   const selectedRun = $derived(allocationRuns.find((run: AllocationRunSummary): boolean => run.id === selectedRunId) ?? null);
   const selectedRuleContract = $derived(contracts.find((contract: DistributionContract): boolean => contract.id === ruleContractId) ?? null);
   const contractSplitBp = $derived(parseSplitBasisPoints(contractSplitPercentInput));
+  const selectedExpenseContract = $derived(
+    contracts.find((contract: DistributionContract): boolean => contract.id === expenseContractIdInput) ?? null
+  );
+  const expenseAmountMicro = $derived(parseExpenseAmountMicro(expenseAmountInput));
+  const expenseContractSelectOptions = $derived<readonly SelectOption[]>([
+    { label: "Select a contract", value: "" },
+    ...contracts.map((contract: DistributionContract): SelectOption => ({ label: `${contract.title} · ${contract.currency}`, value: contract.id }))
+  ]);
   const payeeSelectOptions = $derived<readonly SelectOption[]>([
     { label: "Select a payee", value: "" },
     ...payees.map((payee: PayeeSummary): SelectOption => ({ label: `${payee.displayName} · ${payee.defaultCurrency}`, value: payee.id }))
@@ -1638,20 +1655,29 @@
   }
 
   function clearActionReceipts(): void {
-    runReceipt = null;
-    mutationReceipt = null;
-    runReceiptPageId = null;
-    mutationReceiptPageId = null;
+    clearMutationReceipt();
+    clearRunReceipt();
   }
 
   function clearMutationReceipt(): void {
     mutationReceipt = null;
     mutationReceiptPageId = null;
+    actionError = null;
+    actionErrorPageId = null;
   }
 
   function clearRunReceipt(): void {
     runReceipt = null;
     runReceiptPageId = null;
+    actionError = null;
+    actionErrorPageId = null;
+  }
+
+  // Routes a write failure to the dedicated action banner: the loaded list
+  // states stay intact so the tables keep rendering the last known data.
+  function reportActionError(error: unknown): void {
+    actionError = getErrorMessage(error);
+    actionErrorPageId = activePageId;
   }
 
   function updateImportFilter(value: string): void {
@@ -2053,14 +2079,62 @@
       mutationReceiptPageId = activePageId;
       await loadMappingRows();
     } catch (error: unknown) {
-      mappingState = createErrorState<PageResult<DistributionMappingRow>>(error);
+      reportActionError(error);
     }
   }
 
-  async function recordExpense(): Promise<void> {
-    const contract = contracts[0];
+  function openExpensePanel(): void {
+    expensePanelOpen = true;
+    expenseContractIdInput = "";
+    expenseLabelInput = "";
+    expenseAmountInput = "";
+    expenseDateInput = today;
+  }
 
-    if (contract === undefined) {
+  function closeExpensePanel(): void {
+    expensePanelOpen = false;
+  }
+
+  function updateExpenseContract(value: string): void {
+    expenseContractIdInput = value;
+  }
+
+  function updateExpenseLabel(value: string): void {
+    expenseLabelInput = value;
+  }
+
+  function updateExpenseAmount(value: string): void {
+    expenseAmountInput = value;
+  }
+
+  function updateExpenseDate(event: Event): void {
+    expenseDateInput = readInputValue(event);
+  }
+
+  // Interprets the input as a DECIMAL money value ("2500" or "2500.50") and converts
+  // it to micro units (10^6); returns null while the input is not a valid amount yet.
+  function parseExpenseAmountMicro(input: string): string | null {
+    const match = /^(\d+)(?:[.,](\d{1,2}))?$/u.exec(input.trim());
+
+    if (match === null || match[1] === undefined) {
+      return null;
+    }
+
+    const micro = BigInt(match[1]) * 1_000_000n + BigInt((match[2] ?? "").padEnd(6, "0"));
+
+    if (micro <= 0n) {
+      return null;
+    }
+
+    return micro.toString();
+  }
+
+  async function recordExpense(): Promise<void> {
+    const contract = selectedExpenseContract;
+    const label = expenseLabelInput.trim();
+    const amountMicro = expenseAmountMicro;
+
+    if (contract === null || label === "" || amountMicro === null || expenseDateInput === "") {
       return;
     }
 
@@ -2072,9 +2146,9 @@
           workspaceId: distributionWorkspaceId,
           contractId: contract.id,
           payeeId: contract.payeeId,
-          incurredOn: `${distributionPeriod}-18`,
-          label: "Advance preview",
-          amountMicro: "6000000000",
+          incurredOn: expenseDateInput,
+          label,
+          amountMicro,
           currency: contract.currency
         },
         {
@@ -2082,8 +2156,10 @@
         }
       );
       mutationReceiptPageId = activePageId;
+      closeExpensePanel();
+      await loadContracts();
     } catch (error: unknown) {
-      expensesState = createErrorState<PageResult<DistributionContractExpense>>(error);
+      reportActionError(error);
     }
   }
 
@@ -2134,7 +2210,7 @@
       closeCatalogPanel();
       await loadCatalog();
     } catch (error: unknown) {
-      releasesState = createErrorState<PageResult<ReleaseSummary>>(error);
+      reportActionError(error);
     }
   }
 
@@ -2167,7 +2243,7 @@
       closeCatalogPanel();
       await loadCatalog();
     } catch (error: unknown) {
-      tracksState = createErrorState<PageResult<TrackSummary>>(error);
+      reportActionError(error);
     }
   }
 
@@ -2236,7 +2312,7 @@
       closeContractPanel();
       await loadContracts();
     } catch (error: unknown) {
-      contractsState = createErrorState<PageResult<DistributionContract>>(error);
+      reportActionError(error);
     }
   }
 
@@ -2294,7 +2370,7 @@
       closeContractRulePanel();
       await loadContracts();
     } catch (error: unknown) {
-      contractsState = createErrorState<PageResult<DistributionContract>>(error);
+      reportActionError(error);
     }
   }
 
@@ -2314,7 +2390,7 @@
       );
       runReceiptPageId = activePageId;
     } catch (error: unknown) {
-      allocationsState = createErrorState<PageResult<AllocationRunSummary>>(error);
+      reportActionError(error);
     }
   }
 
@@ -2334,8 +2410,10 @@
         }
       );
       runReceiptPageId = activePageId;
+      // The cadenced run persists a new calculation run; refresh the run list.
+      await loadAllocationRuns();
     } catch (error: unknown) {
-      allocationsState = createErrorState<PageResult<AllocationRunSummary>>(error);
+      reportActionError(error);
     }
   }
 
@@ -2384,7 +2462,7 @@
       closeUnpostPanel();
       await loadAllocationRuns();
     } catch (error: unknown) {
-      allocationsState = createErrorState<PageResult<AllocationRunSummary>>(error);
+      reportActionError(error);
     }
   }
 
@@ -2495,7 +2573,7 @@
       closeSuspensePanel();
       await loadSuspense();
     } catch (error: unknown) {
-      suspenseState = createErrorState<PageResult<SuspenseItem>>(error);
+      reportActionError(error);
     }
   }
 
@@ -2515,8 +2593,10 @@
         }
       );
       runReceiptPageId = activePageId;
+      // The generation run persists new statements; refresh the list.
+      await loadStatements();
     } catch (error: unknown) {
-      statementsState = createErrorState<PageResult<StatementSummary>>(error);
+      reportActionError(error);
     }
   }
 
@@ -2678,7 +2758,7 @@
       recordPaymentReference = "";
       await Promise.all([loadPayments(), loadStatements()]);
     } catch (error: unknown) {
-      paymentsState = createErrorState<PageResult<PaymentSummary>>(error);
+      reportActionError(error);
     }
   }
 
@@ -2709,7 +2789,7 @@
       closePaymentPanel();
       await loadPayments();
     } catch (error: unknown) {
-      paymentsState = createErrorState<PageResult<PaymentSummary>>(error);
+      reportActionError(error);
     }
   }
 
@@ -2739,7 +2819,7 @@
       closePaymentPanel();
       await loadPayments();
     } catch (error: unknown) {
-      paymentsState = createErrorState<PageResult<PaymentSummary>>(error);
+      reportActionError(error);
     }
   }
 
@@ -2768,7 +2848,7 @@
       closePaymentPanel();
       await Promise.all([loadPayments(), loadStatements()]);
     } catch (error: unknown) {
-      paymentsState = createErrorState<PageResult<PaymentSummary>>(error);
+      reportActionError(error);
     }
   }
 
@@ -2802,7 +2882,7 @@
         mutationReceiptPageId = activePageId;
         await Promise.all([loadPayments(), loadReconciliation(), loadAuditLog()]);
       } catch (error: unknown) {
-        reconciliationState = createErrorState<DistributionReconciliationResponse>(error);
+        reportActionError(error);
       }
       return;
     }
@@ -2827,20 +2907,22 @@
         mutationReceiptPageId = activePageId;
         await Promise.all([loadPayments(), loadReconciliation(), loadAuditLog()]);
       } catch (error: unknown) {
-        reconciliationState = createErrorState<DistributionReconciliationResponse>(error);
+        reportActionError(error);
       }
       return;
     }
 
     if (action.id === "assign-expense-payee") {
-      await recordExpense();
-      await Promise.all([loadContracts(), loadReconciliation(), loadAuditLog()]);
+      // The guarded expense write needs explicit operator input (contract, label,
+      // amount, date): route to the real expense form instead of fabricating one.
+      selectPage("contracts");
+      openExpensePanel();
       return;
     }
 
     if (action.id === "allocate-matched-row") {
       await startCadencedAllocationRun();
-      await Promise.all([loadAllocationRuns(), loadReconciliation(), loadAuditLog()]);
+      await Promise.all([loadReconciliation(), loadAuditLog()]);
       return;
     }
 
@@ -2863,7 +2945,7 @@
         mutationReceiptPageId = activePageId;
         await Promise.all([loadStatements(), loadReconciliation(), loadAuditLog()]);
       } catch (error: unknown) {
-        reconciliationState = createErrorState<DistributionReconciliationResponse>(error);
+        reportActionError(error);
       }
     }
   }
@@ -3571,14 +3653,15 @@
 
       {#if periodControlVisible}
         <section class="period-control ehq-edge-surface" aria-label="Period control">
-          <label>
-            <span>Period</span>
-            <select value={periodScope} onchange={(event) => updatePeriodScope(event.currentTarget.value)}>
-              {#each periodOptions as option (option.value)}
-                <option value={option.value}>{option.label}</option>
-              {/each}
-            </select>
-          </label>
+          <Select
+            id="distribution-period-scope"
+            label="Period"
+            value={periodScope}
+            options={periodOptions}
+            state="default"
+            message=""
+            onchange={updatePeriodScope}
+          />
           {#if periodScope === "custom"}
             <label>
               <span>From</span>
@@ -3601,6 +3684,10 @@
         <p class="receipt" role="status">Run queued · lock held by the workflow.</p>
       {/if}
 
+      {#if actionError !== null && actionErrorPageId === activePageId}
+        <p class="receipt error" role="alert">{actionError}</p>
+      {/if}
+
       {#if activePageId === "dashboard"}
         <section class="kpi-grid" aria-label="Distribution KPIs">
           {#each dashboardKpis as kpi (kpi.label)}
@@ -3614,31 +3701,17 @@
       {:else if activePageId === "imports"}
         <Toolbar label="Kontor RouteNote import" filters={importToolbarFilters} actionLabel="" loading={importState.status === "loading"} onFilterSelect={selectImportToolbarFilter} />
         <section class="form-panel ehq-edge-surface" aria-label="Import Kontor RouteNote">
-          <label>
-            <span>Source</span>
-            <select value={importState.source} onchange={(event) => updateImportSource(event.currentTarget.value)}>
-              {#each importSourceOptions as option (option.value)}
-                <option value={option.value}>{option.label}</option>
-              {/each}
-            </select>
-          </label>
+          <Select id="distribution-import-source" label="Source" value={importState.source} options={importSourceOptions} state="default" message="" onchange={updateImportSource} />
           <label>
             <span>Export file</span>
             <input type="file" accept="text/csv,.csv,.tsv,text/tab-separated-values" onchange={handleImportFile} />
           </label>
-          <button class="distribution-action" type="button" disabled={!canPreviewImport} title={canPreviewImport ? "" : "Select a CSV/TSV export file first"} onclick={previewImport}>Preview export</button>
-          <button class="distribution-action primary" type="button" disabled={!canConfirmImport || !writesEnabled} title={writeDisabledTitle()} onclick={confirmImport}>Validate import</button>
+          <Button label="Preview export" variant="secondary" size="medium" type="button" disabled={!canPreviewImport} loading={false} locked={false} focus={false} ariaLabel="Preview export" title={canPreviewImport ? "" : "Select a CSV/TSV export file first"} onclick={previewImport} />
+          <Button label="Validate import" variant="primary" size="medium" type="button" disabled={!canConfirmImport || !writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Validate import" title={writeDisabledTitle()} onclick={confirmImport} />
         </section>
         <section class="filter-strip ehq-edge-surface" aria-label="Import filters">
-          <label>
-            <span>Source filter</span>
-            <select value={importSourceFilter} onchange={(event) => updateImportFilter(event.currentTarget.value)}>
-              {#each importFilterOptions as option (option.value)}
-                <option value={option.value}>{option.label}</option>
-              {/each}
-            </select>
-          </label>
-          <button class="distribution-action primary" type="button" onclick={loadImportBatches}>Filter</button>
+          <Select id="distribution-import-filter" label="Source filter" value={importSourceFilter} options={importFilterOptions} state="default" message="" onchange={updateImportFilter} />
+          <Button label="Filter" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Apply import filters" onclick={loadImportBatches} />
         </section>
         <section class="import-result ehq-edge-surface" class:error={importState.status === "error"} aria-live="polite">
           <strong>{importState.message}</strong>
@@ -3653,86 +3726,39 @@
         <Table title="Batches Kontor / RouteNote" columns={importColumns} rows={importRows} state={tableStateFor(importBatchesState.status, importBatches.length)} actionLabel="" pagination={importPagination} />
       {:else if activePageId === "mapping"}
         <section class="filter-strip ehq-edge-surface" aria-label="Mapping filters">
-          <label>
-            <span>Status</span>
-            <select value={mappingStatusFilter} onchange={(event) => updateMappingStatus(event.currentTarget.value)}>
-              {#each mappingStatusOptions as option (option.value)}
-                <option value={option.value}>{option.label}</option>
-              {/each}
-            </select>
-          </label>
-          <button class="distribution-action" type="button" onclick={loadMappingRows}>Filter</button>
-          <button class="distribution-action primary" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={applyMappingRules}>Apply reusable rules</button>
+          <Select id="distribution-mapping-status" label="Status" value={mappingStatusFilter} options={mappingStatusOptions} state="default" message="" onchange={updateMappingStatus} />
+          <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Apply mapping filters" onclick={loadMappingRows} />
+          <Button label="Apply reusable rules" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Apply reusable rules" title={writeDisabledTitle()} onclick={applyMappingRules} />
         </section>
         <Table title="Kontor / RouteNote rows to map" columns={mappingColumns} rows={mappingTableRows} state={mappingState.status === "loading" ? "loading" : mappingState.status === "error" ? "error" : mappingRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={mappingPagination} />
       {:else if activePageId === "catalog"}
         <section class="contracts-actions ehq-edge-surface">
-          <button class="distribution-action primary" type="button" onclick={() => openCatalogPanel("release")}>New release</button>
-          <button class="distribution-action primary" type="button" onclick={() => openCatalogPanel("track")}>New track</button>
+          <Button label="New release" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="New release" onclick={() => openCatalogPanel("release")} />
+          <Button label="New track" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="New track" onclick={() => openCatalogPanel("track")} />
           <span>Releases and tracks are source records; edits later become audited overrides.</span>
         </section>
         {#if catalogPanelMode === "release"}
           <section class="form-panel ehq-edge-surface" aria-label="New release">
-            <label>
-              <span>Title</span>
-              <input value={releaseTitleInput} oninput={(event) => updateReleaseTitle(event.currentTarget.value)} />
-            </label>
-            <label>
-              <span>Artist</span>
-              <input value={releaseArtistInput} oninput={(event) => updateReleaseArtist(event.currentTarget.value)} />
-            </label>
-            <label>
-              <span>UPC (optional)</span>
-              <input value={releaseUpcInput} oninput={(event) => updateReleaseUpc(event.currentTarget.value)} />
-            </label>
-            <label>
-              <span>Status</span>
-              <select value={releaseStatusInput} onchange={(event) => updateReleaseStatus(event.currentTarget.value)}>
-                {#each catalogStatusOptions as option (option.value)}
-                  <option value={option.value}>{option.label}</option>
-                {/each}
-              </select>
-            </label>
+            <Input id="distribution-release-title" label="Title" value={releaseTitleInput} placeholder="" type="text" state="default" message="" oninput={updateReleaseTitle} />
+            <Input id="distribution-release-artist" label="Artist" value={releaseArtistInput} placeholder="" type="text" state="default" message="" oninput={updateReleaseArtist} />
+            <Input id="distribution-release-upc" label="UPC (optional)" value={releaseUpcInput} placeholder="" type="text" state="default" message="" oninput={updateReleaseUpc} />
+            <Select id="distribution-release-status" label="Status" value={releaseStatusInput} options={catalogStatusOptions} state="default" message="" onchange={updateReleaseStatus} />
             <label>
               <span>Release date (optional)</span>
               <input type="date" value={releaseDateInput} onchange={updateReleaseDate} />
             </label>
-            <button class="distribution-action primary" type="button" disabled={!writesEnabled || releaseTitleInput.trim() === "" || releaseArtistInput.trim() === ""} title={writesEnabled ? (releaseTitleInput.trim() === "" ? "Enter a release title first" : releaseArtistInput.trim() === "" ? "Enter an artist name first" : "") : writeGateMessage} onclick={createRelease}>Create release</button>
-            <button class="distribution-action" type="button" onclick={closeCatalogPanel}>Cancel</button>
+            <Button label="Create release" variant="primary" size="medium" type="button" disabled={!writesEnabled || releaseTitleInput.trim() === "" || releaseArtistInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Create release" title={writesEnabled ? (releaseTitleInput.trim() === "" ? "Enter a release title first" : releaseArtistInput.trim() === "" ? "Enter an artist name first" : "") : writeGateMessage} onclick={createRelease} />
+            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel release creation" onclick={closeCatalogPanel} />
           </section>
         {:else if catalogPanelMode === "track"}
           <section class="form-panel ehq-edge-surface" aria-label="New track">
-            <label>
-              <span>Title</span>
-              <input value={trackTitleInput} oninput={(event) => updateTrackTitle(event.currentTarget.value)} />
-            </label>
-            <label>
-              <span>Artist</span>
-              <input value={trackArtistInput} oninput={(event) => updateTrackArtist(event.currentTarget.value)} />
-            </label>
-            <label>
-              <span>ISRC (optional)</span>
-              <input value={trackIsrcInput} oninput={(event) => updateTrackIsrc(event.currentTarget.value)} />
-            </label>
-            <label>
-              <span>Release</span>
-              <select value={trackReleaseIdInput} onchange={(event) => updateTrackRelease(event.currentTarget.value)}>
-                <option value="">No release</option>
-                {#each releases as release (release.id)}
-                  <option value={release.id}>{release.title} · {release.artistName}</option>
-                {/each}
-              </select>
-            </label>
-            <label>
-              <span>Status</span>
-              <select value={trackStatusInput} onchange={(event) => updateTrackStatus(event.currentTarget.value)}>
-                {#each catalogStatusOptions as option (option.value)}
-                  <option value={option.value}>{option.label}</option>
-                {/each}
-              </select>
-            </label>
-            <button class="distribution-action primary" type="button" disabled={!writesEnabled || trackTitleInput.trim() === "" || trackArtistInput.trim() === ""} title={writesEnabled ? (trackTitleInput.trim() === "" ? "Enter a track title first" : trackArtistInput.trim() === "" ? "Enter an artist name first" : "") : writeGateMessage} onclick={createTrack}>Create track</button>
-            <button class="distribution-action" type="button" onclick={closeCatalogPanel}>Cancel</button>
+            <Input id="distribution-track-title" label="Title" value={trackTitleInput} placeholder="" type="text" state="default" message="" oninput={updateTrackTitle} />
+            <Input id="distribution-track-artist" label="Artist" value={trackArtistInput} placeholder="" type="text" state="default" message="" oninput={updateTrackArtist} />
+            <Input id="distribution-track-isrc" label="ISRC (optional)" value={trackIsrcInput} placeholder="" type="text" state="default" message="" oninput={updateTrackIsrc} />
+            <Select id="distribution-track-release" label="Release" value={trackReleaseIdInput} options={trackReleaseSelectOptions} state="default" message="" onchange={updateTrackRelease} />
+            <Select id="distribution-track-status" label="Status" value={trackStatusInput} options={catalogStatusOptions} state="default" message="" onchange={updateTrackStatus} />
+            <Button label="Create track" variant="primary" size="medium" type="button" disabled={!writesEnabled || trackTitleInput.trim() === "" || trackArtistInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Create track" title={writesEnabled ? (trackTitleInput.trim() === "" ? "Enter a track title first" : trackArtistInput.trim() === "" ? "Enter an artist name first" : "") : writeGateMessage} onclick={createTrack} />
+            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel track creation" onclick={closeCatalogPanel} />
           </section>
         {/if}
         <section class="dashboard-grid">
@@ -3744,39 +3770,34 @@
               detail="Import artist and catalog contributors stay separate until an exact track match is approved."
               state="ready"
             >
-              <button class="distribution-action primary" type="button" onclick={() => selectPage("mapping")}>Fix contributor mapping</button>
+              <Button label="Fix contributor mapping" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Fix contributor mapping" onclick={() => selectPage("mapping")} />
             </SectionTemplate>
           </div>
         </section>
       {:else if activePageId === "contracts"}
         <section class="contracts-actions ehq-edge-surface">
-          <button class="distribution-action primary" type="button" onclick={openContractPanel}>New contract</button>
-          <button class="distribution-action primary" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={recordExpense}>Record recoupable expense</button>
+          <Button label="New contract" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="New contract" onclick={openContractPanel} />
+          <Button label="Record recoupable expense" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Record recoupable expense" title={writeDisabledTitle()} onclick={openExpensePanel} />
           <span>Expenses remain source records; corrections later become audited overrides.</span>
         </section>
+        {#if expensePanelOpen}
+          <section class="form-panel ehq-edge-surface" aria-label="Record recoupable expense">
+            <Select id="distribution-expense-contract" label="Contract" value={expenseContractIdInput} options={expenseContractSelectOptions} state="default" message="" onchange={updateExpenseContract} />
+            <Input id="distribution-expense-label" label="Label" value={expenseLabelInput} placeholder="Advance" type="text" state="default" message="" oninput={updateExpenseLabel} />
+            <Input id="distribution-expense-amount" label="Amount" value={expenseAmountInput} placeholder="2500.00" type="text" state="default" message="" oninput={updateExpenseAmount} />
+            <label>
+              <span>Incurred on</span>
+              <input type="date" value={expenseDateInput} onchange={updateExpenseDate} />
+            </label>
+            <Button label="Record expense" variant="primary" size="medium" type="button" disabled={!writesEnabled || selectedExpenseContract === null || expenseLabelInput.trim() === "" || expenseAmountMicro === null || expenseDateInput === ""} loading={false} locked={false} focus={false} ariaLabel="Record expense" title={writesEnabled ? (selectedExpenseContract === null ? "Select a contract first" : expenseLabelInput.trim() === "" ? "Enter an expense label first" : expenseAmountMicro === null ? "Enter a positive amount like 2500.00" : expenseDateInput === "" ? "Pick the incurred date first" : "") : writeGateMessage} onclick={recordExpense} />
+            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel expense recording" onclick={closeExpensePanel} />
+          </section>
+        {/if}
         {#if contractPanelOpen}
           <section class="form-panel ehq-edge-surface" aria-label="New contract">
-            <label>
-              <span>Title</span>
-              <input value={contractTitleInput} oninput={(event) => updateContractTitle(event.currentTarget.value)} />
-            </label>
-            <label>
-              <span>Payee</span>
-              <select value={contractPayeeIdInput} onchange={(event) => updateContractPayee(event.currentTarget.value)}>
-                <option value="">Select a payee</option>
-                {#each payees as payee (payee.id)}
-                  <option value={payee.id}>{payee.displayName} · {payee.defaultCurrency}</option>
-                {/each}
-              </select>
-            </label>
-            <label>
-              <span>Status</span>
-              <select value={contractStatusInput} onchange={(event) => updateContractStatus(event.currentTarget.value)}>
-                {#each contractStatusOptions as option (option.value)}
-                  <option value={option.value}>{option.label}</option>
-                {/each}
-              </select>
-            </label>
+            <Input id="distribution-contract-title" label="Title" value={contractTitleInput} placeholder="" type="text" state="default" message="" oninput={updateContractTitle} />
+            <Select id="distribution-contract-payee" label="Payee" value={contractPayeeIdInput} options={payeeSelectOptions} state="default" message="" onchange={updateContractPayee} />
+            <Select id="distribution-contract-status" label="Status" value={contractStatusInput} options={contractStatusOptions} state="default" message="" onchange={updateContractStatus} />
             <label>
               <span>Effective from</span>
               <input type="date" value={contractEffectiveFromInput} onchange={updateContractEffectiveFrom} />
@@ -3785,16 +3806,10 @@
               <span>Effective to (optional)</span>
               <input type="date" value={contractEffectiveToInput} min={contractEffectiveFromInput} onchange={updateContractEffectiveTo} />
             </label>
-            <label>
-              <span>Split (%)</span>
-              <input value={contractSplitPercentInput} oninput={(event) => updateContractSplitPercent(event.currentTarget.value)} placeholder="80" />
-            </label>
-            <label>
-              <span>Currency</span>
-              <input value={contractCurrencyInput} oninput={(event) => updateContractCurrency(event.currentTarget.value)} placeholder="MUR" />
-            </label>
-            <button class="distribution-action primary" type="button" disabled={!writesEnabled || contractTitleInput.trim() === "" || contractPayeeIdInput === "" || contractEffectiveFromInput === "" || contractSplitBp === null || contractCurrencyInput.trim() === ""} title={writesEnabled ? (contractTitleInput.trim() === "" ? "Enter a contract title first" : contractPayeeIdInput === "" ? "Select a payee first" : contractEffectiveFromInput === "" ? "Pick the effective-from date first" : contractSplitBp === null ? "Enter a split between 0.01 and 100 percent" : contractCurrencyInput.trim() === "" ? "Enter a currency code first" : "") : writeGateMessage} onclick={createContract}>Create contract</button>
-            <button class="distribution-action" type="button" onclick={closeContractPanel}>Cancel</button>
+            <Input id="distribution-contract-split" label="Split (%)" value={contractSplitPercentInput} placeholder="80" type="text" state="default" message="" oninput={updateContractSplitPercent} />
+            <Input id="distribution-contract-currency" label="Currency" value={contractCurrencyInput} placeholder="MUR" type="text" state="default" message="" oninput={updateContractCurrency} />
+            <Button label="Create contract" variant="primary" size="medium" type="button" disabled={!writesEnabled || contractTitleInput.trim() === "" || contractPayeeIdInput === "" || contractEffectiveFromInput === "" || contractSplitBp === null || contractCurrencyInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Create contract" title={writesEnabled ? (contractTitleInput.trim() === "" ? "Enter a contract title first" : contractPayeeIdInput === "" ? "Select a payee first" : contractEffectiveFromInput === "" ? "Pick the effective-from date first" : contractSplitBp === null ? "Enter a split between 0.01 and 100 percent" : contractCurrencyInput.trim() === "" ? "Enter a currency code first" : "") : writeGateMessage} onclick={createContract} />
+            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel contract creation" onclick={closeContractPanel} />
           </section>
         {/if}
         {#if selectedRuleContract !== null}
@@ -3803,21 +3818,10 @@
               <strong>{selectedRuleContract.title}</strong>
               <span>Rules replace the previous set and must total exactly 100%.</span>
             </div>
-            <label>
-              <span>Payee</span>
-              <select value={rulePayeeIdInput} onchange={(event) => updateRulePayee(event.currentTarget.value)}>
-                <option value="">Select a payee</option>
-                {#each payees as payee (payee.id)}
-                  <option value={payee.id}>{payee.displayName} · {payee.defaultCurrency}</option>
-                {/each}
-              </select>
-            </label>
-            <label>
-              <span>Percentage</span>
-              <input value={rulePercentageInput} oninput={(event) => updateRulePercentage(event.currentTarget.value)} placeholder="100" />
-            </label>
-            <button class="distribution-action primary" type="button" disabled={!writesEnabled || rulePayeeIdInput === "" || rulePercentageInput.trim() === ""} title={writesEnabled ? (rulePayeeIdInput === "" ? "Select a payee first" : rulePercentageInput.trim() === "" ? "Enter the rule percentage first" : "") : writeGateMessage} onclick={addContractRule}>Save rule set</button>
-            <button class="distribution-action" type="button" onclick={closeContractRulePanel}>Cancel</button>
+            <Select id="distribution-rule-payee" label="Payee" value={rulePayeeIdInput} options={payeeSelectOptions} state="default" message="" onchange={updateRulePayee} />
+            <Input id="distribution-rule-percentage" label="Percentage" value={rulePercentageInput} placeholder="100" type="text" state="default" message="" oninput={updateRulePercentage} />
+            <Button label="Save rule set" variant="primary" size="medium" type="button" disabled={!writesEnabled || rulePayeeIdInput === "" || rulePercentageInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Save rule set" title={writesEnabled ? (rulePayeeIdInput === "" ? "Select a payee first" : rulePercentageInput.trim() === "" ? "Enter the rule percentage first" : "") : writeGateMessage} onclick={addContractRule} />
+            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel rule editing" onclick={closeContractRulePanel} />
           </section>
         {/if}
         <section class="dashboard-grid">
@@ -3833,8 +3837,8 @@
             state="ready"
           >
             {#snippet action()}
-              <button class="distribution-action" type="button" onclick={previewAllocationRun}>Preview locked run</button>
-              <button class="distribution-action primary" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={startCadencedAllocationRun}>Post cadence wave</button>
+              <Button label="Preview locked run" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Preview locked run" onclick={previewAllocationRun} />
+              <Button label="Post cadence wave" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Post cadence wave" title={writeDisabledTitle()} onclick={startCadencedAllocationRun} />
             {/snippet}
             <p class="lock-key">{allocationLockKey}</p>
           </SectionTemplate>
@@ -3845,26 +3849,16 @@
               <strong>{selectedRun.runReference}</strong>
               <span>{selectedRun.period} · {selectedRun.status} · lock {selectedRun.lockKey}</span>
             </div>
-            <label>
-              <span>Unpost reason</span>
-              <input value={unpostReasonInput} oninput={(event) => updateUnpostReason(event.currentTarget.value)} />
-            </label>
-            <button class="distribution-action danger" type="button" disabled={!writesEnabled || unpostReasonInput.trim() === ""} title={writesEnabled ? (unpostReasonInput.trim() === "" ? "Enter an unpost reason first" : "") : writeGateMessage} onclick={unpostAllocationRun}>Request unpost run</button>
-            <button class="distribution-action" type="button" onclick={closeUnpostPanel}>Cancel</button>
+            <Input id="distribution-unpost-reason" label="Unpost reason" value={unpostReasonInput} placeholder="" type="text" state="default" message="" oninput={updateUnpostReason} />
+            <Button label="Request unpost run" variant="danger" size="medium" type="button" disabled={!writesEnabled || unpostReasonInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Request unpost run" title={writesEnabled ? (unpostReasonInput.trim() === "" ? "Enter an unpost reason first" : "") : writeGateMessage} onclick={unpostAllocationRun} />
+            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel unpost request" onclick={closeUnpostPanel} />
           </section>
         {/if}
         <Table title="Allocation runs" columns={allocationColumns} rows={allocationRows} state={tableStateFor(allocationsState.status, allocationRuns.length)} actionLabel="" rowActions={allocationRowActions} pagination={allocationsPagination} />
       {:else if activePageId === "suspense"}
         <section class="filter-strip ehq-edge-surface" aria-label="Suspense filters">
-          <label>
-            <span>Status</span>
-            <select value={suspenseStatusFilter} onchange={(event) => updateSuspenseStatus(event.currentTarget.value)}>
-              {#each suspenseStatusOptions as option (option.value)}
-                <option value={option.value}>{option.label}</option>
-              {/each}
-            </select>
-          </label>
-          <button class="distribution-action" type="button" onclick={loadSuspense}>Filter</button>
+          <Select id="distribution-suspense-status" label="Status" value={suspenseStatusFilter} options={suspenseStatusOptions} state="default" message="" onchange={updateSuspenseStatus} />
+          <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Apply suspense filters" onclick={loadSuspense} />
         </section>
         {#if selectedSuspenseItem !== null}
           <section class="form-panel ehq-edge-surface" aria-label="Resolve suspense item">
@@ -3873,21 +3867,13 @@
               <span>{suspenseReason(selectedSuspenseItem.reason)} · {formatMoney(selectedSuspenseItem.amountMicro, selectedSuspenseItem.currency)} · resolution {selectedSuspenseResolution}</span>
             </div>
             {#if selectedSuspenseResolution !== "hold"}
-              <label>
-                <span>Target track</span>
-                <select value={suspenseTargetTrackId} onchange={(event) => updateSuspenseTargetTrack(event.currentTarget.value)}>
-                  <option value="">Select a track</option>
-                  {#each suspenseTrackOptions ?? [] as track (track.id)}
-                    <option value={track.id}>{track.title} · {track.artistName}</option>
-                  {/each}
-                </select>
-              </label>
+              <Select id="distribution-suspense-track" label="Target track" value={suspenseTargetTrackId} options={suspenseTrackSelectOptions} state="default" message="" onchange={updateSuspenseTargetTrack} />
               {#if suspenseTrackOptionsError !== null}
                 <span class="panel-error">{suspenseTrackOptionsError}</span>
               {/if}
             {/if}
-            <button class="distribution-action primary" type="button" disabled={!writesEnabled || !suspenseResolveTarget.ready} title={writesEnabled ? suspenseResolveTarget.hint : writeGateMessage} onclick={resolveSelectedSuspense}>Resolve</button>
-            <button class="distribution-action" type="button" onclick={closeSuspensePanel}>Cancel</button>
+            <Button label="Resolve" variant="primary" size="medium" type="button" disabled={!writesEnabled || !suspenseResolveTarget.ready} loading={false} locked={false} focus={false} ariaLabel="Resolve suspense item" title={writesEnabled ? suspenseResolveTarget.hint : writeGateMessage} onclick={resolveSelectedSuspense} />
+            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel suspense resolution" onclick={closeSuspensePanel} />
           </section>
         {/if}
         <Table title="Suspense grouped by reason" columns={suspenseColumns} rows={suspenseTableRows} state={suspenseState.status === "loading" ? "loading" : suspenseState.status === "error" ? "error" : suspenseItems.length === 0 ? "empty" : "default"} actionLabel="" rowActions={suspenseRowActions} pagination={suspensePagination} />
@@ -3906,7 +3892,7 @@
               </dl>
             </div>
           {/if}
-          <button class="distribution-action primary" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={generateStatements}>Generate statements run</button>
+          <Button label="Generate statements run" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Generate statements run" title={writeDisabledTitle()} onclick={generateStatements} />
         </section>
         <section class="statement-pdf ehq-edge-surface" aria-label="A4 statement PDF preview">
           <header>
@@ -3925,35 +3911,17 @@
         </section>
       {:else if activePageId === "payments"}
         <section class="filter-strip ehq-edge-surface" aria-label="Payment filters">
-          <label>
-            <span>Status</span>
-            <select value={paymentStatusFilter} onchange={(event) => updatePaymentStatus(event.currentTarget.value)}>
-              {#each paymentStatusOptions as option (option.value)}
-                <option value={option.value}>{option.label}</option>
-              {/each}
-            </select>
-          </label>
-          <button class="distribution-action" type="button" onclick={loadPayments}>Filter</button>
+          <Select id="distribution-payment-status" label="Status" value={paymentStatusFilter} options={paymentStatusOptions} state="default" message="" onchange={updatePaymentStatus} />
+          <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Apply payment filters" onclick={loadPayments} />
         </section>
         <section class="form-panel ehq-edge-surface" aria-label="Record payment">
-          <label>
-            <span>Statement</span>
-            <select value={recordStatementId} onchange={(event) => updateRecordStatement(event.currentTarget.value)}>
-              <option value="">Select an open statement</option>
-              {#each openStatements as statement (statement.id)}
-                <option value={statement.id}>{statement.payeeName} · {statement.period} · {formatMoney(statement.netPayableMicro, statement.currency)}</option>
-              {/each}
-            </select>
-          </label>
+          <Select id="distribution-record-statement" label="Statement" value={recordStatementId} options={openStatementSelectOptions} state="default" message="" onchange={updateRecordStatement} />
           <label>
             <span>Amount (from statement)</span>
             <input value={recordStatement === null ? "" : formatMoney(recordStatement.netPayableMicro, recordStatement.currency)} readonly />
           </label>
-          <label>
-            <span>Reference</span>
-            <input value={recordPaymentReference} oninput={(event) => updateRecordPaymentReference(event.currentTarget.value)} />
-          </label>
-          <button class="distribution-action primary" type="button" disabled={!writesEnabled || recordStatement === null || recordPaymentReference.trim() === ""} title={writesEnabled ? (recordStatement === null ? "Select an open statement first" : recordPaymentReference.trim() === "" ? "Enter a payment reference first" : "") : writeGateMessage} onclick={recordPayment}>Record payment</button>
+          <Input id="distribution-record-reference" label="Reference" value={recordPaymentReference} placeholder="" type="text" state="default" message="" oninput={updateRecordPaymentReference} />
+          <Button label="Record payment" variant="primary" size="medium" type="button" disabled={!writesEnabled || recordStatement === null || recordPaymentReference.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Record payment" title={writesEnabled ? (recordStatement === null ? "Select an open statement first" : recordPaymentReference.trim() === "" ? "Enter a payment reference first" : "") : writeGateMessage} onclick={recordPayment} />
         </section>
         {#if selectedPayment !== null && paymentPanelMode !== null}
           <section class="form-panel ehq-edge-surface" aria-label="Payment action">
@@ -3962,39 +3930,23 @@
               <span>{formatMoney(selectedPayment.amountMicro, selectedPayment.currency)} · {selectedPayment.status} · {selectedPayment.reference ?? "no reference"}</span>
             </div>
             {#if paymentPanelMode === "edit"}
-              <label>
-                <span>New reference</span>
-                <input value={paymentReferenceInput} oninput={(event) => updatePaymentReferenceInput(event.currentTarget.value)} />
-              </label>
-              <button class="distribution-action primary" type="button" disabled={!writesEnabled || paymentReferenceInput.trim() === ""} title={writesEnabled ? (paymentReferenceInput.trim() === "" ? "Enter the new reference first" : "") : writeGateMessage} onclick={editPayment}>Save reference</button>
+              <Input id="distribution-payment-reference" label="New reference" value={paymentReferenceInput} placeholder="" type="text" state="default" message="" oninput={updatePaymentReferenceInput} />
+              <Button label="Save reference" variant="primary" size="medium" type="button" disabled={!writesEnabled || paymentReferenceInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Save payment reference" title={writesEnabled ? (paymentReferenceInput.trim() === "" ? "Enter the new reference first" : "") : writeGateMessage} onclick={editPayment} />
             {:else if paymentPanelMode === "reconcile"}
-              <label>
-                <span>Bank transaction ID</span>
-                <input value={paymentBankTransactionInput} oninput={(event) => updatePaymentBankTransactionInput(event.currentTarget.value)} />
-              </label>
-              <button class="distribution-action primary" type="button" disabled={!writesEnabled || paymentBankTransactionInput.trim() === ""} title={writesEnabled ? (paymentBankTransactionInput.trim() === "" ? "Enter the bank transaction ID first" : "") : writeGateMessage} onclick={reconcilePayment}>Reconcile payment</button>
+              <Input id="distribution-payment-bank-transaction" label="Bank transaction ID" value={paymentBankTransactionInput} placeholder="" type="text" state="default" message="" oninput={updatePaymentBankTransactionInput} />
+              <Button label="Reconcile payment" variant="primary" size="medium" type="button" disabled={!writesEnabled || paymentBankTransactionInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Reconcile payment" title={writesEnabled ? (paymentBankTransactionInput.trim() === "" ? "Enter the bank transaction ID first" : "") : writeGateMessage} onclick={reconcilePayment} />
             {:else}
-              <label>
-                <span>Void reason</span>
-                <input value={paymentReferenceInput} oninput={(event) => updatePaymentReferenceInput(event.currentTarget.value)} />
-              </label>
-              <button class="distribution-action danger" type="button" disabled={!writesEnabled || paymentReferenceInput.trim() === ""} title={writesEnabled ? (paymentReferenceInput.trim() === "" ? "Enter a void reason first" : "") : writeGateMessage} onclick={voidPayment}>Void payment</button>
+              <Input id="distribution-payment-void-reason" label="Void reason" value={paymentReferenceInput} placeholder="" type="text" state="default" message="" oninput={updatePaymentReferenceInput} />
+              <Button label="Void payment" variant="danger" size="medium" type="button" disabled={!writesEnabled || paymentReferenceInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Void payment" title={writesEnabled ? (paymentReferenceInput.trim() === "" ? "Enter a void reason first" : "") : writeGateMessage} onclick={voidPayment} />
             {/if}
-            <button class="distribution-action" type="button" onclick={closePaymentPanel}>Cancel</button>
+            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Close payment panel" onclick={closePaymentPanel} />
           </section>
         {/if}
         <Table title="Payments" columns={paymentColumns} rows={paymentRows} state={paymentsState.status === "loading" ? "loading" : paymentsState.status === "error" ? "error" : payments.length === 0 ? "empty" : "default"} actionLabel="" rowActions={paymentRowActions} pagination={paymentsPagination} />
       {:else if activePageId === "revenue"}
         <section class="filter-strip ehq-edge-surface" aria-label="Revenue filters">
-          <label>
-            <span>Group by</span>
-            <select value={revenueGroupBy} onchange={(event) => updateRevenueGroup(event.currentTarget.value)}>
-              {#each revenueGroupOptions as option (option.value)}
-                <option value={option.value}>{option.label}</option>
-              {/each}
-            </select>
-          </label>
-          <button class="distribution-action primary" type="button" onclick={loadRevenue}>Refresh</button>
+          <Select id="distribution-revenue-group" label="Group by" value={revenueGroupBy} options={revenueGroupOptions} state="default" message="" onchange={updateRevenueGroup} />
+          <Button label="Refresh" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Refresh revenue" onclick={loadRevenue} />
         </section>
         <section class="dashboard-grid">
           <BarsChart title="Revenue grouped view" points={revenueChartPoints} tone="active" />
@@ -4007,7 +3959,7 @@
           <section class="empty-state ehq-edge-surface">
             <strong>Reconciliation unavailable</strong>
             <span>The read-only diagnostic could not be loaded. Retry the request.</span>
-            <button class="distribution-action" type="button" onclick={loadReconciliation}>Retry</button>
+            <Button label="Retry" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Retry loading reconciliation" onclick={loadReconciliation} />
           </section>
         {:else}
           <section class="kpi-grid recon" aria-label="Reconciliation KPIs">
@@ -4034,16 +3986,19 @@
                   {#if action.maintenance}
                     <span class="recon-action-flag">One-time maintenance · flagged for review</span>
                   {/if}
-                  <button
-                    class="distribution-action"
+                  <Button
+                    label={action.maintenance ? "Maintenance only" : "Run guarded action"}
+                    variant="secondary"
+                    size="medium"
                     type="button"
                     disabled={action.maintenance || !writesEnabled}
-                    aria-disabled={action.maintenance || !writesEnabled}
+                    loading={false}
+                    locked={false}
+                    focus={false}
+                    ariaLabel={action.maintenance ? "Maintenance only" : `Run guarded action: ${action.label}`}
                     title={action.maintenance ? "maintenance only" : writeDisabledTitle()}
                     onclick={() => runReconciliationAction(action)}
-                  >
-                    {action.maintenance ? "Maintenance only" : "Run guarded action"}
-                  </button>
+                  />
                 </div>
               {/each}
             </div>
@@ -4092,7 +4047,7 @@
           <section class="empty-state ehq-edge-surface">
             <strong>Settings unavailable</strong>
             <span>The workspace configuration could not be loaded.</span>
-            <button class="distribution-action" type="button" onclick={loadSettings}>Retry</button>
+            <Button label="Retry" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Retry loading settings" onclick={loadSettings} />
           </section>
         {:else if settings !== null}
           <section class="settings-panel ehq-edge-surface" aria-label="Distribution settings">
@@ -4119,7 +4074,6 @@
 
   .receipt,
   label span,
-  .distribution-action,
   .import-result,
   .contracts-actions,
   .lock-panel,
@@ -4150,6 +4104,12 @@
     background: var(--ehq-yellow-muted);
     color: var(--ehq-yellow);
     font-size: var(--ehq-type-caption-size);
+  }
+
+  .receipt.error {
+    border-color: var(--ehq-error);
+    background: var(--ehq-error-bg);
+    color: var(--ehq-error);
   }
 
   .kpi-grid {
@@ -4185,7 +4145,8 @@
     justify-content: space-between;
   }
 
-  .period-control label {
+  .period-control label,
+  .period-control :global(.ehq-select-field) {
     width: min(360px, 100%);
   }
 
@@ -4209,7 +4170,7 @@
     text-transform: uppercase;
   }
 
-  select,
+  /* Raw inputs remain only for cases the DS Input does not cover: date, file, readonly. */
   input {
     min-height: 38px;
     width: 100%;
@@ -4226,44 +4187,9 @@
     outline: 0;
   }
 
-  select:focus,
   input:focus {
     border-color: var(--ehq-yellow-border);
     box-shadow: 0 0 0 3px var(--ehq-yellow-muted);
-  }
-
-  .distribution-action {
-    min-height: 38px;
-    padding: 0 var(--ehq-space-3);
-    border: 1px solid var(--ehq-border);
-    border-radius: var(--ehq-radius-sm);
-    background: transparent;
-    color: var(--ehq-text);
-    font-family: var(--ehq-font);
-    font-size: var(--ehq-type-action-size);
-    font-weight: var(--ehq-type-heading-weight);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  .distribution-action.primary {
-    border-color: var(--ehq-yellow);
-    background: var(--ehq-yellow);
-    color: var(--ehq-text-on-yellow);
-  }
-
-  .distribution-action.danger {
-    border-color: var(--ehq-error);
-    background: var(--ehq-error-bg);
-    color: var(--ehq-error);
-  }
-
-  .distribution-action:disabled {
-    border-color: var(--ehq-border-soft);
-    background: var(--ehq-surface);
-    color: var(--ehq-text-disabled);
-    cursor: not-allowed;
-    opacity: 0.76;
   }
 
   .import-result {

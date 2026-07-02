@@ -30,7 +30,6 @@
     <aside class="drawer-panel ehq-edge-surface">
       <header>
         <div>
-          <p>Drawer</p>
           <h3>{props.state === "locked" ? "× " : ""}{props.title}</h3>
         </div>
         {#if props.badgeLabel.length > 0}
@@ -120,21 +119,8 @@
     flex-wrap: wrap;
   }
 
-  p,
   h3 {
     margin: 0;
-  }
-
-  p {
-    color: var(--ehq-text-muted);
-    font-family: var(--ehq-mono);
-    font-size: var(--ehq-type-label-size);
-    font-weight: var(--ehq-type-label-weight);
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-  }
-
-  h3 {
     margin-top: var(--ehq-space-1);
     font-family: var(--ehq-display);
     font-size: var(--ehq-type-section-title-size);

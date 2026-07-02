@@ -38,6 +38,8 @@
     readonly image: string;
   }
 
+  type MessageTone = "info" | "error";
+
   const { session, onLogin, onLogout, onNavigate, onOpenWorkspace }: Props = $props();
   const client = createShellApiClient();
 
@@ -53,6 +55,9 @@
   let loginPassword = $state("");
   let rememberSession = $state(true);
   let loginMessage = $state("");
+  let loginMessageTone = $state<MessageTone>("info");
+  let emailInvalid = $state(false);
+  let passwordInvalid = $state(false);
   let signingIn = $state(false);
   let resettingPassword = $state(false);
 
@@ -120,6 +125,9 @@
   const openLogin = (card: WorkspaceCard | null): void => {
     loginTarget = card;
     loginMessage = "";
+    loginMessageTone = "info";
+    emailInvalid = false;
+    passwordInvalid = false;
     loginOpen = true;
     sessionMenuOpen = false;
     notificationsOpen = false;
@@ -129,10 +137,17 @@
     loginOpen = false;
     loginTarget = null;
     loginMessage = "";
+    loginMessageTone = "info";
+    emailInvalid = false;
+    passwordInvalid = false;
   };
 
   const applyLogin = async (email: string): Promise<void> => {
-    if (email.length === 0 || loginPassword.trim().length === 0) {
+    emailInvalid = email.length === 0;
+    passwordInvalid = loginPassword.trim().length === 0;
+
+    if (emailInvalid || passwordInvalid) {
+      loginMessageTone = "error";
       loginMessage = "Enter your email and password to continue.";
       return;
     }
@@ -149,7 +164,9 @@
       loginOpen = false;
       loginTarget = null;
       loginMessage = "";
+      loginMessageTone = "info";
     } catch (error: unknown) {
+      loginMessageTone = "error";
       loginMessage = error instanceof Error ? error.message : "Supabase sign-in failed.";
     } finally {
       signingIn = false;
@@ -165,6 +182,8 @@
     const trimmedEmail = loginEmail.trim();
 
     if (trimmedEmail.length === 0) {
+      emailInvalid = true;
+      loginMessageTone = "error";
       loginMessage = "Enter your email above to receive a reset link.";
       return;
     }
@@ -174,8 +193,10 @@
 
     try {
       await sendSupabasePasswordReset(trimmedEmail);
+      loginMessageTone = "info";
       loginMessage = `Password reset email sent to ${trimmedEmail}.`;
     } catch (error: unknown) {
+      loginMessageTone = "error";
       loginMessage = error instanceof Error ? error.message : "Supabase password reset failed.";
     } finally {
       resettingPassword = false;
@@ -447,18 +468,31 @@
         {/if}
       </p>
 
-      <label class="field">
+      <label class="field" class:invalid={emailInvalid}>
         <span>email</span>
-        <input bind:value={loginEmail} autocomplete="username" inputmode="email" type="email" />
+        <input
+          bind:value={loginEmail}
+          aria-invalid={emailInvalid}
+          autocomplete="username"
+          inputmode="email"
+          type="email"
+          oninput={() => {
+            emailInvalid = false;
+          }}
+        />
       </label>
 
-      <label class="field">
+      <label class="field" class:invalid={passwordInvalid}>
         <span>password</span>
         <input
           bind:value={loginPassword}
+          aria-invalid={passwordInvalid}
           autocomplete="current-password"
           placeholder="••••••••••"
           type="password"
+          oninput={() => {
+            passwordInvalid = false;
+          }}
         />
       </label>
 
@@ -497,7 +531,7 @@
       </div>
 
       {#if loginMessage.length > 0}
-        <p class="login-message" role="status">{loginMessage}</p>
+        <p class="login-message" class:error={loginMessageTone === "error"} role="status">{loginMessage}</p>
       {/if}
     </form>
   </section>
@@ -1136,6 +1170,11 @@
     color: var(--ehq-text-muted);
   }
 
+  /* Field-level validation state, mirrored on aria-invalid for assistive tech. */
+  .field.invalid input {
+    border-color: var(--ehq-error);
+  }
+
   :global(.login-fog input:-webkit-autofill),
   :global(.login-fog input:-webkit-autofill:hover),
   :global(.login-fog input:-webkit-autofill:focus) {
@@ -1180,6 +1219,11 @@
     margin-top: var(--ehq-space-3);
     color: var(--ehq-yellow);
     font-size: var(--ehq-type-caption-size);
+  }
+
+  /* Error tone distinct from the yellow info/success tone (honest states). */
+  .login-message.error {
+    color: var(--ehq-error);
   }
 
   @media (min-width: 921px) and (max-height: 760px) {

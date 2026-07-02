@@ -1,9 +1,13 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import {
+    Button,
+    Input,
     KPI,
     Loader,
+    Select,
     Table,
+    type SelectOption,
     type TablePagination,
     type TableRow,
     type TableRowAction,
@@ -74,6 +78,8 @@
   let editingAccountId = $state<string | null>(null);
   let accountSubmitStatus = $state<RequestStatus>("idle");
   let accountSubmitMessage = $state<string | null>(null);
+  let reconciliationActionStatus = $state<RequestStatus>("idle");
+  let reconciliationActionMessage = $state<string | null>(null);
   let accountsNextCursor = $state<string | null>(null);
   let accountsLoadingMore = $state(false);
   let accountsLoadMoreError = $state<string | null>(null);
@@ -83,6 +89,12 @@
   let reconciliationNextCursor = $state<string | null>(null);
   let reconciliationLoadingMore = $state(false);
   let reconciliationLoadMoreError = $state<string | null>(null);
+
+  const currencyOptions: readonly SelectOption[] = [
+    { label: "MUR", value: "MUR" },
+    { label: "EUR", value: "EUR" },
+    { label: "USD", value: "USD" }
+  ];
 
   function accountWriteRequest(): OfficeBankAccountWriteRequest {
     return {
@@ -153,6 +165,10 @@
     }
   }
 
+  // The submit button is disabled while the form is incomplete, so the empty
+  // guard inside submitAccountForm can no longer be hit silently.
+  const accountFormComplete = $derived(bankFormName.trim().length > 0 && bankFormLabel.trim().length > 0);
+
   function accountSubmitTitle(): string {
     if (!props.writesEnabled) {
       return "Activez les écritures pour modifier les comptes bancaires.";
@@ -162,8 +178,104 @@
       return "Enregistrement en cours.";
     }
 
+    if (!accountFormComplete) {
+      return "Renseignez la banque et le libellé du compte.";
+    }
+
     return "";
   }
+
+  // Reconciliation candidate rows are keyed by candidate id, but the
+  // unmatch/reject endpoints address the bank statement line — resolve it first.
+  function reconciliationLineIdFor(candidateId: string): string | null {
+    return (
+      reconciliationRows.find((candidate: OfficeReconciliationCandidate): boolean => candidate.id === candidateId)
+        ?.statementLineId ?? null
+    );
+  }
+
+  // Shared write path for the per-row reconciliation actions: gate on the write
+  // lock, run the call, then reload the bank data so the queue reflects reality.
+  async function runReconciliationAction(action: () => Promise<unknown>, successMessage: string): Promise<void> {
+    if (!props.writesEnabled) {
+      reconciliationActionStatus = "error";
+      reconciliationActionMessage = "Activez les écritures pour agir sur les candidats de rapprochement.";
+      return;
+    }
+
+    if (reconciliationActionStatus === "loading") {
+      return;
+    }
+
+    reconciliationActionStatus = "loading";
+    reconciliationActionMessage = null;
+
+    try {
+      await action();
+      await loadBank();
+      reconciliationActionStatus = "success";
+      reconciliationActionMessage = successMessage;
+    } catch (error: unknown) {
+      // Action failures stay on the status line; reconciliationState keeps the loaded list.
+      reconciliationActionStatus = "error";
+      reconciliationActionMessage = getErrorMessage(error);
+    }
+  }
+
+  async function approveReconciliationById(candidateId: string): Promise<void> {
+    await runReconciliationAction(
+      (): Promise<unknown> =>
+        props.client.approveReconciliations(
+          {
+            workspaceId: props.workspaceId,
+            reconciliationIds: [candidateId],
+            approvedAt: new Date().toISOString()
+          },
+          { idempotencyKey: crypto.randomUUID() }
+        ),
+      "Rapprochement approuvé."
+    );
+  }
+
+  async function unmatchReconciliationById(candidateId: string): Promise<void> {
+    const statementLineId = reconciliationLineIdFor(candidateId);
+    if (statementLineId === null) {
+      reconciliationActionStatus = "error";
+      reconciliationActionMessage = "Ligne bancaire introuvable pour ce candidat — recharge la page Bank.";
+      return;
+    }
+    await runReconciliationAction(
+      (): Promise<unknown> =>
+        props.client.unmatchReconciliation(
+          { workspaceId: props.workspaceId, statementLineId },
+          { idempotencyKey: crypto.randomUUID() }
+        ),
+      "Match annulé."
+    );
+  }
+
+  async function rejectReconciliationById(candidateId: string): Promise<void> {
+    const statementLineId = reconciliationLineIdFor(candidateId);
+    if (statementLineId === null) {
+      reconciliationActionStatus = "error";
+      reconciliationActionMessage = "Ligne bancaire introuvable pour ce candidat — recharge la page Bank.";
+      return;
+    }
+    await runReconciliationAction(
+      (): Promise<unknown> =>
+        props.client.rejectReconciliation(
+          { workspaceId: props.workspaceId, statementLineId },
+          { idempotencyKey: crypto.randomUUID() }
+        ),
+      "Candidat rejeté."
+    );
+  }
+
+  const reconciliationRowActions = $derived<readonly TableRowAction[]>([
+    { label: "Accepter", onAction: approveReconciliationById },
+    { label: "Annuler match", onAction: unmatchReconciliationById },
+    { label: "Rejeter", onAction: rejectReconciliationById, danger: true }
+  ]);
   const rawTableRows = $derived(createRawTableRows(rawRows));
   const accountsPagination = $derived<TablePagination | null>(
     createTablePagination(accountsState, accountsLoadingMore, accountsLoadMoreError, loadMoreAccounts, loadAllAccounts)
@@ -431,7 +543,7 @@
           { kind: "text", value: line.reference === "" ? "—" : line.reference, strong: false },
           { kind: "badge", value: line.direction, tone: line.direction === "credit" ? "success" : "warning" },
           { kind: "money", value: formatSignedMoney(directionalAmount, line.currency), tone: moneyTone(directionalAmount) },
-          { kind: "money", value: formatMoney(directionalMurAmount, "MUR"), tone: "muted" },
+          { kind: "money", value: formatSignedMoney(directionalMurAmount, "MUR"), tone: moneyTone(directionalMurAmount) },
           { kind: "badge", value: line.isDuplicateCandidate ? "duplicate" : "unique", tone: line.isDuplicateCandidate ? "warning" : "muted" },
           { kind: "badge", value: line.reconciliationStatus, tone: reconciliationTone(line.reconciliationStatus) }
         ]
@@ -528,47 +640,81 @@
     </div>
   {:else}
     <section class="bank-account-form ehq-edge-surface" aria-label={editingAccountId === null ? "Ajouter un compte bancaire" : "Éditer le compte bancaire"}>
-      <label>
-        <span class="ehq-type-label-mono">Banque</span>
-        <input type="text" bind:value={bankFormName} placeholder="MCB" />
-      </label>
-      <label>
-        <span class="ehq-type-label-mono">Libellé du compte</span>
-        <input type="text" bind:value={bankFormLabel} placeholder="MCB EUR" />
-      </label>
-      <label>
-        <span class="ehq-type-label-mono">Devise</span>
-        <select bind:value={bankFormCurrency}>
-          <option value="MUR">MUR</option>
-          <option value="EUR">EUR</option>
-          <option value="USD">USD</option>
-        </select>
-      </label>
+      <Input
+        id="bank-account-name"
+        label="Banque"
+        value={bankFormName}
+        placeholder="MCB"
+        type="text"
+        state="default"
+        message=""
+        oninput={(value: string): void => { bankFormName = value; }}
+      />
+      <Input
+        id="bank-account-label"
+        label="Libellé du compte"
+        value={bankFormLabel}
+        placeholder="MCB EUR"
+        type="text"
+        state="default"
+        message=""
+        oninput={(value: string): void => { bankFormLabel = value; }}
+      />
+      <Select
+        id="bank-account-currency"
+        label="Devise"
+        value={bankFormCurrency}
+        options={currencyOptions}
+        state="default"
+        message=""
+        onchange={(value: string): void => { bankFormCurrency = value; }}
+      />
       <label class="bank-account-active">
         <input type="checkbox" bind:checked={bankFormActive} />
         <span class="ehq-type-label-mono">Actif</span>
       </label>
       <div class="bank-account-actions">
-        <button
+        <Button
+          label={accountSubmitStatus === "loading" ? "Enregistrement…" : editingAccountId === null ? "Ajouter le compte" : "Enregistrer"}
+          variant="primary"
+          size="medium"
           type="button"
-          class="office-action ehq-type-heading primary"
-          disabled={!props.writesEnabled || accountSubmitStatus === "loading"}
+          disabled={!props.writesEnabled || !accountFormComplete}
+          loading={accountSubmitStatus === "loading"}
+          locked={false}
+          focus={false}
+          ariaLabel={editingAccountId === null ? "Ajouter le compte bancaire" : "Enregistrer le compte bancaire"}
           title={accountSubmitTitle()}
           onclick={submitAccountForm}
-        >
-          {accountSubmitStatus === "loading" ? "Enregistrement…" : editingAccountId === null ? "Ajouter le compte" : "Enregistrer"}
-        </button>
+        />
         {#if editingAccountId !== null}
-          <button type="button" class="office-action ehq-type-heading" onclick={resetAccountForm}>Annuler</button>
+          <Button
+            label="Annuler"
+            variant="secondary"
+            size="medium"
+            type="button"
+            disabled={false}
+            loading={false}
+            locked={false}
+            focus={false}
+            ariaLabel="Annuler l'édition du compte bancaire"
+            onclick={resetAccountForm}
+          />
         {/if}
       </div>
       {#if accountSubmitMessage !== null}
         <p class="form-message ehq-type-body" class:error={accountSubmitStatus === "error"} role="status">{accountSubmitMessage}</p>
       {/if}
     </section>
+    <!-- This branch only renders when accountsState is idle or success: the
+         loading and error statuses are handled by the view-level Loader and
+         error copy above, so the table only distinguishes empty from default. -->
     <Table title="Bank accounts" columns={accountColumns} rows={accountTableRows} state={accountTableRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={accountRowActions} pagination={accountsPagination} />
     <Table title="Raw bank lines" columns={rawColumns} rows={rawTableRows} state={rawState.status === "loading" ? "loading" : rawState.status === "error" ? "error" : rawTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={rawPagination} />
-    <Table title="Reconciliation candidates" columns={reconciliationColumns} rows={reconciliationTableRows} state={reconciliationState.status === "loading" ? "loading" : reconciliationState.status === "error" ? "error" : reconciliationTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={reconciliationPagination} />
+    <Table title="Reconciliation candidates" columns={reconciliationColumns} rows={reconciliationTableRows} state={reconciliationState.status === "loading" ? "loading" : reconciliationState.status === "error" ? "error" : reconciliationTableRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={reconciliationRowActions} pagination={reconciliationPagination} />
+    {#if reconciliationActionMessage !== null}
+      <p class="form-message ehq-type-body" class:error={reconciliationActionStatus === "error"} role="status">{reconciliationActionMessage}</p>
+    {/if}
   {/if}
 </section>
 
@@ -657,11 +803,6 @@
     gap: var(--ehq-space-3);
   }
 
-  .bank-account-form label {
-    display: grid;
-    gap: var(--ehq-space-1);
-  }
-
   .bank-account-active {
     display: flex;
     align-items: center;
@@ -682,31 +823,5 @@
 
   .form-message.error {
     color: var(--ehq-error);
-  }
-
-  .office-action {
-    min-height: 38px;
-    padding: 0 var(--ehq-space-3);
-    border: 1px solid var(--ehq-border);
-    border-radius: var(--ehq-radius-sm);
-    background: transparent;
-    color: var(--ehq-text);
-    font-family: var(--ehq-font);
-    font-size: var(--ehq-type-action-size);
-    font-weight: var(--ehq-type-heading-weight);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    cursor: pointer;
-  }
-
-  .office-action.primary {
-    border-color: var(--ehq-yellow);
-    background: var(--ehq-yellow);
-    color: var(--ehq-text-on-yellow);
-  }
-
-  .office-action:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
   }
 </style>

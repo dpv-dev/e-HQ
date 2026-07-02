@@ -1,6 +1,20 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Badge, Loader, Table, type TableColumn, type TablePagination, type TableRow, type TableRowAction, type Tone } from "@ehq/ui";
+  import {
+    Badge,
+    Button,
+    Drawer,
+    EmptyState,
+    Input,
+    KPI,
+    Loader,
+    Table,
+    type TableColumn,
+    type TablePagination,
+    type TableRow,
+    type TableRowAction,
+    type Tone
+  } from "@ehq/ui";
   import {
     createErrorState,
     createIdleState,
@@ -24,6 +38,7 @@
 
   type DrawerMode = "closed" | "detail" | "create" | "edit";
   type RequestStatus = "idle" | "loading" | "success" | "error";
+  type PayeeLinkAction = "link" | "unlink";
 
   interface Props {
     readonly facet: OfficePartnerFacet;
@@ -79,6 +94,8 @@
   let linkPayeeId = $state<string>("");
   let formStatus = $state<RequestStatus>("idle");
   let payeeLinkStatus = $state<RequestStatus>("idle");
+  // Which payee action is in flight, so only the triggering button spins.
+  let payeeLinkAction = $state<PayeeLinkAction | null>(null);
   // Drawer-level status line; form and payee-link outcomes have their own
   // messages rendered next to the action they belong to.
   let actionMessage = $state<string>("Select a partner to see the full relationship.");
@@ -90,7 +107,6 @@
   const copy = $derived(createFacetCopy(props.facet));
   const partners = $derived(readPageItems(partnersState));
   const selectedPartner = $derived(readPartnerDetail(detailState));
-  const drawerOpen = $derived(drawerMode !== "closed");
   const partnerTableRows = $derived(createPartnerTableRows(partners, copy));
   const partnerRowActions = $derived<readonly TableRowAction[]>([
     { label: "Open", onAction: openPartner }
@@ -98,6 +114,48 @@
   const partnersPagination = $derived<TablePagination | null>(
     createTablePagination(partnersState, partnersLoadingMore, partnersLoadMoreError, loadMorePartners, loadAllPartners)
   );
+  // Drawer footer wiring: the DS Drawer owns the primary/secondary actions, so
+  // the mode-dependent submit ("Edit partner" vs create/update) is derived here.
+  const drawerTitle = $derived(drawerMode === "create" ? "New partner" : selectedPartner?.name ?? "Partner");
+  const drawerBadgeLabel = $derived(drawerMode === "create" ? "new" : selectedPartner?.status ?? "");
+  const drawerBadgeTone = $derived<Tone>(
+    drawerMode === "create" ? "info" : selectedPartner?.status === "active" ? "success" : "muted"
+  );
+  const drawerPrimaryLabel = $derived(createDrawerPrimaryLabel(drawerMode, formStatus));
+  const drawerPrimaryDisabled = $derived(
+    drawerMode === "detail"
+      ? !props.writesEnabled || detailState.status !== "success"
+      : !props.writesEnabled || formStatus === "loading"
+  );
+  const drawerPrimaryTitle = $derived(createDrawerPrimaryTitle());
+
+  function createDrawerPrimaryLabel(mode: DrawerMode, status: RequestStatus): string {
+    if (mode === "detail") {
+      return "Edit partner";
+    }
+
+    if (status === "loading") {
+      return "Saving…";
+    }
+
+    return mode === "create" ? "Create partner" : "Save partner";
+  }
+
+  function createDrawerPrimaryTitle(): string {
+    if (drawerMode === "detail") {
+      if (!props.writesEnabled) {
+        return writeDisabledTitle();
+      }
+
+      if (detailState.status !== "success") {
+        return "Partner detail unavailable.";
+      }
+
+      return "";
+    }
+
+    return writeActionTitle(formStatus);
+  }
 
   onMount((): void => {
     void loadPartners();
@@ -262,6 +320,7 @@
     }
 
     payeeLinkStatus = "loading";
+    payeeLinkAction = "link";
     payeeLinkMessage = null;
     try {
       const receipt = await props.client.linkPartnerPayee(
@@ -280,6 +339,10 @@
     } catch (error: unknown) {
       payeeLinkStatus = "error";
       payeeLinkMessage = getErrorMessage(error);
+    } finally {
+      // The action marker only exists to target the right button's spinner
+      // while loading; clear it so no stale state survives the attempt.
+      payeeLinkAction = null;
     }
   }
 
@@ -289,6 +352,7 @@
     }
 
     payeeLinkStatus = "loading";
+    payeeLinkAction = "unlink";
     payeeLinkMessage = null;
     try {
       const receipt = await props.client.unlinkPartnerPayee(
@@ -307,27 +371,29 @@
     } catch (error: unknown) {
       payeeLinkStatus = "error";
       payeeLinkMessage = getErrorMessage(error);
+    } finally {
+      payeeLinkAction = null;
     }
   }
 
-  function updateName(event: Event): void {
-    partnerForm = { ...partnerForm, name: readInputValue(event) };
+  function updateName(value: string): void {
+    partnerForm = { ...partnerForm, name: value };
   }
 
-  function updateEmail(event: Event): void {
-    partnerForm = { ...partnerForm, email: readInputValue(event) };
+  function updateEmail(value: string): void {
+    partnerForm = { ...partnerForm, email: value };
   }
 
-  function updatePhone(event: Event): void {
-    partnerForm = { ...partnerForm, phone: readInputValue(event) };
+  function updatePhone(value: string): void {
+    partnerForm = { ...partnerForm, phone: value };
   }
 
-  function updateAddress(event: Event): void {
-    partnerForm = { ...partnerForm, address: readInputValue(event) };
+  function updateAddress(value: string): void {
+    partnerForm = { ...partnerForm, address: value };
   }
 
-  function updateTaxId(event: Event): void {
-    partnerForm = { ...partnerForm, taxId: readInputValue(event) };
+  function updateTaxId(value: string): void {
+    partnerForm = { ...partnerForm, taxId: value };
   }
 
   function updateNotes(event: Event): void {
@@ -343,8 +409,8 @@
     partnerForm = { ...partnerForm, active: target.checked };
   }
 
-  function updateLinkPayeeId(event: Event): void {
-    linkPayeeId = readInputValue(event);
+  function updateLinkPayeeId(value: string): void {
+    linkPayeeId = value;
   }
 
   function submitPartnerFormEvent(event: SubmitEvent): void {
@@ -548,15 +614,6 @@
     return `office-${scope}-${Date.now().toString(36)}`;
   }
 
-  function readInputValue(event: Event): string {
-    const target = event.target;
-    if (!(target instanceof HTMLInputElement)) {
-      throw new Error("Partner input event target is not an input.");
-    }
-
-    return target.value;
-  }
-
   function readTextAreaValue(event: Event): string {
     const target = event.target;
     if (!(target instanceof HTMLTextAreaElement)) {
@@ -598,7 +655,19 @@
       <h2>{copy.title}</h2>
       <span>{copy.subtitle}</span>
     </div>
-    <button class="head-action" type="button" disabled={!props.writesEnabled} title={writeDisabledTitle()} onclick={openCreateDrawer}>Create partner</button>
+    <Button
+      label="Create partner"
+      variant="primary"
+      size="medium"
+      type="button"
+      disabled={!props.writesEnabled}
+      loading={false}
+      locked={false}
+      focus={false}
+      ariaLabel="Create partner"
+      title={writeDisabledTitle()}
+      onclick={openCreateDrawer}
+    />
   </header>
 
   <div class="partners-layout">
@@ -608,7 +677,18 @@
           <p>{copy.tableTitle}</p>
           <strong>{partners.length} visible</strong>
         </div>
-        <button type="button" onclick={loadPartners}>Refresh</button>
+        <Button
+          label="Refresh"
+          variant="secondary"
+          size="small"
+          type="button"
+          disabled={false}
+          loading={false}
+          locked={false}
+          focus={false}
+          ariaLabel="Refresh partners"
+          onclick={loadPartners}
+        />
       </header>
 
       <Table
@@ -622,123 +702,201 @@
       />
     </section>
 
-    <aside class="partner-drawer ehq-edge-surface" class:open={drawerOpen} aria-label="Partner relationship drawer">
+    <aside class="partner-drawer" aria-label="Partner relationship drawer">
       {#if drawerMode === "closed"}
-        <div class="drawer-empty">
-          <strong>Select a partner</strong>
-          <span>Clients and suppliers are two lenses over the same partner record.</span>
-        </div>
-      {:else if detailState.status === "loading"}
-        <Loader label="Loading partner" detail="Reading income and expense sides." size="medium" />
-      {:else if detailState.status === "error"}
-        <div class="drawer-empty error-state">
-          <strong>Partner unavailable</strong>
-          <span>{getErrorMessage(detailState.error)}</span>
-          <button type="button" onclick={closeDrawer}>Close</button>
-        </div>
+        <EmptyState
+          title="Select a partner"
+          detail="Clients and suppliers are two lenses over the same partner record."
+          state="empty"
+          actionLabel=""
+          actionHref={null}
+          disabledReason=""
+        />
       {:else}
-        <header class="drawer-head">
-          <div>
-            <p>{drawerMode === "create" ? "Unified partner" : copy.drawerContext}</p>
-            <h3>{drawerMode === "create" ? "New partner" : selectedPartner?.name}</h3>
-          </div>
-          <button type="button" onclick={closeDrawer}>Close</button>
-        </header>
-
-        {#if selectedPartner !== null && drawerMode !== "create"}
-          <section class="side-grid" aria-label="Full relationship sides">
-            <article class="ehq-edge-surface">
-              <p>Client side</p>
-              <strong>{formatMoneyMicro(selectedPartner.activity.income.periodTotalMicro)}</strong>
-              <span>Receivable {formatMoneyMicro(selectedPartner.activity.income.openBalanceMicro)}</span>
-            </article>
-            <article class="ehq-edge-surface">
-              <p>Supplier side</p>
-              <strong>{formatMoneyMicro(selectedPartner.activity.expense.periodTotalMicro)}</strong>
-              <span>Payable {formatMoneyMicro(selectedPartner.activity.expense.openBalanceMicro)}</span>
-            </article>
-            <article class="net-card ehq-edge-surface">
-              <p>Net relationship</p>
-              <strong class={`tone-${netTone(selectedPartner.activity.netMicro)}`}>{formatMoneyMicro(selectedPartner.activity.netMicro)}</strong>
-              <span>Income minus expense for {props.period}</span>
-            </article>
-          </section>
-
-          <section class="suggestions ehq-edge-surface" aria-label="Classification suggestions">
-            <p>Classification suggestions</p>
-            {#each selectedPartner.classificationSuggestions as suggestion (suggestion.id)}
-              <div>
-                <span>{suggestion.categoryLabel}</span>
-                <Badge label={`${suggestion.type} · ${formatConfidence(suggestion.confidenceBp)}`} tone={suggestionTone(suggestion.type)} />
+        <Drawer
+          open={true}
+          title={drawerTitle}
+          badgeLabel={drawerBadgeLabel}
+          badgeTone={drawerBadgeTone}
+          body=""
+          primaryAction={drawerPrimaryLabel}
+          secondaryAction="Close"
+          state={detailState.status === "error" ? "error" : "default"}
+          primaryDisabled={drawerPrimaryDisabled}
+          primaryTitle={drawerPrimaryTitle}
+          onPrimary={drawerMode === "detail" ? openEditDrawer : submitPartnerForm}
+          onSecondary={closeDrawer}
+        >
+          {#snippet content()}
+            {#if detailState.status === "loading"}
+              <Loader label="Loading partner" detail="Reading income and expense sides." size="medium" />
+            {:else if detailState.status === "error"}
+              <div class="drawer-empty error-state">
+                <strong>Partner unavailable</strong>
+                <span>{getErrorMessage(detailState.error)}</span>
               </div>
-            {/each}
-          </section>
+            {:else}
+              {#if selectedPartner !== null && drawerMode !== "create"}
+                <section class="side-grid" aria-label="Full relationship sides">
+                  <KPI
+                    label="Client side"
+                    value={formatMoneyMicro(selectedPartner.activity.income.periodTotalMicro)}
+                    detail={`Receivable ${formatMoneyMicro(selectedPartner.activity.income.openBalanceMicro)}`}
+                    tone="muted"
+                    state="default"
+                    accent={false}
+                  />
+                  <KPI
+                    label="Supplier side"
+                    value={formatMoneyMicro(selectedPartner.activity.expense.periodTotalMicro)}
+                    detail={`Payable ${formatMoneyMicro(selectedPartner.activity.expense.openBalanceMicro)}`}
+                    tone="muted"
+                    state="default"
+                    accent={false}
+                  />
+                  <div class="net-card">
+                    <KPI
+                      label="Net relationship"
+                      value={formatMoneyMicro(selectedPartner.activity.netMicro)}
+                      detail={`Income minus expense for ${props.period}`}
+                      tone={netTone(selectedPartner.activity.netMicro)}
+                      state="default"
+                      accent={false}
+                    />
+                  </div>
+                </section>
 
-          <section class="link-panel ehq-edge-surface" aria-label="Distribution payee link">
-            <p>Distribution payee link</p>
-            <strong>{payeeLinkLabel(selectedPartner.distributionPayeeLink)}</strong>
-            <label>
-              <span>Payee id</span>
-              <input value={linkPayeeId} oninput={updateLinkPayeeId} placeholder="payee_..." />
-            </label>
-            <div class="drawer-actions">
-              <button type="button" disabled={payeeLinkStatus === "loading" || !props.writesEnabled} title={writeActionTitle(payeeLinkStatus)} onclick={linkPartnerPayee}>Idempotent link</button>
-              <button type="button" disabled={payeeLinkStatus === "loading" || !props.writesEnabled} title={writeActionTitle(payeeLinkStatus)} onclick={unlinkPartnerPayee}>Idempotent unlink</button>
-            </div>
-            {#if payeeLinkMessage !== null}
-              <p class="outcome-message" class:error={payeeLinkStatus === "error"} role="status">{payeeLinkMessage}</p>
+                <section class="suggestions ehq-edge-surface" aria-label="Classification suggestions">
+                  <p>Classification suggestions</p>
+                  {#each selectedPartner.classificationSuggestions as suggestion (suggestion.id)}
+                    <div>
+                      <span>{suggestion.categoryLabel}</span>
+                      <Badge label={`${suggestion.type} · ${formatConfidence(suggestion.confidenceBp)}`} tone={suggestionTone(suggestion.type)} />
+                    </div>
+                  {/each}
+                </section>
+
+                <section class="link-panel ehq-edge-surface" aria-label="Distribution payee link">
+                  <p>Distribution payee link</p>
+                  <strong>{payeeLinkLabel(selectedPartner.distributionPayeeLink)}</strong>
+                  <Input
+                    id="partner-link-payee-id"
+                    label="Payee id"
+                    value={linkPayeeId}
+                    placeholder="payee_..."
+                    type="text"
+                    state="default"
+                    message=""
+                    oninput={updateLinkPayeeId}
+                  />
+                  <div class="drawer-actions">
+                    <Button
+                      label="Idempotent link"
+                      variant="secondary"
+                      size="small"
+                      type="button"
+                      disabled={payeeLinkStatus === "loading" || !props.writesEnabled}
+                      loading={payeeLinkStatus === "loading" && payeeLinkAction === "link"}
+                      locked={false}
+                      focus={false}
+                      ariaLabel="Link Distribution payee"
+                      title={writeActionTitle(payeeLinkStatus)}
+                      onclick={linkPartnerPayee}
+                    />
+                    <Button
+                      label="Idempotent unlink"
+                      variant="secondary"
+                      size="small"
+                      type="button"
+                      disabled={payeeLinkStatus === "loading" || !props.writesEnabled}
+                      loading={payeeLinkStatus === "loading" && payeeLinkAction === "unlink"}
+                      locked={false}
+                      focus={false}
+                      ariaLabel="Unlink Distribution payee"
+                      title={writeActionTitle(payeeLinkStatus)}
+                      onclick={unlinkPartnerPayee}
+                    />
+                  </div>
+                  {#if payeeLinkMessage !== null}
+                    <p class="outcome-message" class:error={payeeLinkStatus === "error"} role="status">{payeeLinkMessage}</p>
+                  {/if}
+                </section>
+              {/if}
+
+              {#if drawerMode === "create" || drawerMode === "edit"}
+                <!-- The visible submit control lives in the Drawer footer
+                     (type="button"). Implicit Enter-to-submit needs a real
+                     submit control inside the form, hence the off-screen one. -->
+                <form class="partner-form ehq-edge-surface" onsubmit={submitPartnerFormEvent}>
+                  <input class="submit-proxy" type="submit" value="Save partner" tabindex="-1" aria-hidden="true" />
+                  <Input
+                    id="partner-form-name"
+                    label="Name"
+                    value={partnerForm.name}
+                    placeholder=""
+                    type="text"
+                    state="default"
+                    message=""
+                    oninput={updateName}
+                  />
+                  <Input
+                    id="partner-form-email"
+                    label="Email"
+                    value={partnerForm.email}
+                    placeholder=""
+                    type="text"
+                    state="default"
+                    message=""
+                    oninput={updateEmail}
+                  />
+                  <Input
+                    id="partner-form-phone"
+                    label="Phone"
+                    value={partnerForm.phone}
+                    placeholder=""
+                    type="text"
+                    state="default"
+                    message=""
+                    oninput={updatePhone}
+                  />
+                  <Input
+                    id="partner-form-address"
+                    label="Address"
+                    value={partnerForm.address}
+                    placeholder=""
+                    type="text"
+                    state="default"
+                    message=""
+                    oninput={updateAddress}
+                  />
+                  <Input
+                    id="partner-form-tax-id"
+                    label="Tax id"
+                    value={partnerForm.taxId}
+                    placeholder=""
+                    type="text"
+                    state="default"
+                    message=""
+                    oninput={updateTaxId}
+                  />
+                  <label>
+                    <span>Notes</span>
+                    <textarea value={partnerForm.notes} oninput={updateNotes}></textarea>
+                  </label>
+                  <label class="check-row">
+                    <input type="checkbox" checked={partnerForm.active} onchange={updateActive} />
+                    <span>Active partner</span>
+                  </label>
+                  {#if formMessage !== null}
+                    <p class="outcome-message" class:error={formStatus === "error"} role="status">{formMessage}</p>
+                  {/if}
+                </form>
+              {/if}
+
+              <p class="action-message" role="status">{actionMessage}</p>
             {/if}
-          </section>
-        {/if}
-
-        {#if drawerMode === "detail" && selectedPartner !== null}
-          <div class="drawer-actions">
-            <button type="button" disabled={!props.writesEnabled} title={writeDisabledTitle()} onclick={openEditDrawer}>Edit partner</button>
-          </div>
-        {/if}
-
-        {#if drawerMode === "create" || drawerMode === "edit"}
-          <form class="partner-form ehq-edge-surface" onsubmit={submitPartnerFormEvent}>
-            <label>
-              <span>Name</span>
-              <input value={partnerForm.name} oninput={updateName} />
-            </label>
-            <label>
-              <span>Email</span>
-              <input value={partnerForm.email} oninput={updateEmail} />
-            </label>
-            <label>
-              <span>Phone</span>
-              <input value={partnerForm.phone} oninput={updatePhone} />
-            </label>
-            <label>
-              <span>Address</span>
-              <input value={partnerForm.address} oninput={updateAddress} />
-            </label>
-            <label>
-              <span>Tax id</span>
-              <input value={partnerForm.taxId} oninput={updateTaxId} />
-            </label>
-            <label>
-              <span>Notes</span>
-              <textarea value={partnerForm.notes} oninput={updateNotes}></textarea>
-            </label>
-            <label class="check-row">
-              <input type="checkbox" checked={partnerForm.active} onchange={updateActive} />
-              <span>Active partner</span>
-            </label>
-            <div class="drawer-actions">
-              <button type="submit" disabled={formStatus === "loading" || !props.writesEnabled} title={writeActionTitle(formStatus)}>
-                {formStatus === "loading" ? "Saving…" : drawerMode === "create" ? "Create partner" : "Save partner"}
-              </button>
-            </div>
-            {#if formMessage !== null}
-              <p class="outcome-message" class:error={formStatus === "error"} role="status">{formMessage}</p>
-            {/if}
-          </form>
-        {/if}
-
-        <p class="action-message" role="status">{actionMessage}</p>
+          {/snippet}
+        </Drawer>
       {/if}
     </aside>
   </div>
@@ -753,7 +911,6 @@
 
   .partners-head,
   .partners-toolbar,
-  .drawer-head,
   .drawer-actions {
     display: flex;
     align-items: center;
@@ -796,14 +953,12 @@
 
   p,
   h2,
-  h3,
   strong {
     margin: 0;
   }
 
   p,
   label span,
-  .muted,
   .action-message {
     color: var(--ehq-text-muted);
     font-family: var(--ehq-mono);
@@ -818,15 +973,8 @@
     font-weight: var(--ehq-type-heading-weight);
   }
 
-  h3 {
-    margin-top: var(--ehq-space-1);
-    font-size: var(--ehq-type-section-title-size);
-    font-weight: var(--ehq-type-heading-weight);
-  }
-
   .partners-head span,
   .drawer-empty span,
-  .side-grid span,
   .link-panel strong {
     color: var(--ehq-text-soft);
     font-family: var(--ehq-font);
@@ -835,62 +983,13 @@
     line-height: var(--ehq-type-ui-line);
   }
 
-  .tone-success,
-  .tone-error,
-  .tone-muted {
-    font-family: var(--ehq-font);
-    font-weight: var(--ehq-type-figure-weight);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .tone-success {
-    color: var(--ehq-success);
-  }
-
-  .tone-error {
-    color: var(--ehq-error);
-  }
-
-  .tone-muted {
-    color: var(--ehq-text-muted);
-  }
-
-  button,
+  /* Raw controls that remain after the DS migration: the notes textarea and
+     the active checkbox, which have no @ehq/ui equivalent yet. */
   input,
   textarea {
     font: inherit;
   }
 
-  button {
-    min-height: 34px;
-    padding: 0 var(--ehq-space-3);
-    border: 1px solid var(--ehq-border);
-    border-radius: var(--ehq-radius-sm);
-    background: transparent;
-    color: var(--ehq-text);
-    font-family: var(--ehq-font);
-    font-size: var(--ehq-type-action-size);
-    font-weight: var(--ehq-type-heading-weight);
-    text-transform: uppercase;
-  }
-
-  button:hover {
-    border-color: var(--ehq-yellow-border);
-    box-shadow: 0 0 0 3px var(--ehq-yellow-muted);
-  }
-
-  button:disabled {
-    color: var(--ehq-text-disabled);
-    cursor: not-allowed;
-  }
-
-  .head-action {
-    border-color: var(--ehq-yellow);
-    background: var(--ehq-yellow);
-    color: var(--ehq-text-on-yellow);
-  }
-
-  .empty-state,
   .drawer-empty {
     min-height: 220px;
     padding: var(--ehq-space-5);
@@ -919,21 +1018,24 @@
     color: var(--ehq-error);
   }
 
-  .partner-drawer {
-    padding: var(--ehq-space-4);
-    display: grid;
-    gap: var(--ehq-space-4);
-  }
-
   .side-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--ehq-space-3);
   }
 
-  .side-grid article,
   .suggestions,
   .link-panel,
+  /* Off-screen submit control enabling implicit Enter-to-submit inside the
+     drawer form (the visible action is the Drawer footer button). */
+  .submit-proxy {
+    position: absolute;
+    left: -9999px;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+  }
+
   .partner-form {
     min-width: 0;
     padding: var(--ehq-space-3);
@@ -960,24 +1062,15 @@
     gap: var(--ehq-space-1);
   }
 
-  input,
   textarea {
     width: 100%;
     min-width: 0;
+    min-height: 80px;
+    padding: var(--ehq-space-3);
     border: 1px solid var(--ehq-border);
     border-radius: var(--ehq-radius-sm);
     background: var(--ehq-surface);
     color: var(--ehq-text);
-  }
-
-  input {
-    min-height: 36px;
-    padding: 0 var(--ehq-space-3);
-  }
-
-  textarea {
-    min-height: 80px;
-    padding: var(--ehq-space-3);
     resize: vertical;
   }
 
@@ -1005,7 +1098,6 @@
   @media (max-width: 680px) {
     .partners-head,
     .partners-toolbar,
-    .drawer-head,
     .drawer-actions,
     .suggestions div {
       align-items: stretch;
