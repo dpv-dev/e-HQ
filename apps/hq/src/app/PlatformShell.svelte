@@ -1,5 +1,6 @@
 <script lang="ts">
   import { getWorkspaceAccess, type AuthSession, type WorkspaceAppId } from "@ehq/auth";
+  import { Button, EmptyState } from "@ehq/ui";
   import CommandCenterApp from "./canonical/command-center/App.svelte";
   import DistributionApp from "./canonical/distribution/App.svelte";
   import OfficeApp from "./canonical/office/App.svelte";
@@ -15,7 +16,7 @@
     readonly onLogout: () => void;
   }
 
-  const { initialWorkspaceId, initialPageId, session, onLogout }: Props = $props();
+  const { initialWorkspaceId, initialPageId, session, onNavigate, onLogout }: Props = $props();
 
   const requestedWorkspaceId = $derived(resolveRequestedWorkspaceId(initialWorkspaceId, initialPageId));
   const requestedAccess = $derived(getWorkspaceAccess(session, requestedWorkspaceId));
@@ -49,6 +50,10 @@
 
     return allowedWorkspace.id;
   }
+
+  function openHqLanding(): void {
+    onNavigate("/app");
+  }
 </script>
 
 <svelte:head>
@@ -57,12 +62,42 @@
 
 {#if fallbackAccess.status === "locked"}
   <main class="access-denied">
-    <section class="ehq-edge-surface">
-      <p class="ehq-type-label-mono">access</p>
-      <h1 class="ehq-type-display">Workspace locked</h1>
-      <span class="ehq-type-body">{fallbackAccess.reason ?? "Your Supabase role does not allow this workspace."}</span>
-      <button class="ehq-type-heading" type="button" onclick={onLogout}>Sign out</button>
-    </section>
+    <div class="access-denied-body">
+      <EmptyState
+        title="Workspace locked"
+        detail={fallbackAccess.reason ?? "Your Supabase role does not allow this workspace."}
+        state="error"
+        actionLabel=""
+        actionHref={null}
+        disabledReason=""
+      />
+      <div class="access-denied-actions">
+        <Button
+          label="Back to HQ"
+          variant="secondary"
+          size="medium"
+          type="button"
+          disabled={false}
+          loading={false}
+          locked={false}
+          focus={false}
+          ariaLabel="Back to HQ landing"
+          onclick={openHqLanding}
+        />
+        <Button
+          label="Sign out"
+          variant="primary"
+          size="medium"
+          type="button"
+          disabled={false}
+          loading={false}
+          locked={false}
+          focus={false}
+          ariaLabel="Sign out"
+          onclick={onLogout}
+        />
+      </div>
+    </div>
   </main>
 {:else}
   {#if lockedMessage.length > 0}
@@ -104,30 +139,15 @@
     place-items: center;
   }
 
-  .access-denied section {
+  .access-denied-body {
     width: min(560px, 100%);
-    padding: var(--ehq-space-5);
     display: grid;
     gap: var(--ehq-space-3);
   }
 
-  .access-denied p,
-  .access-denied h1,
-  .access-denied span {
-    margin: 0;
-  }
-
-  .access-denied p {
-    color: var(--ehq-error);
-  }
-
-  .access-denied button {
-    justify-self: start;
-    min-height: 38px;
-    padding: 0 var(--ehq-space-3);
-    border: 1px solid var(--ehq-border);
-    border-radius: var(--ehq-radius-sm);
-    background: transparent;
-    color: var(--ehq-text);
+  .access-denied-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ehq-space-2);
   }
 </style>

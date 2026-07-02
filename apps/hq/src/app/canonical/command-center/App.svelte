@@ -16,16 +16,22 @@
   } from "@ehq/api-client";
   import {
     Badge,
+    Button,
     DonutChart,
+    Input,
     KPI,
+    Loader,
     PageHeader,
     Panel,
+    Select,
     Table,
     Toolbar,
     WorkspaceShell,
     type SelectOption,
+    type SurfaceState,
     type TableColumn,
     type TableRow,
+    type TableState,
     type Tone,
     type ToolbarFilter,
     type WorkspaceNavGroup,
@@ -181,6 +187,7 @@
   ];
   let writesEnabled = $state(false);
   let writeGateMessage = $state("Checking write gate.");
+  let commandBusy = $state(false);
   const dashboardToolbar: readonly ToolbarFilter[] = [
     { label: "Scope", value: "All apps", active: true, disabled: false, actionId: "scope", title: "Open dashboard scope" },
     { label: "Mode", value: "Read-only", active: false, disabled: false, actionId: "mode", title: "Refresh write gate" },
@@ -196,11 +203,25 @@
     { label: "Writes", value: writesEnabled ? "Enabled" : "Disabled", active: writesEnabled, disabled: false, actionId: "writes", title: "Refresh write gate" },
     { label: "Network", value: "Status only", active: false, disabled: false, actionId: "network", title: "Refresh API readiness" }
   ]);
-  const settingsToolbar: readonly ToolbarFilter[] = [
+  const settingsToolbar = $derived<readonly ToolbarFilter[]>([
     { label: "Workspace", value: "Command Center", active: true, disabled: false, actionId: "workspace", title: "Open workspace settings" },
-    { label: "Theme", value: "Dark", active: false, disabled: false, actionId: "theme", title: "Persist theme review" },
-    { label: "Release gate", value: "Manual", active: false, disabled: false, actionId: "release-gate", title: "Persist release gate review" }
-  ];
+    {
+      label: "Theme",
+      value: "Dark",
+      active: false,
+      disabled: commandBusy || !writesEnabled,
+      actionId: "theme",
+      title: writesEnabled ? "Persist theme review" : writeGateMessage
+    },
+    {
+      label: "Release gate",
+      value: "Manual",
+      active: false,
+      disabled: commandBusy || !writesEnabled,
+      actionId: "release-gate",
+      title: writesEnabled ? "Persist release gate review" : writeGateMessage
+    }
+  ]);
   const integrations: readonly IntegrationRow[] = [
     {
       id: "supabase-runtime",
@@ -260,10 +281,9 @@
     selectPage(href as CommandCenterPageId);
   };
   let selectedRole = $state("administrator");
-  let inviteEmail = $state("new.user@eeee.mu");
+  let inviteEmail = $state("");
   let workspaceName = $state("ë • Entreprise");
   let commandNotice = $state("");
-  let commandBusy = $state(false);
   let officeDashboardState = $state<ApiRequestState<OfficeDashboardResponse>>(createIdleState<OfficeDashboardResponse>());
   let distributionDashboardState = $state<ApiRequestState<DistributionDashboardResponse>>(
     createIdleState<DistributionDashboardResponse>()
@@ -274,14 +294,16 @@
   const commandAccess = $derived(getWorkspaceAccess(session, "command-center"));
   const canUseCommandCenter = $derived(commandAccess.status === "allowed");
   const systemStatusLabel = $derived(createSystemStatusLabel(session));
-  const readinessItems = $derived(createReadinessItems(officeDashboardState, distributionDashboardState));
+  const readinessItems = $derived(createReadinessItems(officeDashboardState, distributionDashboardState, permissionUsers));
   const readinessOkCount = $derived(countReadyChecks(readinessItems));
   const readinessPercent = $derived(Math.round((readinessOkCount / readinessItems.length) * 100));
   const dashboardKpis = $derived(createDashboardKpis(readinessItems, permissionUsers, integrations));
   const usersKpis = $derived(createUsersKpis(permissionUsers));
   const integrationKpis = $derived(createIntegrationKpis(integrations, writesEnabled, writeGateMessage));
   const settingsKpis = $derived(createSettingsKpis(settingRows));
-  const actionRows = $derived(createActionRows());
+  const actionRows = $derived(createActionRows(permissionUsers, integrations, settingRows));
+  const dashboardSurfaceState = $derived(deriveDashboardSurfaceState(officeDashboardState, distributionDashboardState));
+  const actionTableState = $derived(deriveActionTableState(dashboardSurfaceState, actionRows));
   const permissionRows = $derived(createPermissionRows(permissionUsers));
   const integrationRows = $derived(createIntegrationRows(integrations));
   const settingsRows = $derived(createSettingsRows(settingRows));
@@ -510,8 +532,11 @@
 
   function createReadinessItems(
     officeState: ApiRequestState<OfficeDashboardResponse>,
-    distributionState: ApiRequestState<DistributionDashboardResponse>
+    distributionState: ApiRequestState<DistributionDashboardResponse>,
+    users: readonly CommandPermissionUser[]
   ): readonly ReadinessItem[] {
+    const reviewCount = countReviewUsers(users);
+
     return [
       {
         label: "Office API",
@@ -524,7 +549,11 @@
         tone: requestStateTone(distributionState)
       },
       { label: "Auth gate", detail: "denied cards remain visible", tone: "success" },
-      { label: "Review queue", detail: "permission review due this month", tone: "warning" }
+      {
+        label: "Review queue",
+        detail: reviewCount > 0 ? `${String(reviewCount)} permission reviews pending` : "no permission reviews pending",
+        tone: reviewCount > 0 ? "warning" : "success"
+      }
     ];
   }
 
@@ -633,30 +662,90 @@
     ];
   }
 
-  function createActionRows(): readonly TableRow[] {
-    return [
-      createTableRow("action_permissions", [
-        { kind: "text", value: "Review permission requests", strong: true },
-        { kind: "text", value: "Users & permissions", strong: false },
-        { kind: "money", value: "3", tone: "warning" },
-        { kind: "badge", value: "review", tone: "warning" },
-        { kind: "badge", value: "open from users", tone: "active" }
-      ]),
-      createTableRow("action_integrations", [
-        { kind: "text", value: "Inspect SBI connector", strong: true },
-        { kind: "text", value: "Office bank imports", strong: false },
-        { kind: "money", value: "1", tone: "muted" },
-        { kind: "badge", value: "idle", tone: "muted" },
-        { kind: "badge", value: "inspect in office", tone: "muted" }
-      ]),
-      createTableRow("action_settings", [
-        { kind: "text", value: "Confirm release gate", strong: true },
-        { kind: "text", value: "Settings", strong: false },
-        { kind: "money", value: "1", tone: "warning" },
-        { kind: "badge", value: "required", tone: "warning" },
-        { kind: "badge", value: "review settings", tone: "muted" }
-      ])
-    ];
+  function createActionRows(
+    users: readonly CommandPermissionUser[],
+    connectorRows: readonly IntegrationRow[],
+    settings: readonly SettingRow[]
+  ): readonly TableRow[] {
+    const rows: TableRow[] = [];
+    const reviewCount = countReviewUsers(users);
+    const inactiveConnectors = connectorRows.filter((row: IntegrationRow): boolean => row.status !== "connected");
+    const pendingSettings = settings.filter((row: SettingRow): boolean => row.tone === "warning");
+
+    if (reviewCount > 0) {
+      rows.push(
+        createTableRow("action_permissions", [
+          { kind: "text", value: "Review permission requests", strong: true },
+          { kind: "text", value: "Users & permissions", strong: false },
+          { kind: "money", value: String(reviewCount), tone: "warning" },
+          { kind: "badge", value: "review", tone: "warning" },
+          { kind: "badge", value: "open from users", tone: "active" }
+        ])
+      );
+    }
+
+    if (inactiveConnectors.length > 0) {
+      const hasAttention = inactiveConnectors.some((row: IntegrationRow): boolean => row.status === "attention");
+
+      rows.push(
+        createTableRow("action_integrations", [
+          {
+            kind: "text",
+            value: `Inspect ${inactiveConnectors.map((row: IntegrationRow): string => row.connector).join(", ")}`,
+            strong: true
+          },
+          { kind: "text", value: "Office bank imports", strong: false },
+          { kind: "money", value: String(inactiveConnectors.length), tone: hasAttention ? "warning" : "muted" },
+          { kind: "badge", value: hasAttention ? "attention" : "idle", tone: hasAttention ? "warning" : "muted" },
+          { kind: "badge", value: "inspect in office", tone: "muted" }
+        ])
+      );
+    }
+
+    if (pendingSettings.length > 0) {
+      rows.push(
+        createTableRow("action_settings", [
+          {
+            kind: "text",
+            value: `Review ${pendingSettings.map((row: SettingRow): string => row.key.toLowerCase()).join(", ")}`,
+            strong: true
+          },
+          { kind: "text", value: "Settings", strong: false },
+          { kind: "money", value: String(pendingSettings.length), tone: "warning" },
+          { kind: "badge", value: "required", tone: "warning" },
+          { kind: "badge", value: "review settings", tone: "muted" }
+        ])
+      );
+    }
+
+    return rows;
+  }
+
+  function deriveDashboardSurfaceState(
+    officeState: ApiRequestState<OfficeDashboardResponse>,
+    distributionState: ApiRequestState<DistributionDashboardResponse>
+  ): SurfaceState {
+    if (officeState.status === "loading" || distributionState.status === "loading") {
+      return "loading";
+    }
+
+    if (officeState.status === "error" || distributionState.status === "error") {
+      return "error";
+    }
+
+    return "default";
+  }
+
+  function deriveActionTableState(surfaceState: SurfaceState, rows: readonly TableRow[]): TableState {
+    if (surfaceState === "loading") {
+      return "loading";
+    }
+
+    if (surfaceState === "error") {
+      return "error";
+    }
+
+    return rows.length === 0 ? "empty" : "default";
   }
 
   function createPermissionRows(users: readonly CommandPermissionUser[]): readonly TableRow[] {
@@ -869,36 +958,16 @@
     return "unknown error";
   }
 
-  function updateSelectedRole(event: Event): void {
-    selectedRole = readSelectValue(event);
+  function updateSelectedRole(value: string): void {
+    selectedRole = value;
   }
 
-  function updateInviteEmail(event: Event): void {
-    inviteEmail = readInputValue(event);
+  function updateInviteEmail(value: string): void {
+    inviteEmail = value;
   }
 
-  function updateWorkspaceName(event: Event): void {
-    workspaceName = readInputValue(event);
-  }
-
-  function readSelectValue(event: Event): string {
-    const target = event.currentTarget;
-
-    if (!(target instanceof HTMLSelectElement)) {
-      throw new Error("Expected select event target.");
-    }
-
-    return target.value;
-  }
-
-  function readInputValue(event: Event): string {
-    const target = event.currentTarget;
-
-    if (!(target instanceof HTMLInputElement)) {
-      throw new Error("Expected input event target.");
-    }
-
-    return target.value;
+  function updateWorkspaceName(value: string): void {
+    workspaceName = value;
   }
 </script>
 
@@ -951,17 +1020,23 @@
 
         <section class="kpi-grid" aria-label="Command Center indicators">
           {#each dashboardKpis as kpi (kpi.label)}
-            <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state="default" accent={kpi.accent} />
+            <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state={dashboardSurfaceState} accent={kpi.accent} />
           {/each}
         </section>
 
         <section class="split-grid">
-          <DonutChart
-            title="Release readiness"
-            value={readinessPercent}
-            label={`${String(readinessOkCount)}/${String(readinessItems.length)} readiness checks ok.`}
-            tone={readinessOkCount === readinessItems.length ? "success" : "warning"}
-          />
+          {#if dashboardSurfaceState === "loading"}
+            <section class="chart-loading ehq-edge-surface" aria-label="Release readiness">
+              <Loader label="Loading readiness" detail="Reading Office and Distribution dashboards." size="medium" />
+            </section>
+          {:else}
+            <DonutChart
+              title="Release readiness"
+              value={readinessPercent}
+              label={`${String(readinessOkCount)}/${String(readinessItems.length)} readiness checks ok.`}
+              tone={dashboardSurfaceState === "error" ? "error" : readinessOkCount === readinessItems.length ? "success" : "warning"}
+            />
+          {/if}
 
           <section class="readiness-panel ehq-edge-surface" aria-label="Readiness checks">
             <header>
@@ -981,7 +1056,7 @@
             </div>
           </section>
 
-          <Table title="Action list" columns={actionColumns} rows={actionRows} state="default" actionLabel="" />
+          <Table title="Action list" columns={actionColumns} rows={actionRows} state={actionTableState} actionLabel="" />
         </section>
       {:else if activePageId === "users"}
         <Toolbar label="Permission controls" filters={usersToolbar} actionLabel="" loading={false} onFilterSelect={selectUsersToolbarFilter} />
@@ -996,19 +1071,40 @@
           <section class="form-panel ehq-edge-surface" aria-label="Invite user">
             <h2>Access editor</h2>
             <p>Persisted permission changes belong behind the API layer.</p>
-            <label class="field" for="invite-email">
-              <span>Email</span>
-              <input id="invite-email" value={inviteEmail} placeholder="user@eeee.mu" type="email" oninput={updateInviteEmail} />
-            </label>
-            <label class="field" for="invite-role">
-              <span>Role</span>
-              <select value={selectedRole} onchange={updateSelectedRole}>
-                {#each roleOptions as option (option.value)}
-                  <option value={option.value}>{option.label}</option>
-                {/each}
-              </select>
-            </label>
-            <button class="command-action" type="button" disabled={commandBusy || !writesEnabled} title={writeGateMessage} onclick={requestAccessReview}>Prepare review</button>
+            <Input
+              id="invite-email"
+              label="Email"
+              value={inviteEmail}
+              placeholder="user@eeee.mu"
+              type="email"
+              state={commandBusy ? "disabled" : "default"}
+              message=""
+              oninput={updateInviteEmail}
+            />
+            <Select
+              id="invite-role"
+              label="Role"
+              value={selectedRole}
+              options={roleOptions}
+              state={commandBusy ? "disabled" : "default"}
+              message=""
+              onchange={updateSelectedRole}
+            />
+            <div class="form-action">
+              <Button
+                label="Prepare review"
+                variant="primary"
+                size="small"
+                type="button"
+                disabled={!writesEnabled || inviteEmail.trim().length === 0}
+                loading={commandBusy}
+                locked={false}
+                focus={false}
+                ariaLabel="Prepare review"
+                title={writesEnabled ? (inviteEmail.trim().length === 0 ? "Enter an email to review" : "Persist permission review") : writeGateMessage}
+                onclick={requestAccessReview}
+              />
+            </div>
           </section>
 
           <section class="locked-card-reference ehq-edge-surface" aria-label="Locked card rule">
@@ -1081,18 +1177,38 @@
           <section class="form-panel ehq-edge-surface" aria-label="Workspace settings">
             <h2>Workspace settings</h2>
             <p>Saved through the Command Center API. Deployments remain manual.</p>
-            <label class="field" for="workspace-name">
-              <span>Workspace name</span>
-              <input id="workspace-name" value={workspaceName} placeholder="Workspace" type="text" oninput={updateWorkspaceName} />
-            </label>
-            <button class="command-action" type="button" disabled={commandBusy || !writesEnabled} title={writeGateMessage} onclick={saveSettingsReview}>Save review</button>
+            <Input
+              id="workspace-name"
+              label="Workspace name"
+              value={workspaceName}
+              placeholder="Workspace"
+              type="text"
+              state={commandBusy ? "disabled" : "default"}
+              message=""
+              oninput={updateWorkspaceName}
+            />
+            <div class="form-action">
+              <Button
+                label="Save review"
+                variant="primary"
+                size="small"
+                type="button"
+                disabled={!writesEnabled || workspaceName.trim().length === 0}
+                loading={commandBusy}
+                locked={false}
+                focus={false}
+                ariaLabel="Save review"
+                title={writesEnabled ? (workspaceName.trim().length === 0 ? "Enter a workspace name" : "Persist workspace settings review") : writeGateMessage}
+                onclick={saveSettingsReview}
+              />
+            </div>
           </section>
 
           <Panel
             title="Supervision mode"
             subtitle="Admin workspace only"
             body="The Command Center menu is local to this app and does not appear inside Office or Distribution."
-            state={writesEnabled ? "default" : "locked"}
+            state={writesEnabled ? (commandBusy ? "loading" : "default") : "locked"}
             primaryAction="Verified"
             secondaryAction=""
             onPrimaryAction={saveSettingsReview}
@@ -1262,53 +1378,19 @@
     font-size: var(--ehq-type-label-size);
   }
 
-  .field {
+  .form-action {
+    display: flex;
+    justify-content: flex-start;
+  }
+
+  .chart-loading {
+    min-height: 190px;
+    padding: var(--ehq-space-4);
+    border: 0;
+    border-radius: var(--ehq-radius-sm);
+    background: transparent;
     display: grid;
-    gap: var(--ehq-space-1);
-  }
-
-  .field span {
-    color: var(--ehq-text-muted);
-    font-family: var(--ehq-mono);
-    font-size: var(--ehq-type-label-size);
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-  }
-
-  .field input,
-  .field select {
-    min-height: 38px;
-    width: 100%;
-    padding: 0 var(--ehq-space-3);
-    border: 1px solid var(--ehq-border);
-    border-radius: var(--ehq-radius-sm);
-    background: var(--ehq-bg-main);
-    color: var(--ehq-text);
-    font-family: var(--ehq-font);
-    font-size: var(--ehq-type-control-size);
-    line-height: var(--ehq-type-ui-line);
-    outline: 0;
-  }
-
-  .field input:focus,
-  .field select:focus {
-    border-color: var(--ehq-yellow-border);
-    box-shadow: 0 0 0 3px var(--ehq-yellow-muted);
-  }
-
-  .command-action {
-    min-height: 30px;
-    width: fit-content;
-    padding: 0 var(--ehq-space-2);
-    border: 1px solid var(--ehq-yellow);
-    border-radius: var(--ehq-radius-sm);
-    background: var(--ehq-yellow);
-    color: var(--ehq-text-on-yellow);
-    font-family: var(--ehq-font);
-    font-size: var(--ehq-type-action-size);
-    font-weight: var(--ehq-type-heading-weight);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    place-items: center;
   }
 
   .workspace-mini-grid {
@@ -1334,7 +1416,7 @@
 
   .workspace-mini-grid span {
     color: var(--ehq-yellow);
-    font-size: 20px;
+    font-size: var(--ehq-type-section-title-size);
     font-weight: var(--ehq-type-display-weight);
     line-height: 1;
   }
