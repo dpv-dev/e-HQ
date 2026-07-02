@@ -1,8 +1,11 @@
 <script lang="ts">
   import type { AuthSession } from "@ehq/auth";
+  import { Button } from "@ehq/ui";
   import sceneCommandCenter from "../../../../packages/ui/assets/backgrounds/scene-command-center.svg?url";
   import type { AppRoute } from "./routes.js";
   import { sendSupabasePasswordReset, signInWithSupabasePassword } from "./supabase.js";
+
+  type StatusTone = "info" | "error";
 
   interface Props {
     readonly onLogin: (session: AuthSession) => void;
@@ -11,15 +14,22 @@
 
   const { onLogin, onNavigate }: Props = $props();
 
-  let email = $state("david@eeee.mu");
+  let email = $state("");
   let password = $state("");
   let rememberSession = $state(true);
   let statusMessage = $state("");
+  let statusTone = $state<StatusTone>("info");
+  let emailInvalid = $state(false);
+  let passwordInvalid = $state(false);
   let signingIn = $state(false);
   let resettingPassword = $state(false);
 
   const signIn = async (): Promise<void> => {
-    if (email.trim().length === 0 || password.trim().length === 0) {
+    emailInvalid = email.trim().length === 0;
+    passwordInvalid = password.trim().length === 0;
+
+    if (emailInvalid || passwordInvalid) {
+      statusTone = "error";
       statusMessage = "Enter your email and password to continue.";
       return;
     }
@@ -32,6 +42,7 @@
         email: email.trim(),
         password
       });
+      statusTone = "info";
       statusMessage = rememberSession
         ? "Session ready. Opening your available workspaces."
         : "Sign-in validated for this session.";
@@ -40,6 +51,7 @@
       // well would push a duplicate history entry.
       onLogin(session);
     } catch (error: unknown) {
+      statusTone = "error";
       statusMessage = error instanceof Error ? error.message : "Supabase sign-in failed.";
     } finally {
       signingIn = false;
@@ -55,6 +67,8 @@
     const trimmedEmail = email.trim();
 
     if (trimmedEmail.length === 0) {
+      emailInvalid = true;
+      statusTone = "error";
       statusMessage = "Enter your email above to receive a reset link.";
       return;
     }
@@ -64,8 +78,10 @@
 
     try {
       await sendSupabasePasswordReset(trimmedEmail);
+      statusTone = "info";
       statusMessage = `Password reset email sent to ${trimmedEmail}.`;
     } catch (error: unknown) {
+      statusTone = "error";
       statusMessage = error instanceof Error ? error.message : "Supabase password reset failed.";
     } finally {
       resettingPassword = false;
@@ -102,24 +118,32 @@
       <h1 id="login-title">welcome back</h1>
       <p class="lead">Sign in to reach your workspaces. Access follows your permissions.</p>
 
-      <label class="field">
+      <label class="field" class:invalid={emailInvalid}>
         <span>email</span>
         <input
           bind:value={email}
+          aria-invalid={emailInvalid}
           autocomplete="username"
           inputmode="email"
           placeholder="you@eeee.mu"
           type="email"
+          oninput={() => {
+            emailInvalid = false;
+          }}
         />
       </label>
 
-      <label class="field">
+      <label class="field" class:invalid={passwordInvalid}>
         <span>password</span>
         <input
           bind:value={password}
+          aria-invalid={passwordInvalid}
           autocomplete="current-password"
           placeholder="••••••••••"
           type="password"
+          oninput={() => {
+            passwordInvalid = false;
+          }}
         />
       </label>
 
@@ -128,23 +152,37 @@
           <input bind:checked={rememberSession} type="checkbox" />
           remember me
         </label>
-        <button
-          class="plain-link"
+        <Button
+          label="forgot password?"
+          variant="secondary"
+          size="small"
           type="button"
-          disabled={resettingPassword}
+          disabled={false}
+          loading={resettingPassword}
+          locked={false}
+          focus={false}
+          ariaLabel="Send a password reset link"
           title={resettingPassword ? "Password reset email is being sent." : "Send a password reset link to the email above."}
           onclick={forgotPassword}
-        >
-          {resettingPassword ? "sending reset link…" : "forgot password?"}
-        </button>
+        />
       </div>
 
-      <button class="submit-button" type="submit" disabled={signingIn}>
-        {signingIn ? "signing in" : "sign in"} <span aria-hidden="true">→</span>
-      </button>
+      <div class="submit-row">
+        <Button
+          label={signingIn ? "signing in" : "sign in →"}
+          variant="primary"
+          size="medium"
+          type="submit"
+          disabled={false}
+          loading={signingIn}
+          locked={false}
+          focus={false}
+          ariaLabel="Sign in"
+        />
+      </div>
 
       {#if statusMessage.length > 0}
-        <p class="status" role="status">{statusMessage}</p>
+        <p class="status" class:error={statusTone === "error"} role="status">{statusMessage}</p>
       {/if}
 
       <p class="foot">© 2026 ë · wip v0001 · port louis, mu</p>
@@ -196,7 +234,7 @@
 
   .brand span {
     color: var(--ehq-yellow);
-    font-size: 26px;
+    font-size: var(--ehq-h2);
     font-weight: var(--ehq-type-display-weight);
     line-height: 1;
   }
@@ -207,8 +245,6 @@
   .eyebrow,
   .field span,
   .form-row,
-  .plain-link,
-  .submit-button,
   .foot,
   .status {
     font-family: var(--ehq-mono);
@@ -342,6 +378,11 @@
     color: var(--ehq-text-muted);
   }
 
+  /* Field-level validation state, mirrored on aria-invalid for assistive tech. */
+  .field.invalid input {
+    border-color: var(--ehq-error);
+  }
+
   :global(.login-shell input:-webkit-autofill),
   :global(.login-shell input:-webkit-autofill:hover),
   :global(.login-shell input:-webkit-autofill:focus) {
@@ -371,45 +412,15 @@
     accent-color: var(--ehq-yellow);
   }
 
-  .plain-link {
-    padding: 0;
-    border: 0;
-    background: transparent;
-    color: var(--ehq-text-muted);
-    font-size: var(--ehq-type-caption-size);
+  /* Stretches the design-system Button into the full-width sign-in CTA. */
+  .submit-row {
+    margin-top: var(--ehq-space-4);
+    display: grid;
   }
 
-  .plain-link:hover {
-    color: var(--ehq-yellow);
-  }
-
-  .plain-link:disabled {
-    color: var(--ehq-text-disabled);
-    cursor: not-allowed;
-  }
-
-  .submit-button {
+  .submit-row :global(.ehq-button) {
     width: 100%;
     min-height: 46px;
-    border-radius: var(--ehq-radius-sm);
-    font-family: var(--ehq-font);
-    font-size: var(--ehq-type-action-size);
-    font-weight: var(--ehq-type-heading-weight);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    margin-top: var(--ehq-space-4);
-    border: 1px solid var(--ehq-yellow);
-    background: var(--ehq-yellow);
-    color: var(--ehq-text-on-yellow);
-  }
-
-  .submit-button span {
-    display: inline-block;
-    transition: transform var(--ehq-transition-normal) var(--ehq-ease);
-  }
-
-  .submit-button:hover span {
-    transform: translateX(var(--ehq-space-1));
   }
 
   .status,
@@ -422,6 +433,10 @@
 
   .status {
     color: var(--ehq-yellow);
+  }
+
+  .status.error {
+    color: var(--ehq-error);
   }
 
   @media (max-width: 860px) {

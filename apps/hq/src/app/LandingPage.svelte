@@ -13,6 +13,7 @@
     type AuthSession,
     type WorkspaceAppId
   } from "@ehq/auth";
+  import { Button, Loader } from "@ehq/ui";
   import commandCenterScene from "../../../../packages/ui/assets/backgrounds/scene-command-center.svg?url";
   import commandCenterPhoto from "../../../../packages/ui/assets/backgrounds/hq-card-command-center.jpg?url";
   import distributionPhoto from "../../../../packages/ui/assets/backgrounds/hq-card-distribution.jpg?url";
@@ -48,7 +49,7 @@
     createIdleState<CommandCenterNotificationsResponse>()
   );
   let loginTarget = $state<WorkspaceCard | null>(null);
-  let loginEmail = $state("david@eeee.mu");
+  let loginEmail = $state("");
   let loginPassword = $state("");
   let rememberSession = $state(true);
   let loginMessage = $state("");
@@ -130,16 +131,6 @@
     loginMessage = "";
   };
 
-  const resolveEmail = (): string => {
-    const trimmedEmail = loginEmail.trim();
-
-    if (trimmedEmail.length === 0) {
-      return "david@eeee.mu";
-    }
-
-    return trimmedEmail;
-  };
-
   const applyLogin = async (email: string): Promise<void> => {
     if (email.length === 0 || loginPassword.trim().length === 0) {
       loginMessage = "Enter your email and password to continue.";
@@ -167,7 +158,7 @@
 
   const submitLogin = (event: SubmitEvent): void => {
     event.preventDefault();
-    void applyLogin(resolveEmail());
+    void applyLogin(loginEmail.trim());
   };
 
   const forgotPassword = async (): Promise<void> => {
@@ -289,9 +280,21 @@
               <p>notifications</p>
               <strong>{isLoggedIn ? "Operations center" : "Sign-in required"}</strong>
             </div>
-            <button class="panel-link" type="button" onclick={loadNotifications} disabled={!isLoggedIn || notificationsState.status === "loading"}>
-              refresh
-            </button>
+            <Button
+              label="refresh"
+              variant="secondary"
+              size="small"
+              type="button"
+              disabled={!isLoggedIn}
+              loading={notificationsState.status === "loading"}
+              locked={false}
+              focus={false}
+              ariaLabel="Refresh notifications"
+              title={isLoggedIn
+                ? "Reload Command Center notifications."
+                : "Sign in to load live Command Center alerts."}
+              onclick={loadNotifications}
+            />
           </header>
 
           {#if !isLoggedIn}
@@ -300,10 +303,7 @@
               <span>Sign in to load live Command Center alerts.</span>
             </article>
           {:else if notificationsState.status === "loading"}
-            <article class="notification-item muted">
-              <strong>Loading</strong>
-              <span>Reading API notifications.</span>
-            </article>
+            <Loader label="Loading" detail="Reading API notifications." size="small" />
           {:else if notificationsState.status === "error"}
             <article class="notification-item error">
               <strong>Notifications unavailable</strong>
@@ -322,9 +322,18 @@
                   <span>{notification.detail}</span>
                 </div>
                 {#if notification.actionHref !== null && notification.actionLabel !== null}
-                  <button class="panel-link" type="button" onclick={() => openNotificationAction(notification)}>
-                    {notification.actionLabel}
-                  </button>
+                  <Button
+                    label={notification.actionLabel}
+                    variant="secondary"
+                    size="small"
+                    type="button"
+                    disabled={false}
+                    loading={false}
+                    locked={false}
+                    focus={false}
+                    ariaLabel={notification.actionLabel}
+                    onclick={() => openNotificationAction(notification)}
+                  />
                 {/if}
               </article>
             {/each}
@@ -339,7 +348,18 @@
             <strong>{session.displayName}</strong>
             <span>{session.roleLabel}</span>
           </header>
-          <button class="signout-button" type="button" onclick={signOut}>Sign out</button>
+          <Button
+            label="Sign out"
+            variant="secondary"
+            size="small"
+            type="button"
+            disabled={false}
+            loading={false}
+            locked={false}
+            focus={false}
+            ariaLabel="Sign out"
+            onclick={signOut}
+          />
         </section>
       {/if}
     </div>
@@ -382,15 +402,18 @@
           <p class="card-desc">{card.description}</p>
           <div class="workspace-actions">
             {#if locked}
-              <button
-                class="locked-button"
+              <Button
+                label="access denied"
+                variant="secondary"
+                size="medium"
                 type="button"
-                disabled
+                disabled={true}
+                loading={false}
+                locked={true}
+                focus={false}
+                ariaLabel="Access denied"
                 title="Access is managed by your administrator — Command Center → Users & permissions."
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
-                access denied
-              </button>
+              />
               <p class="locked-hint">Access is managed by your administrator — Command Center → Users & permissions.</p>
             {:else}
               <button class="enter-button" type="button" onclick={() => openWorkspace(card)}>
@@ -444,20 +467,34 @@
           <input bind:checked={rememberSession} type="checkbox" />
           remember me
         </label>
-        <button
-          class="plain-link"
+        <Button
+          label="forgot password?"
+          variant="secondary"
+          size="small"
           type="button"
-          disabled={resettingPassword}
+          disabled={false}
+          loading={resettingPassword}
+          locked={false}
+          focus={false}
+          ariaLabel="Send a password reset link"
           title={resettingPassword ? "Password reset email is being sent." : "Send a password reset link to the email above."}
           onclick={forgotPassword}
-        >
-          {resettingPassword ? "sending reset link…" : "forgot password?"}
-        </button>
+        />
       </div>
 
-      <button class="submit-button" type="submit" disabled={signingIn}>
-        {signingIn ? "signing in" : "sign in"} <span aria-hidden="true">→</span>
-      </button>
+      <div class="submit-row">
+        <Button
+          label={signingIn ? "signing in" : "sign in →"}
+          variant="primary"
+          size="medium"
+          type="submit"
+          disabled={false}
+          loading={signingIn}
+          locked={false}
+          focus={false}
+          ariaLabel="Sign in"
+        />
+      </div>
 
       {#if loginMessage.length > 0}
         <p class="login-message" role="status">{loginMessage}</p>
@@ -517,7 +554,7 @@
 
   .brand-e {
     color: var(--ehq-yellow);
-    font-size: 26px;
+    font-size: var(--ehq-h2);
     font-weight: var(--ehq-type-display-weight);
     line-height: 1;
   }
@@ -525,20 +562,15 @@
   .eyebrow,
   .locked-hint,
   footer,
-  .locked-button,
   .enter-button,
   .field span,
   .form-row,
-  .plain-link,
-  .submit-button,
   .login-message,
   .close-button,
   .notification-panel p,
   .notification-panel span,
-  .panel-link,
   .session-panel p,
-  .session-panel span,
-  .signout-button {
+  .session-panel span {
     font-family: var(--ehq-mono);
   }
 
@@ -570,7 +602,7 @@
     right: 1px;
     min-width: 15px;
     height: 15px;
-    padding: 0 3px;
+    padding: 0 var(--ehq-space-1);
     border-radius: var(--ehq-radius-pill);
     background: var(--ehq-yellow);
     color: var(--ehq-text-on-yellow);
@@ -578,7 +610,7 @@
     display: grid;
     place-items: center;
     font-family: var(--ehq-mono);
-    font-size: 9px;
+    font-size: var(--ehq-type-label-size);
     font-weight: 600;
   }
 
@@ -728,32 +760,6 @@
     border-color: var(--ehq-border-soft);
   }
 
-  .panel-link,
-  .signout-button {
-    flex: 0 0 auto;
-    min-height: 30px;
-    padding: 0 var(--ehq-space-2);
-    border: 1px solid var(--ehq-border);
-    border-radius: var(--ehq-radius-sm);
-    background: transparent;
-    color: var(--ehq-text);
-    font-size: var(--ehq-type-label-size);
-    font-weight: var(--ehq-type-heading-weight);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  .panel-link:hover,
-  .signout-button:hover {
-    border-color: var(--ehq-yellow-border);
-    color: var(--ehq-yellow);
-  }
-
-  .panel-link:disabled {
-    color: var(--ehq-text-disabled);
-    cursor: not-allowed;
-  }
-
   .hero {
     flex: 1 1 46%;
     min-height: 0;
@@ -863,13 +869,13 @@
     border-color: var(--ehq-error);
   }
 
-  /* Per-workspace accent on the landing (matches the visual identity). */
+  /* Per-workspace accent on the landing, sourced from the canonical workspace tokens. */
   .accent-office {
-    --card-accent: #E6E8EC;
+    --card-accent: var(--ehq-workspace-office);
   }
 
   .accent-distribution {
-    --card-accent: #FF7A1A;
+    --card-accent: var(--ehq-workspace-distribution);
   }
 
   .photo {
@@ -966,8 +972,7 @@
     gap: var(--ehq-space-2);
   }
 
-  .enter-button,
-  .locked-button {
+  .enter-button {
     width: 100%;
     min-height: 40px;
     padding: 0 var(--ehq-space-3);
@@ -981,6 +986,12 @@
     font-weight: var(--ehq-type-heading-weight);
     letter-spacing: 0.04em;
     text-transform: none;
+  }
+
+  /* Stretches the design-system locked Button into the full-width card action. */
+  .workspace-actions :global(.ehq-button) {
+    width: 100%;
+    min-height: 40px;
   }
 
   .enter-button {
@@ -1002,14 +1013,6 @@
     transform: translateX(var(--ehq-space-1));
   }
 
-  .locked-button {
-    border: 1px solid var(--ehq-error);
-    background: var(--ehq-error-bg);
-    color: var(--ehq-error);
-    cursor: not-allowed;
-  }
-
-  .locked-button svg,
   .cross svg {
     width: 14px;
     height: 14px;
@@ -1090,7 +1093,7 @@
 
   .login-window h2 {
     margin-top: var(--ehq-space-3);
-    font-size: 34px;
+    font-size: var(--ehq-h1);
     line-height: 1;
     letter-spacing: 0;
     text-transform: lowercase;
@@ -1162,36 +1165,15 @@
     accent-color: var(--ehq-yellow);
   }
 
-  .plain-link {
-    padding: 0;
-    border: 0;
-    background: transparent;
-    color: var(--ehq-text-muted);
-    font-size: var(--ehq-type-caption-size);
+  /* Stretches the design-system Button into the full-width sign-in CTA. */
+  .submit-row {
+    margin-top: var(--ehq-space-4);
+    display: grid;
   }
 
-  .plain-link:hover {
-    color: var(--ehq-yellow);
-  }
-
-  .plain-link:disabled {
-    color: var(--ehq-text-disabled);
-    cursor: not-allowed;
-  }
-
-  .submit-button {
+  .submit-row :global(.ehq-button) {
     width: 100%;
     min-height: 44px;
-    border-radius: var(--ehq-radius-sm);
-    font-family: var(--ehq-font);
-    font-size: var(--ehq-type-action-size);
-    font-weight: var(--ehq-type-heading-weight);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    margin-top: var(--ehq-space-4);
-    border: 1px solid var(--ehq-yellow);
-    background: var(--ehq-yellow);
-    color: var(--ehq-text-on-yellow);
   }
 
   .login-message {
@@ -1288,7 +1270,7 @@
     }
 
     .enter-button,
-    .locked-button {
+    .workspace-actions :global(.ehq-button) {
       min-height: 36px;
       padding: 0 var(--ehq-space-3);
       font-size: var(--ehq-type-action-size);
