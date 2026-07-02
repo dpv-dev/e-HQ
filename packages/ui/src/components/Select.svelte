@@ -8,14 +8,29 @@
     readonly options: readonly SelectOption[];
     readonly state: FieldState;
     readonly message: string;
+    readonly onchange?: ((value: string) => void) | null;
   }
 
   const props: Props = $props();
+
+  function handleChange(event: Event & { readonly currentTarget: EventTarget & HTMLSelectElement }): void {
+    if (props.onchange === undefined || props.onchange === null) {
+      return;
+    }
+
+    props.onchange(event.currentTarget.value);
+  }
 </script>
 
 <label class={`ehq-select-field ${props.state}`} for={props.id}>
   <span>{props.label}</span>
-  <select id={props.id} value={props.value} disabled={props.state === "disabled"} aria-invalid={props.state === "error"}>
+  <select
+    id={props.id}
+    value={props.value}
+    disabled={props.state === "disabled"}
+    aria-invalid={props.state === "error"}
+    onchange={handleChange}
+  >
     {#each props.options as option (option.value)}
       <option value={option.value}>{option.label}</option>
     {/each}

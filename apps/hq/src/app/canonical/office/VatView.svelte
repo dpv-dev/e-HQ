@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import {
+    EmptyState,
     KPI,
     Loader,
     Table,
@@ -38,7 +39,7 @@
   let vatState = $state<ApiRequestState<OfficeVatReport>>(createIdleState<OfficeVatReport>());
 
   const vatRows = $derived(readVatRows(vatState));
-  const vatKpis = $derived(createVatKpis(vatState));
+  const vatKpis = $derived(createVatKpis(vatState, props.period));
   const vatTableRows = $derived(createVatTableRows(vatRows));
   const hasVatSource = $derived(vatState.status === "success" && vatState.data.hasVatSource);
 
@@ -65,12 +66,12 @@
     return [];
   }
 
-  function createVatKpis(state: ApiRequestState<OfficeVatReport>): readonly VatKpi[] {
+  function createVatKpis(state: ApiRequestState<OfficeVatReport>, requestedPeriod: string): readonly VatKpi[] {
     if (state.status !== "success") {
       return [
         { label: "Output VAT", value: "—", detail: stateLabel(state), tone: "muted", accent: true },
-        { label: "Input VAT", value: "—", detail: "period", tone: "muted", accent: false },
-        { label: "Net VAT", value: "—", detail: "period", tone: "muted", accent: false }
+        { label: "Input VAT", value: "—", detail: requestedPeriod, tone: "muted", accent: false },
+        { label: "Net VAT", value: "—", detail: requestedPeriod, tone: "muted", accent: false }
       ];
     }
 
@@ -167,7 +168,14 @@
       <span class="ehq-type-body">{getErrorMessage(vatState.error)}</span>
     </div>
   {:else if !hasVatSource}
-    <Table title="VAT by rate" columns={vatColumns} rows={[]} state="empty" actionLabel="" />
+    <EmptyState
+      title="No VAT source configured"
+      detail="This workspace has no VAT source yet. Configure one in the eof admin backend to populate the report."
+      state="empty"
+      actionLabel=""
+      actionHref={null}
+      disabledReason=""
+    />
   {:else}
     <Table title="VAT by rate" columns={vatColumns} rows={vatTableRows} state={vatTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
   {/if}
@@ -176,11 +184,13 @@
 <script module lang="ts">
   import type { TableColumn } from "@ehq/ui";
 
+  // sortable stays false everywhere: the shared Table renders the sort glyph but
+  // implements no sorting, so advertising it would be a dead affordance.
   const vatColumns: readonly TableColumn[] = [
-    { label: "Line", align: "left", sortable: true },
-    { label: "Base", align: "right", sortable: true },
-    { label: "Rate", align: "left", sortable: true },
-    { label: "VAT", align: "right", sortable: true }
+    { label: "Line", align: "left", sortable: false },
+    { label: "Base", align: "right", sortable: false },
+    { label: "Rate", align: "left", sortable: false },
+    { label: "VAT", align: "right", sortable: false }
   ];
 </script>
 

@@ -11,6 +11,7 @@
     readonly locked: boolean;
     readonly focus: boolean;
     readonly ariaLabel: string | null;
+    readonly title?: string | null;
     readonly onclick?: (() => void | Promise<void>) | null;
   }
 
@@ -27,6 +28,7 @@
   type={props.type}
   disabled={isDisabled}
   aria-label={accessibleLabel}
+  title={props.title ?? undefined}
   onclick={props.onclick ?? undefined}
 >
   {#if props.loading}

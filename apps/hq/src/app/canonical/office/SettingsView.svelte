@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import {
+    Card,
     Loader,
     Table,
     type TablePagination,
@@ -17,7 +18,7 @@
     type PageResult
   } from "@ehq/api-client";
   import { formatDateOnly } from "../../date-format.js";
-  import { formatMoneyValue } from "../../money-format.js";
+  import { apiMoneyToMicroUnits, formatMoneyValue } from "../../money-format.js";
   import { createTablePagination, loadPageResult, readPageItems, TABLE_PAGE_SIZE, type PageLoadMode } from "../../table-pagination.js";
 
   interface Props {
@@ -86,28 +87,62 @@
     });
   }
 
+  interface CurrencyAggregate {
+    readonly currency: string;
+    readonly accountCount: number;
+    // Sum of the converted MUR balances across every account of the currency;
+    // null when no account carries a converted balance (reference currency).
+    readonly convertedSumMicro: bigint | null;
+    readonly latestAsOf: string | null;
+  }
+
+  // The "Converted balance (MUR)" column is the consolidated balance of every
+  // account in the currency, not just the first one encountered.
   function createCurrencyTableRows(rows: readonly OfficeBankAccountSummary[]): readonly TableRow[] {
-    const seen = new Set<string>();
-    const result: TableRow[] = [];
+    const aggregates = new Map<string, CurrencyAggregate>();
 
     for (const account of rows) {
-      if (seen.has(account.currency)) {
-        continue;
-      }
+      const previous = aggregates.get(account.currency) ?? {
+        currency: account.currency,
+        accountCount: 0,
+        convertedSumMicro: null,
+        latestAsOf: null
+      };
+      const accountConverted = account.currentBalanceMurMicro === null ? null : apiMoneyToMicroUnits(account.currentBalanceMurMicro);
+      const convertedSumMicro = accountConverted === null
+        ? previous.convertedSumMicro
+        : (previous.convertedSumMicro ?? 0n) + accountConverted;
+      const latestAsOf = account.balanceAsOf === null
+        ? previous.latestAsOf
+        : previous.latestAsOf === null || account.balanceAsOf > previous.latestAsOf
+          ? account.balanceAsOf
+          : previous.latestAsOf;
 
-      seen.add(account.currency);
-      result.push({
-        id: account.currency,
-        cells: [
-          { kind: "badge", value: account.currency, tone: "info" },
-          { kind: "text", value: account.currentBalanceMurMicro === null ? "Reference currency" : "Converted to MUR", strong: false },
-          { kind: "money", value: account.currentBalanceMurMicro === null ? "—" : formatMoneyValue(account.currentBalanceMurMicro, "MUR"), tone: "muted" },
-          { kind: "text", value: formatDateOnly(account.balanceAsOf), strong: false }
-        ]
+      aggregates.set(account.currency, {
+        currency: account.currency,
+        accountCount: previous.accountCount + 1,
+        convertedSumMicro,
+        latestAsOf
       });
     }
 
-    return result;
+    return [...aggregates.values()].map((aggregate: CurrencyAggregate): TableRow => ({
+      id: aggregate.currency,
+      cells: [
+        { kind: "badge", value: aggregate.currency, tone: "info" },
+        {
+          kind: "text",
+          value: `${aggregate.convertedSumMicro === null ? "Reference currency" : "Converted to MUR"} · ${String(aggregate.accountCount)} ${aggregate.accountCount === 1 ? "account" : "accounts"}`,
+          strong: false
+        },
+        {
+          kind: "money",
+          value: aggregate.convertedSumMicro === null ? "—" : formatMoneyValue(aggregate.convertedSumMicro.toString(), "MUR"),
+          tone: "muted"
+        },
+        { kind: "text", value: formatDateOnly(aggregate.latestAsOf), strong: false }
+      ]
+    }));
   }
 
   function getErrorMessage(error: unknown): string {
@@ -121,21 +156,36 @@
 
 <section class="settings-view">
   <section class="config-grid" aria-label="Office configuration">
-    <section class="config-panel ehq-edge-surface">
-      <p class="ehq-type-label-mono">Reference</p>
-      <h2 class="ehq-type-heading">Reference currency</h2>
-      <span class="ehq-type-body">MUR is the Office reference currency. Foreign-currency accounts carry a converted MUR balance derived from the data layer.</span>
-    </section>
-    <section class="config-panel ehq-edge-surface">
-      <p class="ehq-type-label-mono">Period</p>
-      <h2 class="ehq-type-heading">{props.period}</h2>
-      <span class="ehq-type-body">Active accounting period used across Office reads.</span>
-    </section>
-    <section class="config-panel ehq-edge-surface">
-      <p class="ehq-type-label-mono">Maintenance</p>
-      <h2 class="ehq-type-heading">Read-only</h2>
-      <span class="ehq-type-body">This console exposes Office in read-only mode. Maintenance and configuration changes are made in the eof admin backend; no editable settings are surfaced here.</span>
-    </section>
+    <Card
+      eyebrow="Reference"
+      title="Reference currency"
+      subtitle="MUR is the Office reference currency. Foreign-currency accounts carry a converted MUR balance derived from the data layer."
+      state="default"
+      accent={false}
+      badgeLabel=""
+      badgeTone="muted"
+      actionLabel=""
+    />
+    <Card
+      eyebrow="Period"
+      title={props.period}
+      subtitle="Active accounting period used across Office reads."
+      state="default"
+      accent={false}
+      badgeLabel=""
+      badgeTone="muted"
+      actionLabel=""
+    />
+    <Card
+      eyebrow="Maintenance"
+      title="Read-only"
+      subtitle="This console exposes Office in read-only mode. Maintenance and configuration changes are made in the eof admin backend; no editable settings are surfaced here."
+      state="default"
+      accent={false}
+      badgeLabel=""
+      badgeTone="muted"
+      actionLabel=""
+    />
   </section>
 
   {#if accountsState.status === "loading"}
@@ -153,11 +203,13 @@
 <script module lang="ts">
   import type { TableColumn } from "@ehq/ui";
 
+  // sortable stays false everywhere: the shared Table renders the sort glyph but
+  // implements no sorting, so advertising it would be a dead affordance.
   const currencyColumns: readonly TableColumn[] = [
-    { label: "Currency", align: "left", sortable: true },
+    { label: "Currency", align: "left", sortable: false },
     { label: "Role", align: "left", sortable: false },
-    { label: "Converted balance (MUR)", align: "right", sortable: true },
-    { label: "As of", align: "left", sortable: true }
+    { label: "Converted balance (MUR)", align: "right", sortable: false },
+    { label: "As of", align: "left", sortable: false }
   ];
 </script>
 
@@ -173,33 +225,6 @@
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: var(--ehq-space-3);
-  }
-
-  .config-panel {
-    min-width: 0;
-    padding: var(--ehq-space-4);
-    border-radius: var(--ehq-radius-sm);
-    display: grid;
-    gap: var(--ehq-space-2);
-  }
-
-  .config-panel p {
-    margin: 0;
-    color: var(--ehq-text-muted);
-    font-size: var(--ehq-type-label-size);
-    letter-spacing: 0.2em;
-    text-transform: uppercase;
-  }
-
-  .config-panel h2 {
-    margin: 0;
-    font-size: var(--ehq-type-section-title-size);
-  }
-
-  .config-panel span {
-    color: var(--ehq-text-soft);
-    font-size: var(--ehq-type-ui-size);
-    line-height: var(--ehq-type-ui-line);
   }
 
   .state-copy {

@@ -3,11 +3,15 @@
   import type { AuthSession } from "@ehq/auth";
   import {
     BarsChart,
+    Button,
     DivergeChart,
+    Drawer,
+    Input,
     KPI,
     Loader,
     PageHeader,
     SectionTemplate,
+    Select,
     Table,
     WorkspaceShell,
     type ChartPoint,
@@ -300,12 +304,13 @@
     { label: "Reconciled", value: "reconciled" },
     { label: "Voided", value: "voided" }
   ];
+  // "rejected" is intentionally absent: the eof/v1 reconciliations list query only
+  // accepts unmatched/suggested/matched, so offering it would be a silent no-op filter.
   const reconciliationStatusOptions: readonly SelectOption[] = [
     { label: "All", value: allValue },
     { label: "Unmatched", value: "unmatched" },
     { label: "Suggested", value: "suggested" },
-    { label: "Matched", value: "matched" },
-    { label: "Rejected", value: "rejected" }
+    { label: "Matched", value: "matched" }
   ];
   const importSourceOptions: readonly SelectOption[] = [
     { label: "MCB EUR PDF", value: "mcb" },
@@ -317,6 +322,23 @@
   const bankStatementSourceOptions: readonly SelectOption[] = importSourceOptions.filter(
     (option: SelectOption): boolean => option.value === "mcb" || option.value === "sbi"
   );
+  const planKindOptions: readonly SelectOption[] = [
+    { label: "Department", value: "department" },
+    { label: "Division", value: "division" },
+    { label: "Category", value: "category" }
+  ];
+  const planTypeOptions: readonly SelectOption[] = [
+    { label: "Income", value: "income" },
+    { label: "Expense", value: "expense" }
+  ];
+  const createDirectionOptions: readonly SelectOption[] = [
+    { label: "Dépense", value: "expense" },
+    { label: "Revenu", value: "income" }
+  ];
+  const importEditDirectionOptions: readonly SelectOption[] = [
+    { label: "Débit", value: "debit" },
+    { label: "Crédit", value: "credit" }
+  ];
 
   let activePageId = $state<OfficePageId>("dashboard");
   const shellNavGroups = $derived<readonly WorkspaceNavGroup[]>(
@@ -455,6 +477,42 @@
   const editProjectOptions = $derived(
     createProjectOptions(transactionRows).filter((option: SelectOption): boolean => option.value !== allValue)
   );
+  // Placeholder-prefixed option lists for the Select component (it renders options only,
+  // so the "empty" choice has to be part of the list).
+  const optionalCategoryOptions = $derived<readonly SelectOption[]>([
+    { label: "— Aucune —", value: "" },
+    ...editCategoryOptions
+  ]);
+  const optionalProjectOptions = $derived<readonly SelectOption[]>([
+    { label: "— Aucun —", value: "" },
+    ...editProjectOptions
+  ]);
+  const reconcileCategoryOptions = $derived<readonly SelectOption[]>([
+    { label: "Brouillon — à classer", value: "" },
+    ...editCategoryOptions
+  ]);
+  const reconcileProjectOptions = $derived<readonly SelectOption[]>([
+    { label: "Aucun", value: "" },
+    ...editProjectOptions
+  ]);
+  const pendingCategoryOptions = $derived<readonly SelectOption[]>([
+    { label: "Choisir…", value: "" },
+    ...editCategoryOptions
+  ]);
+  const pendingProjectOptions = $derived<readonly SelectOption[]>([
+    { label: "Inchangé", value: "" },
+    ...editProjectOptions
+  ]);
+  const createAccountSelectOptions = $derived<readonly SelectOption[]>(
+    importAccounts.length === 0
+      ? [{ label: "Aucun compte bancaire chargé", value: "" }]
+      : importAccounts.map(bankAccountSelectOption)
+  );
+  const importAccountSelectOptions = $derived<readonly SelectOption[]>(
+    importAccounts.length === 0
+      ? [{ label: "Aucun compte — crée-en un dans l'onglet Bank", value: "" }]
+      : [{ label: "Choisis un compte…", value: "" }, ...importAccounts.map(bankAccountSelectOption)]
+  );
   // Account filter options come from the workspace's real bank accounts (loaded once at
   // mount via loadImportAccounts) so filter values always match server-side account ids.
   const accountOptions = $derived<readonly SelectOption[]>([
@@ -493,6 +551,10 @@
       label: `${transaction.description} · ${formatSignedMicro(transaction.amountMicro)}`
     }))
   );
+  const reconcileMatchSelectOptions = $derived<readonly SelectOption[]>([
+    { label: "Choisir une écriture…", value: "" },
+    ...reconcileTransactionOptions
+  ]);
   const dashboardKpis = $derived(createDashboardKpis(dashboardState));
   const pnlKpis = $derived(createPnlKpis(pnlState));
   const pnlChartPoints = $derived(createPnlChartPoints(pnlRows));
@@ -762,6 +824,13 @@
     } catch {
       importAccounts = [];
     }
+  }
+
+  function bankAccountSelectOption(account: OfficeBankAccountSummary): SelectOption {
+    return {
+      label: `${account.bankName} · ${account.accountLabel} (${account.currency})${account.isActive ? "" : " — inactif"}`,
+      value: account.id
+    };
   }
 
   // Prefer an active account in the detected currency, then any active account, then any account.
@@ -1600,40 +1669,40 @@
     actionReceipt = receipt;
   }
 
-  function updateDepartmentFilter(event: Event): void {
-    departmentFilter = readSelectValue(event);
+  function updateDepartmentFilter(value: string): void {
+    departmentFilter = value;
   }
 
-  function updateDivisionFilter(event: Event): void {
-    divisionFilter = readSelectValue(event);
+  function updateDivisionFilter(value: string): void {
+    divisionFilter = value;
   }
 
-  function updateCategoryFilter(event: Event): void {
-    categoryFilter = readSelectValue(event);
+  function updateCategoryFilter(value: string): void {
+    categoryFilter = value;
   }
 
-  function updateProjectFilter(event: Event): void {
-    projectFilter = readSelectValue(event);
+  function updateProjectFilter(value: string): void {
+    projectFilter = value;
   }
 
-  function updateAccountFilter(event: Event): void {
-    accountFilter = readSelectValue(event);
+  function updateAccountFilter(value: string): void {
+    accountFilter = value;
   }
 
-  function updateTypeFilter(event: Event): void {
-    typeFilter = readSelectValue(event);
+  function updateTypeFilter(value: string): void {
+    typeFilter = value;
   }
 
-  function updateTransactionStatusFilter(event: Event): void {
-    transactionStatusFilter = readSelectValue(event);
+  function updateTransactionStatusFilter(value: string): void {
+    transactionStatusFilter = value;
   }
 
-  function updateReconciliationStatusFilter(event: Event): void {
-    reconciliationStatusFilter = readSelectValue(event);
+  function updateReconciliationStatusFilter(value: string): void {
+    reconciliationStatusFilter = value;
   }
 
-  function updatePeriodScope(event: Event): void {
-    periodScope = readSelectValue(event) as PeriodScope;
+  function updatePeriodScope(value: string): void {
+    periodScope = value as PeriodScope;
     if (periodScope === "custom" && customRange === null) {
       customRange = activeRange;
     }
@@ -1652,8 +1721,8 @@
     void reloadPeriodScopedData();
   }
 
-  function updateImportSource(event: Event): void {
-    const source = officeImportSourceFromValue(readSelectValue(event));
+  function updateImportSource(value: string): void {
+    const source = officeImportSourceFromValue(value);
     const rows = importState.rows;
     const fileName = importState.fileName;
 
@@ -1670,38 +1739,38 @@
     }
   }
 
-  function updatePlanKind(event: Event): void {
+  function updatePlanKind(value: string): void {
     planForm = {
       ...planForm,
-      kind: readSelectValue(event) as "department" | "division" | "category"
+      kind: value as "department" | "division" | "category"
     };
   }
 
-  function updatePlanParent(event: Event): void {
+  function updatePlanParent(value: string): void {
     planForm = {
       ...planForm,
-      parentId: readSelectValue(event)
+      parentId: value
     };
   }
 
-  function updatePlanCode(event: Event): void {
+  function updatePlanCode(value: string): void {
     planForm = {
       ...planForm,
-      code: readInputValue(event)
+      code: value
     };
   }
 
-  function updatePlanLabel(event: Event): void {
+  function updatePlanLabel(value: string): void {
     planForm = {
       ...planForm,
-      label: readInputValue(event)
+      label: value
     };
   }
 
-  function updatePlanType(event: Event): void {
+  function updatePlanType(value: string): void {
     planForm = {
       ...planForm,
-      type: readSelectValue(event) as OfficeCategoryType
+      type: value as OfficeCategoryType
     };
   }
 
@@ -2095,9 +2164,9 @@
           idempotencyKey: createIdempotencyKey("plan-create")
         }
       );
-      const nextNode = createPlanNodeFromForm(`${receipt.id}_${planForm.code}`, parentId, planForm, planNodes);
-      planState = createSuccessState<readonly OfficePlanComptableNode[]>([...planNodes, nextNode]);
       actionReceipt = receipt;
+      // Reload the server truth instead of appending an optimistic local node.
+      await loadPlanComptable();
     } catch (error: unknown) {
       planState = createErrorState<readonly OfficePlanComptableNode[]>(error);
     }
@@ -2126,12 +2195,9 @@
           idempotencyKey: createIdempotencyKey("plan-update")
         }
       );
-      planState = createSuccessState<readonly OfficePlanComptableNode[]>(
-        planNodes.map((node: OfficePlanComptableNode): OfficePlanComptableNode =>
-          node.id === category.id ? { ...node, active: false } : node
-        )
-      );
       actionReceipt = receipt;
+      // Reload the server truth instead of mutating the loaded list locally.
+      await loadPlanComptable();
     } catch (error: unknown) {
       planState = createErrorState<readonly OfficePlanComptableNode[]>(error);
     }
@@ -2207,13 +2273,9 @@
           idempotencyKey: createIdempotencyKey("reconciliation-approve")
         }
       );
-      reconciliationState = createSuccessState<PageResult<OfficeReconciliationCandidate>>({
-        items: reconciliationRows.map((candidate: OfficeReconciliationCandidate): OfficeReconciliationCandidate =>
-          reconciliationIds.includes(candidate.id) ? { ...candidate, status: "matched" } : candidate
-        ),
-        nextCursor: null
-      });
       actionReceipt = receipt;
+      // Reload the server truth instead of marking the local rows as matched.
+      await loadReconciliations();
     } catch (error: unknown) {
       reconciliationState = createErrorState<PageResult<OfficeReconciliationCandidate>>(error);
     }
@@ -2469,81 +2531,6 @@
     }));
   }
 
-  function createPlanNodeFromForm(
-    id: string,
-    parentId: string | null,
-    form: PlanFormState,
-    nodes: readonly OfficePlanComptableNode[]
-  ): OfficePlanComptableNode {
-    if (form.kind === "department") {
-      return {
-        id,
-        parentId: null,
-        kind: "department",
-        code: form.code,
-        label: form.label,
-        active: form.active
-      };
-    }
-
-    if (form.kind === "division") {
-      const department = findDepartmentNode(parentId, nodes);
-
-      return {
-        id,
-        parentId: department.id,
-        kind: "division",
-        code: form.code,
-        label: form.label,
-        active: form.active,
-        departmentId: department.id,
-        departmentLabel: department.label
-      };
-    }
-
-    const division = findDivisionNode(parentId, nodes);
-
-    return {
-      id,
-      parentId: division.id,
-      kind: "category",
-      code: form.code,
-      label: form.label,
-      active: form.active,
-      departmentId: division.departmentId,
-      departmentLabel: division.departmentLabel,
-      divisionId: division.id,
-      divisionLabel: division.label,
-      type: form.type
-    };
-  }
-
-  function findDepartmentNode(
-    nodeId: string | null,
-    nodes: readonly OfficePlanComptableNode[]
-  ): Extract<OfficePlanComptableNode, { readonly kind: "department" }> {
-    const node = nodes.find((item: OfficePlanComptableNode): boolean => item.id === nodeId);
-
-    if (node === undefined || node.kind !== "department") {
-      throw new Error("Division parent must be a department.");
-    }
-
-    return node;
-  }
-
-  function findDivisionNode(
-    nodeId: string | null,
-    nodes: readonly OfficePlanComptableNode[]
-  ): Extract<OfficePlanComptableNode, { readonly kind: "division" }> {
-    const node = nodes.find((item: OfficePlanComptableNode): boolean => item.id === nodeId);
-
-    if (node === undefined || node.kind !== "division") {
-      throw new Error("Category parent must be a division.");
-    }
-
-    return node;
-  }
-
   function categoryTypeLabel(node: OfficePlanComptableNode): string {
     if (node.kind === "category") {
       return node.type;
@@ -2767,16 +2754,6 @@
     }
 
     return null;
-  }
-
-  function readSelectValue(event: Event): string {
-    const target = event.currentTarget;
-
-    if (!(target instanceof HTMLSelectElement)) {
-      throw new Error("Expected select event target.");
-    }
-
-    return target.value;
   }
 
   function readInputValue(event: Event): string {
@@ -3018,14 +2995,15 @@
 
       {#if periodControlVisible}
         <section class="period-control ehq-edge-surface" aria-label="Period control">
-          <label>
-            <span class="ehq-type-label-mono">Period</span>
-            <select value={periodScope} onchange={updatePeriodScope}>
-              {#each periodOptions as option (option.value)}
-                <option value={option.value}>{option.label}</option>
-              {/each}
-            </select>
-          </label>
+          <Select
+            id="office-period-scope"
+            label="Period"
+            value={periodScope}
+            options={periodOptions}
+            state="default"
+            message=""
+            onchange={updatePeriodScope}
+          />
           {#if periodScope === "custom"}
             <label>
               <span class="ehq-type-label-mono">From</span>
@@ -3053,15 +3031,15 @@
 
         <section class="dashboard-grid">
           <div class="panel-card ehq-edge-surface">
-            <SectionTemplate eyebrow="reconciliation" title="Recent reconciliation" detail="Bank and ledger candidates for the selected period." state="ready">
-              <Table title="Reconciliation" columns={reconciliationColumns} rows={reconciliationTableRows} state={reconciliationState.status === "loading" ? "loading" : reconciliationState.status === "error" ? "error" : "default"} actionLabel="" pagination={reconciliationPagination} />
+            <SectionTemplate eyebrow="reconciliation" title="Recent reconciliation" detail="Bank and ledger candidates for the selected period." state={reconciliationState.status === "loading" ? "loading" : reconciliationState.status === "error" ? "error" : "ready"}>
+              <Table title="Reconciliation" columns={reconciliationColumns} rows={reconciliationTableRows} state={reconciliationState.status === "loading" ? "loading" : reconciliationState.status === "error" ? "error" : reconciliationTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={reconciliationPagination} />
             </SectionTemplate>
           </div>
 
           <div class="panel-card ehq-edge-surface">
-            <SectionTemplate eyebrow="cash-flow" title="Cash flow" detail="Inflows, outflows, and closing balances." state="ready">
+            <SectionTemplate eyebrow="cash-flow" title="Cash flow" detail="Inflows, outflows, and closing balances." state={cashflowState.status === "loading" ? "loading" : cashflowState.status === "error" ? "error" : "ready"}>
               <BarsChart title="Inflows" points={cashflowInflowPoints} tone="success" />
-              <Table title="Cash-flow by month" columns={cashflowColumns} rows={cashflowTableRows} state={cashflowState.status === "loading" ? "loading" : cashflowState.status === "error" ? "error" : "default"} actionLabel="" />
+              <Table title="Cash-flow by month" columns={cashflowColumns} rows={cashflowTableRows} state={cashflowState.status === "loading" ? "loading" : cashflowState.status === "error" ? "error" : cashflowTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
             </SectionTemplate>
           </div>
         </section>
@@ -3073,15 +3051,16 @@
         </section>
 
         <section class="filter-strip ehq-edge-surface" aria-label="P&L filters">
-          <label>
-            <span class="ehq-type-label-mono">Department</span>
-            <select value={departmentFilter} onchange={updateDepartmentFilter}>
-              {#each departmentOptions as option (option.value)}
-                <option value={option.value}>{option.label}</option>
-              {/each}
-            </select>
-          </label>
-          <button class="office-action ehq-type-heading primary" type="button" onclick={applyPnlFilters}>Apply</button>
+          <Select
+            id="office-pnl-department"
+            label="Department"
+            value={departmentFilter}
+            options={departmentOptions}
+            state="default"
+            message=""
+            onchange={updateDepartmentFilter}
+          />
+          <Button label="Apply" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Apply P&L filters" onclick={applyPnlFilters} />
         </section>
 
         {#if pnlState.status === "loading"}
@@ -3096,105 +3075,32 @@
         {/if}
       {:else if activePageId === "coa"}
         <section class="form-panel ehq-edge-surface" aria-label="Chart of accounts editor">
-          <label>
-            <span class="ehq-type-label-mono">Type</span>
-            <select value={planForm.kind} onchange={updatePlanKind}>
-              <option value="department">Department</option>
-              <option value="division">Division</option>
-              <option value="category">Category</option>
-            </select>
-          </label>
-          <label>
-            <span class="ehq-type-label-mono">Parent</span>
-            <select value={planForm.parentId} onchange={updatePlanParent}>
-              {#each parentOptions as option (option.value)}
-                <option value={option.value}>{option.label}</option>
-              {/each}
-            </select>
-          </label>
-          <label>
-            <span class="ehq-type-label-mono">Code</span>
-            <input value={planForm.code} oninput={updatePlanCode} />
-          </label>
-          <label>
-            <span class="ehq-type-label-mono">Label</span>
-            <input value={planForm.label} oninput={updatePlanLabel} />
-          </label>
+          <Select id="office-plan-kind" label="Type" value={planForm.kind} options={planKindOptions} state="default" message="" onchange={updatePlanKind} />
+          <Select id="office-plan-parent" label="Parent" value={planForm.parentId} options={parentOptions} state="default" message="" onchange={updatePlanParent} />
+          <Input id="office-plan-code" label="Code" value={planForm.code} placeholder="" type="text" state="default" message="" oninput={updatePlanCode} />
+          <Input id="office-plan-label" label="Label" value={planForm.label} placeholder="" type="text" state="default" message="" oninput={updatePlanLabel} />
           {#if planForm.kind === "category"}
-            <label>
-              <span class="ehq-type-label-mono">Category type</span>
-              <select value={planForm.type} onchange={updatePlanType}>
-                <option value="income">Income</option>
-                <option value="expense">Expense</option>
-              </select>
-            </label>
+            <Select id="office-plan-type" label="Category type" value={planForm.type} options={planTypeOptions} state="default" message="" onchange={updatePlanType} />
           {/if}
-          <button class="office-action ehq-type-heading primary" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={createPlanNode}>Create</button>
-          <button class="office-action ehq-type-heading" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={deactivateFirstCategory}>Deactivate a category</button>
+          <Button label="Create" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Create plan node" title={writeDisabledTitle()} onclick={createPlanNode} />
+          <Button label="Deactivate a category" variant="secondary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Deactivate a category" title={writeDisabledTitle()} onclick={deactivateFirstCategory} />
         </section>
 
         <Table title="Department → Division → Category" columns={planColumns} rows={planTableRows} state={planState.status === "loading" ? "loading" : planState.status === "error" ? "error" : "default"} actionLabel="" rowActions={planRowActions} />
       {:else if activePageId === "transactions"}
         <section class="filter-grid ehq-edge-surface" aria-label="Transaction filters">
-          <label>
-            <span class="ehq-type-label-mono">Account</span>
-            <select value={accountFilter} onchange={updateAccountFilter}>
-              {#each accountOptions as option (option.value)}
-                <option value={option.value}>{option.label}</option>
-              {/each}
-            </select>
-          </label>
-          <label>
-            <span class="ehq-type-label-mono">Department</span>
-            <select value={departmentFilter} onchange={updateDepartmentFilter}>
-              {#each departmentOptions as option (option.value)}
-                <option value={option.value}>{option.label}</option>
-              {/each}
-            </select>
-          </label>
-          <label>
-            <span class="ehq-type-label-mono">Division</span>
-            <select value={divisionFilter} onchange={updateDivisionFilter}>
-              {#each divisionOptions as option (option.value)}
-                <option value={option.value}>{option.label}</option>
-              {/each}
-            </select>
-          </label>
-          <label>
-            <span class="ehq-type-label-mono">Category</span>
-            <select value={categoryFilter} onchange={updateCategoryFilter}>
-              {#each categoryOptions as option (option.value)}
-                <option value={option.value}>{option.label}</option>
-              {/each}
-            </select>
-          </label>
-          <label>
-            <span class="ehq-type-label-mono">Project</span>
-            <select value={projectFilter} onchange={updateProjectFilter}>
-              {#each projectOptions as option (option.value)}
-                <option value={option.value}>{option.label}</option>
-              {/each}
-            </select>
-          </label>
-          <label>
-            <span class="ehq-type-label-mono">Type</span>
-            <select value={typeFilter} onchange={updateTypeFilter}>
-              {#each typeOptions as option (option.value)}
-                <option value={option.value}>{option.label}</option>
-              {/each}
-            </select>
-          </label>
-          <label>
-            <span class="ehq-type-label-mono">Status</span>
-            <select value={transactionStatusFilter} onchange={updateTransactionStatusFilter}>
-              {#each statusOptions as option (option.value)}
-                <option value={option.value}>{option.label}</option>
-              {/each}
-            </select>
-          </label>
-          <button class="office-action ehq-type-heading primary" type="button" onclick={applyTransactionFilters}>Filter</button>
-          <button class="office-action ehq-type-heading" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={openTransactionCreate}>New entry</button>
-          <button class="office-action ehq-type-heading" type="button" disabled={transactionRows.length === 0} onclick={exportTransactionsCsv}>Export CSV</button>
+          <Select id="office-filter-account" label="Account" value={accountFilter} options={accountOptions} state="default" message="" onchange={updateAccountFilter} />
+          <Select id="office-filter-department" label="Department" value={departmentFilter} options={departmentOptions} state="default" message="" onchange={updateDepartmentFilter} />
+          <Select id="office-filter-division" label="Division" value={divisionFilter} options={divisionOptions} state="default" message="" onchange={updateDivisionFilter} />
+          <Select id="office-filter-category" label="Category" value={categoryFilter} options={categoryOptions} state="default" message="" onchange={updateCategoryFilter} />
+          <Select id="office-filter-project" label="Project" value={projectFilter} options={projectOptions} state="default" message="" onchange={updateProjectFilter} />
+          <Select id="office-filter-type" label="Type" value={typeFilter} options={typeOptions} state="default" message="" onchange={updateTypeFilter} />
+          <Select id="office-filter-status" label="Status" value={transactionStatusFilter} options={statusOptions} state="default" message="" onchange={updateTransactionStatusFilter} />
+          <div class="filter-actions">
+            <Button label="Filter" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Apply transaction filters" onclick={applyTransactionFilters} />
+            <Button label="New entry" variant="secondary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="New ledger entry" title={writeDisabledTitle()} onclick={openTransactionCreate} />
+            <Button label="Export CSV" variant="secondary" size="medium" type="button" disabled={transactionRows.length === 0} loading={false} locked={false} focus={false} ariaLabel="Export transactions as CSV" onclick={exportTransactionsCsv} />
+          </div>
         </section>
 
         {#if creatingTransaction}
@@ -3204,55 +3110,26 @@
                 <span class="ehq-type-label-mono">Date</span>
                 <input type="date" bind:value={createOccurredOn} />
               </label>
-              <label class="office-edit-wide">
-                <span class="ehq-type-label-mono">Description</span>
-                <input type="text" bind:value={createDescription} />
-              </label>
-              <label>
-                <span class="ehq-type-label-mono">Compte</span>
-                <select bind:value={createAccountId} disabled={importAccounts.length === 0}>
-                  {#if importAccounts.length === 0}
-                    <option value="">Aucun compte bancaire chargé</option>
-                  {:else}
-                    {#each importAccounts as account (account.id)}
-                      <option value={account.id}>{account.bankName} · {account.accountLabel} ({account.currency}){account.isActive ? "" : " — inactif"}</option>
-                    {/each}
-                  {/if}
-                </select>
-              </label>
-              <label>
-                <span class="ehq-type-label-mono">Montant</span>
-                <input type="text" inputmode="decimal" bind:value={createAmount} placeholder="1200.00" />
-              </label>
-              <label>
-                <span class="ehq-type-label-mono">Sens</span>
-                <select bind:value={createDirection}>
-                  <option value="expense">Dépense</option>
-                  <option value="income">Revenu</option>
-                </select>
-              </label>
-              <label>
-                <span class="ehq-type-label-mono">Catégorie</span>
-                <select bind:value={createCategoryId}>
-                  <option value="">— Aucune —</option>
-                  {#each editCategoryOptions as option (option.value)}
-                    <option value={option.value}>{option.label}</option>
-                  {/each}
-                </select>
-              </label>
-              <label>
-                <span class="ehq-type-label-mono">Projet</span>
-                <select bind:value={createProjectId}>
-                  <option value="">— Aucun —</option>
-                  {#each editProjectOptions as option (option.value)}
-                    <option value={option.value}>{option.label}</option>
-                  {/each}
-                </select>
-              </label>
+              <div class="office-edit-wide">
+                <Input id="office-create-description" label="Description" value={createDescription} placeholder="" type="text" state="default" message="" oninput={(value: string): void => { createDescription = value; }} />
+              </div>
+              <Select
+                id="office-create-account"
+                label="Compte"
+                value={createAccountId}
+                options={createAccountSelectOptions}
+                state={importAccounts.length === 0 ? "disabled" : "default"}
+                message=""
+                onchange={(value: string): void => { createAccountId = value; }}
+              />
+              <Input id="office-create-amount" label="Montant" value={createAmount} placeholder="1200.00" type="text" state="default" message="" oninput={(value: string): void => { createAmount = value; }} />
+              <Select id="office-create-direction" label="Sens" value={createDirection} options={createDirectionOptions} state="default" message="" onchange={(value: string): void => { createDirection = value === "income" ? "income" : "expense"; }} />
+              <Select id="office-create-category" label="Catégorie" value={createCategoryId} options={optionalCategoryOptions} state="default" message="" onchange={(value: string): void => { createCategoryId = value; }} />
+              <Select id="office-create-project" label="Projet" value={createProjectId} options={optionalProjectOptions} state="default" message="" onchange={(value: string): void => { createProjectId = value; }} />
             </div>
             <div class="office-edit-actions">
-              <button class="office-action ehq-type-heading primary" type="button" disabled={!writesEnabled || !canSubmitTransactionCreate} title={writeDisabledTitle()} onclick={submitTransactionCreate}>Créer l'écriture</button>
-              <button class="office-action ehq-type-heading" type="button" onclick={closeTransactionCreate}>Fermer</button>
+              <Button label="Créer l'écriture" variant="primary" size="medium" type="button" disabled={!writesEnabled || !canSubmitTransactionCreate} loading={false} locked={false} focus={false} ariaLabel="Créer l'écriture" title={writeDisabledTitle()} onclick={submitTransactionCreate} />
+              <Button label="Fermer" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Fermer le formulaire de création" onclick={closeTransactionCreate} />
             </div>
           </section>
         {/if}
@@ -3264,42 +3141,22 @@
                 <span class="ehq-type-label-mono">Date</span>
                 <input type="date" bind:value={editOccurredOn} />
               </label>
-              <label class="office-edit-wide">
-                <span class="ehq-type-label-mono">Description</span>
-                <input type="text" bind:value={editDescription} />
-              </label>
-              <label>
-                <span class="ehq-type-label-mono">Montant</span>
-                <input type="text" inputmode="decimal" bind:value={editAmount} />
-              </label>
-              <label>
-                <span class="ehq-type-label-mono">Catégorie</span>
-                <select bind:value={editCategoryId}>
-                  <option value="">— Aucune —</option>
-                  {#each editCategoryOptions as option (option.value)}
-                    <option value={option.value}>{option.label}</option>
-                  {/each}
-                </select>
-              </label>
-              <label>
-                <span class="ehq-type-label-mono">Projet</span>
-                <select bind:value={editProjectId}>
-                  <option value="">— Aucun —</option>
-                  {#each editProjectOptions as option (option.value)}
-                    <option value={option.value}>{option.label}</option>
-                  {/each}
-                </select>
-              </label>
+              <div class="office-edit-wide">
+                <Input id="office-edit-description" label="Description" value={editDescription} placeholder="" type="text" state="default" message="" oninput={(value: string): void => { editDescription = value; }} />
+              </div>
+              <Input id="office-edit-amount" label="Montant" value={editAmount} placeholder="" type="text" state="default" message="" oninput={(value: string): void => { editAmount = value; }} />
+              <Select id="office-edit-category" label="Catégorie" value={editCategoryId} options={optionalCategoryOptions} state="default" message="" onchange={(value: string): void => { editCategoryId = value; }} />
+              <Select id="office-edit-project" label="Projet" value={editProjectId} options={optionalProjectOptions} state="default" message="" onchange={(value: string): void => { editProjectId = value; }} />
             </div>
             <div class="office-edit-actions">
-              <button class="office-action ehq-type-heading primary" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={saveTransactionEdit}>Enregistrer</button>
-              <button class="office-action ehq-type-heading" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={validateEditingTransaction}>Valider</button>
-              <button class="office-action ehq-type-heading" type="button" onclick={closeTransactionEditor}>Fermer</button>
+              <Button label="Enregistrer" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Enregistrer la transaction" title={writeDisabledTitle()} onclick={saveTransactionEdit} />
+              <Button label="Valider" variant="secondary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Valider la transaction" title={writeDisabledTitle()} onclick={validateEditingTransaction} />
+              <Button label="Fermer" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Fermer l'éditeur" onclick={closeTransactionEditor} />
             </div>
           </section>
         {/if}
 
-        <Table title="Ledger · May 2026" columns={transactionColumns} rows={transactionTableRows} state={transactionsState.status === "loading" ? "loading" : transactionsState.status === "error" ? "error" : transactionRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={ledgerRowActions} pagination={transactionPagination} />
+        <Table title={`Ledger · ${rangeLabel(activeRange)}`} columns={transactionColumns} rows={transactionTableRows} state={transactionsState.status === "loading" ? "loading" : transactionsState.status === "error" ? "error" : transactionRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={ledgerRowActions} pagination={transactionPagination} />
       {:else if activePageId === "clients"}
         <PartnersView
           facet="client"
@@ -3356,41 +3213,36 @@
           </div>
 
           <div class="import-actions">
-            <label class="file-control">
-              <span class="ehq-type-label-mono">Compte de destination</span>
-              <select bind:value={selectedImportAccountId} disabled={importAccounts.length === 0}>
-                {#if importAccounts.length === 0}
-                  <option value="">Aucun compte — crée-en un dans l'onglet Bank</option>
-                {:else}
-                  <option value="">Choisis un compte…</option>
-                  {#each importAccounts as account (account.id)}
-                    <option value={account.id}>{account.bankName} · {account.accountLabel} ({account.currency}){account.isActive ? "" : " — inactif"}</option>
-                  {/each}
-                {/if}
-              </select>
-            </label>
+            <div class="file-control">
+              <Select
+                id="office-import-account"
+                label="Compte de destination"
+                value={selectedImportAccountId}
+                options={importAccountSelectOptions}
+                state={importAccounts.length === 0 ? "disabled" : "default"}
+                message=""
+                onchange={(value: string): void => { selectedImportAccountId = value; }}
+              />
+            </div>
             <label class="file-control">
               <span class="ehq-type-label-mono">Relevé PDF ou CSV</span>
               <input type="file" accept="application/pdf,.pdf,text/csv,.csv" onchange={handleStatementFile} />
             </label>
-            <button class="office-action ehq-type-heading" type="button" disabled={!canPreviewImport} onclick={previewImport}>
-              Analyser
-            </button>
-            <button class="office-action ehq-type-heading primary" type="button" disabled={!canConfirmImport || !writesEnabled} title={writeDisabledTitle()} onclick={confirmImport}>
-              Importer en base
-            </button>
+            <Button label="Analyser" variant="secondary" size="medium" type="button" disabled={!canPreviewImport} loading={false} locked={false} focus={false} ariaLabel="Analyser le relevé" onclick={previewImport} />
+            <Button label="Importer en base" variant="primary" size="medium" type="button" disabled={!canConfirmImport || !writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Importer le relevé en base" title={writeDisabledTitle()} onclick={confirmImport} />
           </div>
 
           <details class="import-advanced">
             <summary>Correction source</summary>
-            <label>
-              <span class="ehq-type-label-mono">Banque détectée</span>
-              <select value={importState.source} onchange={updateImportSource}>
-                {#each bankStatementSourceOptions as option (option.value)}
-                  <option value={option.value}>{option.label}</option>
-                {/each}
-              </select>
-            </label>
+            <Select
+              id="office-import-source"
+              label="Banque détectée"
+              value={importState.source}
+              options={bankStatementSourceOptions}
+              state="default"
+              message=""
+              onchange={updateImportSource}
+            />
           </details>
 
           <section class="import-result ehq-type-label-mono" class:error={importState.status === "error"} aria-live="polite">
@@ -3416,8 +3268,8 @@
               <header class="import-rows-head">
                 <span class="ehq-type-label-mono">Lignes détectées · {importPreviewTableRows.length} · {selectedImportRowIds.length} cochées</span>
                 <div class="import-rows-tools">
-                  <button type="button" class="office-action ehq-type-heading" onclick={() => setAllImportRows(true)}>Tout cocher</button>
-                  <button type="button" class="office-action ehq-type-heading" onclick={() => setAllImportRows(false)}>Tout décocher</button>
+                  <Button label="Tout cocher" variant="secondary" size="small" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cocher toutes les lignes" onclick={(): void => { setAllImportRows(true); }} />
+                  <Button label="Tout décocher" variant="secondary" size="small" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Décocher toutes les lignes" onclick={(): void => { setAllImportRows(false); }} />
                 </div>
               </header>
               <div class="import-rows-table" role="table">
@@ -3446,7 +3298,7 @@
                     <span role="cell">{row.status === "accepted" ? "Accepté" : `Rejeté — ${row.reason}`}</span>
                     <span role="cell">
                       {#if row.status === "rejected"}
-                        <button type="button" class="office-action" onclick={() => startImportRowEdit(row.rowNumber)}>Corriger</button>
+                        <Button label="Corriger" variant="secondary" size="small" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel={`Corriger la ligne ${String(row.rowNumber)}`} onclick={(): void => { startImportRowEdit(row.rowNumber); }} />
                       {/if}
                     </span>
                   </div>
@@ -3460,19 +3312,14 @@
                 <div class="import-row-editor ehq-edge-surface" aria-label="Corriger une ligne">
                   <span class="ehq-type-label-mono">Corriger la ligne {editingImportRowNumber} puis ré-analyser</span>
                   <div class="import-row-editor-grid">
-                    <label><span class="ehq-type-label-mono">Date (AAAA-MM-JJ)</span><input type="text" bind:value={importEditDate} placeholder="2026-05-27" /></label>
-                    <label><span class="ehq-type-label-mono">Description</span><input type="text" bind:value={importEditDescription} /></label>
-                    <label><span class="ehq-type-label-mono">Sens</span>
-                      <select bind:value={importEditDirection}>
-                        <option value="debit">Débit</option>
-                        <option value="credit">Crédit</option>
-                      </select>
-                    </label>
-                    <label><span class="ehq-type-label-mono">Montant</span><input type="text" bind:value={importEditAmount} placeholder="40.00" /></label>
+                    <Input id="office-import-edit-date" label="Date (AAAA-MM-JJ)" value={importEditDate} placeholder="2026-05-27" type="text" state="default" message="" oninput={(value: string): void => { importEditDate = value; }} />
+                    <Input id="office-import-edit-description" label="Description" value={importEditDescription} placeholder="" type="text" state="default" message="" oninput={(value: string): void => { importEditDescription = value; }} />
+                    <Select id="office-import-edit-direction" label="Sens" value={importEditDirection} options={importEditDirectionOptions} state="default" message="" onchange={(value: string): void => { importEditDirection = value === "credit" ? "credit" : "debit"; }} />
+                    <Input id="office-import-edit-amount" label="Montant" value={importEditAmount} placeholder="40.00" type="text" state="default" message="" oninput={(value: string): void => { importEditAmount = value; }} />
                   </div>
                   <div class="import-row-editor-actions">
-                    <button type="button" class="office-action ehq-type-heading primary" onclick={applyImportRowEdit}>Appliquer + ré-analyser</button>
-                    <button type="button" class="office-action ehq-type-heading" onclick={cancelImportRowEdit}>Annuler</button>
+                    <Button label="Appliquer + ré-analyser" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Appliquer la correction et ré-analyser" onclick={applyImportRowEdit} />
+                    <Button label="Annuler" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Annuler la correction" onclick={cancelImportRowEdit} />
                   </div>
                 </div>
               {/if}
@@ -3483,96 +3330,85 @@
         <Table title="Batches bancaires connus par l'API" columns={importColumns} rows={recentImportRows} state={dashboardState.status === "loading" ? "loading" : dashboardState.status === "error" ? "error" : recentImportRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={importRowActions} />
       {:else if activePageId === "reconciliation"}
         <section class="filter-strip ehq-edge-surface" aria-label="Reconciliation filters">
-          <label>
-            <span class="ehq-type-label-mono">Account</span>
-            <select value={accountFilter} onchange={updateAccountFilter}>
-              {#each accountOptions as option (option.value)}
-                <option value={option.value}>{option.label}</option>
-              {/each}
-            </select>
-          </label>
-          <label>
-            <span class="ehq-type-label-mono">Status</span>
-            <select value={reconciliationStatusFilter} onchange={updateReconciliationStatusFilter}>
-              {#each reconciliationStatusOptions as option (option.value)}
-                <option value={option.value}>{option.label}</option>
-              {/each}
-            </select>
-          </label>
-          <button class="office-action ehq-type-heading" type="button" onclick={applyReconciliationFilters}>Filter</button>
-          <button class="office-action ehq-type-heading primary" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={approveSuggestedReconciliations}>Approve batch</button>
+          <Select id="office-reconciliation-account" label="Account" value={accountFilter} options={accountOptions} state="default" message="" onchange={updateAccountFilter} />
+          <Select id="office-reconciliation-status" label="Status" value={reconciliationStatusFilter} options={reconciliationStatusOptions} state="default" message="" onchange={updateReconciliationStatusFilter} />
+          <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Apply reconciliation filters" onclick={applyReconciliationFilters} />
+          <Button label="Approve batch" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Approve suggested reconciliations" title={writeDisabledTitle()} onclick={approveSuggestedReconciliations} />
         </section>
 
         <Table title="Bank ↔ ledger matching" columns={reconciliationColumns} rows={reconciliationTableRows} state={reconciliationState.status === "loading" ? "loading" : reconciliationState.status === "error" ? "error" : reconciliationRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={reconciliationRowActions} pagination={reconciliationPagination} />
 
         {#if reconcileDrawerLineId !== null}
-          <section class="reconcile-drawer ehq-edge-surface" aria-label="Action de rapprochement">
-            {#if reconcileDrawerMode === "match"}
-              <span class="ehq-type-label-mono">Matcher « {reconcileDrawerBankLabel} » à une écriture existante</span>
-              <label class="reconcile-drawer-field">
-                <span class="ehq-type-label-mono">Écriture du grand livre</span>
-                <select bind:value={reconcileMatchTransactionId}>
-                  <option value="">Choisir une écriture…</option>
-                  {#each reconcileTransactionOptions as option (option.value)}
-                    <option value={option.value}>{option.label}</option>
-                  {/each}
-                </select>
-              </label>
-              <div class="reconcile-drawer-actions">
-                <button class="office-action ehq-type-heading primary" type="button" disabled={!writesEnabled || reconcileMatchTransactionId.length === 0} title={writeDisabledTitle()} onclick={submitReconcileMatch}>Matcher</button>
-                <button class="office-action ehq-type-heading" type="button" onclick={closeReconcileDrawer}>Annuler</button>
-              </div>
-            {:else}
-              <span class="ehq-type-label-mono">Créer une écriture depuis « {reconcileDrawerBankLabel} »</span>
-              <div class="reconcile-drawer-grid">
-                <label class="reconcile-drawer-field">
-                  <span class="ehq-type-label-mono">Catégorie (option.)</span>
-                  <select bind:value={reconcileCreateCategoryId}>
-                    <option value="">Brouillon — à classer</option>
-                    {#each editCategoryOptions as option (option.value)}
-                      <option value={option.value}>{option.label}</option>
-                    {/each}
-                  </select>
-                </label>
-                <label class="reconcile-drawer-field">
-                  <span class="ehq-type-label-mono">Projet (option.)</span>
-                  <select bind:value={reconcileCreateProjectId}>
-                    <option value="">Aucun</option>
-                    {#each editProjectOptions as option (option.value)}
-                      <option value={option.value}>{option.label}</option>
-                    {/each}
-                  </select>
-                </label>
-              </div>
-              <div class="reconcile-drawer-actions">
-                <button class="office-action ehq-type-heading primary" type="button" disabled={!writesEnabled} title={writeDisabledTitle()} onclick={submitReconcileCreate}>Créer &amp; matcher</button>
-                <button class="office-action ehq-type-heading" type="button" onclick={closeReconcileDrawer}>Annuler</button>
-              </div>
-            {/if}
-          </section>
+          <Drawer
+            open={true}
+            title={reconcileDrawerMode === "match" ? `Matcher « ${reconcileDrawerBankLabel} »` : `Créer une écriture depuis « ${reconcileDrawerBankLabel} »`}
+            badgeLabel={reconcileDrawerMode === "match" ? "match" : "création"}
+            badgeTone="info"
+            body=""
+            primaryAction={reconcileDrawerMode === "match" ? "Matcher" : "Créer & matcher"}
+            secondaryAction="Annuler"
+            state="default"
+            primaryDisabled={!writesEnabled || (reconcileDrawerMode === "match" && reconcileMatchTransactionId.length === 0)}
+            primaryTitle={writeDisabledTitle()}
+            onPrimary={reconcileDrawerMode === "match" ? submitReconcileMatch : submitReconcileCreate}
+            onSecondary={closeReconcileDrawer}
+          >
+            {#snippet content()}
+              {#if reconcileDrawerMode === "match"}
+                <Select
+                  id="office-reconcile-transaction"
+                  label="Écriture du grand livre"
+                  value={reconcileMatchTransactionId}
+                  options={reconcileMatchSelectOptions}
+                  state="default"
+                  message=""
+                  onchange={(value: string): void => { reconcileMatchTransactionId = value; }}
+                />
+              {:else}
+                <Select
+                  id="office-reconcile-category"
+                  label="Catégorie (option.)"
+                  value={reconcileCreateCategoryId}
+                  options={reconcileCategoryOptions}
+                  state="default"
+                  message=""
+                  onchange={(value: string): void => { reconcileCreateCategoryId = value; }}
+                />
+                <Select
+                  id="office-reconcile-project"
+                  label="Projet (option.)"
+                  value={reconcileCreateProjectId}
+                  options={reconcileProjectOptions}
+                  state="default"
+                  message=""
+                  onchange={(value: string): void => { reconcileCreateProjectId = value; }}
+                />
+              {/if}
+            {/snippet}
+          </Drawer>
         {/if}
       {:else if activePageId === "pending"}
         <section class="pending-actions ehq-edge-surface" aria-label="Actions pending">
-          <label class="pending-field">
-            <span class="ehq-type-label-mono">Catégorie</span>
-            <select bind:value={pendingClassifyCategoryId}>
-              <option value="">Choisir…</option>
-              {#each editCategoryOptions as option (option.value)}
-                <option value={option.value}>{option.label}</option>
-              {/each}
-            </select>
-          </label>
-          <label class="pending-field">
-            <span class="ehq-type-label-mono">Projet (option.)</span>
-            <select bind:value={pendingClassifyProjectId}>
-              <option value="">Inchangé</option>
-              {#each editProjectOptions as option (option.value)}
-                <option value={option.value}>{option.label}</option>
-              {/each}
-            </select>
-          </label>
-          <button class="office-action ehq-type-heading" type="button" disabled={!writesEnabled || selectedPendingIds.length === 0 || pendingClassifyCategoryId.length === 0} title={writeDisabledTitle()} onclick={classifySelectedPending}>Classer la sélection</button>
-          <button class="office-action ehq-type-heading primary" type="button" disabled={!writesEnabled || selectedPendingIds.length === 0} title={writeDisabledTitle()} onclick={bulkValidatePending}>Valider la sélection</button>
+          <Select
+            id="office-pending-category"
+            label="Catégorie"
+            value={pendingClassifyCategoryId}
+            options={pendingCategoryOptions}
+            state="default"
+            message=""
+            onchange={(value: string): void => { pendingClassifyCategoryId = value; }}
+          />
+          <Select
+            id="office-pending-project"
+            label="Projet (option.)"
+            value={pendingClassifyProjectId}
+            options={pendingProjectOptions}
+            state="default"
+            message=""
+            onchange={(value: string): void => { pendingClassifyProjectId = value; }}
+          />
+          <Button label="Classer la sélection" variant="secondary" size="medium" type="button" disabled={!writesEnabled || selectedPendingIds.length === 0 || pendingClassifyCategoryId.length === 0} loading={false} locked={false} focus={false} ariaLabel="Classer la sélection" title={writeDisabledTitle()} onclick={classifySelectedPending} />
+          <Button label="Valider la sélection" variant="primary" size="medium" type="button" disabled={!writesEnabled || selectedPendingIds.length === 0} loading={false} locked={false} focus={false} ariaLabel="Valider la sélection" title={writeDisabledTitle()} onclick={bulkValidatePending} />
           <span class="ehq-type-label-mono">{selectedPendingIds.length} sélectionnées</span>
         </section>
 
@@ -3593,15 +3429,8 @@
         <Table title="Queue pending" columns={pendingColumns} rows={pendingTableRows} state={pendingState.status === "loading" ? "loading" : pendingState.status === "error" ? "error" : pendingRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={pendingPagination} />
       {:else if activePageId === "cashflow"}
         <section class="filter-strip ehq-edge-surface" aria-label="Cash-flow filters">
-          <label>
-            <span class="ehq-type-label-mono">Account</span>
-            <select value={accountFilter} onchange={updateAccountFilter}>
-              {#each accountOptions as option (option.value)}
-                <option value={option.value}>{option.label}</option>
-              {/each}
-            </select>
-          </label>
-          <button class="office-action ehq-type-heading primary" type="button" onclick={applyCashflowFilters}>Refresh</button>
+          <Select id="office-cashflow-account" label="Account" value={accountFilter} options={accountOptions} state="default" message="" onchange={updateAccountFilter} />
+          <Button label="Refresh" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Refresh cash-flow" onclick={applyCashflowFilters} />
         </section>
 
         <section class="office-edit-panel ehq-edge-surface" aria-label="Importer un cashflow">
@@ -3613,7 +3442,7 @@
           </div>
           <div class="office-edit-actions">
             <span class="ehq-type-label-mono">{cashflowImportMessage}</span>
-            <button class="office-action ehq-type-heading primary" type="button" disabled={!writesEnabled || cashflowImportRecords.length === 0} title={writeDisabledTitle()} onclick={confirmCashflowFileImport}>Importer en base</button>
+            <Button label="Importer en base" variant="primary" size="medium" type="button" disabled={!writesEnabled || cashflowImportRecords.length === 0} loading={false} locked={false} focus={false} ariaLabel="Importer le cashflow en base" title={writeDisabledTitle()} onclick={confirmCashflowFileImport} />
           </div>
         </section>
 
@@ -3622,7 +3451,7 @@
           <BarsChart title="Outflows" points={cashflowOutflowPoints} tone="error" />
         </section>
 
-        <Table title="Cash-flow by month" columns={cashflowColumns} rows={cashflowTableRows} state={cashflowState.status === "loading" ? "loading" : cashflowState.status === "error" ? "error" : "default"} actionLabel="" />
+        <Table title="Cash-flow by month" columns={cashflowColumns} rows={cashflowTableRows} state={cashflowState.status === "loading" ? "loading" : cashflowState.status === "error" ? "error" : cashflowTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
       {:else if activePageId === "ceo"}
         <CeoView client={client.office} workspaceId={officeWorkspaceId} {period} />
       {:else if activePageId === "bank"}
@@ -3645,76 +3474,78 @@
 <script module lang="ts">
   import type { TableColumn, TableRow } from "@ehq/ui";
 
+  // sortable stays false everywhere: the shared Table renders the sort glyph but
+  // implements no sorting, so advertising it would be a dead affordance.
   const pnlColumns: readonly TableColumn[] = [
-    { label: "Department", align: "left", sortable: true },
-    { label: "Revenue", align: "right", sortable: true },
-    { label: "Expenses", align: "right", sortable: true },
-    { label: "Net", align: "right", sortable: true },
+    { label: "Department", align: "left", sortable: false },
+    { label: "Revenue", align: "right", sortable: false },
+    { label: "Expenses", align: "right", sortable: false },
+    { label: "Net", align: "right", sortable: false },
     { label: "Validated", align: "left", sortable: false }
   ];
   const divisionPnlColumns: readonly TableColumn[] = [
-    { label: "Division", align: "left", sortable: true },
-    { label: "Revenue", align: "right", sortable: true },
-    { label: "Expenses", align: "right", sortable: true },
-    { label: "Net", align: "right", sortable: true }
+    { label: "Division", align: "left", sortable: false },
+    { label: "Revenue", align: "right", sortable: false },
+    { label: "Expenses", align: "right", sortable: false },
+    { label: "Net", align: "right", sortable: false }
   ];
   const pnlLineColumns: readonly TableColumn[] = [
-    { label: "Category", align: "left", sortable: true },
-    { label: "Revenue", align: "right", sortable: true },
-    { label: "Expenses", align: "right", sortable: true },
-    { label: "Net", align: "right", sortable: true }
+    { label: "Category", align: "left", sortable: false },
+    { label: "Revenue", align: "right", sortable: false },
+    { label: "Expenses", align: "right", sortable: false },
+    { label: "Net", align: "right", sortable: false }
   ];
   const planColumns: readonly TableColumn[] = [
-    { label: "Label", align: "left", sortable: true },
-    { label: "Node", align: "left", sortable: true },
-    { label: "Reference", align: "left", sortable: true },
-    { label: "Category type", align: "left", sortable: true },
+    { label: "Label", align: "left", sortable: false },
+    { label: "Node", align: "left", sortable: false },
+    { label: "Reference", align: "left", sortable: false },
+    { label: "Category type", align: "left", sortable: false },
     { label: "Path", align: "left", sortable: false },
-    { label: "Status", align: "left", sortable: true }
+    { label: "Status", align: "left", sortable: false }
   ];
   const transactionColumns: readonly TableColumn[] = [
-    { label: "Date", align: "left", sortable: true },
-    { label: "Label", align: "left", sortable: true },
-    { label: "Department · Division · Category", align: "left", sortable: true },
-    { label: "Type", align: "left", sortable: true },
-    { label: "Project", align: "left", sortable: true },
-    { label: "Amount", align: "right", sortable: true },
-    { label: "Status", align: "left", sortable: true }
+    { label: "Date", align: "left", sortable: false },
+    { label: "Label", align: "left", sortable: false },
+    { label: "Department · Division · Category", align: "left", sortable: false },
+    { label: "Type", align: "left", sortable: false },
+    { label: "Project", align: "left", sortable: false },
+    { label: "Amount", align: "right", sortable: false },
+    { label: "Status", align: "left", sortable: false }
   ];
   const importColumns: readonly TableColumn[] = [
-    { label: "File", align: "left", sortable: true },
-    { label: "Source", align: "left", sortable: true },
-    { label: "Rows", align: "right", sortable: true },
-    { label: "Period", align: "left", sortable: true },
-    { label: "Status", align: "left", sortable: true }
+    { label: "File", align: "left", sortable: false },
+    { label: "Source", align: "left", sortable: false },
+    { label: "Rows", align: "right", sortable: false },
+    { label: "Period", align: "left", sortable: false },
+    { label: "Status", align: "left", sortable: false }
   ];
   const reconciliationColumns: readonly TableColumn[] = [
-    { label: "Bank line", align: "left", sortable: true },
-    { label: "Date", align: "left", sortable: true },
-    { label: "Amount", align: "right", sortable: true },
-    { label: "Suggested match", align: "left", sortable: true },
-    { label: "Conf.", align: "left", sortable: true },
-    { label: "Status", align: "left", sortable: true }
+    { label: "Bank line", align: "left", sortable: false },
+    { label: "Date", align: "left", sortable: false },
+    { label: "Amount", align: "right", sortable: false },
+    { label: "Suggested match", align: "left", sortable: false },
+    { label: "Conf.", align: "left", sortable: false },
+    { label: "Status", align: "left", sortable: false }
   ];
   const pendingColumns: readonly TableColumn[] = [
     { label: "Selection", align: "left", sortable: false },
-    { label: "Label", align: "left", sortable: true },
-    { label: "Department · Division · Category", align: "left", sortable: true },
-    { label: "Amount", align: "right", sortable: true },
-    { label: "Status", align: "left", sortable: true }
+    { label: "Label", align: "left", sortable: false },
+    { label: "Department · Division · Category", align: "left", sortable: false },
+    { label: "Amount", align: "right", sortable: false },
+    { label: "Status", align: "left", sortable: false }
   ];
   const cashflowColumns: readonly TableColumn[] = [
-    { label: "Period", align: "left", sortable: true },
-    { label: "Inflows", align: "right", sortable: true },
-    { label: "Outflows", align: "right", sortable: true },
-    { label: "Closing", align: "right", sortable: true }
+    { label: "Period", align: "left", sortable: false },
+    { label: "Inflows", align: "right", sortable: false },
+    { label: "Outflows", align: "right", sortable: false },
+    { label: "Closing", align: "right", sortable: false }
   ];
   const auditColumns: readonly TableColumn[] = [
-    { label: "Time", align: "left", sortable: true },
-    { label: "Action", align: "left", sortable: true },
-    { label: "Entity", align: "left", sortable: true },
-    { label: "Entity id", align: "left", sortable: true },
-    { label: "Write guard", align: "left", sortable: true }
+    { label: "Time", align: "left", sortable: false },
+    { label: "Action", align: "left", sortable: false },
+    { label: "Entity", align: "left", sortable: false },
+    { label: "Entity id", align: "left", sortable: false },
+    { label: "Write guard", align: "left", sortable: false }
   ];
 </script>
 
@@ -3825,35 +3656,7 @@
     gap: var(--ehq-space-2);
   }
 
-  .import-row-editor-grid label {
-    display: grid;
-    gap: var(--ehq-space-1);
-  }
-
   .import-row-editor-actions {
-    display: flex;
-    gap: var(--ehq-space-2);
-  }
-
-  .reconcile-drawer {
-    display: grid;
-    gap: var(--ehq-space-2);
-    padding: var(--ehq-space-3);
-    border-radius: var(--ehq-radius-sm);
-  }
-
-  .reconcile-drawer-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: var(--ehq-space-2);
-  }
-
-  .reconcile-drawer-field {
-    display: grid;
-    gap: var(--ehq-space-1);
-  }
-
-  .reconcile-drawer-actions {
     display: flex;
     gap: var(--ehq-space-2);
   }
@@ -3898,7 +3701,8 @@
     justify-content: flex-end;
   }
 
-  .period-control label {
+  .period-control label,
+  .period-control :global(.ehq-select-field) {
     width: min(360px, 100%);
   }
 
@@ -3948,7 +3752,7 @@
 
   .statement-import-panel h2 {
     margin-top: var(--ehq-space-1);
-    font-size: 24px;
+    font-size: var(--ehq-h2);
     line-height: 1.1;
   }
 
@@ -4049,7 +3853,7 @@
     text-transform: uppercase;
   }
 
-  .import-advanced label {
+  .import-advanced :global(.ehq-select-field) {
     width: min(280px, calc(100vw - var(--ehq-space-8)));
     margin-top: var(--ehq-space-2);
   }
@@ -4068,9 +3872,27 @@
     gap: var(--ehq-space-3);
   }
 
+  /* Select/Input components carry their own label layout; in the flex strips they
+     need a minimum width so the controls stay usable. */
+  .filter-strip :global(.ehq-select-field),
+  .form-panel :global(.ehq-select-field),
+  .form-panel :global(.ehq-field),
+  .pending-actions :global(.ehq-select-field) {
+    min-width: 180px;
+    flex: 0 1 auto;
+  }
+
   .filter-grid {
     display: grid;
     grid-template-columns: repeat(4, minmax(150px, 1fr));
+  }
+
+  .filter-actions {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: var(--ehq-space-2);
   }
 
   label {
@@ -4087,7 +3909,8 @@
     text-transform: uppercase;
   }
 
-  select,
+  /* Raw inputs remain only for control types the design-system Input does not
+     cover yet (date, file, checkbox); selects and text inputs use the DS components. */
   input {
     min-height: 38px;
     width: 100%;
@@ -4103,37 +3926,9 @@
     outline: 0;
   }
 
-  select:focus,
   input:focus {
     border-color: var(--ehq-yellow-border);
     box-shadow: 0 0 0 3px var(--ehq-yellow-muted);
-  }
-
-  .office-action {
-    min-height: 38px;
-    padding: 0 var(--ehq-space-3);
-    border: 1px solid var(--ehq-border);
-    border-radius: var(--ehq-radius-sm);
-    background: transparent;
-    color: var(--ehq-text);
-    font-family: var(--ehq-font);
-    font-size: var(--ehq-type-action-size);
-    font-weight: var(--ehq-type-heading-weight);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  .office-action.primary {
-    border-color: var(--ehq-yellow);
-    background: var(--ehq-yellow);
-    color: var(--ehq-text-on-yellow);
-  }
-
-  .office-action:disabled {
-    border-color: var(--ehq-border);
-    background: transparent;
-    color: var(--ehq-text-disabled);
-    cursor: not-allowed;
   }
 
   .import-result {
@@ -4150,12 +3945,6 @@
   .pending-actions span {
     color: var(--ehq-text-muted);
     font-size: var(--ehq-type-caption-size);
-  }
-
-  .pending-field {
-    display: grid;
-    gap: var(--ehq-space-1);
-    min-width: 160px;
   }
 
   .pending-list {

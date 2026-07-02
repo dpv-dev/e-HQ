@@ -2,10 +2,12 @@
   import { onMount } from "svelte";
   import {
     BarsChart,
+    Button,
     KPI,
     Loader,
     Table,
     type ChartPoint,
+    type SurfaceState,
     type TablePagination,
     type TableRow,
     type Tone
@@ -42,6 +44,9 @@
     readonly detail: string;
     readonly tone: Tone;
     readonly accent: boolean;
+    // Each KPI carries the loading state of its own source request instead of
+    // borrowing the integrity state for all four indicators.
+    readonly state: SurfaceState;
   }
 
   const props: Props = $props();
@@ -68,7 +73,14 @@
   const auditRows = $derived(readPageItems(auditState));
   const recentImports = $derived(readRecentImports(dashboardState));
   const integrityRows = $derived(readIntegrityRows(integrityState));
-  const monitoringKpis = $derived(createMonitoringKpis(integrityState, bankQualityState, pendingRows));
+  const monitoringKpis = $derived(createMonitoringKpis(integrityState, bankQualityState, pendingState, dashboardState));
+  const monitoringLoading = $derived(
+    integrityState.status === "loading" ||
+    bankQualityState.status === "loading" ||
+    pendingState.status === "loading" ||
+    auditState.status === "loading" ||
+    dashboardState.status === "loading"
+  );
   const bankQualityPoints = $derived(createBankQualityPoints(bankQualityState));
   const integrityTableRows = $derived(createIntegrityTableRows(integrityRows));
   const pendingTableRows = $derived(createPendingTableRows(pendingRows));
@@ -86,6 +98,12 @@
   });
 
   async function loadMonitoring(): Promise<void> {
+    // Re-entrance guard: the refresh button is disabled while loading, but this
+    // also protects any programmatic caller from firing concurrent reloads.
+    if (monitoringLoading) {
+      return;
+    }
+
     integrityState = createLoadingState<OfficeIntegrityCheckAllResponse>();
     bankQualityState = createLoadingState<OfficeBankQualityResponse>();
     pendingState = createLoadingState<PageResult<OfficeTransaction>>();
@@ -237,7 +255,8 @@
   function createMonitoringKpis(
     integrity: ApiRequestState<OfficeIntegrityCheckAllResponse>,
     bankQuality: ApiRequestState<OfficeBankQualityResponse>,
-    pending: readonly OfficeTransaction[]
+    pending: ApiRequestState<PageResult<OfficeTransaction>>,
+    dashboard: ApiRequestState<OfficeDashboardResponse>
   ): readonly MonitoringKpi[] {
     const integrityValue = integrity.status === "success" ? integrity.data.status : "—";
     const integrityDetail =
@@ -249,6 +268,7 @@
       bankQuality.status === "success"
         ? `${String(bankQuality.data.unmatchedLineCount)} unmatched lines`
         : stateLabel(bankQuality);
+    const pendingCount = readPageItems(pending).length;
 
     return [
       {
@@ -256,30 +276,50 @@
         value: integrityValue,
         detail: integrityDetail,
         tone: integrityTone(integrityValue),
-        accent: true
+        accent: true,
+        state: kpiState(integrity)
       },
       {
         label: "Bank quality",
         value: bankValue,
         detail: bankDetail,
         tone: "info",
-        accent: false
+        accent: false,
+        state: kpiState(bankQuality)
       },
       {
         label: "Pending",
-        value: String(pending.length),
+        value: String(pendingCount),
         detail: "first page · max 50",
-        tone: pending.length > 0 ? "warning" : "success",
-        accent: false
+        tone: pendingCount > 0 ? "warning" : "success",
+        accent: false,
+        state: kpiState(pending)
       },
       {
         label: "Recent imports",
-        value: dashboardImportCountLabel(dashboardState),
+        value: dashboardImportCountLabel(dashboard),
         detail: "from dashboard",
         tone: "muted",
-        accent: false
+        accent: false,
+        state: kpiState(dashboard)
       }
     ];
+  }
+
+  function kpiState(state: ApiRequestState<unknown>): SurfaceState {
+    return state.status === "loading" ? "loading" : "default";
+  }
+
+  // checkedAt is an ISO datetime; render it as "YYYY-MM-DD HH:MM" so it matches
+  // the date formatting used by the rest of the screen while keeping the time.
+  function formatDateTimeLabel(value: string): string {
+    const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/u.exec(value.trim());
+
+    if (match === null) {
+      return formatDateOnly(value);
+    }
+
+    return `${match[1] ?? ""} ${match[2] ?? ""}`.trim();
   }
 
   function dashboardImportCountLabel(state: ApiRequestState<OfficeDashboardResponse>): string {
@@ -432,7 +472,7 @@
 <section class="monitoring-view">
   <section class="kpi-grid" aria-label="Monitoring indicators">
     {#each monitoringKpis as kpi (kpi.label)}
-      <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state={integrityState.status === "loading" ? "loading" : "default"} accent={kpi.accent} />
+      <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state={kpi.state} accent={kpi.accent} />
     {/each}
   </section>
 
@@ -445,7 +485,18 @@
           <h2 class="ehq-type-heading">Operational checks</h2>
           <span class="ehq-type-body">Read-only integrity, bank quality, pending rows, and recent audit activity.</span>
         </div>
-        <button class="ehq-type-heading" type="button" onclick={loadMonitoring}>Refresh</button>
+        <Button
+          label="Refresh"
+          variant="secondary"
+          size="medium"
+          type="button"
+          disabled={monitoringLoading}
+          loading={monitoringLoading}
+          locked={false}
+          focus={false}
+          ariaLabel="Refresh monitoring data"
+          onclick={loadMonitoring}
+        />
       </header>
       {#if integrityState.status === "loading"}
         <Loader label="Loading monitoring" detail="Reading Office monitoring endpoints." size="medium" />
@@ -456,7 +507,7 @@
         </div>
       {:else}
         <div class="check-summary">
-          <strong class="ehq-type-body">{integrityState.status === "success" ? integrityState.data.checkedAt : "Not checked"}</strong>
+          <strong class="ehq-type-body">{integrityState.status === "success" ? formatDateTimeLabel(integrityState.data.checkedAt) : "Not checked"}</strong>
           <span class="ehq-type-body">{integrityState.status === "success" ? `${String(integrityState.data.passCount)} passed · ${String(integrityState.data.warningCount)} warnings · ${String(integrityState.data.failCount)} failures` : "Waiting for checks."}</span>
         </div>
       {/if}
@@ -472,34 +523,36 @@
 <script module lang="ts">
   import type { TableColumn } from "@ehq/ui";
 
+  // sortable stays false everywhere: the shared Table renders the sort glyph but
+  // implements no sorting, so advertising it would be a dead affordance.
   const integrityColumns: readonly TableColumn[] = [
-    { label: "Check", align: "left", sortable: true },
+    { label: "Check", align: "left", sortable: false },
     { label: "Detail", align: "left", sortable: false },
-    { label: "Fix path", align: "left", sortable: true },
-    { label: "Status", align: "left", sortable: true }
+    { label: "Fix path", align: "left", sortable: false },
+    { label: "Status", align: "left", sortable: false }
   ];
   const pendingColumns: readonly TableColumn[] = [
-    { label: "Date", align: "left", sortable: true },
-    { label: "Label", align: "left", sortable: true },
-    { label: "Department", align: "left", sortable: true },
-    { label: "Category", align: "left", sortable: true },
-    { label: "Amount", align: "right", sortable: true },
-    { label: "Status", align: "left", sortable: true }
+    { label: "Date", align: "left", sortable: false },
+    { label: "Label", align: "left", sortable: false },
+    { label: "Department", align: "left", sortable: false },
+    { label: "Category", align: "left", sortable: false },
+    { label: "Amount", align: "right", sortable: false },
+    { label: "Status", align: "left", sortable: false }
   ];
   const importColumns: readonly TableColumn[] = [
-    { label: "File", align: "left", sortable: true },
-    { label: "Source", align: "left", sortable: true },
-    { label: "Period", align: "left", sortable: true },
-    { label: "Accepted", align: "left", sortable: true },
-    { label: "Issues", align: "left", sortable: true },
-    { label: "Status", align: "left", sortable: true }
+    { label: "File", align: "left", sortable: false },
+    { label: "Source", align: "left", sortable: false },
+    { label: "Period", align: "left", sortable: false },
+    { label: "Accepted", align: "left", sortable: false },
+    { label: "Issues", align: "left", sortable: false },
+    { label: "Status", align: "left", sortable: false }
   ];
   const auditColumns: readonly TableColumn[] = [
-    { label: "Time", align: "left", sortable: true },
-    { label: "Action", align: "left", sortable: true },
-    { label: "Entity", align: "left", sortable: true },
-    { label: "Entity id", align: "left", sortable: true },
-    { label: "Write guard", align: "left", sortable: true }
+    { label: "Time", align: "left", sortable: false },
+    { label: "Action", align: "left", sortable: false },
+    { label: "Entity", align: "left", sortable: false },
+    { label: "Entity id", align: "left", sortable: false },
+    { label: "Write guard", align: "left", sortable: false }
   ];
 </script>
 
@@ -540,22 +593,6 @@
     align-items: start;
     justify-content: space-between;
     gap: var(--ehq-space-3);
-  }
-
-  .monitoring-panel button {
-    min-height: 34px;
-    padding: 0 var(--ehq-space-3);
-    border: 1px solid var(--ehq-border);
-    border-radius: var(--ehq-radius-sm);
-    background: transparent;
-    color: var(--ehq-text);
-    font-size: var(--ehq-type-action-size);
-    text-transform: uppercase;
-  }
-
-  .monitoring-panel button:hover {
-    border-color: var(--ehq-yellow-border);
-    box-shadow: 0 0 0 3px var(--ehq-yellow-muted);
   }
 
   p,

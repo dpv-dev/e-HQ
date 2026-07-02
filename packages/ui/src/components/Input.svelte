@@ -9,9 +9,18 @@
     readonly type: "text" | "search" | "email" | "number";
     readonly state: FieldState;
     readonly message: string;
+    readonly oninput?: ((value: string) => void) | null;
   }
 
   const props: Props = $props();
+
+  function handleInput(event: Event & { readonly currentTarget: EventTarget & HTMLInputElement }): void {
+    if (props.oninput === undefined || props.oninput === null) {
+      return;
+    }
+
+    props.oninput(event.currentTarget.value);
+  }
 </script>
 
 <label class={`ehq-field ${props.state}`} for={props.id}>
@@ -23,6 +32,7 @@
     placeholder={props.placeholder}
     disabled={props.state === "disabled"}
     aria-invalid={props.state === "error"}
+    oninput={handleInput}
   />
   {#if props.message.length > 0}
     <small>{props.message}</small>

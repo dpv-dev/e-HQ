@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Snippet } from "svelte";
   import type { DrawerState, Tone } from "./types.js";
   import Badge from "./Badge.svelte";
   import Button from "./Button.svelte";
@@ -12,6 +13,13 @@
     readonly primaryAction: string;
     readonly secondaryAction: string;
     readonly state: DrawerState;
+    // Optional live wiring: pages pass rich content and real handlers, while
+    // static previews (design system) omit these and keep the inert demo body.
+    readonly content?: Snippet | null;
+    readonly onPrimary?: (() => void | Promise<void>) | null;
+    readonly onSecondary?: (() => void | Promise<void>) | null;
+    readonly primaryDisabled?: boolean;
+    readonly primaryTitle?: string | null;
   }
 
   const props: Props = $props();
@@ -29,7 +37,13 @@
           <Badge label={props.badgeLabel} tone={props.badgeTone} />
         {/if}
       </header>
-      <div class="body">{props.body}</div>
+      {#if props.content}
+        <div class="content">
+          {@render props.content()}
+        </div>
+      {:else}
+        <div class="body">{props.body}</div>
+      {/if}
       <footer>
         <Button
           label={props.secondaryAction}
@@ -41,17 +55,20 @@
           locked={false}
           focus={false}
           ariaLabel={props.secondaryAction}
+          onclick={props.onSecondary ?? null}
         />
         <Button
           label={props.primaryAction}
           variant={props.state === "error" ? "danger" : "primary"}
           size="small"
           type="button"
-          disabled={false}
+          disabled={props.primaryDisabled ?? false}
           loading={false}
           locked={props.state === "locked"}
           focus={false}
           ariaLabel={props.primaryAction}
+          title={props.primaryTitle ?? null}
+          onclick={props.onPrimary ?? null}
         />
       </footer>
     </aside>
@@ -127,6 +144,11 @@
   .locked h3,
   .error h3 {
     color: var(--ehq-error);
+  }
+
+  .content {
+    display: grid;
+    gap: var(--ehq-space-3);
   }
 
   .body,

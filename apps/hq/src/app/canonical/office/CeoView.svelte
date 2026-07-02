@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import {
     DivergeChart,
+    EmptyState,
     KPI,
     Loader,
     Table,
@@ -250,7 +251,18 @@
       <span class="ehq-type-body">{getErrorMessage(globalPnlState.error)}</span>
     </div>
   {:else}
-    <DivergeChart title="Revenue and expenses by department" points={departmentChartPoints} />
+    {#if departmentChartPoints.length === 0}
+      <EmptyState
+        title="Revenue and expenses by department"
+        detail="No validated projection rows for this period, so there is nothing to chart yet."
+        state="empty"
+        actionLabel=""
+        actionHref={null}
+        disabledReason=""
+      />
+    {:else}
+      <DivergeChart title="Revenue and expenses by department" points={departmentChartPoints} />
+    {/if}
     <Table title="Result by category" columns={categoryColumns} rows={departmentTableRows} state={departmentTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
     <Table title="Result by division" columns={divisionColumns} rows={divisionTableRows} state={divisionState.status === "loading" ? "loading" : divisionState.status === "error" ? "error" : divisionTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={divisionPagination} />
   {/if}
@@ -259,17 +271,19 @@
 <script module lang="ts">
   import type { TableColumn } from "@ehq/ui";
 
+  // sortable stays false everywhere: the shared Table renders the sort glyph but
+  // implements no sorting, so advertising it would be a dead affordance.
   const categoryColumns: readonly TableColumn[] = [
-    { label: "Category", align: "left", sortable: true },
-    { label: "Income", align: "right", sortable: true },
-    { label: "Expenses", align: "right", sortable: true },
-    { label: "Net", align: "right", sortable: true }
+    { label: "Category", align: "left", sortable: false },
+    { label: "Income", align: "right", sortable: false },
+    { label: "Expenses", align: "right", sortable: false },
+    { label: "Net", align: "right", sortable: false }
   ];
   const divisionColumns: readonly TableColumn[] = [
-    { label: "Division", align: "left", sortable: true },
-    { label: "Income", align: "right", sortable: true },
-    { label: "Expenses", align: "right", sortable: true },
-    { label: "Net", align: "right", sortable: true }
+    { label: "Division", align: "left", sortable: false },
+    { label: "Income", align: "right", sortable: false },
+    { label: "Expenses", align: "right", sortable: false },
+    { label: "Net", align: "right", sortable: false }
   ];
 </script>
 
