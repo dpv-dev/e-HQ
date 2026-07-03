@@ -4,7 +4,7 @@
 // Pure functions only — the caller supplies "today" (and any custom range) so the
 // math stays deterministic and testable.
 
-export type PeriodScope = "week" | "month" | "last3" | "last6" | "year" | "custom";
+export type PeriodScope = "week" | "month" | "last3" | "last6" | "year" | "all" | "custom";
 
 export interface PeriodOption {
   readonly value: PeriodScope;
@@ -18,6 +18,9 @@ export interface DateRange {
 }
 
 const latestDataPeriod = "2026-05";
+
+const allRangeFrom = "2015-01-01";
+const allRangeTo = "2030-12-31";
 
 export function getLatestDataPeriod(): string {
   return latestDataPeriod;
@@ -37,6 +40,7 @@ export function createPeriodOptions(): readonly PeriodOption[] {
     { value: "last3", label: "Last 3 Months", detail: "Trailing 3 months" },
     { value: "last6", label: "Last 6 Months", detail: "Trailing 6 months" },
     { value: "year", label: "This Year", detail: "Year to date" },
+    { value: "all", label: "All / Tout", detail: "Entire history" },
     { value: "custom", label: "Custom", detail: "Pick dates" }
   ];
 }
@@ -71,6 +75,9 @@ export function rangeForScope(scope: PeriodScope, today: string, customRange: Da
   }
   if (scope === "year") {
     return { from: `${today.slice(0, 4)}-01-01`, to: `${today.slice(0, 4)}-12-31` };
+  }
+  if (scope === "all") {
+    return { from: allRangeFrom, to: allRangeTo };
   }
   // custom — fall back to the current month until the user picks dates.
   return customRange !== null ? customRange : monthRangeFromDate(today);

@@ -69,7 +69,10 @@
   const reconciliationRows = $derived(readPageItems(reconciliationState));
   const bankKpis = $derived(createBankKpis(accountRows, qualityState));
   const accountTableRows = $derived(createAccountTableRows(accountRows));
-  const accountRowActions = $derived<readonly TableRowAction[]>([{ label: "Éditer", onAction: startEditAccount }]);
+  const accountRowActions = $derived<readonly TableRowAction[]>([
+    { label: "Éditer", onAction: startEditAccount },
+    { label: "Supprimer", onAction: deleteAccountById, danger: true }
+  ]);
 
   let bankFormName = $state("");
   let bankFormLabel = $state("");
@@ -132,6 +135,51 @@
     bankFormLabel = account.accountLabel;
     bankFormCurrency = account.currency;
     bankFormActive = account.isActive;
+  }
+
+  async function deleteAccountById(accountId: string): Promise<void> {
+    if (!props.writesEnabled) {
+      accountSubmitStatus = "error";
+      accountSubmitMessage = "Activez les écritures pour supprimer un compte bancaire.";
+      return;
+    }
+
+    if (accountSubmitStatus === "loading") {
+      return;
+    }
+
+    const account = accountRows.find((row: OfficeBankAccountSummary): boolean => row.id === accountId);
+    if (account === undefined) {
+      accountSubmitStatus = "error";
+      accountSubmitMessage = "Compte bancaire introuvable dans la liste chargée.";
+      return;
+    }
+
+    const confirmed = globalThis.confirm(
+      `Supprimer ${account.bankName} · ${account.accountLabel} et toutes ses lignes bancaires importées ?`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    accountSubmitStatus = "loading";
+    accountSubmitMessage = null;
+    try {
+      await props.client.deleteBankAccount(
+        accountId,
+        { workspaceId: props.workspaceId },
+        { idempotencyKey: crypto.randomUUID() }
+      );
+      if (editingAccountId === accountId) {
+        resetAccountFormFields();
+      }
+      await loadBank();
+      accountSubmitStatus = "success";
+      accountSubmitMessage = "Compte bancaire et lignes liées supprimés.";
+    } catch (error: unknown) {
+      accountSubmitStatus = "error";
+      accountSubmitMessage = getErrorMessage(error);
+    }
   }
 
   async function submitAccountForm(): Promise<void> {

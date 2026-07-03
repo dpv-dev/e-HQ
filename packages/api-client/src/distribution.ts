@@ -175,7 +175,9 @@ export function createDistributionApiClient(config: ApiClientConfig): Distributi
     getDashboard: (query: DistributionDashboardQuery): Promise<DistributionDashboardResponse> =>
       transport.get<DistributionDashboardResponse>("dashboard", {
         workspaceId: query.workspaceId,
-        period: query.period
+        period: query.period,
+        dateFrom: query.dateFrom ?? null,
+        dateTo: query.dateTo ?? null
       }),
     listImportBatches: (query: DistributionImportBatchesQuery): Promise<PageResult<DistributionImportBatch>> =>
       transport.get<PageResult<DistributionImportBatch>>("imports/batches", {
@@ -317,6 +319,8 @@ export function createDistributionApiClient(config: ApiClientConfig): Distributi
         workspaceId: query.workspaceId,
         period: query.period,
         status: query.status,
+        dateFrom: query.dateFrom ?? null,
+        dateTo: query.dateTo ?? null,
         cursor: query.cursor,
         limit: query.limit
       }),
@@ -356,6 +360,8 @@ export function createDistributionApiClient(config: ApiClientConfig): Distributi
         workspaceId: query.workspaceId,
         period: query.period,
         payeeId: query.payeeId,
+        dateFrom: query.dateFrom ?? null,
+        dateTo: query.dateTo ?? null,
         status: query.status,
         cursor: query.cursor,
         limit: query.limit
@@ -399,6 +405,8 @@ export function createDistributionApiClient(config: ApiClientConfig): Distributi
         payeeId: query.payeeId,
         store: query.store,
         currency: query.currency,
+        dateFrom: query.dateFrom ?? null,
+        dateTo: query.dateTo ?? null,
         groupBy: query.groupBy,
         cursor: query.cursor,
         limit: query.limit

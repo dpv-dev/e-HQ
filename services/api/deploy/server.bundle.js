@@ -38064,6 +38064,7 @@ var SENSITIVE_ACTIONS = /* @__PURE__ */ new Set([
   "distribution_suspense_resolve",
   "distribution_track_upsert",
   "office_bank_import_reverse",
+  "office_bank_account_delete",
   "office_partner_payee_link",
   "office_partner_payee_unlink"
 ]);
@@ -39461,7 +39462,7 @@ function createApiService(dependencies) {
         "http://localhost:5173",
         "http://127.0.0.1:5173"
       ],
-      allowMethods: ["GET", "POST", "PATCH", "OPTIONS"],
+      allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
       allowHeaders: ["Content-Type", "Authorization", "Idempotency-Key"]
     })
   );
@@ -39717,6 +39718,9 @@ function registerOfficeRoutes(app, dependencies) {
   });
   app.patch("/eof/v1/bank/accounts/:accountId", async (context) => {
     return officeBankAccountUpdateResponse(context, dependencies);
+  });
+  app.delete("/eof/v1/bank/accounts/:accountId", async (context) => {
+    return officeBankAccountDeleteResponse(context, dependencies);
   });
   app.get("/eof/v1/bank/raw", (context) => {
     const workspaceId = resolveWorkspaceId(context);
@@ -40881,11 +40885,57 @@ async function officeBankAccountUpdateResponse(context, dependencies) {
         action: "office_bank_account_update",
         targetType: "office_bank_account",
         targetId: accountId,
-        before: { account: before },
+        before: { account: officeBankAccountAuditSnapshot(before) },
         after: { accountId, request },
         idempotencyKey: resolvedIdempotencyKey
       });
       upsertOfficeBankAccountFixture(dependencies.fixtures, accountId, request);
+      return mutationReceipt(accountId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+async function officeBankAccountDeleteResponse(context, dependencies) {
+  const accountId = requirePathParam(context, "accountId");
+  const request = await readZodBody(context, workspaceBodySchema);
+  const before = dependencies.fixtures.office.bankAccounts.find(
+    (account) => account.id === accountId && account.workspaceId === request.workspaceId
+  );
+  if (before === void 0) {
+    throw new ApiRouteError(404, "office_bank_account_not_found", "Office bank account was not found.", [
+      `accountId=${accountId}`,
+      `workspaceId=${request.workspaceId}`
+    ]);
+  }
+  const fixtureCounts = countOfficeBankAccountFixtureDependencies(dependencies.fixtures, accountId);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_bank_account_delete",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `office:bank-account:${accountId}`);
+      const deletedCounts = await persistOfficeBankAccountDelete(tx, accountId, request);
+      if (tx.kind !== "memory" && deletedCounts.accountCount !== 1) {
+        throw new ApiRouteError(404, "office_bank_account_not_found", "Office bank account was not found.", [
+          `accountId=${accountId}`,
+          `workspaceId=${request.workspaceId}`
+        ]);
+      }
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_bank_account_delete",
+        targetType: "office_bank_account",
+        targetId: accountId,
+        before: { account: officeBankAccountAuditSnapshot(before), counts: fixtureCounts },
+        after: { accountId, deletedCounts },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      deleteOfficeBankAccountFixture(dependencies.fixtures, accountId);
       return mutationReceipt(accountId, auditEventId);
     }
   });
@@ -40912,6 +40962,74 @@ async function persistOfficeBankAccountUpsert(tx, accountId, request, isUpdate) 
     values (${accountId}, ${request.workspaceId}, ${request.bankName.trim()}, ${request.accountLabel.trim()}, ${`manual-${accountId}`}, ${request.currency.toUpperCase()}, 0, 0, ${request.active})
   `);
 }
+async function persistOfficeBankAccountDelete(tx, accountId, request) {
+  if (tx.kind === "memory") {
+    return {
+      accountCount: 1,
+      statementLineCount: 0,
+      reconciliationMatchCount: 0,
+      importBatchCount: 0,
+      cashflowProjectionCount: 0
+    };
+  }
+  const rows = queryRowsFromResult(await tx.executor.execute(sql`
+    with scoped_account as (
+      select id
+      from office_bank_accounts
+      where id = ${accountId}
+        and workspace_id = ${request.workspaceId}
+    ),
+    scoped_lines as (
+      select line.id
+      from office_bank_statement_lines line
+      join scoped_account account on account.id = line.account_id
+    ),
+    deleted_matches as (
+      delete from office_bank_reconciliation_matches match
+      using scoped_lines line
+      where match.bank_statement_line_id = line.id
+      returning match.id
+    ),
+    deleted_lines as (
+      delete from office_bank_statement_lines line
+      using scoped_account account
+      where line.account_id = account.id
+      returning line.id
+    ),
+    deleted_cashflow as (
+      delete from office_cashflow_projection_rows row
+      using scoped_account account
+      where row.account_id = account.id
+      returning row.id
+    ),
+    deleted_batches as (
+      delete from office_bank_import_batches batch
+      using scoped_account account
+      where batch.account_id = account.id
+      returning batch.id
+    ),
+    deleted_account as (
+      delete from office_bank_accounts account
+      using scoped_account scoped
+      where account.id = scoped.id
+      returning account.id
+    )
+    select
+      (select count(*) from deleted_account)::int as account_count,
+      (select count(*) from deleted_lines)::int as statement_line_count,
+      (select count(*) from deleted_matches)::int as reconciliation_match_count,
+      (select count(*) from deleted_batches)::int as import_batch_count,
+      (select count(*) from deleted_cashflow)::int as cashflow_projection_count
+  `));
+  const row = rows[0];
+  return {
+    accountCount: integerQueryField(row, "account_count"),
+    statementLineCount: integerQueryField(row, "statement_line_count"),
+    reconciliationMatchCount: integerQueryField(row, "reconciliation_match_count"),
+    importBatchCount: integerQueryField(row, "import_batch_count"),
+    cashflowProjectionCount: integerQueryField(row, "cashflow_projection_count")
+  };
+}
 function upsertOfficeBankAccountFixture(fixtures, accountId, request) {
   const mutableOffice = fixtures.office;
   const existing = fixtures.office.bankAccounts.find((account2) => account2.id === accountId);
@@ -40928,6 +41046,37 @@ function upsertOfficeBankAccountFixture(fixtures, accountId, request) {
     balanceAsOf: existing?.balanceAsOf ?? null
   };
   mutableOffice.bankAccounts = upsertById(fixtures.office.bankAccounts, account);
+}
+function countOfficeBankAccountFixtureDependencies(fixtures, accountId) {
+  const statementLineIds = new Set(
+    fixtures.office.bankStatementLines.filter((line) => line.accountId === accountId).map((line) => line.id)
+  );
+  return {
+    accountCount: fixtures.office.bankAccounts.some((account) => account.id === accountId) ? 1 : 0,
+    statementLineCount: statementLineIds.size,
+    reconciliationMatchCount: fixtures.office.bankReconciliationMatches.filter(
+      (match2) => statementLineIds.has(match2.bankStatementLineId)
+    ).length,
+    importBatchCount: fixtures.office.bankImportBatches.filter((batch) => batch.accountId === accountId).length,
+    cashflowProjectionCount: fixtures.office.cashflowProjectionRows.filter((row) => row.accountId === accountId).length
+  };
+}
+function deleteOfficeBankAccountFixture(fixtures, accountId) {
+  const mutableOffice = fixtures.office;
+  const statementLineIds = new Set(
+    fixtures.office.bankStatementLines.filter((line) => line.accountId === accountId).map((line) => line.id)
+  );
+  mutableOffice.bankReconciliationMatches = fixtures.office.bankReconciliationMatches.filter(
+    (match2) => !statementLineIds.has(match2.bankStatementLineId)
+  );
+  mutableOffice.bankStatementLines = fixtures.office.bankStatementLines.filter(
+    (line) => line.accountId !== accountId
+  );
+  mutableOffice.cashflowProjectionRows = fixtures.office.cashflowProjectionRows.filter((row) => row.accountId !== accountId);
+  mutableOffice.bankImportBatches = fixtures.office.bankImportBatches.filter(
+    (batch) => batch.accountId !== accountId
+  );
+  mutableOffice.bankAccounts = fixtures.office.bankAccounts.filter((account) => account.id !== accountId);
 }
 async function officeProjectCreateResponse(context, dependencies) {
   const request = await readZodBody(context, officeProjectWriteSchema);
@@ -41867,6 +42016,31 @@ function mutationReceipt(id, auditEventId) {
     auditEventId
   };
 }
+function queryRowsFromResult(result) {
+  if (typeof result === "object" && result !== null && Array.isArray(result.rows)) {
+    return result.rows;
+  }
+  if (Array.isArray(result)) {
+    return result.filter((row) => typeof row === "object" && row !== null);
+  }
+  return [];
+}
+function integerQueryField(row, key) {
+  if (row === void 0) {
+    return 0;
+  }
+  const value = row[key];
+  if (typeof value === "number") {
+    return value;
+  }
+  if (typeof value === "bigint") {
+    return Number(value);
+  }
+  if (typeof value === "string") {
+    return Number.parseInt(value, 10);
+  }
+  return 0;
+}
 async function persistCommandCenterSettingUpdate(tx, request, actorUserId) {
   if (tx.kind === "memory") {
     return;
@@ -42012,6 +42186,20 @@ function officeTransactionAuditSnapshot(transaction) {
     amountMinor: transaction.amountMinor.toString(),
     originalCurrency: transaction.originalCurrency,
     exchangeRateE10: transaction.exchangeRateE10 === null ? null : transaction.exchangeRateE10.toString()
+  };
+}
+function officeBankAccountAuditSnapshot(account) {
+  return {
+    id: account.id,
+    workspaceId: account.workspaceId,
+    bankName: account.bankName,
+    accountLabel: account.accountLabel,
+    accountReferenceHash: account.accountReferenceHash,
+    currency: account.currency,
+    currentBalanceMinor: account.currentBalanceMinor.toString(),
+    currentBalanceMurMinor: account.currentBalanceMurMinor === null ? null : account.currentBalanceMurMinor.toString(),
+    isActive: account.isActive,
+    balanceAsOf: account.balanceAsOf
   };
 }
 function upsertOfficeTransactionFixture(fixtures, transaction) {

@@ -9,6 +9,7 @@
     "check": "tsc -b --pretty false",
     "generate": "drizzle-kit generate --config drizzle.config.ts",
     "migrate": "drizzle-kit migrate --config drizzle.migrate.config.ts",
+    "migrate:direct": "node migrate-direct.mjs",
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {

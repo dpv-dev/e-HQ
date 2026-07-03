@@ -29,14 +29,15 @@ user = postgres.ywibsaorpqyzovdtjkui
 db   = postgres
 ssl  = require
 ```
-Mettre la connexion dans `packages/db/.env` (gitignoré ; `drizzle.migrate.config.ts` le lit).
+Mettre la connexion dans le `.env` racine (gitignoré). Ne pas recréer de
+`packages/db/.env` : le repo garde une seule source locale non commitée.
 ⚠️ Si le mot de passe contient des caractères spéciaux (`* @ : / ? #`), **URL-encoder**
 dans `DATABASE_URL` (ex. `*` → `%2A`) — sinon le parsing d'URL casse. Alternative
 robuste : utiliser des variables séparées `PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE`.
 
 Vérifier la connexion avant de migrer :
 ```bash
-node --env-file=packages/db/.env packages/db/diag.mjs
+node --env-file=.env packages/db/diag.mjs
 # attendu : CONNECT: OK  + liste des tables + état du journal Drizzle
 ```
 
@@ -50,9 +51,14 @@ node --env-file=packages/db/.env packages/db/diag.mjs
 ## Étape 1 — Migrations DB (Supabase)
 
 ```bash
-# packages/db/.env doit contenir le BON DATABASE_URL (pooler + vrai mot de passe)
-corepack pnpm --filter @ehq/db migrate
+# .env racine doit contenir le BON DATABASE_URL (pooler + vrai mot de passe)
+corepack pnpm --filter @ehq/db migrate:direct
 ```
+Le migrateur direct appelle `drizzle-orm/node-postgres` avec `sslmode=no-verify`
+et le dossier `packages/db/migrations`. C'est le chemin canonique en prod : le CLI
+`drizzle-kit migrate` peut rester muet/spinner chez Hostinger alors que le migrator
+Node remonte les erreurs correctement.
+
 Le migrateur Drizzle est idempotent (journal `drizzle.__drizzle_migrations`).
 Si erreur "type/table already exists" : le schéma existe déjà sans journal Drizzle →
 baseliner (marquer les migrations comme appliquées) plutôt que recréer. Confirmer
@@ -112,6 +118,10 @@ Health check : `curl -fsS "$API_URL/healthz"` → `200 {"status":"ok"}`
 
 Décompresser `app-eeee-frontend.zip` (ou servir `apps/hq/dist/`) en statique sur `app.eeee.mu`. Les `VITE_*` sont déjà bakées
 depuis `apps/hq/.env.production` (clé `sb_publishable_...` = publique).
+Le zip front inclut maintenant `apps/hq/.htaccess` (règle SPA rewrite + cache headers).  
+⚠️ Pendant le déploiement, ne jamais supprimer `public_html` sans restaurer ce `.htaccess` :
+- soit via l’upload du zip `app-eeee-frontend.zip` (recommandé),
+- soit en le recollant manuellement après upload.
 **Config hébergeur indispensable** : fallback SPA — réécrire tout chemin inconnu vers
 `/index.html` (routes client : `/`, `/login`, `/console/*`). Servir `/assets/*`
 (fichiers hashés) avec cache long.
@@ -153,6 +163,7 @@ par défaut ; ajouter d'autres devises = `TARGET_CURRENCIES` dans le script — 
 curl -fsS "$API_URL/healthz"
 curl -fsS "$API_URL/eof/v1/pl/global?workspaceId=workspace_1&period=2026-02"   # route Office réelle
 # ouvrir https://app.eeee.mu/  puis /login puis une page /console/* (vérifier le fallback SPA)
+curl -fsS -o /dev/null -w "%{http_code}\\n" https://app.eeee.mu/console/office/bank   # doit retourner 200 (pas 404 Hostinger)
 ```
 
 ## Rollback
@@ -160,16 +171,22 @@ curl -fsS "$API_URL/eof/v1/pl/global?workspaceId=workspace_1&period=2026-02"   #
 - API : ré-pointer la route prod vers l'ancien slot ; le bundle ne mute pas la DB au démarrage.
 - DB : Supabase a des sauvegardes/PITR ; ne pas relancer de migration destructive en rollback.
 
-## État au 2026-06-29
+## État au 2026-07-03
 
 - Artefacts buildés et verts : API (`tsc` OK, **tests 44/44**, bundle ~1.65 Mo), frontend
   (`apps/hq/dist/`, build propre, shell unifié), api-client + domain-office OK.
-- DB **déjà migrée** (53 tables, journal Drizzle 0000→0011) — rien à migrer.
+- DB live **déjà migrée** : journal Drizzle 0000→0012 (13 entrées). Objets vérifiés :
+  `api_import_previews`, `command_center_settings`,
+  `command_center_integration_states`, `command_center_user_permissions`,
+  `categories.account_code`, `categories.account_label`,
+  enum `transaction_source = ledger_import`, table `exchange_rates` présente
+  avec des taux jusqu'au 2026-06-30.
 - API **déjà LIVE** à `api.eeee.mu` (`/healthz` 200, lit la vraie DB). Ce déploiement = **mise à jour**.
 
 ### Nouveautés de cette livraison (à prendre en compte au redéploiement)
 1. **Import EUR + conversion FX** : les lignes en devise étrangère sont converties en MUR à
-   l'import via la table `exchange_rates`. → faire **Étape 4** (poser/rafraîchir un taux + cron FX).
+   l'import via la table `exchange_rates` (table historique, pas créée par 0012). → garder
+   **Étape 4** active (poser/rafraîchir un taux + cron FX).
 2. **Job FX quotidien** : `scripts/refresh-fx.mjs` (dans le zip API) — cron Hostinger quotidien.
 3. **Filtre Period** : 6 options (This Week→Custom) filtrant réellement les vues Office (P&L,
    transactions, rapprochements, cashflow, partenaires, projets). Pur code → **redéployer API + front**.

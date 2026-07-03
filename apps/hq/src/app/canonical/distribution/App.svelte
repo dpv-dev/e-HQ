@@ -946,6 +946,8 @@
           workspaceId: distributionWorkspaceId,
           period: distributionPeriod,
           status: toNullableSuspenseStatus(suspenseStatusFilter),
+          dateFrom: activeRange.from,
+          dateTo: activeRange.to,
           cursor,
           limit: TABLE_PAGE_SIZE
         }),
@@ -1002,6 +1004,8 @@
           period: distributionPeriod,
           payeeId: null,
           status: toNullablePaymentStatus(paymentStatusFilter),
+          dateFrom: activeRange.from,
+          dateTo: activeRange.to,
           cursor,
           limit: TABLE_PAGE_SIZE
         }),
@@ -1032,6 +1036,8 @@
           store: null,
           currency: null,
           groupBy: revenueGroupBy,
+          dateFrom: activeRange.from,
+          dateTo: activeRange.to,
           cursor,
           limit: TABLE_PAGE_SIZE
         }),
@@ -1138,7 +1144,12 @@
 
     try {
       dashboardState = createSuccessState<DistributionDashboardResponse>(
-        await client.distribution.getDashboard({ workspaceId: distributionWorkspaceId, period: distributionPeriod })
+        await client.distribution.getDashboard({
+          workspaceId: distributionWorkspaceId,
+          period: distributionPeriod,
+          dateFrom: activeRange.from,
+          dateTo: activeRange.to
+        })
       );
     } catch (error: unknown) {
       dashboardState = createErrorState<DistributionDashboardResponse>(error);
@@ -1272,6 +1283,8 @@
           workspaceId: distributionWorkspaceId,
           period: distributionPeriod,
           status: toNullableSuspenseStatus(suspenseStatusFilter),
+          dateFrom: activeRange.from,
+          dateTo: activeRange.to,
           cursor: null,
           limit: TABLE_PAGE_SIZE
         })
@@ -1312,6 +1325,8 @@
           period: distributionPeriod,
           payeeId: null,
           status: toNullablePaymentStatus(paymentStatusFilter),
+          dateFrom: activeRange.from,
+          dateTo: activeRange.to,
           cursor: null,
           limit: TABLE_PAGE_SIZE
         })
@@ -1334,6 +1349,8 @@
           store: null,
           currency: null,
           groupBy: revenueGroupBy,
+          dateFrom: activeRange.from,
+          dateTo: activeRange.to,
           cursor: null,
           limit: TABLE_PAGE_SIZE
         })

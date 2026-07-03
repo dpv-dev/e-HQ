@@ -13,11 +13,13 @@ API_DIR="services/api/deploy"
 FRONT_DIR="apps/hq/dist"
 API_ZIP="app-eeee-api-hostinger.zip"
 FRONT_ZIP="app-eeee-frontend.zip"
+FRONT_HTACCESS_TEMPLATE="apps/hq/.htaccess"
 
 # --- preconditions: build must have run ---
 [ -f "$API_DIR/server.bundle.js" ] || { echo "ERROR: $API_DIR/server.bundle.js missing — run ./deploy-build.sh first"; exit 1; }
 [ -f "$API_DIR/scripts/refresh-fx.mjs" ] || { echo "ERROR: $API_DIR/scripts/refresh-fx.mjs missing — run ./deploy-build.sh first"; exit 1; }
 [ -f "$FRONT_DIR/index.html" ] || { echo "ERROR: $FRONT_DIR/index.html missing — run ./deploy-build.sh first"; exit 1; }
+[ -f "$FRONT_HTACCESS_TEMPLATE" ] || { echo "ERROR: $FRONT_HTACCESS_TEMPLATE missing — create this deploy-time SPA fallback file."; exit 1; }
 
 # --- secret guard: never ship .env or real secret values ---
 echo "==> Secret guard"
@@ -36,6 +38,7 @@ rm -f "$API_ZIP"
 ( cd "$API_DIR" && zip -rq "$OLDPWD/$API_ZIP" . -x '*.DS_Store' '__MACOSX/*' )
 
 echo "==> Front zip -> $FRONT_ZIP"
+cp "$FRONT_HTACCESS_TEMPLATE" "$FRONT_DIR/.htaccess"
 rm -f "$FRONT_ZIP"
 ( cd "$FRONT_DIR" && zip -rq "$OLDPWD/$FRONT_ZIP" . -x '*.DS_Store' '__MACOSX/*' )
 
@@ -44,6 +47,9 @@ echo "Top-level of $API_ZIP:"
 unzip -Z1 "$API_ZIP" | grep -vE '/.+' | sed 's/^/    /'
 echo "Top-level of $FRONT_ZIP:"
 unzip -Z1 "$FRONT_ZIP" | grep -vE '/.+' | sed 's/^/    /'
+if [ -f "$FRONT_DIR/.htaccess" ]; then
+  echo "    .htaccess included in $FRONT_ZIP"
+fi
 echo
 echo "Sizes:"; ls -lh "$API_ZIP" "$FRONT_ZIP" | awk '{print "    "$5"  "$9}'
 echo "Done. Upload these two on the host (see DEPLOYMENT.md)."

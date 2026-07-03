@@ -28,6 +28,7 @@ export interface RestTransport {
   readonly get: <TResult>(path: string, query: QueryParams) => Promise<TResult>;
   readonly post: <TResult>(path: string, body: unknown, idempotencyKey: IdempotencyKey) => Promise<TResult>;
   readonly patch: <TResult>(path: string, body: unknown, idempotencyKey: IdempotencyKey) => Promise<TResult>;
+  readonly delete: <TResult>(path: string, body: unknown, idempotencyKey: IdempotencyKey) => Promise<TResult>;
 }
 
 export const standardApiRetryPolicy: RetryPolicy = {
@@ -63,6 +64,15 @@ export function createRestTransport(config: ApiClientConfig, namespace: LegacyNa
     patch: <TResult>(path: string, body: unknown, idempotencyKey: IdempotencyKey): Promise<TResult> =>
       requestJson<TResult>(config, {
         method: "PATCH",
+        namespace,
+        path,
+        query: {},
+        body,
+        idempotencyKey
+      }),
+    delete: <TResult>(path: string, body: unknown, idempotencyKey: IdempotencyKey): Promise<TResult> =>
+      requestJson<TResult>(config, {
+        method: "DELETE",
         namespace,
         path,
         query: {},

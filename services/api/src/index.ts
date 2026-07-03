@@ -324,6 +324,14 @@ interface PaymentMutationResponse extends ApiMutationReceipt, ApiMutationRespons
   readonly groupTotals: readonly StatementGroupTotal[];
 }
 
+interface OfficeBankAccountDeleteCounts {
+  readonly accountCount: number;
+  readonly statementLineCount: number;
+  readonly reconciliationMatchCount: number;
+  readonly importBatchCount: number;
+  readonly cashflowProjectionCount: number;
+}
+
 interface ContractRoyaltyRuleRequest {
   readonly payeeId: string;
   readonly percentage: string;
@@ -541,6 +549,7 @@ const officeBankAccountWriteSchema = workspaceBodySchema.extend({
   active: z.boolean()
 });
 type OfficeBankAccountWriteRequest = z.infer<typeof officeBankAccountWriteSchema>;
+type OfficeBankAccountDeleteRequest = WorkspaceBodyRequest;
 const officeProjectWriteSchema = workspaceBodySchema.extend({
   name: z.string().min(1),
   status: z.enum(["draft", "active", "paused", "completed", "cancelled", "archived"]),
@@ -781,7 +790,7 @@ export function createApiService(dependencies: ApiServiceDependencies): Hono<Api
         "http://localhost:5173",
         "http://127.0.0.1:5173"
       ],
-      allowMethods: ["GET", "POST", "PATCH", "OPTIONS"],
+      allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
       allowHeaders: ["Content-Type", "Authorization", "Idempotency-Key"]
     })
   );
@@ -1126,6 +1135,10 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
 
   app.patch("/eof/v1/bank/accounts/:accountId", async (context) => {
     return officeBankAccountUpdateResponse(context, dependencies);
+  });
+
+  app.delete("/eof/v1/bank/accounts/:accountId", async (context) => {
+    return officeBankAccountDeleteResponse(context, dependencies);
   });
 
   app.get("/eof/v1/bank/raw", (context) => {
@@ -2471,11 +2484,59 @@ async function officeBankAccountUpdateResponse(context: ApiContext, dependencies
         action: "office_bank_account_update",
         targetType: "office_bank_account",
         targetId: accountId,
-        before: { account: before },
+        before: { account: officeBankAccountAuditSnapshot(before) },
         after: { accountId, request },
         idempotencyKey: resolvedIdempotencyKey
       });
       upsertOfficeBankAccountFixture(dependencies.fixtures, accountId, request);
+      return mutationReceipt(accountId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function officeBankAccountDeleteResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const accountId = requirePathParam(context, "accountId");
+  const request = await readZodBody<OfficeBankAccountDeleteRequest>(context, workspaceBodySchema);
+  const before = dependencies.fixtures.office.bankAccounts.find(
+    (account: OfficeBankAccountRow): boolean => account.id === accountId && account.workspaceId === request.workspaceId
+  );
+  if (before === undefined) {
+    throw new ApiRouteError(404, "office_bank_account_not_found", "Office bank account was not found.", [
+      `accountId=${accountId}`,
+      `workspaceId=${request.workspaceId}`
+    ]);
+  }
+
+  const fixtureCounts = countOfficeBankAccountFixtureDependencies(dependencies.fixtures, accountId);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_bank_account_delete",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `office:bank-account:${accountId}`);
+      const deletedCounts = await persistOfficeBankAccountDelete(tx, accountId, request);
+      if (tx.kind !== "memory" && deletedCounts.accountCount !== 1) {
+        throw new ApiRouteError(404, "office_bank_account_not_found", "Office bank account was not found.", [
+          `accountId=${accountId}`,
+          `workspaceId=${request.workspaceId}`
+        ]);
+      }
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_bank_account_delete",
+        targetType: "office_bank_account",
+        targetId: accountId,
+        before: { account: officeBankAccountAuditSnapshot(before), counts: fixtureCounts },
+        after: { accountId, deletedCounts },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      deleteOfficeBankAccountFixture(dependencies.fixtures, accountId);
       return mutationReceipt(accountId, auditEventId);
     }
   });
@@ -2506,6 +2567,80 @@ async function persistOfficeBankAccountUpsert(tx: ApiWriteTransaction, accountId
   `);
 }
 
+async function persistOfficeBankAccountDelete(
+  tx: ApiWriteTransaction,
+  accountId: string,
+  request: OfficeBankAccountDeleteRequest
+): Promise<OfficeBankAccountDeleteCounts> {
+  if (tx.kind === "memory") {
+    return {
+      accountCount: 1,
+      statementLineCount: 0,
+      reconciliationMatchCount: 0,
+      importBatchCount: 0,
+      cashflowProjectionCount: 0
+    };
+  }
+
+  const rows = queryRowsFromResult(await tx.executor.execute(sql`
+    with scoped_account as (
+      select id
+      from office_bank_accounts
+      where id = ${accountId}
+        and workspace_id = ${request.workspaceId}
+    ),
+    scoped_lines as (
+      select line.id
+      from office_bank_statement_lines line
+      join scoped_account account on account.id = line.account_id
+    ),
+    deleted_matches as (
+      delete from office_bank_reconciliation_matches match
+      using scoped_lines line
+      where match.bank_statement_line_id = line.id
+      returning match.id
+    ),
+    deleted_lines as (
+      delete from office_bank_statement_lines line
+      using scoped_account account
+      where line.account_id = account.id
+      returning line.id
+    ),
+    deleted_cashflow as (
+      delete from office_cashflow_projection_rows row
+      using scoped_account account
+      where row.account_id = account.id
+      returning row.id
+    ),
+    deleted_batches as (
+      delete from office_bank_import_batches batch
+      using scoped_account account
+      where batch.account_id = account.id
+      returning batch.id
+    ),
+    deleted_account as (
+      delete from office_bank_accounts account
+      using scoped_account scoped
+      where account.id = scoped.id
+      returning account.id
+    )
+    select
+      (select count(*) from deleted_account)::int as account_count,
+      (select count(*) from deleted_lines)::int as statement_line_count,
+      (select count(*) from deleted_matches)::int as reconciliation_match_count,
+      (select count(*) from deleted_batches)::int as import_batch_count,
+      (select count(*) from deleted_cashflow)::int as cashflow_projection_count
+  `));
+  const row = rows[0];
+  return {
+    accountCount: integerQueryField(row, "account_count"),
+    statementLineCount: integerQueryField(row, "statement_line_count"),
+    reconciliationMatchCount: integerQueryField(row, "reconciliation_match_count"),
+    importBatchCount: integerQueryField(row, "import_batch_count"),
+    cashflowProjectionCount: integerQueryField(row, "cashflow_projection_count")
+  };
+}
+
 function upsertOfficeBankAccountFixture(fixtures: ApiFixtureStore, accountId: string, request: OfficeBankAccountWriteRequest): void {
   const mutableOffice = fixtures.office as Mutable<OfficeAnalyticsDataset>;
   const existing = fixtures.office.bankAccounts.find((account: OfficeBankAccountRow): boolean => account.id === accountId);
@@ -2522,6 +2657,45 @@ function upsertOfficeBankAccountFixture(fixtures: ApiFixtureStore, accountId: st
     balanceAsOf: existing?.balanceAsOf ?? null
   };
   mutableOffice.bankAccounts = upsertById(fixtures.office.bankAccounts, account);
+}
+
+function countOfficeBankAccountFixtureDependencies(fixtures: ApiFixtureStore, accountId: string): OfficeBankAccountDeleteCounts {
+  const statementLineIds = new Set<string>(
+    fixtures.office.bankStatementLines
+      .filter((line: OfficeBankStatementLineRow): boolean => line.accountId === accountId)
+      .map((line: OfficeBankStatementLineRow): string => line.id)
+  );
+
+  return {
+    accountCount: fixtures.office.bankAccounts.some((account: OfficeBankAccountRow): boolean => account.id === accountId) ? 1 : 0,
+    statementLineCount: statementLineIds.size,
+    reconciliationMatchCount: fixtures.office.bankReconciliationMatches.filter((match): boolean =>
+      statementLineIds.has(match.bankStatementLineId)
+    ).length,
+    importBatchCount: fixtures.office.bankImportBatches.filter((batch: OfficeBankImportBatchRow): boolean => batch.accountId === accountId).length,
+    cashflowProjectionCount: fixtures.office.cashflowProjectionRows.filter((row): boolean => row.accountId === accountId).length
+  };
+}
+
+function deleteOfficeBankAccountFixture(fixtures: ApiFixtureStore, accountId: string): void {
+  const mutableOffice = fixtures.office as Mutable<OfficeAnalyticsDataset>;
+  const statementLineIds = new Set<string>(
+    fixtures.office.bankStatementLines
+      .filter((line: OfficeBankStatementLineRow): boolean => line.accountId === accountId)
+      .map((line: OfficeBankStatementLineRow): string => line.id)
+  );
+
+  mutableOffice.bankReconciliationMatches = fixtures.office.bankReconciliationMatches.filter(
+    (match): boolean => !statementLineIds.has(match.bankStatementLineId)
+  );
+  mutableOffice.bankStatementLines = fixtures.office.bankStatementLines.filter(
+    (line: OfficeBankStatementLineRow): boolean => line.accountId !== accountId
+  );
+  mutableOffice.cashflowProjectionRows = fixtures.office.cashflowProjectionRows.filter((row): boolean => row.accountId !== accountId);
+  mutableOffice.bankImportBatches = fixtures.office.bankImportBatches.filter(
+    (batch: OfficeBankImportBatchRow): boolean => batch.accountId !== accountId
+  );
+  mutableOffice.bankAccounts = fixtures.office.bankAccounts.filter((account: OfficeBankAccountRow): boolean => account.id !== accountId);
 }
 
 async function officeProjectCreateResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
@@ -3568,6 +3742,39 @@ function mutationReceipt(id: string, auditEventId: string): ApiMutationReceipt &
   };
 }
 
+function queryRowsFromResult(result: unknown): readonly JsonRecord[] {
+  if (typeof result === "object" && result !== null && Array.isArray((result as { readonly rows?: unknown }).rows)) {
+    return (result as { readonly rows: readonly JsonRecord[] }).rows;
+  }
+
+  if (Array.isArray(result)) {
+    return result.filter((row: unknown): row is JsonRecord => typeof row === "object" && row !== null);
+  }
+
+  return [];
+}
+
+function integerQueryField(row: JsonRecord | undefined, key: string): number {
+  if (row === undefined) {
+    return 0;
+  }
+
+  const value = row[key];
+  if (typeof value === "number") {
+    return value;
+  }
+
+  if (typeof value === "bigint") {
+    return Number(value);
+  }
+
+  if (typeof value === "string") {
+    return Number.parseInt(value, 10);
+  }
+
+  return 0;
+}
+
 async function persistCommandCenterSettingUpdate(
   tx: ApiWriteTransaction,
   request: CommandCenterSettingUpdateRequest,
@@ -3743,6 +3950,21 @@ function officeTransactionAuditSnapshot(transaction: OfficeTransactionRow): Read
     amountMinor: transaction.amountMinor.toString(),
     originalCurrency: transaction.originalCurrency,
     exchangeRateE10: transaction.exchangeRateE10 === null ? null : transaction.exchangeRateE10.toString()
+  };
+}
+
+function officeBankAccountAuditSnapshot(account: OfficeBankAccountRow): Readonly<Record<string, unknown>> {
+  return {
+    id: account.id,
+    workspaceId: account.workspaceId,
+    bankName: account.bankName,
+    accountLabel: account.accountLabel,
+    accountReferenceHash: account.accountReferenceHash,
+    currency: account.currency,
+    currentBalanceMinor: account.currentBalanceMinor.toString(),
+    currentBalanceMurMinor: account.currentBalanceMurMinor === null ? null : account.currentBalanceMurMinor.toString(),
+    isActive: account.isActive,
+    balanceAsOf: account.balanceAsOf
   };
 }
 

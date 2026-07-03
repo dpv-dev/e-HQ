@@ -14,6 +14,7 @@ import type {
   CashflowQuery,
   EntityId,
   OfficeBankAccountsQuery,
+  OfficeBankAccountDeleteRequest,
   OfficeBankAccountSummary,
   OfficeBankAccountWriteRequest,
   OfficeBankQualityQuery,
@@ -192,6 +193,7 @@ export interface OfficeApiClient {
   readonly listBankAccounts: (query: OfficeBankAccountsQuery) => Promise<PageResult<OfficeBankAccountSummary>>;
   readonly createBankAccount: (request: OfficeBankAccountWriteRequest, options: WriteRequestOptions) => Promise<ApiMutationReceipt>;
   readonly updateBankAccount: (accountId: EntityId, request: OfficeBankAccountWriteRequest, options: WriteRequestOptions) => Promise<ApiMutationReceipt>;
+  readonly deleteBankAccount: (accountId: EntityId, request: OfficeBankAccountDeleteRequest, options: WriteRequestOptions) => Promise<ApiMutationReceipt>;
   readonly listBankRawLines: (query: OfficeBankRawLinesQuery) => Promise<PageResult<OfficeBankRawLine>>;
   readonly getVatReport: (query: OfficeVatQuery) => Promise<OfficeVatReport>;
 }
@@ -508,6 +510,8 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
       transport.post<ApiMutationReceipt>("bank/accounts", request, options.idempotencyKey),
     updateBankAccount: (accountId: EntityId, request: OfficeBankAccountWriteRequest, options: WriteRequestOptions): Promise<ApiMutationReceipt> =>
       transport.patch<ApiMutationReceipt>(`bank/accounts/${encodePathSegment(accountId)}`, request, options.idempotencyKey),
+    deleteBankAccount: (accountId: EntityId, request: OfficeBankAccountDeleteRequest, options: WriteRequestOptions): Promise<ApiMutationReceipt> =>
+      transport.delete<ApiMutationReceipt>(`bank/accounts/${encodePathSegment(accountId)}`, request, options.idempotencyKey),
     listBankRawLines: (query: OfficeBankRawLinesQuery): Promise<PageResult<OfficeBankRawLine>> =>
       transport.get<PageResult<OfficeBankRawLine>>("bank/raw", {
         workspaceId: query.workspaceId,

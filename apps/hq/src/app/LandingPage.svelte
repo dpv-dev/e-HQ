@@ -14,9 +14,9 @@
     type WorkspaceAppId
   } from "@ehq/auth";
   import { Button, Loader } from "@ehq/ui";
-  import commandCenterScene from "../../../../packages/ui/assets/backgrounds/scene-command-center.svg?url";
   import commandCenterPhoto from "../../../../packages/ui/assets/backgrounds/hq-card-command-center.jpg?url";
   import distributionPhoto from "../../../../packages/ui/assets/backgrounds/hq-card-distribution.jpg?url";
+  import landingBackground from "../../../../packages/ui/assets/backgrounds/hq-landing-command-room.png?url";
   import officePhoto from "../../../../packages/ui/assets/backgrounds/hq-card-office.jpg?url";
   import { createShellApiClient } from "./app-shell-data.js";
   import type { AppRoute } from "./routes.js";
@@ -63,13 +63,6 @@
 
   const cards: readonly WorkspaceCard[] = [
     {
-      workspaceId: "command-center",
-      eyebrow: "Command Center",
-      title: "HQ",
-      description: "Manage overall operations and monitoring.",
-      image: commandCenterPhoto
-    },
-    {
       workspaceId: "office",
       eyebrow: "Finance Control",
       title: "Office",
@@ -82,6 +75,13 @@
       title: "Distribution",
       description: "Manage royalties, imports, mapping and allocations.",
       image: distributionPhoto
+    },
+    {
+      workspaceId: "command-center",
+      eyebrow: "Command Center",
+      title: "HQ",
+      description: "Manage overall operations and monitoring.",
+      image: commandCenterPhoto
     }
   ];
 
@@ -272,6 +272,36 @@
 </svelte:head>
 
 <main class="landing-shell" class:fogged={loginOpen}>
+  <img class="landing-background" src={landingBackground} alt="" aria-hidden="true" />
+  <div class="map-sparkles" aria-hidden="true">
+    <span class="sparkle s1"></span>
+    <span class="sparkle s2"></span>
+    <span class="sparkle s3"></span>
+    <span class="sparkle s4"></span>
+    <span class="sparkle s5"></span>
+    <span class="sparkle s6"></span>
+    <span class="sparkle s7"></span>
+    <span class="sparkle s8"></span>
+    <span class="sparkle s9"></span>
+    <span class="sparkle s10"></span>
+    <span class="sparkle s11"></span>
+    <span class="sparkle s12"></span>
+    <span class="sparkle s13"></span>
+    <span class="sparkle s14"></span>
+    <span class="sparkle s15"></span>
+    <span class="sparkle s16"></span>
+    <span class="sparkle s17"></span>
+    <span class="sparkle s18"></span>
+    <span class="sparkle s19"></span>
+    <span class="sparkle s20"></span>
+    <span class="signal-flow f1"></span>
+    <span class="signal-flow f2"></span>
+    <span class="signal-flow f3"></span>
+    <span class="signal-flow f4"></span>
+    <span class="signal-flow f5"></span>
+    <span class="signal-flow f6"></span>
+  </div>
+
   <header class="landing-top">
     <button class="brand" type="button" aria-label="ë • HQ home" onclick={() => onNavigate("/")}>
       <span class="brand-e">ë</span>
@@ -392,10 +422,6 @@
       <p class="lead">Select your workspace to continue</p>
       <i aria-hidden="true"></i>
     </div>
-
-    <div class="hero-scene" aria-hidden="true">
-      <img src={commandCenterScene} alt="" />
-    </div>
   </section>
 
   <section class="workspace-grid" aria-label="Available workspaces">
@@ -445,11 +471,63 @@
         </div>
       </article>
     {/each}
+
+    <article class="workspace-card session-card accent-session">
+      <div class="session-visual" aria-hidden="true">
+        <span>{userInitials}</span>
+        <i></i>
+      </div>
+
+      <div class="workspace-copy">
+        <div class="card-head">
+          <span class="hexicon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M12 2.6 20.5 7.3v9.4L12 21.4 3.5 16.7V7.3Z" /></svg>
+          </span>
+          <h2>Session</h2>
+        </div>
+        <p class="card-sub">{isLoggedIn ? "Active access" : "Secure access"}</p>
+        <p class="card-desc">
+          {#if isLoggedIn}
+            {userName} · {userRole}
+          {:else}
+            Sign in to unlock your current workspaces.
+          {/if}
+        </p>
+        <div class="workspace-actions">
+          {#if isLoggedIn}
+            <Button
+              label="Sign out →"
+              variant="secondary"
+              size="medium"
+              type="button"
+              disabled={false}
+              loading={false}
+              locked={false}
+              focus={false}
+              ariaLabel="Sign out"
+              onclick={signOut}
+            />
+          {:else}
+            <Button
+              label="Sign in →"
+              variant="secondary"
+              size="medium"
+              type="button"
+              disabled={false}
+              loading={false}
+              locked={false}
+              focus={false}
+              ariaLabel="Sign in"
+              onclick={() => openLogin(null)}
+            />
+          {/if}
+        </div>
+      </div>
+    </article>
   </section>
 
   <footer>
     <span>© 2026 ë-HQ. All rights reserved.</span>
-    <span>Privacy Policy · Terms of Service</span>
   </footer>
 
 </main>
@@ -543,6 +621,8 @@
   }
 
   .landing-shell {
+    position: relative;
+    isolation: isolate;
     height: 100dvh;
     min-height: 0;
     padding: clamp(var(--ehq-space-4), 2.4vh, var(--ehq-space-5)) clamp(var(--ehq-space-5), 4vw, var(--ehq-space-8));
@@ -554,6 +634,359 @@
     overflow: hidden;
   }
 
+  .landing-shell::before,
+  .landing-shell::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+  }
+
+  .landing-shell::before {
+    background:
+      linear-gradient(90deg, color-mix(in srgb, var(--ehq-bg-main) 72%, transparent) 0%, color-mix(in srgb, var(--ehq-bg-main) 36%, transparent) 30%, color-mix(in srgb, var(--ehq-bg-main) 5%, transparent) 58%, color-mix(in srgb, var(--ehq-bg-main) 12%, transparent) 100%),
+      linear-gradient(180deg, color-mix(in srgb, var(--ehq-bg-main) 8%, transparent) 0%, transparent 42%, color-mix(in srgb, var(--ehq-bg-main) 42%, transparent) 100%);
+  }
+
+  .landing-shell::after {
+    background:
+      radial-gradient(circle at 12% 48%, color-mix(in srgb, var(--ehq-yellow) 10%, transparent), transparent 20rem),
+      linear-gradient(180deg, transparent 0%, color-mix(in srgb, var(--ehq-bg-main) 46%, transparent) 100%);
+    mix-blend-mode: screen;
+    opacity: 0.34;
+  }
+
+  .landing-background {
+    position: absolute;
+    inset: 0;
+    z-index: -2;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center center;
+    filter: saturate(1.08) brightness(1.02) contrast(1.04);
+    transform: scale(1.01);
+    pointer-events: none;
+    user-select: none;
+  }
+
+  .map-sparkles {
+    position: absolute;
+    left: clamp(520px, 50.8vw, 920px);
+    top: clamp(92px, 14.2vh, 146px);
+    z-index: 0;
+    width: clamp(500px, 42.4vw, 790px);
+    height: clamp(178px, 27vh, 280px);
+    pointer-events: none;
+  }
+
+  .sparkle {
+    position: absolute;
+    left: var(--spark-x);
+    top: var(--spark-y);
+    width: var(--spark-size);
+    height: var(--spark-size);
+    border-radius: var(--ehq-radius-pill);
+    background: var(--ehq-yellow);
+    box-shadow:
+      0 0 8px color-mix(in srgb, var(--ehq-yellow) 86%, transparent),
+      0 0 22px color-mix(in srgb, var(--ehq-yellow) 44%, transparent);
+    opacity: 0.18;
+    transform: translate(-50%, -50%) scale(0.72);
+    animation: mapTwinkle var(--spark-speed) ease-in-out infinite;
+    animation-delay: var(--spark-delay);
+  }
+
+  .signal-flow {
+    position: absolute;
+    left: var(--flow-x);
+    top: var(--flow-y);
+    z-index: 1;
+    width: var(--flow-length);
+    height: 10px;
+    transform: rotate(var(--flow-angle));
+    transform-origin: left center;
+    opacity: 0.92;
+    pointer-events: none;
+  }
+
+  .signal-flow::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 0;
+    width: var(--flow-size);
+    height: var(--flow-size);
+    border-radius: var(--ehq-radius-pill);
+    background: var(--ehq-yellow);
+    box-shadow:
+      0 0 8px color-mix(in srgb, var(--ehq-yellow) 92%, transparent),
+      0 0 18px color-mix(in srgb, var(--ehq-yellow) 50%, transparent);
+    transform: translate(-50%, -50%);
+    animation: signalTravel var(--flow-speed) linear infinite;
+    animation-delay: var(--flow-delay);
+  }
+
+  .s1 {
+    --spark-x: 7%;
+    --spark-y: 34%;
+    --spark-size: 4px;
+    --spark-speed: 2.7s;
+    --spark-delay: -0.4s;
+  }
+
+  .s2 {
+    --spark-x: 17%;
+    --spark-y: 24%;
+    --spark-size: 3px;
+    --spark-speed: 3.1s;
+    --spark-delay: -1.6s;
+  }
+
+  .s3 {
+    --spark-x: 31%;
+    --spark-y: 30%;
+    --spark-size: 5px;
+    --spark-speed: 2.9s;
+    --spark-delay: -2.2s;
+  }
+
+  .s4 {
+    --spark-x: 43%;
+    --spark-y: 38%;
+    --spark-size: 3px;
+    --spark-speed: 2.5s;
+    --spark-delay: -0.9s;
+  }
+
+  .s5 {
+    --spark-x: 55%;
+    --spark-y: 31%;
+    --spark-size: 4px;
+    --spark-speed: 3.4s;
+    --spark-delay: -1.2s;
+  }
+
+  .s6 {
+    --spark-x: 72%;
+    --spark-y: 38%;
+    --spark-size: 3px;
+    --spark-speed: 2.8s;
+    --spark-delay: -2.7s;
+  }
+
+  .s7 {
+    --spark-x: 21%;
+    --spark-y: 64%;
+    --spark-size: 3px;
+    --spark-speed: 3.5s;
+    --spark-delay: -1.1s;
+  }
+
+  .s8 {
+    --spark-x: 37%;
+    --spark-y: 55%;
+    --spark-size: 4px;
+    --spark-speed: 2.6s;
+    --spark-delay: -2s;
+  }
+
+  .s9 {
+    --spark-x: 49%;
+    --spark-y: 60%;
+    --spark-size: 3px;
+    --spark-speed: 3.2s;
+    --spark-delay: -0.2s;
+  }
+
+  .s10 {
+    --spark-x: 64%;
+    --spark-y: 57%;
+    --spark-size: 5px;
+    --spark-speed: 2.9s;
+    --spark-delay: -1.8s;
+  }
+
+  .s11 {
+    --spark-x: 84%;
+    --spark-y: 67%;
+    --spark-size: 3px;
+    --spark-speed: 3.6s;
+    --spark-delay: -2.4s;
+  }
+
+  .s12 {
+    --spark-x: 3%;
+    --spark-y: 58%;
+    --spark-size: 3px;
+    --spark-speed: 3s;
+    --spark-delay: -1.4s;
+  }
+
+  .s13 {
+    --spark-x: 29%;
+    --spark-y: 43%;
+    --spark-size: 3px;
+    --spark-speed: 2.45s;
+    --spark-delay: -0.7s;
+  }
+
+  .s14 {
+    --spark-x: 39%;
+    --spark-y: 26%;
+    --spark-size: 4px;
+    --spark-speed: 3.15s;
+    --spark-delay: -1.9s;
+  }
+
+  .s15 {
+    --spark-x: 51%;
+    --spark-y: 43%;
+    --spark-size: 5px;
+    --spark-speed: 2.75s;
+    --spark-delay: -2.3s;
+  }
+
+  .s16 {
+    --spark-x: 61%;
+    --spark-y: 34%;
+    --spark-size: 3px;
+    --spark-speed: 3.25s;
+    --spark-delay: -1.5s;
+  }
+
+  .s17 {
+    --spark-x: 76%;
+    --spark-y: 28%;
+    --spark-size: 4px;
+    --spark-speed: 2.6s;
+    --spark-delay: -0.1s;
+  }
+
+  .s18 {
+    --spark-x: 91%;
+    --spark-y: 70%;
+    --spark-size: 5px;
+    --spark-speed: 3.05s;
+    --spark-delay: -2.55s;
+  }
+
+  .s19 {
+    --spark-x: 69%;
+    --spark-y: 61%;
+    --spark-size: 3px;
+    --spark-speed: 2.35s;
+    --spark-delay: -1.25s;
+  }
+
+  .s20 {
+    --spark-x: 12%;
+    --spark-y: 48%;
+    --spark-size: 4px;
+    --spark-speed: 3.45s;
+    --spark-delay: -2.85s;
+  }
+
+  .f1 {
+    --flow-x: 9%;
+    --flow-y: 31%;
+    --flow-length: 24%;
+    --flow-angle: -11deg;
+    --flow-size: 4px;
+    --flow-speed: 4.8s;
+    --flow-delay: -1.2s;
+  }
+
+  .f2 {
+    --flow-x: 29%;
+    --flow-y: 32%;
+    --flow-length: 26%;
+    --flow-angle: 8deg;
+    --flow-size: 5px;
+    --flow-speed: 5.4s;
+    --flow-delay: -3.1s;
+  }
+
+  .f3 {
+    --flow-x: 51%;
+    --flow-y: 36%;
+    --flow-length: 22%;
+    --flow-angle: -14deg;
+    --flow-size: 4px;
+    --flow-speed: 4.2s;
+    --flow-delay: -0.4s;
+  }
+
+  .f4 {
+    --flow-x: 41%;
+    --flow-y: 44%;
+    --flow-length: 36%;
+    --flow-angle: 22deg;
+    --flow-size: 4px;
+    --flow-speed: 6s;
+    --flow-delay: -2.4s;
+  }
+
+  .f5 {
+    --flow-x: 18%;
+    --flow-y: 53%;
+    --flow-length: 31%;
+    --flow-angle: -18deg;
+    --flow-size: 3px;
+    --flow-speed: 5.2s;
+    --flow-delay: -4.2s;
+  }
+
+  .f6 {
+    --flow-x: 64%;
+    --flow-y: 60%;
+    --flow-length: 28%;
+    --flow-angle: 24deg;
+    --flow-size: 5px;
+    --flow-speed: 4.9s;
+    --flow-delay: -1.7s;
+  }
+
+  @keyframes mapTwinkle {
+    0%,
+    100% {
+      opacity: 0.14;
+      transform: translate(-50%, -50%) scale(0.72);
+    }
+
+    42% {
+      opacity: 0.92;
+      transform: translate(-50%, -50%) scale(1.35);
+    }
+
+    56% {
+      opacity: 0.38;
+      transform: translate(-50%, -50%) scale(0.94);
+    }
+  }
+
+  @keyframes signalTravel {
+    0% {
+      opacity: 0;
+      transform: translate(-50%, -50%) scale(0.55);
+    }
+
+    12% {
+      opacity: 1;
+    }
+
+    82% {
+      opacity: 1;
+    }
+
+    100% {
+      left: 100%;
+      opacity: 0;
+      transform: translate(-50%, -50%) scale(1.08);
+    }
+  }
+
   .landing-shell.fogged {
     filter: saturate(0.82);
   }
@@ -561,6 +994,8 @@
   .landing-top,
   .top-right,
   footer {
+    position: relative;
+    z-index: 1;
     flex: 0 0 auto;
     display: flex;
     align-items: center;
@@ -795,16 +1230,20 @@
   }
 
   .hero {
-    flex: 1 1 46%;
+    position: relative;
+    z-index: 1;
+    flex: 0 1 36%;
     min-height: 0;
     display: grid;
-    grid-template-columns: minmax(0, 0.82fr) minmax(0, 1.18fr);
+    grid-template-columns: minmax(0, 0.72fr) minmax(240px, 1fr);
     align-items: center;
     gap: clamp(var(--ehq-space-4), 3vw, var(--ehq-space-6));
   }
 
   .hero-copy {
+    width: min(640px, 100%);
     min-width: 0;
+    padding: clamp(var(--ehq-space-2), 3vh, var(--ehq-space-6)) 0;
   }
 
   .eyebrow,
@@ -823,11 +1262,12 @@
 
   h1 {
     margin-top: var(--ehq-space-3);
-    font-size: clamp(30px, 4.3vw, 50px);
+    font-size: clamp(42px, 6.8vw, 86px);
     font-weight: var(--ehq-type-display-weight);
-    line-height: 1;
+    line-height: 0.96;
     letter-spacing: 0;
     text-transform: none;
+    text-shadow: 0 18px 44px color-mix(in srgb, var(--ehq-black) 62%, transparent);
   }
 
   h1 span {
@@ -835,12 +1275,13 @@
   }
 
   .lead {
-    max-width: 45ch;
-    margin-top: var(--ehq-space-3);
+    max-width: 38ch;
+    margin-top: var(--ehq-space-4);
     color: var(--ehq-text-soft);
-    font-size: var(--ehq-type-ui-size);
+    font-size: clamp(var(--ehq-type-ui-size), 1.5vw, var(--ehq-h3));
     font-weight: 300;
     line-height: var(--ehq-type-ui-line);
+    text-shadow: 0 10px 28px color-mix(in srgb, var(--ehq-black) 70%, transparent);
   }
 
   .hero-copy i {
@@ -851,43 +1292,33 @@
     background: var(--ehq-yellow);
   }
 
-  .hero-scene {
-    min-height: clamp(220px, 34vh, 360px);
-    height: 100%;
-    display: grid;
-    place-items: center;
-  }
-
-  .hero-scene img {
-    width: min(100%, 760px);
-    height: auto;
-    max-height: min(40vh, 360px);
-    object-fit: contain;
-    object-position: center bottom;
-    filter: drop-shadow(0 24px 50px var(--ehq-black));
-  }
-
   .workspace-grid {
-    flex: 0 1 44%;
-    min-height: 0;
-    display: flex;
+    position: absolute;
+    left: clamp(var(--ehq-space-4), 2.5vw, var(--ehq-space-6));
+    bottom: clamp(86px, 12vh, 118px);
+    z-index: 1;
+    width: min(590px, calc(100vw - var(--ehq-space-8)));
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 250px));
     align-items: stretch;
     justify-content: space-between;
-    gap: clamp(var(--ehq-space-3), 1.4vw, var(--ehq-space-4));
+    row-gap: clamp(48px, 7vh, 70px);
+    column-gap: var(--ehq-space-5);
   }
 
   .workspace-card {
     position: relative;
     --card-accent: var(--ehq-yellow);
-    flex: 0 1 clamp(230px, 28vw, 340px);
     min-width: 0;
-    min-height: 0;
-    max-width: 340px;
+    min-height: clamp(136px, 17vh, 156px);
     border: 1px solid var(--ehq-border);
     border-radius: var(--ehq-radius-sm);
-    background: var(--ehq-surface);
-    display: flex;
-    flex-direction: column;
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--ehq-surface) 82%, transparent), color-mix(in srgb, var(--ehq-bg-main) 72%, transparent)),
+      color-mix(in srgb, var(--ehq-surface) 78%, transparent);
+    backdrop-filter: blur(18px);
+    box-shadow: 0 18px 46px color-mix(in srgb, var(--ehq-black) 36%, transparent);
+    display: block;
     overflow: hidden;
     transition:
       transform var(--ehq-transition-normal) var(--ehq-ease),
@@ -912,35 +1343,51 @@
     --card-accent: var(--ehq-workspace-distribution);
   }
 
+  .accent-session {
+    --card-accent: var(--ehq-yellow);
+  }
+
   .photo {
-    position: relative;
-    flex: 0 0 auto;
-    height: clamp(150px, 17vh, 200px);
+    position: absolute;
+    inset: 0;
+    height: auto;
     overflow: hidden;
+    background: transparent;
   }
 
   .photo img {
     width: 100%;
     height: 100%;
     object-fit: cover;
-    filter: brightness(0.8) saturate(0.95);
-    transform: scale(1.02);
+    filter: brightness(0.6) saturate(0.9);
+    opacity: 0.78;
+    transform: scale(1.04);
+    -webkit-mask-image:
+      linear-gradient(to right, transparent 0, color-mix(in srgb, var(--ehq-black) 90%, transparent) 34px, var(--ehq-black) 72px, var(--ehq-black) calc(100% - 72px), color-mix(in srgb, var(--ehq-black) 90%, transparent) calc(100% - 34px), transparent 100%),
+      linear-gradient(to bottom, transparent 0, color-mix(in srgb, var(--ehq-black) 90%, transparent) 30px, var(--ehq-black) 66px, var(--ehq-black) calc(100% - 72px), color-mix(in srgb, var(--ehq-black) 90%, transparent) calc(100% - 34px), transparent 100%);
+    -webkit-mask-composite: source-in;
+    mask-image:
+      linear-gradient(to right, transparent 0, color-mix(in srgb, var(--ehq-black) 90%, transparent) 34px, var(--ehq-black) 72px, var(--ehq-black) calc(100% - 72px), color-mix(in srgb, var(--ehq-black) 90%, transparent) calc(100% - 34px), transparent 100%),
+      linear-gradient(to bottom, transparent 0, color-mix(in srgb, var(--ehq-black) 90%, transparent) 30px, var(--ehq-black) 66px, var(--ehq-black) calc(100% - 72px), color-mix(in srgb, var(--ehq-black) 90%, transparent) calc(100% - 34px), transparent 100%);
+    mask-composite: intersect;
     transition:
       transform var(--ehq-transition-normal) var(--ehq-ease),
       filter var(--ehq-transition-normal) var(--ehq-ease);
   }
 
   .workspace-card.live:hover .photo img {
-    filter: brightness(1) saturate(1.05);
-    transform: scale(1.06);
+    filter: brightness(0.8) saturate(1.04);
+    transform: scale(1.08);
   }
 
   .photo::after {
     content: "";
     position: absolute;
     inset: 0;
-    background: linear-gradient(180deg, transparent 45%, var(--ehq-surface) 100%);
-    opacity: 0.9;
+    background:
+      linear-gradient(90deg, color-mix(in srgb, var(--ehq-surface) 94%, transparent), transparent 72px, transparent calc(100% - 72px), color-mix(in srgb, var(--ehq-surface) 94%, transparent)),
+      linear-gradient(180deg, color-mix(in srgb, var(--ehq-surface) 78%, transparent), transparent 62px, transparent 42%, color-mix(in srgb, var(--ehq-surface) 96%, transparent) 100%);
+    opacity: 0.96;
   }
 
   .card-head {
@@ -984,31 +1431,94 @@
   }
 
   .workspace-copy {
-    flex: 1 1 auto;
-    padding: var(--ehq-space-4);
+    position: relative;
+    z-index: 1;
+    min-height: clamp(136px, 17vh, 156px);
+    padding: clamp(var(--ehq-space-2), 1vw, var(--ehq-space-3));
     display: flex;
     flex-direction: column;
     gap: var(--ehq-space-1);
   }
 
+  .session-card {
+    background:
+      radial-gradient(circle at 76% 0%, color-mix(in srgb, var(--ehq-yellow) 18%, transparent), transparent 12rem),
+      linear-gradient(180deg, color-mix(in srgb, var(--ehq-surface) 86%, transparent), color-mix(in srgb, var(--ehq-bg-main) 76%, transparent)),
+      color-mix(in srgb, var(--ehq-surface) 78%, transparent);
+  }
+
+  .session-visual {
+    position: absolute;
+    inset: 0;
+    min-height: auto;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    background:
+      radial-gradient(circle at center, color-mix(in srgb, var(--ehq-yellow) 18%, transparent), transparent 7rem),
+      linear-gradient(135deg, color-mix(in srgb, var(--ehq-yellow) 6%, transparent), color-mix(in srgb, var(--ehq-surface-raised) 18%, transparent));
+  }
+
+  .session-visual span {
+    position: absolute;
+    top: var(--ehq-space-3);
+    right: var(--ehq-space-3);
+    z-index: 1;
+    width: 42px;
+    height: 42px;
+    border: 1px solid color-mix(in srgb, var(--ehq-yellow) 52%, transparent);
+    border-radius: var(--ehq-radius-pill);
+    background: color-mix(in srgb, var(--ehq-bg-main) 68%, transparent);
+    color: var(--ehq-yellow);
+    display: grid;
+    place-items: center;
+    font-family: var(--ehq-mono);
+    font-size: var(--ehq-type-ui-size);
+    font-weight: var(--ehq-type-heading-weight);
+    box-shadow:
+      0 0 0 10px color-mix(in srgb, var(--ehq-yellow) 4%, transparent),
+      0 18px 42px color-mix(in srgb, var(--ehq-black) 42%, transparent);
+  }
+
+  .session-visual i {
+    position: absolute;
+    inset: 22%;
+    border: 1px solid color-mix(in srgb, var(--ehq-yellow) 28%, transparent);
+    border-radius: var(--ehq-radius-pill);
+    animation: sessionPulse 3.8s ease-in-out infinite;
+  }
+
+  @keyframes sessionPulse {
+    0%,
+    100% {
+      opacity: 0.24;
+      transform: scale(0.88);
+    }
+
+    48% {
+      opacity: 0.72;
+      transform: scale(1.05);
+    }
+  }
+
   .card-desc {
     margin-top: var(--ehq-space-1);
     color: var(--ehq-text-soft);
-    font-size: var(--ehq-type-ui-size);
+    font-size: var(--ehq-type-caption-size);
     font-weight: 400;
-    line-height: var(--ehq-type-ui-line);
+    line-height: 1.45;
   }
 
   .workspace-actions {
     margin-top: auto;
-    padding-top: var(--ehq-space-3);
+    padding-top: var(--ehq-space-2);
     display: grid;
     gap: var(--ehq-space-2);
   }
 
   .enter-button {
     width: 100%;
-    min-height: 40px;
+    min-height: 32px;
     padding: 0 var(--ehq-space-3);
     border-radius: var(--ehq-radius-sm);
     display: inline-flex;
@@ -1016,7 +1526,7 @@
     justify-content: center;
     gap: var(--ehq-space-2);
     font-family: var(--ehq-font);
-    font-size: var(--ehq-type-ui-size);
+    font-size: var(--ehq-type-label-size);
     font-weight: var(--ehq-type-heading-weight);
     letter-spacing: 0.04em;
     text-transform: none;
@@ -1025,7 +1535,7 @@
   /* Stretches the design-system locked Button into the full-width card action. */
   .workspace-actions :global(.ehq-button) {
     width: 100%;
-    min-height: 40px;
+    min-height: 32px;
   }
 
   .enter-button {
@@ -1080,6 +1590,9 @@
   }
 
   footer {
+    position: absolute;
+    left: clamp(var(--ehq-space-4), 2.5vw, var(--ehq-space-6));
+    bottom: clamp(var(--ehq-space-3), 3vh, var(--ehq-space-5));
     padding-top: clamp(var(--ehq-space-2), 1.6vh, var(--ehq-space-4));
     color: var(--ehq-text-muted);
     font-size: var(--ehq-type-caption-size);
@@ -1235,10 +1748,6 @@
       flex-basis: 38%;
     }
 
-    .hero-scene {
-      min-height: clamp(180px, 30vh, 300px);
-    }
-
     .lead {
       font-size: var(--ehq-type-ui-size);
     }
@@ -1254,8 +1763,9 @@
       gap: var(--ehq-space-3);
     }
 
-    .hero-scene {
-      display: none;
+    .landing-background {
+      object-position: 64% center;
+      filter: saturate(1.06) brightness(0.96) contrast(1.02);
     }
 
     .landing-top,
@@ -1271,7 +1781,7 @@
 
     h1 {
       margin-top: var(--ehq-space-2);
-      font-size: clamp(28px, 10vw, 40px);
+      font-size: clamp(34px, 12vw, 52px);
     }
 
     .lead {
@@ -1284,25 +1794,30 @@
     }
 
     .workspace-grid {
+      position: relative;
+      left: auto;
+      bottom: auto;
       flex: 1 1 auto;
+      width: 100%;
+      margin-top: auto;
       display: grid;
       grid-template-columns: 1fr;
-      gap: var(--ehq-space-2);
+      row-gap: var(--ehq-space-2);
+      column-gap: 0;
     }
 
     .workspace-card {
+      min-height: 132px;
       max-width: none;
-      flex-direction: row;
-      align-items: stretch;
     }
 
     .photo {
-      flex: 0 0 30%;
+      inset: 0;
     }
 
     .workspace-copy {
-      flex: 1 1 auto;
       min-width: 0;
+      min-height: 132px;
       padding: var(--ehq-space-3);
       display: flex;
       flex-direction: column;

@@ -738,6 +738,8 @@
         client.office.listTransactions({
           workspaceId: officeWorkspaceId,
           period,
+          dateFrom: activeRange.from,
+          dateTo: activeRange.to,
           accountId: null,
           departmentId: null,
           divisionId: null,
@@ -1277,6 +1279,8 @@
       const page = await client.office.listTransactions({
         workspaceId: officeWorkspaceId,
         period,
+        dateFrom: activeRange.from,
+        dateTo: activeRange.to,
         accountId: null,
         departmentId: null,
         divisionId: null,

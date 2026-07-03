@@ -1,5 +1,5 @@
 export type LegacyNamespace = "eof/v1" | "erh/v1" | "cc/v1";
-export type HttpMethod = "GET" | "POST" | "PATCH";
+export type HttpMethod = "DELETE" | "GET" | "POST" | "PATCH";
 export type IsoDateString = string;
 export type IsoDateTimeString = string;
 export type IsoMonthString = string;
@@ -779,6 +779,10 @@ export interface OfficeBankAccountWriteRequest {
   readonly active: boolean;
 }
 
+export interface OfficeBankAccountDeleteRequest {
+  readonly workspaceId: EntityId;
+}
+
 export interface OfficeBankAccountSummary {
   readonly id: EntityId;
   readonly workspaceId: EntityId;
@@ -1110,6 +1114,8 @@ export interface SuspenseQuery extends PageQuery {
   readonly workspaceId: EntityId;
   readonly period: IsoMonthString | null;
   readonly status: "open" | "resolved" | null;
+  readonly dateFrom?: IsoDateString | null;
+  readonly dateTo?: IsoDateString | null;
 }
 
 export interface SuspenseItem {
@@ -1208,6 +1214,8 @@ export interface PaymentsQuery extends PageQuery {
   readonly period: IsoMonthString | null;
   readonly payeeId: EntityId | null;
   readonly status: "draft" | "queued" | "paid" | "voided" | null;
+  readonly dateFrom?: IsoDateString | null;
+  readonly dateTo?: IsoDateString | null;
 }
 
 export interface PaymentSummary {
@@ -1257,6 +1265,8 @@ export interface DistributionRevenueQuery extends PageQuery {
   readonly store: string | null;
   readonly currency: CurrencyCode | null;
   readonly groupBy: "payee" | "track" | "currency" | "store" | "period";
+  readonly dateFrom?: IsoDateString | null;
+  readonly dateTo?: IsoDateString | null;
 }
 
 export interface DistributionRevenueRow {

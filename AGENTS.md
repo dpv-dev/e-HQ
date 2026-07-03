@@ -169,6 +169,8 @@ These are not preferences. A change that breaks any of them is a defect.
 
 ## 8. Deployment & validation gate
 
+- **Canonical deployment recipe:** follow `DEPLOY.md`, which points to the full
+  `DEPLOYMENT.md` runbook. Do not invent a second deployment path.
 - **Never deploy or run a destructive operation without an explicit go** from
   the human.
 - **Confirm the source tree and versions before any build.**
