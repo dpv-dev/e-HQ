@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import {
     Button,
     Input,
@@ -342,7 +341,8 @@
     )
   );
 
-  onMount((): void => {
+  // $effect (not onMount): re-runs on props.workspaceId/props.period change.
+  $effect((): void => {
     void loadBank();
   });
 

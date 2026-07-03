@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { untrack } from "svelte";
   import {
     BarsChart,
     Button,
@@ -93,14 +93,19 @@
     createTablePagination(auditState, auditLoadingMore, auditLoadMoreError, loadMoreAudit, loadAllAudit)
   );
 
-  onMount((): void => {
+  // $effect (not onMount): re-runs on props.workspaceId/props.period change.
+  $effect((): void => {
     void loadMonitoring();
   });
 
   async function loadMonitoring(): Promise<void> {
     // Re-entrance guard: the refresh button is disabled while loading, but this
     // also protects any programmatic caller from firing concurrent reloads.
-    if (monitoringLoading) {
+    // Read via untrack(): this function is invoked from an $effect, and
+    // monitoringLoading is a $derived of the very states this function sets a
+    // few lines below — tracking it here would make the effect re-fire on every
+    // loading/success transition, causing an infinite reload loop.
+    if (untrack((): boolean => monitoringLoading)) {
       return;
     }
 

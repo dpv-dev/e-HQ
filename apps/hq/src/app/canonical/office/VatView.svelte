@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import {
     EmptyState,
     KPI,
@@ -43,7 +42,8 @@
   const vatTableRows = $derived(createVatTableRows(vatRows));
   const hasVatSource = $derived(vatState.status === "success" && vatState.data.hasVatSource);
 
-  onMount((): void => {
+  // $effect (not onMount): re-runs on props.workspaceId/props.period change.
+  $effect((): void => {
     void loadVat();
   });
 

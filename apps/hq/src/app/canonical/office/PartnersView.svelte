@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import {
     Badge,
     Button,
@@ -157,7 +156,9 @@
     return writeActionTitle(formStatus);
   }
 
-  onMount((): void => {
+  // $effect (not onMount): re-runs on props.workspaceId/period/dateFrom/dateTo/
+  // facet change (all read synchronously inside loadPartners).
+  $effect((): void => {
     void loadPartners();
   });
 

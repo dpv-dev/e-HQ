@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import {
     DivergeChart,
     EmptyState,
@@ -59,7 +58,9 @@
     createTablePagination(divisionState, divisionLoadingMore, divisionLoadMoreError, loadMoreDivisions, loadAllDivisions)
   );
 
-  onMount((): void => {
+  // $effect (not onMount): re-runs whenever props.workspaceId/props.period
+  // change, not just on first mount, so switching period actually refetches.
+  $effect((): void => {
     void loadCeo();
   });
 

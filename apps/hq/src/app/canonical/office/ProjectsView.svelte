@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import {
     Badge,
     Button,
@@ -203,8 +202,22 @@
     createTablePagination(violationsState, violationsLoadingMore, violationsLoadMoreError, loadMoreViolations, loadAllViolations)
   );
 
-  onMount((): void => {
+  // $effect (not onMount): re-runs if props.workspaceId ever changes.
+  $effect((): void => {
     void loadProjects();
+  });
+
+  // Single owner of "fetch the selected project's PnL/violations": reacts to
+  // selectedProjectId changing (row click, or auto-select below) AND to
+  // props.period/dateFrom/dateTo changing (read synchronously inside
+  // selectProject, before its first await) — so switching period actually
+  // refetches the currently open project instead of freezing on the value
+  // fetched at mount.
+  $effect((): void => {
+    const projectId = selectedProjectId;
+    if (projectId !== null) {
+      void selectProject(projectId);
+    }
   });
 
   async function loadProjects(): Promise<void> {
@@ -221,8 +234,11 @@
       projectsLoadMoreError = null;
       const firstProject = page.items[0] ?? null;
 
-      if (firstProject !== null) {
-        await selectProject(firstProject.id);
+      // Write-only: the selectProject effect above owns fetching. Only
+      // auto-select when nothing is selected yet, so this does not override
+      // an in-progress user selection if the project list ever reloads.
+      if (firstProject !== null && selectedProjectId === null) {
+        selectedProjectId = firstProject.id;
       }
     } catch (error: unknown) {
       projectsState = createErrorState<PageResult<OfficeProjectSummary>>(error);
@@ -580,7 +596,7 @@
               class="ehq-edge-surface"
               class:selected={selectedProjectId === project.id}
               type="button"
-              onclick={() => selectProject(project.id)}
+              onclick={() => { selectedProjectId = project.id; }}
             >
               <strong>{project.label}</strong>
               <span>{projectReferenceLabel(project)} · {project.ownerLabel}</span>
