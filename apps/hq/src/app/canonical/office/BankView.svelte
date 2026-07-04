@@ -348,7 +348,13 @@
     void loadBank();
   });
 
+  // Sequence token: discard a stale response if a newer loadBank() call
+  // (period change or a write-path reload) started before this one's request
+  // resolves (out-of-order network replies).
+  let loadBankToken = 0;
+
   async function loadBank(): Promise<void> {
+    const token = ++loadBankToken;
     accountsState = createLoadingState<PageResult<OfficeBankAccountSummary>>();
     rawState = createLoadingState<PageResult<OfficeBankRawLine>>();
     qualityState = createLoadingState<OfficeBankQualityResponse>();
@@ -376,6 +382,9 @@
           limit: TABLE_PAGE_SIZE
         })
       ]);
+      if (token !== loadBankToken) {
+        return;
+      }
       accountsState = createSuccessState<PageResult<OfficeBankAccountSummary>>(accounts);
       accountsNextCursor = accounts.nextCursor;
       accountsLoadMoreError = null;
@@ -387,6 +396,9 @@
       reconciliationNextCursor = reconciliations.nextCursor;
       reconciliationLoadMoreError = null;
     } catch (error: unknown) {
+      if (token !== loadBankToken) {
+        return;
+      }
       accountsState = createErrorState<PageResult<OfficeBankAccountSummary>>(error);
       rawState = createErrorState<PageResult<OfficeBankRawLine>>(error);
       qualityState = createErrorState<OfficeBankQualityResponse>(error);

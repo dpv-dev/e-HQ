@@ -49,13 +49,24 @@
     void loadVat();
   });
 
+  // Sequence token: discard a stale response if a newer loadVat() call has
+  // started before this one's request resolves (out-of-order network replies).
+  let loadVatToken = 0;
+
   async function loadVat(): Promise<void> {
+    const token = ++loadVatToken;
     vatState = createLoadingState<OfficeVatReport>();
 
     try {
       const report = await props.client.getVatReport({ workspaceId: props.workspaceId, period: props.period, dateFrom: props.dateFrom, dateTo: props.dateTo });
+      if (token !== loadVatToken) {
+        return;
+      }
       vatState = createSuccessState<OfficeVatReport>(report);
     } catch (error: unknown) {
+      if (token !== loadVatToken) {
+        return;
+      }
       vatState = createErrorState<OfficeVatReport>(error);
     }
   }

@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { untrack } from "svelte";
   import {
     BarsChart,
     Button,
@@ -100,17 +99,16 @@
     void loadMonitoring();
   });
 
-  async function loadMonitoring(): Promise<void> {
-    // Re-entrance guard: the refresh button is disabled while loading, but this
-    // also protects any programmatic caller from firing concurrent reloads.
-    // Read via untrack(): this function is invoked from an $effect, and
-    // monitoringLoading is a $derived of the very states this function sets a
-    // few lines below — tracking it here would make the effect re-fire on every
-    // loading/success transition, causing an infinite reload loop.
-    if (untrack((): boolean => monitoringLoading)) {
-      return;
-    }
+  // Sequence token: a period change while a load is still in flight must win,
+  // not be silently dropped -- so this no longer blocks re-entrance while
+  // loading (that guard could swallow a period change entirely if it landed
+  // mid-fetch). Instead every call proceeds, and only the response matching
+  // the most recent call is applied; earlier, now-stale responses (success or
+  // error) are discarded on arrival regardless of network resolution order.
+  let loadMonitoringToken = 0;
 
+  async function loadMonitoring(): Promise<void> {
+    const token = ++loadMonitoringToken;
     integrityState = createLoadingState<OfficeIntegrityCheckAllResponse>();
     bankQualityState = createLoadingState<OfficeBankQualityResponse>();
     pendingState = createLoadingState<PageResult<OfficeTransaction>>();
@@ -161,6 +159,9 @@
           dateTo: props.dateTo
         })
       ]);
+      if (token !== loadMonitoringToken) {
+        return;
+      }
       integrityState = createSuccessState<OfficeIntegrityCheckAllResponse>(integrity);
       bankQualityState = createSuccessState<OfficeBankQualityResponse>(bankQuality);
       pendingState = createSuccessState<PageResult<OfficeTransaction>>(pending);
@@ -169,6 +170,9 @@
       auditLoadMoreError = null;
       dashboardState = createSuccessState<OfficeDashboardResponse>(dashboard);
     } catch (error: unknown) {
+      if (token !== loadMonitoringToken) {
+        return;
+      }
       integrityState = createErrorState<OfficeIntegrityCheckAllResponse>(error);
       bankQualityState = createErrorState<OfficeBankQualityResponse>(error);
       pendingState = createErrorState<PageResult<OfficeTransaction>>(error);

@@ -245,7 +245,13 @@
     }
   }
 
+  // Sequence token: discard a stale response if a newer selectProject() call
+  // (row click, or the period-change effect above) started before this one's
+  // request resolves (out-of-order network replies).
+  let selectProjectToken = 0;
+
   async function selectProject(projectId: EntityId): Promise<void> {
+    const token = ++selectProjectToken;
     selectedProjectId = projectId;
     projectPnlState = createLoadingState<OfficeProjectPnl>();
     violationsState = createLoadingState<PageResult<OfficeProjectCoherenceViolation>>();
@@ -264,10 +270,16 @@
           limit: TABLE_PAGE_SIZE
         })
       ]);
+      if (token !== selectProjectToken) {
+        return;
+      }
       projectPnlState = createSuccessState<OfficeProjectPnl>(projectPnlResult);
       violationsState = createSuccessState<PageResult<OfficeProjectCoherenceViolation>>(violationsResult);
       violationsLoadMoreError = null;
     } catch (error: unknown) {
+      if (token !== selectProjectToken) {
+        return;
+      }
       projectPnlState = createErrorState<OfficeProjectPnl>(error);
       violationsState = createErrorState<PageResult<OfficeProjectCoherenceViolation>>(error);
     }

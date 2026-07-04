@@ -66,7 +66,14 @@
     void loadCeo();
   });
 
+  // Sequence token: if the period changes again before this call's requests
+  // resolve, a newer loadCeo() call bumps the token and this call's response
+  // (success or error) is discarded instead of clobbering the current view
+  // with stale data -- network responses can arrive out of request order.
+  let loadCeoToken = 0;
+
   async function loadCeo(): Promise<void> {
+    const token = ++loadCeoToken;
     dashboardState = createLoadingState<OfficeDashboardResponse>();
     globalPnlState = createLoadingState<OfficeGlobalPnl>();
     divisionState = createLoadingState<PageResult<OfficeDivisionPnl>>();
@@ -77,11 +84,17 @@
         props.client.getGlobalPnl({ workspaceId: props.workspaceId, period: props.period, dateFrom: props.dateFrom, dateTo: props.dateTo }),
         props.client.getDivisionPnl({ workspaceId: props.workspaceId, period: props.period, dateFrom: props.dateFrom, dateTo: props.dateTo, cursor: null, limit: TABLE_PAGE_SIZE })
       ]);
+      if (token !== loadCeoToken) {
+        return;
+      }
       dashboardState = createSuccessState<OfficeDashboardResponse>(dashboard);
       globalPnlState = createSuccessState<OfficeGlobalPnl>(globalPnl);
       divisionState = createSuccessState<PageResult<OfficeDivisionPnl>>(divisions);
       divisionLoadMoreError = null;
     } catch (error: unknown) {
+      if (token !== loadCeoToken) {
+        return;
+      }
       dashboardState = createErrorState<OfficeDashboardResponse>(error);
       globalPnlState = createErrorState<OfficeGlobalPnl>(error);
       divisionState = createErrorState<PageResult<OfficeDivisionPnl>>(error);

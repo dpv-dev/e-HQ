@@ -162,7 +162,12 @@
     void loadPartners();
   });
 
+  // Sequence token: discard a stale response if a newer loadPartners() call
+  // started before this one's request resolves (out-of-order network replies).
+  let loadPartnersToken = 0;
+
   async function loadPartners(): Promise<void> {
+    const token = ++loadPartnersToken;
     partnersState = createLoadingState<PageResult<OfficePartnerListItem>>();
 
     try {
@@ -175,9 +180,15 @@
         cursor: null,
         limit: TABLE_PAGE_SIZE
       });
+      if (token !== loadPartnersToken) {
+        return;
+      }
       partnersState = createSuccessState<PageResult<OfficePartnerListItem>>(page);
       partnersLoadMoreError = null;
     } catch (error: unknown) {
+      if (token !== loadPartnersToken) {
+        return;
+      }
       partnersState = createErrorState<PageResult<OfficePartnerListItem>>(error);
     }
   }
