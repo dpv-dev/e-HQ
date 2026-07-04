@@ -36,6 +36,8 @@
     readonly client: OfficeApiClient;
     readonly workspaceId: string;
     readonly period: string;
+    readonly dateFrom: string;
+    readonly dateTo: string;
   }
 
   interface MonitoringKpi {
@@ -118,6 +120,8 @@
     const pendingQuery = {
       workspaceId: props.workspaceId,
       period: props.period,
+      dateFrom: props.dateFrom,
+      dateTo: props.dateTo,
       accountId: null,
       departmentId: null,
       divisionId: null,
@@ -136,7 +140,9 @@
         }),
         props.client.getBankQuality({
           workspaceId: props.workspaceId,
-          period: props.period
+          period: props.period,
+          dateFrom: props.dateFrom,
+          dateTo: props.dateTo
         }),
         props.client.listTransactions(pendingQuery),
         props.client.listAuditLog({
@@ -150,7 +156,9 @@
         }),
         props.client.getDashboard({
           workspaceId: props.workspaceId,
-          period: props.period
+          period: props.period,
+          dateFrom: props.dateFrom,
+          dateTo: props.dateTo
         })
       ]);
       integrityState = createSuccessState<OfficeIntegrityCheckAllResponse>(integrity);
@@ -194,6 +202,8 @@
         props.client.listTransactions({
           workspaceId: props.workspaceId,
           period: props.period,
+          dateFrom: props.dateFrom,
+          dateTo: props.dateTo,
           accountId: null,
           departmentId: null,
           divisionId: null,

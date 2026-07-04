@@ -31,6 +31,8 @@
     readonly client: OfficeApiClient;
     readonly workspaceId: string;
     readonly period: string;
+    readonly dateFrom: string;
+    readonly dateTo: string;
   }
 
   interface CeoKpi {
@@ -71,9 +73,9 @@
 
     try {
       const [dashboard, globalPnl, divisions] = await Promise.all([
-        props.client.getDashboard({ workspaceId: props.workspaceId, period: props.period }),
-        props.client.getGlobalPnl({ workspaceId: props.workspaceId, period: props.period }),
-        props.client.getDivisionPnl({ workspaceId: props.workspaceId, period: props.period, cursor: null, limit: TABLE_PAGE_SIZE })
+        props.client.getDashboard({ workspaceId: props.workspaceId, period: props.period, dateFrom: props.dateFrom, dateTo: props.dateTo }),
+        props.client.getGlobalPnl({ workspaceId: props.workspaceId, period: props.period, dateFrom: props.dateFrom, dateTo: props.dateTo }),
+        props.client.getDivisionPnl({ workspaceId: props.workspaceId, period: props.period, dateFrom: props.dateFrom, dateTo: props.dateTo, cursor: null, limit: TABLE_PAGE_SIZE })
       ]);
       dashboardState = createSuccessState<OfficeDashboardResponse>(dashboard);
       globalPnlState = createSuccessState<OfficeGlobalPnl>(globalPnl);
@@ -111,6 +113,8 @@
         props.client.getDivisionPnl({
           workspaceId: props.workspaceId,
           period: props.period,
+          dateFrom: props.dateFrom,
+          dateTo: props.dateTo,
           cursor,
           limit: TABLE_PAGE_SIZE
         })

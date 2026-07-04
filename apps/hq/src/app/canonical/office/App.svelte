@@ -3186,7 +3186,7 @@
       {:else if activePageId === "projects"}
         <ProjectsView client={client.office} workspaceId={officeWorkspaceId} {period} dateFrom={activeRange.from} dateTo={activeRange.to} writesEnabled={writesEnabled} />
       {:else if activePageId === "monitoring"}
-        <MonitoringView client={client.office} workspaceId={officeWorkspaceId} {period} />
+        <MonitoringView client={client.office} workspaceId={officeWorkspaceId} {period} dateFrom={activeRange.from} dateTo={activeRange.to} />
       {:else if activePageId === "imports"}
         <section class="statement-import-panel ehq-edge-surface" aria-label="Importer un relevé bancaire">
           <header>
@@ -3457,13 +3457,13 @@
 
         <Table title="Cash-flow by month" columns={cashflowColumns} rows={cashflowTableRows} state={cashflowState.status === "loading" ? "loading" : cashflowState.status === "error" ? "error" : cashflowTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
       {:else if activePageId === "ceo"}
-        <CeoView client={client.office} workspaceId={officeWorkspaceId} {period} />
+        <CeoView client={client.office} workspaceId={officeWorkspaceId} {period} dateFrom={activeRange.from} dateTo={activeRange.to} />
       {:else if activePageId === "bank"}
-        <BankView client={client.office} workspaceId={officeWorkspaceId} {period} writesEnabled={writesEnabled} />
+        <BankView client={client.office} workspaceId={officeWorkspaceId} {period} dateFrom={activeRange.from} dateTo={activeRange.to} writesEnabled={writesEnabled} />
       {:else if activePageId === "audit"}
         <Table title="Audit log" columns={auditColumns} rows={auditTableRows} state={auditState.status === "loading" ? "loading" : auditState.status === "error" ? "error" : auditTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={auditPagination} />
       {:else if activePageId === "vat"}
-        <VatView client={client.office} workspaceId={officeWorkspaceId} {period} />
+        <VatView client={client.office} workspaceId={officeWorkspaceId} {period} dateFrom={activeRange.from} dateTo={activeRange.to} />
       {:else if activePageId === "settings"}
         <SettingsView client={client.office} workspaceId={officeWorkspaceId} {period} />
       {:else if activePageId === "wave-invoices"}

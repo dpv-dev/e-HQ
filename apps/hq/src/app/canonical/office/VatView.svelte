@@ -23,6 +23,8 @@
     readonly client: OfficeApiClient;
     readonly workspaceId: string;
     readonly period: string;
+    readonly dateFrom: string;
+    readonly dateTo: string;
   }
 
   interface VatKpi {
@@ -51,7 +53,7 @@
     vatState = createLoadingState<OfficeVatReport>();
 
     try {
-      const report = await props.client.getVatReport({ workspaceId: props.workspaceId, period: props.period });
+      const report = await props.client.getVatReport({ workspaceId: props.workspaceId, period: props.period, dateFrom: props.dateFrom, dateTo: props.dateTo });
       vatState = createSuccessState<OfficeVatReport>(report);
     } catch (error: unknown) {
       vatState = createErrorState<OfficeVatReport>(error);

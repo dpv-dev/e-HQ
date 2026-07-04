@@ -35,6 +35,8 @@
     readonly client: OfficeApiClient;
     readonly workspaceId: string;
     readonly period: string;
+    readonly dateFrom: string;
+    readonly dateTo: string;
     readonly writesEnabled: boolean;
   }
 
@@ -362,11 +364,13 @@
           cursor: null,
           limit: TABLE_PAGE_SIZE
         }),
-        props.client.getBankQuality({ workspaceId: props.workspaceId, period: props.period }),
+        props.client.getBankQuality({ workspaceId: props.workspaceId, period: props.period, dateFrom: props.dateFrom, dateTo: props.dateTo }),
         props.client.listReconciliations({
           workspaceId: props.workspaceId,
           accountId: null,
           period: props.period,
+          dateFrom: props.dateFrom,
+          dateTo: props.dateTo,
           status: null,
           cursor: null,
           limit: TABLE_PAGE_SIZE
@@ -501,6 +505,8 @@
           workspaceId: props.workspaceId,
           accountId: null,
           period: props.period,
+          dateFrom: props.dateFrom,
+          dateTo: props.dateTo,
           status: null,
           cursor: nextCursor,
           limit: TABLE_PAGE_SIZE
