@@ -413,6 +413,7 @@
   let editAmount = $state("");
   let editCategoryId = $state("");
   let editProjectId = $state("");
+  let editAccountId = $state("");
   let creatingTransaction = $state(false);
   let createOccurredOn = $state("");
   let createDescription = $state("");
@@ -1019,6 +1020,7 @@
     editAmount = (Number(transaction.amountMicro) / 1_000_000).toFixed(2);
     editCategoryId = transaction.categoryId ?? "";
     editProjectId = transaction.projectId ?? "";
+    editAccountId = transaction.accountId ?? defaultImportAccountId(importAccounts, transaction.currency);
   }
 
   function closeTransactionEditor(): void {
@@ -1032,12 +1034,15 @@
     }
 
     try {
+      if (editAccountId.length === 0) {
+        throw new Error("Choisis un compte bancaire pour cette transaction.");
+      }
       const receipt = await client.office.updateTransaction(
         transaction.id,
         {
           workspaceId: officeWorkspaceId,
           occurredOn: editOccurredOn,
-          accountId: transaction.accountId,
+          accountId: editAccountId,
           categoryId: editCategoryId.length > 0 ? editCategoryId : null,
           projectId: editProjectId.length > 0 ? editProjectId : null,
           description: editDescription,
@@ -2313,7 +2318,7 @@
             {
               workspaceId: officeWorkspaceId,
               occurredOn: transaction.occurredOn,
-              accountId: transaction.accountId,
+              accountId: transaction.accountId ?? defaultImportAccountId(importAccounts, transaction.currency),
               categoryId: pendingClassifyCategoryId,
               projectId: pendingClassifyProjectId.length > 0 ? pendingClassifyProjectId : transaction.projectId,
               description: transaction.description,
@@ -3148,6 +3153,15 @@
               <div class="office-edit-wide">
                 <Input id="office-edit-description" label="Description" value={editDescription} placeholder="" type="text" state="default" message="" oninput={(value: string): void => { editDescription = value; }} />
               </div>
+              <Select
+                id="office-edit-account"
+                label="Compte"
+                value={editAccountId}
+                options={createAccountSelectOptions}
+                state={importAccounts.length === 0 ? "disabled" : "default"}
+                message=""
+                onchange={(value: string): void => { editAccountId = value; }}
+              />
               <Input id="office-edit-amount" label="Montant" value={editAmount} placeholder="" type="text" state="default" message="" oninput={(value: string): void => { editAmount = value; }} />
               <Select id="office-edit-category" label="Catégorie" value={editCategoryId} options={optionalCategoryOptions} state="default" message="" onchange={(value: string): void => { editCategoryId = value; }} />
               <Select id="office-edit-project" label="Projet" value={editProjectId} options={optionalProjectOptions} state="default" message="" onchange={(value: string): void => { editProjectId = value; }} />

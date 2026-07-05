@@ -17,3 +17,4 @@ data/dumps/*.sql
 !.env.example
 data/
 reference/
+.claude/

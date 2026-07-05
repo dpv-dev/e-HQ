@@ -1,0 +1,3 @@
+ALTER TABLE "transactions" ADD COLUMN "account_id" uuid;--> statement-breakpoint
+ALTER TABLE "transactions" ADD CONSTRAINT "transactions_account_id_office_bank_accounts_id_fk" FOREIGN KEY ("account_id") REFERENCES "public"."office_bank_accounts"("id") ON DELETE set null ON UPDATE cascade;--> statement-breakpoint
+CREATE INDEX "transactions_account_id_idx" ON "transactions" USING btree ("account_id");

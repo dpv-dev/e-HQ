@@ -3213,12 +3213,12 @@ async function persistOfficeLedgerBulk(tx: ApiWriteTransaction, rows: readonly R
     await tx.executor.execute(sql`
       insert into transactions (
         id, legacy_id, transaction_date, type, status, is_active, description,
-        category_id, partner_id, project_id, amount_minor, original_amount_minor, original_currency,
+        category_id, partner_id, project_id, account_id, amount_minor, original_amount_minor, original_currency,
         total_amount_minor, source, created_by_user_id, approved_by_user_id, approved_at
       )
       values (
         ${randomUUID()}, ${row.legacyId}, ${occurredAt}, ${row.type}, ${row.status}, true, ${row.description},
-        ${row.categoryId}, ${row.partnerId}, ${row.projectId}, ${amount}, ${amount}, ${row.currency === "MUR" ? null : row.currency},
+        ${row.categoryId}, ${row.partnerId}, ${row.projectId}, null, ${amount}, ${amount}, ${row.currency === "MUR" ? null : row.currency},
         ${amount}, 'ledger_import', ${actorUserId}, ${approvedBy}, ${approvedAt}
       )
       on conflict (legacy_id) do update set
@@ -3261,6 +3261,7 @@ function upsertOfficeLedgerBulkFixture(fixtures: ApiFixtureStore, rows: readonly
     categoryId: row.categoryId,
     partnerId: row.partnerId,
     projectId: row.projectId,
+    accountId: null,
     amountMinor: row.amountMinor,
     originalCurrency: row.currency === "MUR" ? null : (row.currency as CurrencyCode),
     exchangeRateE10: null
@@ -3930,6 +3931,7 @@ function transactionFromOfficeRequest(
     categoryId: request.categoryId,
     partnerId: null,
     projectId: request.projectId,
+    accountId: request.accountId,
     amountMinor,
     originalCurrency: request.currency === "MUR" ? null : request.currency,
     exchangeRateE10: null
@@ -3947,6 +3949,7 @@ function officeTransactionAuditSnapshot(transaction: OfficeTransactionRow): Read
     categoryId: transaction.categoryId,
     partnerId: transaction.partnerId,
     projectId: transaction.projectId,
+    accountId: transaction.accountId,
     amountMinor: transaction.amountMinor.toString(),
     originalCurrency: transaction.originalCurrency,
     exchangeRateE10: transaction.exchangeRateE10 === null ? null : transaction.exchangeRateE10.toString()
@@ -4003,6 +4006,7 @@ async function persistOfficeTransactionUpsert(
         description = ${input.request.description.trim()},
         category_id = ${input.request.categoryId},
         project_id = ${input.request.projectId},
+        account_id = ${input.request.accountId},
         amount_minor = ${input.amountMinor.toString()},
         original_amount_minor = ${input.amountMinor.toString()},
         original_currency = ${input.request.currency === "MUR" ? null : input.request.currency},
@@ -4024,6 +4028,7 @@ async function persistOfficeTransactionUpsert(
       description,
       category_id,
       project_id,
+      account_id,
       amount_minor,
       original_amount_minor,
       original_currency,
@@ -4041,6 +4046,7 @@ async function persistOfficeTransactionUpsert(
       ${input.request.description.trim()},
       ${input.request.categoryId},
       ${input.request.projectId},
+      ${input.request.accountId},
       ${input.amountMinor.toString()},
       ${input.amountMinor.toString()},
       ${input.request.currency === "MUR" ? null : input.request.currency},
@@ -4110,7 +4116,7 @@ function assertPlanComptableRequest(context: ApiContext, dataset: OfficeAnalytic
 }
 
 function requireDivision(dataset: OfficeAnalyticsDataset, divisionId: string): OfficeDivisionRow {
-  const division = dataset.divisions.find((candidate) => candidate.id === divisionId);
+  const division = idMapOf(dataset.divisions).get(divisionId);
   if (division === undefined) {
     throw new ApiRouteError(404, "division_not_found", "Office division was not found.", [`divisionId=${divisionId}`]);
   }
@@ -7959,7 +7965,7 @@ function toOfficeTransaction(dataset: OfficeAnalyticsDataset, transaction: Offic
   const base = {
     id: transaction.id,
     occurredOn: transaction.transactionDate.slice(0, 10),
-    accountId: "bank_mur",
+    accountId: transaction.accountId,
     projectId: transaction.projectId,
     projectLabel: transaction.projectId === null ? null : requireProject(dataset, transaction.projectId).name,
     description: transaction.description ?? "",
@@ -8013,11 +8019,28 @@ function toApiTransactionStatus(status: OfficeTransactionRow["status"]): OfficeT
   return status;
 }
 
+// Per-array memoized id -> row maps. Keyed by array identity: every fixture mutation
+// (see upsertById) replaces the array with a new reference, so a stale cache entry is
+// never read back — it just becomes unreachable and gets rebuilt on next access. This
+// turns the O(rows) .find() scans below into O(1) lookups without any invalidation logic.
+const idMapCache = new WeakMap<readonly { readonly id: string }[], ReadonlyMap<string, { readonly id: string }>>();
+
+function idMapOf<TItem extends { readonly id: string }>(items: readonly TItem[]): ReadonlyMap<string, TItem> {
+  const cached = idMapCache.get(items);
+  if (cached !== undefined) {
+    return cached as ReadonlyMap<string, TItem>;
+  }
+
+  const map = new Map<string, TItem>(items.map((item) => [item.id, item]));
+  idMapCache.set(items, map);
+  return map;
+}
+
 function resolveCategoryPath(
   dataset: OfficeAnalyticsDataset,
   categoryId: string
 ): Readonly<{ readonly category: OfficeCategoryRow; readonly division: OfficeDivisionRow | null; readonly department: OfficeDepartmentRow | null }> {
-  const category = dataset.categories.find((candidate) => candidate.id === categoryId);
+  const category = idMapOf(dataset.categories).get(categoryId);
   if (category === undefined) {
     throw new ApiRouteError(500, "category_not_found", "Transaction category was not found in the chart of accounts.", [
       `categoryId=${categoryId}`
@@ -8028,7 +8051,7 @@ function resolveCategoryPath(
     return { category, division: null, department: null };
   }
 
-  const division = dataset.divisions.find((candidate) => candidate.id === category.divisionId);
+  const division = idMapOf(dataset.divisions).get(category.divisionId);
   if (division === undefined) {
     throw new ApiRouteError(500, "division_not_found", "Category division was not found in the chart of accounts.", [
       `categoryId=${categoryId}`,
@@ -8036,7 +8059,7 @@ function resolveCategoryPath(
     ]);
   }
 
-  const department = dataset.departments.find((candidate) => candidate.id === division.departmentId);
+  const department = idMapOf(dataset.departments).get(division.departmentId);
   if (department === undefined) {
     throw new ApiRouteError(500, "department_not_found", "Division department was not found in the chart of accounts.", [
       `divisionId=${division.id}`,
@@ -8049,6 +8072,7 @@ function resolveCategoryPath(
 
 function matchesOfficeTransactionQuery(context: ApiContext, transaction: OfficeTransaction): boolean {
   const period = nullableQuery(context, "period");
+  const accountId = nullableQuery(context, "accountId");
   const departmentId = nullableQuery(context, "departmentId");
   const divisionId = nullableQuery(context, "divisionId");
   const categoryId = nullableQuery(context, "categoryId");
@@ -8062,6 +8086,10 @@ function matchesOfficeTransactionQuery(context: ApiContext, transaction: OfficeT
       return false;
     }
   } else if (period !== null && !transaction.occurredOn.startsWith(period)) {
+    return false;
+  }
+
+  if (accountId !== null && transaction.accountId !== accountId) {
     return false;
   }
 
@@ -8475,7 +8503,7 @@ function requirePartner(dataset: OfficeAnalyticsDataset, partnerId: string): Off
 }
 
 function requireProject(dataset: OfficeAnalyticsDataset, projectId: string): OfficeProjectRow {
-  const project = dataset.projects.find((candidate) => candidate.id === projectId);
+  const project = idMapOf(dataset.projects).get(projectId);
   if (project === undefined) {
     throw new ApiRouteError(404, "project_not_found", "Office project fixture was not found.", [`projectId=${projectId}`]);
   }
@@ -8484,7 +8512,7 @@ function requireProject(dataset: OfficeAnalyticsDataset, projectId: string): Off
 }
 
 function requireDepartment(dataset: OfficeAnalyticsDataset, departmentId: string): OfficeDepartmentRow {
-  const department = dataset.departments.find((candidate) => candidate.id === departmentId);
+  const department = idMapOf(dataset.departments).get(departmentId);
   if (department === undefined) {
     throw new ApiRouteError(404, "department_not_found", "Office department fixture was not found.", [`departmentId=${departmentId}`]);
   }

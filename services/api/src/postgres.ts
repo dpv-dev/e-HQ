@@ -148,7 +148,7 @@ async function readOfficeDataset(pool: Pool): Promise<OfficeAnalyticsDataset> {
   const projectBudgetLines = await queryRows(pool, "select id::text, project_id::text, category_id::text, type, planned_amount_minor::text from project_budget_lines order by legacy_id nulls last, id", []);
   const transactions = await queryRows(
     pool,
-    "select id::text, transaction_date, type, status, is_active, description, category_id::text, partner_id::text, project_id::text, amount_minor::text, original_currency, exchange_rate_e10::text from transactions order by transaction_date, id",
+    "select id::text, transaction_date, type, status, is_active, description, category_id::text, partner_id::text, project_id::text, account_id::text, amount_minor::text, original_currency, exchange_rate_e10::text from transactions order by transaction_date, id",
     []
   );
   const financialAllocations = await queryRows(pool, "select id::text, transaction_id::text, department_id::text, amount_minor::text from financial_allocations order by legacy_id nulls last, id", []);
@@ -494,6 +494,7 @@ function toOfficeTransaction(row: PgRow): OfficeTransactionRow {
     categoryId: nullableStringCell(row, "category_id"),
     partnerId: nullableStringCell(row, "partner_id"),
     projectId: nullableStringCell(row, "project_id"),
+    accountId: nullableStringCell(row, "account_id"),
     amountMinor: bigintCell(row, "amount_minor"),
     originalCurrency: nullableStringCell(row, "original_currency"),
     exchangeRateE10: nullableBigintCell(row, "exchange_rate_e10")

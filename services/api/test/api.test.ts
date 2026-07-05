@@ -315,6 +315,22 @@ test("Office transactions expose category-derived path and keep project nullable
   assert.equal(pending.status, "pending");
   assert.equal(pending.categoryId, null);
   assert.equal(pending.projectId, null);
+
+  assert.equal(fee.accountId, "bank_mur");
+  assert.equal(pending.accountId, null);
+
+  const filteredResponse = await app.request("/eof/v1/transactions?workspaceId=workspace_1&period=2026-02&accountId=bank_mur&limit=10", {
+    headers: authHeaders()
+  });
+  const filteredPage = await filteredResponse.json();
+  assert.ok(filteredPage.items.some((item: { readonly id: string }) => item.id === "tx_mcb_fee"));
+  assert.ok(!filteredPage.items.some((item: { readonly id: string }) => item.id === "tx_uncategorized"));
+
+  const otherAccountResponse = await app.request("/eof/v1/transactions?workspaceId=workspace_1&period=2026-02&accountId=bank_eur&limit=10", {
+    headers: authHeaders()
+  });
+  const otherAccountPage = await otherAccountResponse.json();
+  assert.equal(otherAccountPage.items.length, 0);
 });
 
 test("Office partner facets are lenses over the same partner", async () => {

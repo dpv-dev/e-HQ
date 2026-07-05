@@ -378,6 +378,7 @@ function transformTransactions(rows: readonly LegacyOfficeTransactionRow[]): rea
     categoryId: row.categoryId,
     partnerId: row.partnerId,
     projectId: row.projectId,
+    accountId: null,
     amountMinor: eofMoney.parse(row.amountMur),
     originalCurrency: normalizeOriginalCurrency(row.originalCurrency),
     exchangeRateE10: row.exchangeRate === null ? null : erhMoney.parse(row.exchangeRate)

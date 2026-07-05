@@ -46,6 +46,7 @@ export type OfficeTransactionRow = Pick<
   | "categoryId"
   | "partnerId"
   | "projectId"
+  | "accountId"
   | "amountMinor"
   | "originalCurrency"
   | "exchangeRateE10"

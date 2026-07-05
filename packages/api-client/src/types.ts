@@ -281,7 +281,7 @@ export type OfficeTransactionStatus = "pending" | "draft" | "posted" | "reconcil
 export interface OfficeTransactionBase {
   readonly id: EntityId;
   readonly occurredOn: IsoDateString;
-  readonly accountId: EntityId;
+  readonly accountId: EntityId | null;
   readonly projectId: EntityId | null;
   readonly projectLabel: string | null;
   readonly description: string;

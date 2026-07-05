@@ -99,6 +99,7 @@ function createOfficeFixture(): OfficeAnalyticsDataset {
         categoryId: "cat_live_income",
         partnerId: "partner_bedouin",
         projectId: "project_kaya",
+        accountId: "bank_mur",
         amountMinor: 500_000n,
         originalCurrency: null,
         exchangeRateE10: null
@@ -113,6 +114,7 @@ function createOfficeFixture(): OfficeAnalyticsDataset {
         categoryId: "cat_rental_expense",
         partnerId: "partner_bedouin",
         projectId: "project_kaya",
+        accountId: "bank_mur",
         amountMinor: 120_000n,
         originalCurrency: null,
         exchangeRateE10: null
@@ -127,6 +129,7 @@ function createOfficeFixture(): OfficeAnalyticsDataset {
         categoryId: "cat_bank_fee",
         partnerId: "partner_mcb",
         projectId: null,
+        accountId: "bank_mur",
         amountMinor: 5_000n,
         originalCurrency: null,
         exchangeRateE10: null
@@ -141,6 +144,7 @@ function createOfficeFixture(): OfficeAnalyticsDataset {
         categoryId: null,
         partnerId: null,
         projectId: null,
+        accountId: null,
         amountMinor: 8_500n,
         originalCurrency: null,
         exchangeRateE10: null

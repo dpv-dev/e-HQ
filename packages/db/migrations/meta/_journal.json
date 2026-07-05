@@ -92,6 +92,13 @@
       "when": 1782903695735,
       "tag": "0012_rare_swordsman",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1783284819508,
+      "tag": "0013_wooden_spyke",
+      "breakpoints": true
     }
   ]
 }

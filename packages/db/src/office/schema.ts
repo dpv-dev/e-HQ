@@ -234,6 +234,7 @@ export const transactions = pgTable(
     categoryId: uuid("category_id").references(() => categories.id, { onDelete: "restrict", onUpdate: "cascade" }),
     partnerId: uuid("partner_id").references(() => partners.id, { onDelete: "set null", onUpdate: "cascade" }),
     projectId: uuid("project_id").references(() => projects.id, { onDelete: "set null", onUpdate: "cascade" }),
+    accountId: uuid("account_id").references(() => officeBankAccounts.id, { onDelete: "set null", onUpdate: "cascade" }),
     amountMinor: bigint("amount_minor", { mode: "bigint" }).notNull(),
     originalAmountMinor: bigint("original_amount_minor", { mode: "bigint" }),
     originalCurrency: char("original_currency", { length: 3 }),
@@ -261,6 +262,7 @@ export const transactions = pgTable(
     index("transactions_category_id_idx").on(table.categoryId),
     index("transactions_partner_id_idx").on(table.partnerId),
     index("transactions_project_id_idx").on(table.projectId),
+    index("transactions_account_id_idx").on(table.accountId),
     index("transactions_external_id_idx").on(table.externalId),
     check("transactions_vat_rate_bp_check", sql`${table.vatRateBp} is null or (${table.vatRateBp} >= 0 and ${table.vatRateBp} <= 10000)`)
   ]
