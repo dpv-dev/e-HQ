@@ -30,6 +30,7 @@
 
   /* Text — warmed off-white (visual identity: Text Primary #F6F7F9) */
   --ehq-text:#F6F7F9;
+  --ehq-text-white:rgba(255,255,255,1);
   --ehq-text-muted:rgba(255,255,255,.48);
   --ehq-text-soft:rgba(255,255,255,.74);
   --ehq-text-secondary:var(--ehq-text-soft);
@@ -60,7 +61,7 @@
   --ehq-body:16px; --ehq-small:14px; --ehq-caption:12px;
   --ehq-type-ui-size:13px;
   --ehq-type-ui-line:1.5;
-  --ehq-type-menu-size:14px;
+  --ehq-type-menu-size:15px;
   --ehq-type-control-size:var(--ehq-type-ui-size);
   --ehq-type-action-size:11px;
   --ehq-type-label-size:10px;

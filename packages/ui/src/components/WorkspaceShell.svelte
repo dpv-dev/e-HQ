@@ -198,7 +198,7 @@
     min-height: 42px;
     padding: 0 var(--ehq-space-3);
     border-radius: var(--ehq-radius-sm);
-    color: var(--ehq-text-soft);
+    color: var(--ehq-text-white);
     display: grid;
     grid-template-columns: 20px minmax(0, 1fr) auto;
     align-items: center;
@@ -207,7 +207,7 @@
   }
 
   .nav-item.active {
-    color: var(--ehq-text);
+    color: var(--ehq-text-white);
   }
 
   .nav-item.disabled {

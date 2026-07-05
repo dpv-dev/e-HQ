@@ -257,9 +257,9 @@
   }
 
   td {
-    color: var(--ehq-text);
+    color: var(--ehq-text-white);
     font-family: var(--ehq-font);
-    font-size: var(--ehq-type-ui-size);
+    font-size: 15px;
     font-weight: var(--ehq-type-body-weight);
     line-height: var(--ehq-type-ui-line);
   }
