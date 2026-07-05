@@ -36,8 +36,8 @@
   }
 
   span {
-    width: 18px;
-    height: 18px;
+    width: var(--ehq-spinner-md);
+    height: var(--ehq-spinner-md);
     border: 2px solid var(--ehq-yellow-muted);
     border-top-color: var(--ehq-yellow);
     border-radius: var(--ehq-radius-pill);
@@ -45,8 +45,8 @@
   }
 
   .small span {
-    width: 14px;
-    height: 14px;
+    width: var(--ehq-spinner-sm);
+    height: var(--ehq-spinner-sm);
   }
 
   strong {

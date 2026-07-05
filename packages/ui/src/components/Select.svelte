@@ -56,7 +56,7 @@
   }
 
   select {
-    min-height: 38px;
+    min-height: 36px;
     width: 100%;
     padding: 0 var(--ehq-space-3);
     border: 1px solid var(--ehq-border);

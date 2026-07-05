@@ -115,7 +115,7 @@
 
   .empty-link {
     width: max-content;
-    min-height: 32px;
+    min-height: 30px;
     padding: 0 var(--ehq-space-3);
     border: 1px solid var(--ehq-border);
     border-radius: var(--ehq-radius-sm);

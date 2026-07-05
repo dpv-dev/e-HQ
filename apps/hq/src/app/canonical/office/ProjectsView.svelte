@@ -150,7 +150,7 @@
       resetProjectFormFields();
       await loadProjects();
       projectSubmitStatus = "success";
-      projectSubmitMessage = projectId === null ? "Projet créé." : "Projet mis à jour.";
+      projectSubmitMessage = projectId === null ? "Project created." : "Project updated.";
     } catch (error: unknown) {
       // Write failures stay on the form; projectsState keeps the loaded list.
       projectSubmitStatus = "error";
@@ -164,15 +164,15 @@
 
   function projectSubmitTitle(): string {
     if (!props.writesEnabled) {
-      return "Activez les écritures pour modifier les projets.";
+      return "Enable writes to edit projects.";
     }
 
     if (projectSubmitStatus === "loading") {
-      return "Enregistrement en cours.";
+      return "Saving in progress.";
     }
 
     if (!projectFormComplete) {
-      return "Renseignez le nom du projet.";
+      return "Enter the project name.";
     }
 
     return "";
@@ -521,10 +521,10 @@
         />
       </header>
 
-      <section class="project-form ehq-edge-surface" aria-label={editingProjectId === null ? "Créer un projet" : "Éditer le projet"}>
+      <section class="project-form ehq-edge-surface" aria-label={editingProjectId === null ? "Create a project" : "Edit project"}>
         <Input
           id="project-form-name"
-          label="Nom du projet"
+          label="Project name"
           value={projectFormName}
           placeholder="Album launch"
           type="text"
@@ -534,7 +534,7 @@
         />
         <Select
           id="project-form-status"
-          label="Statut"
+          label="Status"
           value={projectFormStatus}
           options={projectStatusOptions}
           state="default"
@@ -545,7 +545,7 @@
           id="project-form-description"
           label="Description"
           value={projectFormDescription}
-          placeholder="Optionnelle"
+          placeholder="Optional"
           type="text"
           state="default"
           message=""
@@ -553,16 +553,16 @@
         />
         <label class="project-form-active">
           <input type="checkbox" bind:checked={projectFormActive} />
-          <span class="ehq-type-label-mono">Actif</span>
+          <span class="ehq-type-label-mono">Active</span>
         </label>
         {#if editingProjectId !== null}
           <p class="form-warning" role="note">
-            La description et l'indicateur actif ne sont pas relus depuis l'API : les valeurs ci-dessus remplaceront celles enregistrées.
+            The description and active flag are not read back from the API: the values above will overwrite the stored ones.
           </p>
         {/if}
         <div class="project-form-actions">
           <Button
-            label={projectSubmitStatus === "loading" ? "Enregistrement…" : editingProjectId === null ? "Créer le projet" : "Enregistrer"}
+            label={projectSubmitStatus === "loading" ? "Saving…" : editingProjectId === null ? "Create project" : "Save"}
             variant="primary"
             size="medium"
             type="button"
@@ -570,13 +570,13 @@
             loading={projectSubmitStatus === "loading"}
             locked={false}
             focus={false}
-            ariaLabel={editingProjectId === null ? "Créer le projet" : "Enregistrer le projet"}
+            ariaLabel={editingProjectId === null ? "Create project" : "Save project"}
             title={projectSubmitTitle()}
             onclick={submitProjectForm}
           />
           {#if editingProjectId !== null}
             <Button
-              label="Annuler"
+              label="Cancel"
               variant="secondary"
               size="medium"
               type="button"
@@ -584,7 +584,7 @@
               loading={false}
               locked={false}
               focus={false}
-              ariaLabel="Annuler l'édition du projet"
+              ariaLabel="Cancel project edit"
               onclick={resetProjectForm}
             />
           {/if}
@@ -630,7 +630,7 @@
           <div class="project-detail-actions">
             <Badge label={selectedProject.status} tone="info" />
             <Button
-              label="Éditer"
+              label="Edit"
               variant="secondary"
               size="small"
               type="button"
@@ -638,7 +638,7 @@
               loading={false}
               locked={false}
               focus={false}
-              ariaLabel="Éditer le projet sélectionné"
+              ariaLabel="Edit selected project"
               onclick={() => startEditProject(selectedProject.id)}
             />
           </div>

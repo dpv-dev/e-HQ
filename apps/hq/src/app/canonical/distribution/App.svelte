@@ -3867,7 +3867,7 @@
               <span>{selectedRun.period} · {selectedRun.status} · lock {selectedRun.lockKey}</span>
             </div>
             <Input id="distribution-unpost-reason" label="Unpost reason" value={unpostReasonInput} placeholder="" type="text" state="default" message="" oninput={updateUnpostReason} />
-            <Button label="Request unpost run" variant="danger" size="medium" type="button" disabled={!writesEnabled || unpostReasonInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Request unpost run" title={writesEnabled ? (unpostReasonInput.trim() === "" ? "Enter an unpost reason first" : "") : writeGateMessage} onclick={unpostAllocationRun} />
+            <Button label="Unpost run" variant="danger" size="medium" type="button" disabled={!writesEnabled || unpostReasonInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Unpost run" title={writesEnabled ? (unpostReasonInput.trim() === "" ? "Enter an unpost reason first" : "") : writeGateMessage} onclick={unpostAllocationRun} />
             <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel unpost request" onclick={closeUnpostPanel} />
           </section>
         {/if}
@@ -3909,7 +3909,7 @@
               </dl>
             </div>
           {/if}
-          <Button label="Generate statements run" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Generate statements run" title={writeDisabledTitle()} onclick={generateStatements} />
+          <Button label="Generate statements" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Generate statements" title={writeDisabledTitle()} onclick={generateStatements} />
         </section>
         <section class="statement-pdf ehq-edge-surface" aria-label="A4 statement PDF preview">
           <header>
@@ -3973,7 +3973,7 @@
         {#if reconciliationState.status === "loading"}
           <Loader label="Loading reconciliation" detail="Computing read-only diagnostics." size="medium" />
         {:else if reconciliationState.status === "error"}
-          <section class="empty-state ehq-edge-surface">
+          <section class="empty-state error ehq-edge-surface">
             <strong>Reconciliation unavailable</strong>
             <span>The read-only diagnostic could not be loaded. Retry the request.</span>
             <Button label="Retry" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Retry loading reconciliation" onclick={loadReconciliation} />
@@ -4061,7 +4061,7 @@
         {#if settingsState.status === "loading"}
           <Loader label="Loading settings" detail="Reading workspace configuration." size="medium" />
         {:else if settingsState.status === "error"}
-          <section class="empty-state ehq-edge-surface">
+          <section class="empty-state error ehq-edge-surface">
             <strong>Settings unavailable</strong>
             <span>The workspace configuration could not be loaded.</span>
             <Button label="Retry" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Retry loading settings" onclick={loadSettings} />
@@ -4341,10 +4341,6 @@
     font-size: var(--ehq-type-caption-size);
   }
 
-  .kpi-grid.recon {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-
   .empty-state {
     padding: var(--ehq-space-5);
     border: 0;
@@ -4365,6 +4361,11 @@
     color: var(--ehq-text-soft);
     font-size: var(--ehq-type-ui-size);
     line-height: var(--ehq-type-ui-line);
+  }
+
+  .empty-state.error {
+    --ehq-edge-fill: var(--ehq-error-bg);
+    --ehq-edge-border-color: var(--ehq-error);
   }
 
   .recon-actions {

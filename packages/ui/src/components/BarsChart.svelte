@@ -44,7 +44,7 @@
 
   h3 {
     margin: 0;
-    font-size: var(--ehq-h3);
+    font-size: var(--ehq-type-section-title-size);
   }
 
   .title-stack,
@@ -62,7 +62,7 @@
   }
 
   .bars-frame {
-    height: 104px;
+    height: var(--ehq-chart-frame-height);
     display: grid;
     grid-template-columns: repeat(6, minmax(0, 1fr));
     align-items: end;

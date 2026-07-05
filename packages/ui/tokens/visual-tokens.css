@@ -43,10 +43,11 @@
   --ehq-border-strong:rgba(255,184,0,.42);
 
   /* States */
-  --ehq-success:#22C55E; --ehq-success-bg:rgba(34,197,94,.12);
-  --ehq-info:#3B82F6;    --ehq-info-bg:rgba(59,130,246,.12);
+  --ehq-success:#22C55E; --ehq-success-bg:rgba(34,197,94,.12); --ehq-success-border:rgba(34,197,94,.35);
+  --ehq-info:#3B82F6;    --ehq-info-bg:rgba(59,130,246,.12);   --ehq-info-border:rgba(59,130,246,.35);
   --ehq-warning:#FBBF24; --ehq-warning-bg:rgba(251,191,36,.12);
-  --ehq-error:#FF3B30;   --ehq-error-bg:rgba(255,59,48,.12);   /* eeee.mu red */
+  --ehq-error:#FF3B30;   --ehq-error-bg:rgba(255,59,48,.12);   --ehq-error-border:rgba(255,59,48,.40);   /* eeee.mu red */
+  --ehq-error-hover:rgba(255,59,48,.20);
   --ehq-purple:#A855F7;
 
   /* Typography — Calibri (per David) + Space Mono (labels / technical).
@@ -61,16 +62,21 @@
   --ehq-body:16px; --ehq-small:14px; --ehq-caption:12px;
   --ehq-type-ui-size:13px;
   --ehq-type-ui-line:1.5;
-  --ehq-type-menu-size:15px;
+  --ehq-type-menu-size:14.5px;
   --ehq-type-control-size:var(--ehq-type-ui-size);
   --ehq-type-action-size:11px;
-  --ehq-type-label-size:10px;
+  --ehq-type-label-size:12px;
   --ehq-type-caption-size:11px;
   --ehq-type-page-title-size:clamp(24px,2.6vw,34px);
   --ehq-type-page-title-line:1;
   --ehq-type-page-title-color:var(--ehq-yellow);
   --ehq-type-section-title-size:var(--ehq-h3);
   --ehq-type-card-body-size:var(--ehq-type-ui-size);
+  --ehq-type-kpi-value-size:24px;
+  --ehq-type-chart-value-size:20px;
+  --ehq-chart-frame-height:104px;
+  --ehq-spinner-sm:14px;
+  --ehq-spinner-md:18px;
   --ehq-type-display-weight:600;
   --ehq-type-heading-weight:500;
   --ehq-type-heading-color:var(--ehq-text-secondary);
@@ -299,37 +305,6 @@
 .ehq-nav-fade-item.active:focus-visible{
   box-shadow:inset 2px 0 0 var(--ehq-yellow),0 0 0 3px var(--ehq-yellow-muted);
 }
-.ehq-button-primary{
-  background:var(--ehq-yellow); color:var(--ehq-text-on-yellow);
-  border:1px solid var(--ehq-yellow); border-radius:var(--ehq-radius-sm);
-  font-family:var(--ehq-font); text-transform:uppercase; letter-spacing:.08em; font-weight:500;
-}
-.ehq-button-primary:hover{ background:var(--ehq-yellow-hover); }
-.ehq-button-secondary{
-  background:transparent; color:var(--ehq-text);
-  border:1px solid var(--ehq-border); border-radius:var(--ehq-radius-sm);
-  font-family:var(--ehq-font); text-transform:uppercase; letter-spacing:.08em; font-weight:500;
-}
-.ehq-button-secondary:hover{ border-color:var(--ehq-yellow-border); }
-.ehq-button-danger{
-  background:var(--ehq-error-bg); color:var(--ehq-text);
-  border:1px solid var(--ehq-error); border-radius:var(--ehq-radius-sm);
-}
-.ehq-label{ font-family:var(--ehq-mono); text-transform:uppercase; letter-spacing:.16em; font-size:var(--ehq-type-caption-size); color:var(--ehq-text-muted); }
-.ehq-input,.ehq-select{
-  background:var(--ehq-black); color:var(--ehq-text);
-  border:1px solid var(--ehq-border); border-radius:var(--ehq-radius-sm);
-}
-.ehq-input:focus,.ehq-select:focus{
-  outline:none; border-color:var(--ehq-yellow-border);
-  box-shadow:0 0 0 3px var(--ehq-yellow-muted);
-}
-.ehq-badge-success{ color:var(--ehq-success); background:var(--ehq-success-bg); border:1px solid rgba(34,197,94,.35); }
-.ehq-badge-info{ color:var(--ehq-info); background:var(--ehq-info-bg); border:1px solid rgba(59,130,246,.35); }
-.ehq-badge-warning{ color:var(--ehq-text-soft); background:var(--ehq-surface-high); border:1px solid var(--ehq-border); }
-.ehq-badge-error{ color:var(--ehq-error); background:var(--ehq-error-bg); border:1px solid rgba(255,59,48,.40); }
-.ehq-badge-active{ color:var(--ehq-text-soft); background:var(--ehq-surface-high); border:1px solid var(--ehq-border); }
-
 .ehq-workspace-office{ --ehq-workspace-accent:var(--ehq-workspace-office); --ehq-workspace-accent-bg:var(--ehq-workspace-office-bg); }
 .ehq-workspace-distribution{ --ehq-workspace-accent:var(--ehq-workspace-distribution); --ehq-workspace-accent-bg:var(--ehq-workspace-distribution-bg); }
 .ehq-workspace-command-center{ --ehq-workspace-accent:var(--ehq-workspace-command); --ehq-workspace-accent-bg:var(--ehq-workspace-command-bg); }

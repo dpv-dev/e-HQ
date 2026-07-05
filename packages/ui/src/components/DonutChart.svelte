@@ -91,7 +91,7 @@
     display: grid;
     place-items: center;
     font-family: var(--ehq-font);
-    font-size: 20px;
+    font-size: var(--ehq-type-chart-value-size);
     font-weight: var(--ehq-type-figure-weight);
     font-variant-numeric: tabular-nums;
   }

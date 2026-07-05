@@ -57,12 +57,12 @@
   }
 
   .tone-success {
-    border-color: rgba(34,197,94,.28);
+    border-color: var(--ehq-success-border);
     background: var(--ehq-success-bg);
   }
 
   .tone-info {
-    border-color: rgba(59,130,246,.28);
+    border-color: var(--ehq-info-border);
     background: var(--ehq-info-bg);
   }
 
@@ -73,7 +73,7 @@
   }
 
   .tone-error {
-    border-color: rgba(255,59,48,.34);
+    border-color: var(--ehq-error-border);
     background: var(--ehq-error-bg);
   }
 

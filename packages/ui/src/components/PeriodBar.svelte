@@ -46,7 +46,7 @@
   }
 
   button {
-    min-height: 32px;
+    min-height: 30px;
     padding: 0 var(--ehq-space-3);
     border: 1px solid var(--ehq-border);
     border-radius: var(--ehq-radius-pill);
@@ -54,6 +54,11 @@
     color: var(--ehq-text-soft);
     font-family: var(--ehq-font);
     font-size: var(--ehq-type-control-size);
+  }
+
+  button:hover:not(:disabled) {
+    border-color: var(--ehq-yellow-border);
+    color: var(--ehq-text);
   }
 
   button.active {

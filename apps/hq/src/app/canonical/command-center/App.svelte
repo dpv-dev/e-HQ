@@ -1069,8 +1069,10 @@
 
         <section class="permission-workbench">
           <section class="form-panel ehq-edge-surface" aria-label="Invite user">
-            <h2>Access editor</h2>
-            <p>Persisted permission changes belong behind the API layer.</p>
+            <header>
+              <h2>Access editor</h2>
+              <p>Persisted permission changes belong behind the API layer.</p>
+            </header>
             <Input
               id="invite-email"
               label="Email"
@@ -1108,8 +1110,10 @@
           </section>
 
           <section class="locked-card-reference ehq-edge-surface" aria-label="Locked card rule">
-            <h2>HQ card rule</h2>
-            <p>Denied workspaces are visible on HQ, locked with a red cross, and never silently hidden.</p>
+            <header>
+              <h2>HQ card rule</h2>
+              <p>Denied workspaces are visible on HQ, locked with a red cross, and never silently hidden.</p>
+            </header>
             <div class="workspace-mini-grid">
               {#each allWorkspaces as workspaceId (workspaceId)}
                 {@const access = getWorkspaceAccess(session, workspaceId)}
@@ -1209,7 +1213,7 @@
             subtitle="Admin workspace only"
             body="The Command Center menu is local to this app and does not appear inside Office or Distribution."
             state={writesEnabled ? (commandBusy ? "loading" : "default") : "locked"}
-            primaryAction="Verified"
+            primaryAction="Save review"
             secondaryAction=""
             onPrimaryAction={saveSettingsReview}
           />
@@ -1411,7 +1415,7 @@
   }
 
   .workspace-mini-grid article.locked {
-    border-color: var(--ehq-error);
+    --ehq-edge-border-color: var(--ehq-error);
   }
 
   .workspace-mini-grid span {

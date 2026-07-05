@@ -292,13 +292,13 @@
   .shell-title {
     color: var(--ehq-text);
     font-family: var(--ehq-display);
-    font-size: 16px;
+    font-size: var(--ehq-body);
     font-weight: var(--ehq-type-heading-weight);
     text-decoration: none;
   }
 
   .shell-search {
-    min-height: 38px;
+    min-height: 36px;
     padding: 0 var(--ehq-space-3);
     border: 1px solid var(--ehq-border);
     border-radius: var(--ehq-radius-pill);

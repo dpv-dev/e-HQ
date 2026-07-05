@@ -200,7 +200,7 @@
           id: "imports",
           label: "Imports",
           title: "Imports",
-          subtitle: "Relevés bancaires mensuels avec analyse automatique puis import confirmé."
+          subtitle: "Monthly bank statements with automatic analysis then confirmed import."
         },
         {
           id: "reconciliation",
@@ -332,12 +332,12 @@
     { label: "Expense", value: "expense" }
   ];
   const createDirectionOptions: readonly SelectOption[] = [
-    { label: "Dépense", value: "expense" },
-    { label: "Revenu", value: "income" }
+    { label: "Expense", value: "expense" },
+    { label: "Income", value: "income" }
   ];
   const importEditDirectionOptions: readonly SelectOption[] = [
-    { label: "Débit", value: "debit" },
-    { label: "Crédit", value: "credit" }
+    { label: "Debit", value: "debit" },
+    { label: "Credit", value: "credit" }
   ];
 
   let activePageId = $state<OfficePageId>("dashboard");
@@ -423,7 +423,7 @@
   let createAmount = $state("");
   let createDirection = $state<"expense" | "income">("expense");
   let cashflowImportRecords = $state<readonly Readonly<Record<string, string>>[]>([]);
-  let cashflowImportMessage = $state("Importer un cashflow CSV (Month, Inflow, Outflow, ClosingBalance, Currency).");
+  let cashflowImportMessage = $state("Import a cashflow CSV (Month, Inflow, Outflow, ClosingBalance, Currency).");
   let importState = $state<ImportUiState>({
     status: "idle",
     source: "mcb",
@@ -431,7 +431,7 @@
     rows: [],
     preview: null,
     confirm: null,
-    message: "Choisis un relevé bancaire (PDF ou CSV)."
+    message: "Choose a bank statement (PDF or CSV)."
   });
   let importAccounts = $state<readonly OfficeBankAccountSummary[]>([]);
   let selectedImportAccountId = $state<string>("");
@@ -481,38 +481,38 @@
   // Placeholder-prefixed option lists for the Select component (it renders options only,
   // so the "empty" choice has to be part of the list).
   const optionalCategoryOptions = $derived<readonly SelectOption[]>([
-    { label: "— Aucune —", value: "" },
+    { label: "— None —", value: "" },
     ...editCategoryOptions
   ]);
   const optionalProjectOptions = $derived<readonly SelectOption[]>([
-    { label: "— Aucun —", value: "" },
+    { label: "— None —", value: "" },
     ...editProjectOptions
   ]);
   const reconcileCategoryOptions = $derived<readonly SelectOption[]>([
-    { label: "Brouillon — à classer", value: "" },
+    { label: "Draft — to classify", value: "" },
     ...editCategoryOptions
   ]);
   const reconcileProjectOptions = $derived<readonly SelectOption[]>([
-    { label: "Aucun", value: "" },
+    { label: "None", value: "" },
     ...editProjectOptions
   ]);
   const pendingCategoryOptions = $derived<readonly SelectOption[]>([
-    { label: "Choisir…", value: "" },
+    { label: "Choose…", value: "" },
     ...editCategoryOptions
   ]);
   const pendingProjectOptions = $derived<readonly SelectOption[]>([
-    { label: "Inchangé", value: "" },
+    { label: "Unchanged", value: "" },
     ...editProjectOptions
   ]);
   const createAccountSelectOptions = $derived<readonly SelectOption[]>(
     importAccounts.length === 0
-      ? [{ label: "Aucun compte bancaire chargé", value: "" }]
+      ? [{ label: "No bank account loaded", value: "" }]
       : importAccounts.map(bankAccountSelectOption)
   );
   const importAccountSelectOptions = $derived<readonly SelectOption[]>(
     importAccounts.length === 0
-      ? [{ label: "Aucun compte — crée-en un dans l'onglet Bank", value: "" }]
-      : [{ label: "Choisis un compte…", value: "" }, ...importAccounts.map(bankAccountSelectOption)]
+      ? [{ label: "No account — create one in the Bank tab", value: "" }]
+      : [{ label: "Choose an account…", value: "" }, ...importAccounts.map(bankAccountSelectOption)]
   );
   // Account filter options come from the workspace's real bank accounts (loaded once at
   // mount via loadImportAccounts) so filter values always match server-side account ids.
@@ -530,21 +530,21 @@
     createAmount.trim().length > 0
   );
   const ledgerRowActions = $derived<readonly TableRowAction[]>([
-    { label: "Éditer", onAction: openTransactionEditor },
-    { label: "Annuler", onAction: cancelTransactionById, danger: true }
+    { label: "Edit", onAction: openTransactionEditor },
+    { label: "Cancel", onAction: cancelTransactionById, danger: true }
   ]);
   const importRowActions = $derived<readonly TableRowAction[]>([
-    { label: "Annuler l'import", onAction: reverseImportBatch, danger: true }
+    { label: "Cancel import", onAction: reverseImportBatch, danger: true }
   ]);
   const planRowActions = $derived<readonly TableRowAction[]>([
-    { label: "Activer / Désactiver", onAction: togglePlanNodeActive }
+    { label: "Activate / Deactivate", onAction: togglePlanNodeActive }
   ]);
   const reconciliationRowActions = $derived<readonly TableRowAction[]>([
-    { label: "Accepter", onAction: acceptReconciliation },
-    { label: "Matcher", onAction: openReconcileMatch },
-    { label: "Créer écriture", onAction: openReconcileCreate },
-    { label: "Annuler match", onAction: unmatchReconciliationById },
-    { label: "Rejeter", onAction: rejectReconciliationById, danger: true }
+    { label: "Accept", onAction: acceptReconciliation },
+    { label: "Match", onAction: openReconcileMatch },
+    { label: "Create entry", onAction: openReconcileCreate },
+    { label: "Unmatch", onAction: unmatchReconciliationById },
+    { label: "Reject", onAction: rejectReconciliationById, danger: true }
   ]);
   const reconcileTransactionOptions = $derived(
     transactionRows.map((transaction: OfficeTransaction): SelectOption => ({
@@ -553,7 +553,7 @@
     }))
   );
   const reconcileMatchSelectOptions = $derived<readonly SelectOption[]>([
-    { label: "Choisir une écriture…", value: "" },
+    { label: "Choose an entry…", value: "" },
     ...reconcileTransactionOptions
   ]);
   const dashboardKpis = $derived(createDashboardKpis(dashboardState));
@@ -831,7 +831,7 @@
 
   function bankAccountSelectOption(account: OfficeBankAccountSummary): SelectOption {
     return {
-      label: `${account.bankName} · ${account.accountLabel} (${account.currency})${account.isActive ? "" : " — inactif"}`,
+      label: `${account.bankName} · ${account.accountLabel} (${account.currency})${account.isActive ? "" : " — inactive"}`,
       value: account.id
     };
   }
@@ -978,7 +978,7 @@
   }
 
   async function cancelTransactionById(transactionId: string): Promise<void> {
-    if (!window.confirm("Annuler cette transaction ? Elle passera en « annulée » (exclue des chiffres, conservée pour l'audit).")) {
+    if (!window.confirm("Cancel this transaction? It will be marked “cancelled” (excluded from figures, kept for audit).")) {
       return;
     }
 
@@ -1000,7 +1000,7 @@
   function decimalAmountToMicro(input: string): string {
     const match = /^([+-]?)(\d+)(?:[.,](\d+))?$/u.exec(input.trim().replace(",", "."));
     if (match === null) {
-      throw new Error(`Montant invalide : ${input}`);
+      throw new Error(`Invalid amount: ${input}`);
     }
     const sign = match[1] === "-" ? -1n : 1n;
     const whole = BigInt(match[2] ?? "0");
@@ -1035,7 +1035,7 @@
 
     try {
       if (editAccountId.length === 0) {
-        throw new Error("Choisis un compte bancaire pour cette transaction.");
+        throw new Error("Choose a bank account for this transaction.");
       }
       const receipt = await client.office.updateTransaction(
         transaction.id,
@@ -1233,7 +1233,7 @@
   }
 
   async function reverseImportBatch(batchId: string): Promise<void> {
-    if (!window.confirm("Annuler cet import ? Toutes ses lignes seront retirées (action réservée à l'administrateur).")) {
+    if (!window.confirm("Cancel this import? All its rows will be removed (action reserved for administrators).")) {
       return;
     }
 
@@ -1354,7 +1354,7 @@
       const records = parseCsvRecords(await file.text());
       if (records.length === 0) {
         cashflowImportRecords = [];
-        cashflowImportMessage = "Aucune ligne lisible dans ce CSV.";
+        cashflowImportMessage = "No readable row in this CSV.";
         return;
       }
       const preview = await client.office.previewCashflowImport(
@@ -1362,7 +1362,7 @@
         { idempotencyKey: createIdempotencyKey("cashflow-preview") }
       );
       cashflowImportRecords = records;
-      cashflowImportMessage = `${preview.acceptedRowCount} lignes prêtes · ${preview.rejectedRowCount} rejetées.`;
+      cashflowImportMessage = `${preview.acceptedRowCount} rows ready · ${preview.rejectedRowCount} rejected.`;
     } catch (error: unknown) {
       cashflowImportRecords = [];
       cashflowImportMessage = getErrorMessage(error);
@@ -1381,7 +1381,7 @@
       );
       actionReceipt = receipt;
       cashflowImportRecords = [];
-      cashflowImportMessage = "Cashflow importé.";
+      cashflowImportMessage = "Cashflow imported.";
       await loadCashflow();
     } catch (error: unknown) {
       cashflowImportMessage = getErrorMessage(error);
@@ -1740,7 +1740,7 @@
       source,
       preview: null,
       confirm: null,
-      message: rows.length > 0 ? "Source corrigée. Analyse API relancée." : "Source corrigée."
+      message: rows.length > 0 ? "Source corrected. Re-running API analysis." : "Source corrected."
     };
 
     if (rows.length > 0 && fileName.length > 0) {
@@ -1844,7 +1844,7 @@
         date: raw.transactionDate ?? raw.date ?? "",
         description: raw.description ?? "",
         amount: isCredit ? credit : debit,
-        direction: isCredit ? "Crédit" : "Débit",
+        direction: isCredit ? "Credit" : "Debit",
         currency: raw.currency ?? "",
         status: result.status,
         reason: result.issues.map(describeRejectionReason).join(", ")
@@ -1938,7 +1938,7 @@
       rows: [],
       preview: null,
       confirm: null,
-      message: "Lecture du relevé en cours."
+      message: "Reading the statement."
     };
 
     try {
@@ -1970,7 +1970,7 @@
           status: "error",
           source,
           rows: [],
-          message: isCsv ? "Aucune transaction lisible dans ce CSV." : "Aucune transaction lisible dans ce PDF."
+          message: isCsv ? "No readable transaction in this CSV." : "No readable transaction in this PDF."
         };
         return;
       }
@@ -1980,7 +1980,7 @@
         status: "loading",
         source,
         rows,
-        message: `${parsed.length} lignes détectées (${sourceLabel(source)}, ${currency}). Analyse API en cours.`
+        message: `${parsed.length} rows detected (${sourceLabel(source)}, ${currency}). Running API analysis.`
       };
       await previewImportRows(rows, source, file.name);
     } catch (error: unknown) {
@@ -1995,15 +1995,15 @@
   function describeRejectionReason(reason: string): string {
     switch (reason) {
       case "account_not_found":
-        return "compte de destination introuvable — choisis le bon compte";
+        return "destination account not found — choose the right account";
       case "occurred_on_missing":
-        return "date manquante ou illisible";
+        return "missing or unreadable date";
       case "description_missing":
-        return "libellé manquant";
+        return "missing description";
       case "amount_missing_or_invalid":
-        return "montant manquant ou invalide";
+        return "missing or invalid amount";
       case "amount_mur_missing_for_foreign_currency":
-        return "pas de taux de change MUR à cette date";
+        return "no MUR exchange rate for this date";
       default:
         return reason;
     }
@@ -2011,16 +2011,16 @@
 
   function previewSummaryMessage(preview: BankImportPreviewResponse): string {
     if (preview.rejectedRowCount === 0) {
-      return "Aperçu prêt. Vérifie les lignes détectées puis importe en base.";
+      return "Preview ready. Check the detected rows then import to the database.";
     }
     const topReason = preview.rejectionReasons[0];
     const reasonText = topReason === undefined
       ? ""
-      : ` Raison principale : ${describeRejectionReason(topReason.reason)} (${topReason.count} lignes).`;
+      : ` Main reason: ${describeRejectionReason(topReason.reason)} (${topReason.count} rows).`;
     if (preview.acceptedRowCount === 0) {
-      return `Aucune ligne acceptée sur ${preview.rejectedRowCount}.${reasonText}`;
+      return `No row accepted out of ${preview.rejectedRowCount}.${reasonText}`;
     }
-    return `Aperçu prêt : ${preview.acceptedRowCount} prêtes, ${preview.rejectedRowCount} rejetées.${reasonText}`;
+    return `Preview ready: ${preview.acceptedRowCount} ready, ${preview.rejectedRowCount} rejected.${reasonText}`;
   }
 
   async function previewImportRows(
@@ -2029,7 +2029,7 @@
     fileName: string
   ): Promise<void> {
     if (rows.length === 0) {
-      importState = { ...importState, status: "error", message: "Choisis d'abord un relevé bancaire (PDF ou CSV)." };
+      importState = { ...importState, status: "error", message: "Choose a bank statement first (PDF or CSV)." };
       return;
     }
     if (selectedImportAccountId.length === 0) {
@@ -2038,8 +2038,8 @@
         status: "error",
         rows,
         message: importAccounts.length === 0
-          ? "Aucun compte bancaire dans cet espace. Crée d'abord un compte dans l'onglet Bank, puis relance l'import."
-          : "Choisis le compte bancaire de destination avant de lancer l'aperçu."
+          ? "No bank account in this workspace. Create an account in the Bank tab first, then restart the import."
+          : "Choose the destination bank account before running the preview."
       };
       return;
     }
@@ -2057,7 +2057,7 @@
       source,
       fileName,
       rows: stampedRows,
-      message: "Analyse API en cours.",
+      message: "Running API analysis.",
       preview: null,
       confirm: null
     };
@@ -2098,7 +2098,7 @@
       importState = {
         ...importState,
         status: "error",
-        message: "Analyse le relevé avant de l'importer."
+        message: "Analyze the statement before importing it."
       };
       return;
     }
@@ -2107,7 +2107,7 @@
       importState = {
         ...importState,
         status: "error",
-        message: "Coche au moins une ligne acceptée à importer."
+        message: "Check at least one accepted row to import."
       };
       return;
     }
@@ -2119,7 +2119,7 @@
     importState = {
       ...importState,
       status: "loading",
-      message: "Import en base en cours."
+      message: "Importing to the database."
     };
 
     try {
@@ -2138,7 +2138,7 @@
         ...importState,
         status: "success",
         confirm,
-        message: "Relevé importé en base."
+        message: "Statement imported to the database."
       };
       await Promise.all([
         loadDashboard(),
@@ -2234,12 +2234,12 @@
     try {
       const account = importAccounts.find((candidate: OfficeBankAccountSummary): boolean => candidate.id === createAccountId);
       if (account === undefined) {
-        throw new Error("Choisis un compte bancaire pour la nouvelle écriture.");
+        throw new Error("Choose a bank account for the new entry.");
       }
       const magnitudeMicro = BigInt(decimalAmountToMicro(createAmount));
       const absoluteMicro = magnitudeMicro < 0n ? -magnitudeMicro : magnitudeMicro;
       if (absoluteMicro === 0n) {
-        throw new Error("Le montant doit être différent de zéro.");
+        throw new Error("The amount must not be zero.");
       }
       const request: OfficeTransactionWriteRequest = {
         workspaceId: officeWorkspaceId,
@@ -3069,7 +3069,7 @@
             message=""
             onchange={updateDepartmentFilter}
           />
-          <Button label="Apply" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Apply P&L filters" onclick={applyPnlFilters} />
+          <Button label="Filter" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Apply P&L filters" onclick={applyPnlFilters} />
         </section>
 
         {#if pnlState.status === "loading"}
@@ -3113,7 +3113,7 @@
         </section>
 
         {#if creatingTransaction}
-          <section class="office-edit-panel ehq-edge-surface" aria-label="Nouvelle écriture">
+          <section class="office-edit-panel ehq-edge-surface" aria-label="New entry">
             <div class="office-edit-grid">
               <label>
                 <span class="ehq-type-label-mono">Date</span>
@@ -3124,27 +3124,27 @@
               </div>
               <Select
                 id="office-create-account"
-                label="Compte"
+                label="Account"
                 value={createAccountId}
                 options={createAccountSelectOptions}
                 state={importAccounts.length === 0 ? "disabled" : "default"}
                 message=""
                 onchange={(value: string): void => { createAccountId = value; }}
               />
-              <Input id="office-create-amount" label="Montant" value={createAmount} placeholder="1200.00" type="text" state="default" message="" oninput={(value: string): void => { createAmount = value; }} />
-              <Select id="office-create-direction" label="Sens" value={createDirection} options={createDirectionOptions} state="default" message="" onchange={(value: string): void => { createDirection = value === "income" ? "income" : "expense"; }} />
-              <Select id="office-create-category" label="Catégorie" value={createCategoryId} options={optionalCategoryOptions} state="default" message="" onchange={(value: string): void => { createCategoryId = value; }} />
-              <Select id="office-create-project" label="Projet" value={createProjectId} options={optionalProjectOptions} state="default" message="" onchange={(value: string): void => { createProjectId = value; }} />
+              <Input id="office-create-amount" label="Amount" value={createAmount} placeholder="1200.00" type="text" state="default" message="" oninput={(value: string): void => { createAmount = value; }} />
+              <Select id="office-create-direction" label="Direction" value={createDirection} options={createDirectionOptions} state="default" message="" onchange={(value: string): void => { createDirection = value === "income" ? "income" : "expense"; }} />
+              <Select id="office-create-category" label="Category" value={createCategoryId} options={optionalCategoryOptions} state="default" message="" onchange={(value: string): void => { createCategoryId = value; }} />
+              <Select id="office-create-project" label="Project" value={createProjectId} options={optionalProjectOptions} state="default" message="" onchange={(value: string): void => { createProjectId = value; }} />
             </div>
             <div class="office-edit-actions">
-              <Button label="Créer l'écriture" variant="primary" size="medium" type="button" disabled={!writesEnabled || !canSubmitTransactionCreate} loading={false} locked={false} focus={false} ariaLabel="Créer l'écriture" title={writeDisabledTitle()} onclick={submitTransactionCreate} />
-              <Button label="Fermer" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Fermer le formulaire de création" onclick={closeTransactionCreate} />
+              <Button label="Create entry" variant="primary" size="medium" type="button" disabled={!writesEnabled || !canSubmitTransactionCreate} loading={false} locked={false} focus={false} ariaLabel="Create entry" title={writeDisabledTitle()} onclick={submitTransactionCreate} />
+              <Button label="Close" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Close the creation form" onclick={closeTransactionCreate} />
             </div>
           </section>
         {/if}
 
         {#if editingTransaction !== null}
-          <section class="office-edit-panel ehq-edge-surface" aria-label="Éditer la transaction">
+          <section class="office-edit-panel ehq-edge-surface" aria-label="Edit transaction">
             <div class="office-edit-grid">
               <label>
                 <span class="ehq-type-label-mono">Date</span>
@@ -3155,21 +3155,21 @@
               </div>
               <Select
                 id="office-edit-account"
-                label="Compte"
+                label="Account"
                 value={editAccountId}
                 options={createAccountSelectOptions}
                 state={importAccounts.length === 0 ? "disabled" : "default"}
                 message=""
                 onchange={(value: string): void => { editAccountId = value; }}
               />
-              <Input id="office-edit-amount" label="Montant" value={editAmount} placeholder="" type="text" state="default" message="" oninput={(value: string): void => { editAmount = value; }} />
-              <Select id="office-edit-category" label="Catégorie" value={editCategoryId} options={optionalCategoryOptions} state="default" message="" onchange={(value: string): void => { editCategoryId = value; }} />
-              <Select id="office-edit-project" label="Projet" value={editProjectId} options={optionalProjectOptions} state="default" message="" onchange={(value: string): void => { editProjectId = value; }} />
+              <Input id="office-edit-amount" label="Amount" value={editAmount} placeholder="" type="text" state="default" message="" oninput={(value: string): void => { editAmount = value; }} />
+              <Select id="office-edit-category" label="Category" value={editCategoryId} options={optionalCategoryOptions} state="default" message="" onchange={(value: string): void => { editCategoryId = value; }} />
+              <Select id="office-edit-project" label="Project" value={editProjectId} options={optionalProjectOptions} state="default" message="" onchange={(value: string): void => { editProjectId = value; }} />
             </div>
             <div class="office-edit-actions">
-              <Button label="Enregistrer" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Enregistrer la transaction" title={writeDisabledTitle()} onclick={saveTransactionEdit} />
-              <Button label="Valider" variant="secondary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Valider la transaction" title={writeDisabledTitle()} onclick={validateEditingTransaction} />
-              <Button label="Fermer" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Fermer l'éditeur" onclick={closeTransactionEditor} />
+              <Button label="Save" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Save transaction" title={writeDisabledTitle()} onclick={saveTransactionEdit} />
+              <Button label="Validate" variant="secondary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Validate transaction" title={writeDisabledTitle()} onclick={validateEditingTransaction} />
+              <Button label="Close" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Close editor" onclick={closeTransactionEditor} />
             </div>
           </section>
         {/if}
@@ -3202,31 +3202,31 @@
       {:else if activePageId === "monitoring"}
         <MonitoringView client={client.office} workspaceId={officeWorkspaceId} {period} dateFrom={activeRange.from} dateTo={activeRange.to} />
       {:else if activePageId === "imports"}
-        <section class="statement-import-panel ehq-edge-surface" aria-label="Importer un relevé bancaire">
+        <section class="statement-import-panel ehq-edge-surface" aria-label="Import a bank statement">
           <header>
             <div>
-              <span class="ehq-type-label-mono">Import bancaire mensuel</span>
-              <h2>Importer un statement</h2>
-              <p>Dépose un PDF MCB ou SBI/SBM. L'app détecte la banque, lit les lignes, lance l'aperçu API, puis tu confirmes l'import.</p>
+              <span class="ehq-type-label-mono">Monthly bank import</span>
+              <h2>Import a statement</h2>
+              <p>Drop an MCB or SBI/SBM PDF. The app detects the bank, reads the rows, runs the API preview, then you confirm the import.</p>
             </div>
-            <strong>{writesEnabled ? "Écritures activées" : "Écritures verrouillées"}</strong>
+            <strong>{writesEnabled ? "Entries enabled" : "Entries locked"}</strong>
           </header>
 
-          <div class="import-steps" aria-label="Progression import">
+          <div class="import-steps" aria-label="Import progress">
             <article class:complete={importState.fileName.length > 0}>
               <b>1</b>
-              <span>Fichier</span>
-              <small>{importState.fileName.length > 0 ? importState.fileName : "Aucun fichier"}</small>
+              <span>File</span>
+              <small>{importState.fileName.length > 0 ? importState.fileName : "No file"}</small>
             </article>
             <article class:complete={importState.preview !== null}>
               <b>2</b>
-              <span>Analyse</span>
-              <small>{importState.preview === null ? "En attente" : `${importState.preview.acceptedRowCount} lignes prêtes`}</small>
+              <span>Analysis</span>
+              <small>{importState.preview === null ? "Pending" : `${importState.preview.acceptedRowCount} rows ready`}</small>
             </article>
             <article class:complete={importState.confirm !== null}>
               <b>3</b>
               <span>Import</span>
-              <small>{importState.confirm === null ? "Non confirmé" : `${importState.confirm.importedTransactionCount} transactions`}</small>
+              <small>{importState.confirm === null ? "Not confirmed" : `${importState.confirm.importedTransactionCount} transactions`}</small>
             </article>
           </div>
 
@@ -3234,7 +3234,7 @@
             <div class="file-control">
               <Select
                 id="office-import-account"
-                label="Compte de destination"
+                label="Destination account"
                 value={selectedImportAccountId}
                 options={importAccountSelectOptions}
                 state={importAccounts.length === 0 ? "disabled" : "default"}
@@ -3243,18 +3243,18 @@
               />
             </div>
             <label class="file-control">
-              <span class="ehq-type-label-mono">Relevé PDF ou CSV</span>
+              <span class="ehq-type-label-mono">Bank statement PDF or CSV</span>
               <input type="file" accept="application/pdf,.pdf,text/csv,.csv" onchange={handleStatementFile} />
             </label>
-            <Button label="Analyser" variant="secondary" size="medium" type="button" disabled={!canPreviewImport} loading={false} locked={false} focus={false} ariaLabel="Analyser le relevé" onclick={previewImport} />
-            <Button label="Importer en base" variant="primary" size="medium" type="button" disabled={!canConfirmImport || !writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Importer le relevé en base" title={writeDisabledTitle()} onclick={confirmImport} />
+            <Button label="Analyze" variant="secondary" size="medium" type="button" disabled={!canPreviewImport} loading={false} locked={false} focus={false} ariaLabel="Analyze the statement" onclick={previewImport} />
+            <Button label="Import to database" variant="primary" size="medium" type="button" disabled={!canConfirmImport || !writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Import the statement to the database" title={writeDisabledTitle()} onclick={confirmImport} />
           </div>
 
           <details class="import-advanced">
-            <summary>Correction source</summary>
+            <summary>Source correction</summary>
             <Select
               id="office-import-source"
-              label="Banque détectée"
+              label="Detected bank"
               value={importState.source}
               options={bankStatementSourceOptions}
               state="default"
@@ -3267,44 +3267,44 @@
             <strong>{importState.message}</strong>
             {#if importState.preview !== null}
               <span>{sourceLabel(importState.preview.source)} · {importState.preview.periodLabel} · {importState.preview.currencyCodes.join(" / ")}</span>
-              <span>{importState.preview.acceptedRowCount} lignes prêtes · {importState.preview.rejectedRowCount} rejetées · {importState.preview.duplicateRowCount} doublons</span>
-              <span>{importState.preview.accountReference ?? "Compte détecté à la confirmation"}</span>
+              <span>{importState.preview.acceptedRowCount} rows ready · {importState.preview.rejectedRowCount} rejected · {importState.preview.duplicateRowCount} duplicates</span>
+              <span>{importState.preview.accountReference ?? "Account detected on confirmation"}</span>
               {#if importState.preview.openingBalanceMicro !== null && importState.preview.closingBalanceMicro !== null}
-                <span>Ouverture {formatMoney(importState.preview.openingBalanceMicro, importState.preview.currencyCodes[0] ?? "MUR")} · clôture {formatMoney(importState.preview.closingBalanceMicro, importState.preview.currencyCodes[0] ?? "MUR")}</span>
+                <span>Opening {formatMoney(importState.preview.openingBalanceMicro, importState.preview.currencyCodes[0] ?? "MUR")} · closing {formatMoney(importState.preview.closingBalanceMicro, importState.preview.currencyCodes[0] ?? "MUR")}</span>
               {/if}
               {#each importState.preview.warnings as warning (warning)}
                 <span>{warning}</span>
               {/each}
             {/if}
             {#if !writesEnabled}
-              <span>Pour importer en base, l'API doit avoir WRITES_ENABLED=true puis être redémarrée.</span>
+              <span>To import to the database, the API must have WRITES_ENABLED=true and be restarted.</span>
             {/if}
           </section>
 
           {#if importState.preview !== null && importPreviewTableRows.length > 0}
-            <section class="import-rows" aria-label="Lignes détectées">
+            <section class="import-rows" aria-label="Detected rows">
               <header class="import-rows-head">
-                <span class="ehq-type-label-mono">Lignes détectées · {importPreviewTableRows.length} · {selectedImportRowIds.length} cochées</span>
+                <span class="ehq-type-label-mono">Detected rows · {importPreviewTableRows.length} · {selectedImportRowIds.length} checked</span>
                 <div class="import-rows-tools">
-                  <Button label="Tout cocher" variant="secondary" size="small" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cocher toutes les lignes" onclick={(): void => { setAllImportRows(true); }} />
-                  <Button label="Tout décocher" variant="secondary" size="small" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Décocher toutes les lignes" onclick={(): void => { setAllImportRows(false); }} />
+                  <Button label="Check all" variant="secondary" size="small" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Check all rows" onclick={(): void => { setAllImportRows(true); }} />
+                  <Button label="Uncheck all" variant="secondary" size="small" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Uncheck all rows" onclick={(): void => { setAllImportRows(false); }} />
                 </div>
               </header>
               <div class="import-rows-table" role="table">
                 <div class="import-row import-row--header" role="row">
-                  <span role="columnheader" aria-label="Importer"></span>
+                  <span role="columnheader" aria-label="Import"></span>
                   <span role="columnheader">Date</span>
                   <span role="columnheader">Description</span>
-                  <span role="columnheader">Montant</span>
-                  <span role="columnheader">Sens</span>
-                  <span role="columnheader">Statut</span>
+                  <span role="columnheader">Amount</span>
+                  <span role="columnheader">Direction</span>
+                  <span role="columnheader">Status</span>
                   <span role="columnheader" aria-label="Action"></span>
                 </div>
                 {#each importPreviewTableRows.slice(0, 200) as row (row.id)}
                   <div class="import-row" class:import-row--rejected={row.status === "rejected"} role="row">
                     <span role="cell">
                       {#if row.status === "accepted"}
-                        <input type="checkbox" checked={importRowSelection[row.id] === true} onchange={() => toggleImportRow(row.id)} aria-label={`Importer la ligne ${String(row.rowNumber)}`} />
+                        <input type="checkbox" checked={importRowSelection[row.id] === true} onchange={() => toggleImportRow(row.id)} aria-label={`Import row ${String(row.rowNumber)}`} />
                       {:else}
                         <span class="import-row-flag" aria-hidden="true">!</span>
                       {/if}
@@ -3313,31 +3313,31 @@
                     <span role="cell" class="import-row-desc">{row.description}</span>
                     <span role="cell">{row.amount} {row.currency}</span>
                     <span role="cell">{row.direction}</span>
-                    <span role="cell">{row.status === "accepted" ? "Accepté" : `Rejeté — ${row.reason}`}</span>
+                    <span role="cell">{row.status === "accepted" ? "Accepted" : `Rejected — ${row.reason}`}</span>
                     <span role="cell">
                       {#if row.status === "rejected"}
-                        <Button label="Corriger" variant="secondary" size="small" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel={`Corriger la ligne ${String(row.rowNumber)}`} onclick={(): void => { startImportRowEdit(row.rowNumber); }} />
+                        <Button label="Fix" variant="secondary" size="small" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel={`Fix row ${String(row.rowNumber)}`} onclick={(): void => { startImportRowEdit(row.rowNumber); }} />
                       {/if}
                     </span>
                   </div>
                 {/each}
               </div>
               {#if importPreviewTableRows.length > 200}
-                <small>{importPreviewTableRows.length - 200} lignes supplémentaires non affichées — toutes les lignes acceptées cochées seront importées.</small>
+                <small>{importPreviewTableRows.length - 200} additional rows not shown — every checked accepted row will be imported.</small>
               {/if}
 
               {#if editingImportRowNumber !== null}
-                <div class="import-row-editor ehq-edge-surface" aria-label="Corriger une ligne">
-                  <span class="ehq-type-label-mono">Corriger la ligne {editingImportRowNumber} puis ré-analyser</span>
+                <div class="import-row-editor ehq-edge-surface" aria-label="Fix a row">
+                  <span class="ehq-type-label-mono">Fix row {editingImportRowNumber} then re-analyze</span>
                   <div class="import-row-editor-grid">
-                    <Input id="office-import-edit-date" label="Date (AAAA-MM-JJ)" value={importEditDate} placeholder="2026-05-27" type="text" state="default" message="" oninput={(value: string): void => { importEditDate = value; }} />
+                    <Input id="office-import-edit-date" label="Date (YYYY-MM-DD)" value={importEditDate} placeholder="2026-05-27" type="text" state="default" message="" oninput={(value: string): void => { importEditDate = value; }} />
                     <Input id="office-import-edit-description" label="Description" value={importEditDescription} placeholder="" type="text" state="default" message="" oninput={(value: string): void => { importEditDescription = value; }} />
-                    <Select id="office-import-edit-direction" label="Sens" value={importEditDirection} options={importEditDirectionOptions} state="default" message="" onchange={(value: string): void => { importEditDirection = value === "credit" ? "credit" : "debit"; }} />
-                    <Input id="office-import-edit-amount" label="Montant" value={importEditAmount} placeholder="40.00" type="text" state="default" message="" oninput={(value: string): void => { importEditAmount = value; }} />
+                    <Select id="office-import-edit-direction" label="Direction" value={importEditDirection} options={importEditDirectionOptions} state="default" message="" onchange={(value: string): void => { importEditDirection = value === "credit" ? "credit" : "debit"; }} />
+                    <Input id="office-import-edit-amount" label="Amount" value={importEditAmount} placeholder="40.00" type="text" state="default" message="" oninput={(value: string): void => { importEditAmount = value; }} />
                   </div>
                   <div class="import-row-editor-actions">
-                    <Button label="Appliquer + ré-analyser" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Appliquer la correction et ré-analyser" onclick={applyImportRowEdit} />
-                    <Button label="Annuler" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Annuler la correction" onclick={cancelImportRowEdit} />
+                    <Button label="Apply + re-analyze" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Apply the fix and re-analyze" onclick={applyImportRowEdit} />
+                    <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel the fix" onclick={cancelImportRowEdit} />
                   </div>
                 </div>
               {/if}
@@ -3345,7 +3345,7 @@
           {/if}
         </section>
 
-        <Table title="Batches bancaires connus par l'API" columns={importColumns} rows={recentImportRows} state={dashboardState.status === "loading" ? "loading" : dashboardState.status === "error" ? "error" : recentImportRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={importRowActions} />
+        <Table title="Bank batches known to the API" columns={importColumns} rows={recentImportRows} state={dashboardState.status === "loading" ? "loading" : dashboardState.status === "error" ? "error" : recentImportRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={importRowActions} />
       {:else if activePageId === "reconciliation"}
         <section class="filter-strip ehq-edge-surface" aria-label="Reconciliation filters">
           <Select id="office-reconciliation-account" label="Account" value={accountFilter} options={accountOptions} state="default" message="" onchange={updateAccountFilter} />
@@ -3359,12 +3359,12 @@
         {#if reconcileDrawerLineId !== null}
           <Drawer
             open={true}
-            title={reconcileDrawerMode === "match" ? `Matcher « ${reconcileDrawerBankLabel} »` : `Créer une écriture depuis « ${reconcileDrawerBankLabel} »`}
-            badgeLabel={reconcileDrawerMode === "match" ? "match" : "création"}
+            title={reconcileDrawerMode === "match" ? `Match “${reconcileDrawerBankLabel}”` : `Create an entry from “${reconcileDrawerBankLabel}”`}
+            badgeLabel={reconcileDrawerMode === "match" ? "match" : "creation"}
             badgeTone="info"
             body=""
-            primaryAction={reconcileDrawerMode === "match" ? "Matcher" : "Créer & matcher"}
-            secondaryAction="Annuler"
+            primaryAction={reconcileDrawerMode === "match" ? "Match" : "Create & match"}
+            secondaryAction="Cancel"
             state="default"
             primaryDisabled={!writesEnabled || (reconcileDrawerMode === "match" && reconcileMatchTransactionId.length === 0)}
             primaryTitle={writeDisabledTitle()}
@@ -3375,7 +3375,7 @@
               {#if reconcileDrawerMode === "match"}
                 <Select
                   id="office-reconcile-transaction"
-                  label="Écriture du grand livre"
+                  label="Ledger entry"
                   value={reconcileMatchTransactionId}
                   options={reconcileMatchSelectOptions}
                   state="default"
@@ -3385,7 +3385,7 @@
               {:else}
                 <Select
                   id="office-reconcile-category"
-                  label="Catégorie (option.)"
+                  label="Category (opt.)"
                   value={reconcileCreateCategoryId}
                   options={reconcileCategoryOptions}
                   state="default"
@@ -3394,7 +3394,7 @@
                 />
                 <Select
                   id="office-reconcile-project"
-                  label="Projet (option.)"
+                  label="Project (opt.)"
                   value={reconcileCreateProjectId}
                   options={reconcileProjectOptions}
                   state="default"
@@ -3406,10 +3406,10 @@
           </Drawer>
         {/if}
       {:else if activePageId === "pending"}
-        <section class="pending-actions ehq-edge-surface" aria-label="Actions pending">
+        <section class="pending-actions ehq-edge-surface" aria-label="Pending actions">
           <Select
             id="office-pending-category"
-            label="Catégorie"
+            label="Category"
             value={pendingClassifyCategoryId}
             options={pendingCategoryOptions}
             state="default"
@@ -3418,16 +3418,16 @@
           />
           <Select
             id="office-pending-project"
-            label="Projet (option.)"
+            label="Project (opt.)"
             value={pendingClassifyProjectId}
             options={pendingProjectOptions}
             state="default"
             message=""
             onchange={(value: string): void => { pendingClassifyProjectId = value; }}
           />
-          <Button label="Classer la sélection" variant="secondary" size="medium" type="button" disabled={!writesEnabled || selectedPendingIds.length === 0 || pendingClassifyCategoryId.length === 0} loading={false} locked={false} focus={false} ariaLabel="Classer la sélection" title={writeDisabledTitle()} onclick={classifySelectedPending} />
-          <Button label="Valider la sélection" variant="primary" size="medium" type="button" disabled={!writesEnabled || selectedPendingIds.length === 0} loading={false} locked={false} focus={false} ariaLabel="Valider la sélection" title={writeDisabledTitle()} onclick={bulkValidatePending} />
-          <span class="ehq-type-label-mono">{selectedPendingIds.length} sélectionnées</span>
+          <Button label="Classify selection" variant="secondary" size="medium" type="button" disabled={!writesEnabled || selectedPendingIds.length === 0 || pendingClassifyCategoryId.length === 0} loading={false} locked={false} focus={false} ariaLabel="Classify selection" title={writeDisabledTitle()} onclick={classifySelectedPending} />
+          <Button label="Validate selection" variant="primary" size="medium" type="button" disabled={!writesEnabled || selectedPendingIds.length === 0} loading={false} locked={false} focus={false} ariaLabel="Validate selection" title={writeDisabledTitle()} onclick={bulkValidatePending} />
+          <span class="ehq-type-label-mono">{selectedPendingIds.length} selected</span>
         </section>
 
         <div class="pending-list">
@@ -3448,19 +3448,19 @@
       {:else if activePageId === "cashflow"}
         <section class="filter-strip ehq-edge-surface" aria-label="Cash-flow filters">
           <Select id="office-cashflow-account" label="Account" value={accountFilter} options={accountOptions} state="default" message="" onchange={updateAccountFilter} />
-          <Button label="Refresh" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Refresh cash-flow" onclick={applyCashflowFilters} />
+          <Button label="Filter" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Refresh cash-flow" onclick={applyCashflowFilters} />
         </section>
 
-        <section class="office-edit-panel ehq-edge-surface" aria-label="Importer un cashflow">
+        <section class="office-edit-panel ehq-edge-surface" aria-label="Import a cashflow">
           <div class="office-edit-grid">
             <label class="office-edit-wide">
-              <span class="ehq-type-label-mono">Importer un CSV cashflow (Month, Inflow, Outflow, ClosingBalance, Currency)</span>
+              <span class="ehq-type-label-mono">Import a cashflow CSV (Month, Inflow, Outflow, ClosingBalance, Currency)</span>
               <input type="file" accept="text/csv,.csv" onchange={handleCashflowFile} />
             </label>
           </div>
           <div class="office-edit-actions">
             <span class="ehq-type-label-mono">{cashflowImportMessage}</span>
-            <Button label="Importer en base" variant="primary" size="medium" type="button" disabled={!writesEnabled || cashflowImportRecords.length === 0} loading={false} locked={false} focus={false} ariaLabel="Importer le cashflow en base" title={writeDisabledTitle()} onclick={confirmCashflowFileImport} />
+            <Button label="Import to database" variant="primary" size="medium" type="button" disabled={!writesEnabled || cashflowImportRecords.length === 0} loading={false} locked={false} focus={false} ariaLabel="Import the cashflow to the database" title={writeDisabledTitle()} onclick={confirmCashflowFileImport} />
           </div>
         </section>
 

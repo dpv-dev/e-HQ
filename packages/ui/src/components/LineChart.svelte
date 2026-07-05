@@ -64,7 +64,7 @@
 
   .line-frame {
     position: relative;
-    height: 104px;
+    height: var(--ehq-chart-frame-height);
     border-bottom: 1px solid var(--ehq-border);
     border-left: 1px solid var(--ehq-border);
   }

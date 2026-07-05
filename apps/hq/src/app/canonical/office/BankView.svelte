@@ -71,8 +71,8 @@
   const bankKpis = $derived(createBankKpis(accountRows, qualityState));
   const accountTableRows = $derived(createAccountTableRows(accountRows));
   const accountRowActions = $derived<readonly TableRowAction[]>([
-    { label: "Éditer", onAction: startEditAccount },
-    { label: "Supprimer", onAction: deleteAccountById, danger: true }
+    { label: "Edit", onAction: startEditAccount },
+    { label: "Delete", onAction: deleteAccountById, danger: true }
   ]);
 
   let bankFormName = $state("");
@@ -141,7 +141,7 @@
   async function deleteAccountById(accountId: string): Promise<void> {
     if (!props.writesEnabled) {
       accountSubmitStatus = "error";
-      accountSubmitMessage = "Activez les écritures pour supprimer un compte bancaire.";
+      accountSubmitMessage = "Enable writes to delete a bank account.";
       return;
     }
 
@@ -152,12 +152,12 @@
     const account = accountRows.find((row: OfficeBankAccountSummary): boolean => row.id === accountId);
     if (account === undefined) {
       accountSubmitStatus = "error";
-      accountSubmitMessage = "Compte bancaire introuvable dans la liste chargée.";
+      accountSubmitMessage = "Bank account not found in the loaded list.";
       return;
     }
 
     const confirmed = globalThis.confirm(
-      `Supprimer ${account.bankName} · ${account.accountLabel} et toutes ses lignes bancaires importées ?`
+      `Delete ${account.bankName} · ${account.accountLabel} and all its imported bank lines?`
     );
     if (!confirmed) {
       return;
@@ -176,7 +176,7 @@
       }
       await loadBank();
       accountSubmitStatus = "success";
-      accountSubmitMessage = "Compte bancaire et lignes liées supprimés.";
+      accountSubmitMessage = "Bank account and related lines deleted.";
     } catch (error: unknown) {
       accountSubmitStatus = "error";
       accountSubmitMessage = getErrorMessage(error);
@@ -206,7 +206,7 @@
       resetAccountFormFields();
       await loadBank();
       accountSubmitStatus = "success";
-      accountSubmitMessage = accountId === null ? "Compte bancaire créé." : "Compte bancaire mis à jour.";
+      accountSubmitMessage = accountId === null ? "Bank account created." : "Bank account updated.";
     } catch (error: unknown) {
       // Write failures stay on the form; accountsState keeps the loaded list.
       accountSubmitStatus = "error";
@@ -220,15 +220,15 @@
 
   function accountSubmitTitle(): string {
     if (!props.writesEnabled) {
-      return "Activez les écritures pour modifier les comptes bancaires.";
+      return "Enable writes to edit bank accounts.";
     }
 
     if (accountSubmitStatus === "loading") {
-      return "Enregistrement en cours.";
+      return "Saving in progress.";
     }
 
     if (!accountFormComplete) {
-      return "Renseignez la banque et le libellé du compte.";
+      return "Fill in the bank and account label.";
     }
 
     return "";
@@ -248,7 +248,7 @@
   async function runReconciliationAction(action: () => Promise<unknown>, successMessage: string): Promise<void> {
     if (!props.writesEnabled) {
       reconciliationActionStatus = "error";
-      reconciliationActionMessage = "Activez les écritures pour agir sur les candidats de rapprochement.";
+      reconciliationActionMessage = "Enable writes to act on reconciliation candidates.";
       return;
     }
 
@@ -282,7 +282,7 @@
           },
           { idempotencyKey: crypto.randomUUID() }
         ),
-      "Rapprochement approuvé."
+      "Reconciliation approved."
     );
   }
 
@@ -290,7 +290,7 @@
     const statementLineId = reconciliationLineIdFor(candidateId);
     if (statementLineId === null) {
       reconciliationActionStatus = "error";
-      reconciliationActionMessage = "Ligne bancaire introuvable pour ce candidat — recharge la page Bank.";
+      reconciliationActionMessage = "Bank line not found for this candidate — reload the Bank page.";
       return;
     }
     await runReconciliationAction(
@@ -299,7 +299,7 @@
           { workspaceId: props.workspaceId, statementLineId },
           { idempotencyKey: crypto.randomUUID() }
         ),
-      "Match annulé."
+      "Match cancelled."
     );
   }
 
@@ -307,7 +307,7 @@
     const statementLineId = reconciliationLineIdFor(candidateId);
     if (statementLineId === null) {
       reconciliationActionStatus = "error";
-      reconciliationActionMessage = "Ligne bancaire introuvable pour ce candidat — recharge la page Bank.";
+      reconciliationActionMessage = "Bank line not found for this candidate — reload the Bank page.";
       return;
     }
     await runReconciliationAction(
@@ -316,14 +316,14 @@
           { workspaceId: props.workspaceId, statementLineId },
           { idempotencyKey: crypto.randomUUID() }
         ),
-      "Candidat rejeté."
+      "Candidate rejected."
     );
   }
 
   const reconciliationRowActions = $derived<readonly TableRowAction[]>([
-    { label: "Accepter", onAction: approveReconciliationById },
-    { label: "Annuler match", onAction: unmatchReconciliationById },
-    { label: "Rejeter", onAction: rejectReconciliationById, danger: true }
+    { label: "Approve", onAction: approveReconciliationById },
+    { label: "Cancel match", onAction: unmatchReconciliationById },
+    { label: "Reject", onAction: rejectReconciliationById, danger: true }
   ]);
   const rawTableRows = $derived(createRawTableRows(rawRows));
   const accountsPagination = $derived<TablePagination | null>(
@@ -705,10 +705,10 @@
       <span class="ehq-type-body">{getErrorMessage(accountsState.error)}</span>
     </div>
   {:else}
-    <section class="bank-account-form ehq-edge-surface" aria-label={editingAccountId === null ? "Ajouter un compte bancaire" : "Éditer le compte bancaire"}>
+    <section class="bank-account-form ehq-edge-surface" aria-label={editingAccountId === null ? "Add a bank account" : "Edit bank account"}>
       <Input
         id="bank-account-name"
-        label="Banque"
+        label="Bank"
         value={bankFormName}
         placeholder="MCB"
         type="text"
@@ -718,7 +718,7 @@
       />
       <Input
         id="bank-account-label"
-        label="Libellé du compte"
+        label="Account label"
         value={bankFormLabel}
         placeholder="MCB EUR"
         type="text"
@@ -728,7 +728,7 @@
       />
       <Select
         id="bank-account-currency"
-        label="Devise"
+        label="Currency"
         value={bankFormCurrency}
         options={currencyOptions}
         state="default"
@@ -737,11 +737,11 @@
       />
       <label class="bank-account-active">
         <input type="checkbox" bind:checked={bankFormActive} />
-        <span class="ehq-type-label-mono">Actif</span>
+        <span class="ehq-type-label-mono">Active</span>
       </label>
       <div class="bank-account-actions">
         <Button
-          label={accountSubmitStatus === "loading" ? "Enregistrement…" : editingAccountId === null ? "Ajouter le compte" : "Enregistrer"}
+          label={accountSubmitStatus === "loading" ? "Saving…" : editingAccountId === null ? "Add account" : "Save"}
           variant="primary"
           size="medium"
           type="button"
@@ -749,13 +749,13 @@
           loading={accountSubmitStatus === "loading"}
           locked={false}
           focus={false}
-          ariaLabel={editingAccountId === null ? "Ajouter le compte bancaire" : "Enregistrer le compte bancaire"}
+          ariaLabel={editingAccountId === null ? "Add bank account" : "Save bank account"}
           title={accountSubmitTitle()}
           onclick={submitAccountForm}
         />
         {#if editingAccountId !== null}
           <Button
-            label="Annuler"
+            label="Cancel"
             variant="secondary"
             size="medium"
             type="button"
@@ -763,7 +763,7 @@
             loading={false}
             locked={false}
             focus={false}
-            ariaLabel="Annuler l'édition du compte bancaire"
+            ariaLabel="Cancel editing bank account"
             onclick={resetAccountForm}
           />
         {/if}

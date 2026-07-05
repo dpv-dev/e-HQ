@@ -73,6 +73,11 @@
     color: var(--ehq-text-on-yellow);
   }
 
+  .ehq-button.primary:hover {
+    background: var(--ehq-yellow-hover);
+    border-color: var(--ehq-yellow-hover);
+  }
+
   .ehq-button.secondary:hover,
   .ehq-button.focus-demo,
   .ehq-button:focus-visible {
@@ -85,6 +90,10 @@
     background: var(--ehq-error-bg);
     border-color: var(--ehq-error);
     color: var(--ehq-error);
+  }
+
+  .ehq-button.danger:hover {
+    background: var(--ehq-error-hover);
   }
 
   .ehq-button:disabled {
@@ -104,8 +113,8 @@
   }
 
   .spinner {
-    width: 14px;
-    height: 14px;
+    width: var(--ehq-spinner-sm);
+    height: var(--ehq-spinner-sm);
     border: 2px solid var(--ehq-yellow-muted);
     border-top-color: var(--ehq-yellow);
     border-radius: var(--ehq-radius-pill);

@@ -73,7 +73,7 @@
     display: block;
     margin: var(--ehq-space-2) 0;
     font-family: var(--ehq-font);
-    font-size: 24px;
+    font-size: var(--ehq-type-kpi-value-size);
     font-weight: var(--ehq-type-figure-weight);
     font-variant-numeric: tabular-nums;
   }
