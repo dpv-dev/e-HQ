@@ -38,7 +38,7 @@
   {:else}
     <EmptyState
       title={props.title}
-      detail={props.detail.length > 0 ? props.detail : "Aucune donnée ne correspond aux filtres actuels."}
+      detail={props.detail.length > 0 ? props.detail : "No data matches the current filters."}
       state={props.state}
       actionLabel=""
       actionHref={null}

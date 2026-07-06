@@ -54,7 +54,7 @@
 
 <div class={`ehq-workspace-shell ehq-workspace-${props.workspace}`}>
   <aside>
-    <a class="shell-mark" href={props.homeHref} aria-label={`${props.brandLabel} accueil`}>ë</a>
+    <a class="shell-mark" href={props.homeHref} aria-label={`${props.brandLabel} home`}>ë</a>
 
     <nav aria-label={props.navLabel}>
       {#each navGroupList as group (group.id)}
@@ -82,7 +82,7 @@
     </nav>
 
     <div class="shell-foot">
-      <section class="shell-status" aria-label="Statut de l'espace">
+      <section class="shell-status" aria-label="Workspace status">
         <span>{props.statusLabel}</span>
         <strong>{props.statusValue}</strong>
       </section>
@@ -96,7 +96,7 @@
     <header class="shell-topbar">
       <a class="shell-title" href={props.homeHref}>{props.brandLabel}</a>
       <div class="shell-search" aria-hidden="true">
-        <span>Aller à une section</span>
+        <span>Go to a section</span>
         <kbd>⌘K</kbd>
       </div>
       <div class="shell-user-wrap">

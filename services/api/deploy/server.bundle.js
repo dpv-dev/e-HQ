@@ -44532,11 +44532,47 @@ function signedMoneyValue(row, aliases) {
   return moneyValue(row, aliases);
 }
 function cleanMoneyText(value) {
-  const trimmed = value.trim().replaceAll(",", "");
-  if (trimmed.startsWith("(") && trimmed.endsWith(")")) {
-    return `-${trimmed.slice(1, -1)}`;
+  const original = value.trim();
+  if (original.length === 0) {
+    return "";
   }
-  return trimmed;
+  let sign = "";
+  let trimmed = original;
+  if (trimmed.startsWith("(") && trimmed.endsWith(")")) {
+    sign = "-";
+    trimmed = trimmed.slice(1, -1).trim();
+  }
+  if (trimmed.startsWith("+")) {
+    trimmed = trimmed.slice(1).trim();
+  } else if (trimmed.startsWith("-")) {
+    sign = "-";
+    trimmed = trimmed.slice(1).trim();
+  }
+  const compacted = trimmed.replaceAll(/\u00a0/g, "").replaceAll(" ", "").replace(/[^0-9.,]/gu, "");
+  if (compacted.length === 0) {
+    return "";
+  }
+  const lastComma = compacted.lastIndexOf(",");
+  const lastDot = compacted.lastIndexOf(".");
+  if (lastComma === -1 && lastDot === -1) {
+    return `${sign}${compacted}`;
+  }
+  if (lastComma === -1) {
+    return `${sign}${compacted.replace(/,/gu, "")}`;
+  }
+  if (lastDot === -1) {
+    const decimalPart = compacted.slice(lastComma + 1);
+    const integerWithGroup = compacted.slice(0, lastComma);
+    const integerGroups = integerWithGroup.split(",");
+    if (decimalPart.length > 0 && decimalPart.length <= 2 && integerGroups.every((group, groupIndex) => groupIndex === 0 ? group.length >= 1 && group.length <= 3 : group.length === 3)) {
+      return `${sign}${integerWithGroup.replace(/,/gu, "")}.${decimalPart}`;
+    }
+    return `${sign}${compacted.replace(/,/gu, "")}`;
+  }
+  if (lastComma > lastDot) {
+    return `${sign}${compacted.slice(0, lastComma).replace(/,/gu, "")}.${compacted.slice(lastComma + 1)}`;
+  }
+  return `${sign}${compacted.replace(/,/gu, "")}`;
 }
 function isoDateValue(row, aliases) {
   const value = rowValue(row, aliases);

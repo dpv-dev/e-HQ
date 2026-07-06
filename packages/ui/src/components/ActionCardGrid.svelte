@@ -20,10 +20,10 @@
       </div>
 
       {#if action.href !== null && !action.disabled}
-        <a href={action.href}>Ouvrir</a>
+        <a href={action.href}>Open</a>
       {:else}
         <Button
-          label={action.disabled ? "Activer les écritures" : "Ouvrir"}
+          label={action.disabled ? "Enable writes" : "Open"}
           variant={action.variant}
           size="small"
           type="button"
