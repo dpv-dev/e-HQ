@@ -799,7 +799,30 @@ export async function persistOfficeBankImportConfirmation(tx: ApiWriteTransactio
     )
   `);
 
-  for (const line of input.lines) {
+  // Multi-row inserts in chunks: a statement-by-statement loop over thousands of lines
+  // (real imports run 2000+) exceeded the host proxy's request timeout, so the client saw
+  // a 500 while the transaction kept committing server-side. 400 rows x 15 params = 6000
+  // bind parameters per statement, comfortably under Postgres's 65535 limit.
+  const INSERT_CHUNK_SIZE = 400;
+  for (let offset = 0; offset < input.lines.length; offset += INSERT_CHUNK_SIZE) {
+    const chunk = input.lines.slice(offset, offset + INSERT_CHUNK_SIZE);
+    const rows = chunk.map((line): SQL => sql`(
+      ${line.id},
+      ${input.batchId},
+      ${line.accountId},
+      ${line.occurredOn},
+      ${line.valueOn},
+      ${line.description},
+      ${line.reference},
+      ${line.direction},
+      ${String(line.amountMinor)},
+      ${line.balanceMinor === null ? null : String(line.balanceMinor)},
+      ${line.currency},
+      ${String(line.amountMurMinor)},
+      ${line.balanceMurMinor === null ? null : String(line.balanceMurMinor)},
+      ${line.isDuplicateCandidate},
+      ${JSON.stringify(line.rawData)}::jsonb
+    )`);
     await tx.executor.execute(sql`
       insert into office_bank_statement_lines (
         id,
@@ -818,23 +841,7 @@ export async function persistOfficeBankImportConfirmation(tx: ApiWriteTransactio
         is_duplicate_candidate,
         raw_data
       )
-      values (
-        ${line.id},
-        ${input.batchId},
-        ${line.accountId},
-        ${line.occurredOn},
-        ${line.valueOn},
-        ${line.description},
-        ${line.reference},
-        ${line.direction},
-        ${String(line.amountMinor)},
-        ${line.balanceMinor === null ? null : String(line.balanceMinor)},
-        ${line.currency},
-        ${String(line.amountMurMinor)},
-        ${line.balanceMurMinor === null ? null : String(line.balanceMurMinor)},
-        ${line.isDuplicateCandidate},
-        ${JSON.stringify(line.rawData)}::jsonb
-      )
+      values ${sql.join(rows, sql`, `)}
     `);
   }
 }

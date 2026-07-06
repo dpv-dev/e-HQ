@@ -2124,37 +2124,53 @@
       message: "Importing to the database."
     };
 
-    try {
-      const confirm = await client.office.confirmBankImport(
-        {
-          workspaceId: officeWorkspaceId,
-          previewId: preview.previewId,
-          acceptedRowIds,
-          rejectedRowIds
-        },
-        {
-          idempotencyKey: createIdempotencyKey("import-confirm")
+    // One idempotency key for both attempts: on a proxy timeout the first confirm often
+    // COMMITS server-side while the client sees a 500. Replaying the same request is safe
+    // (the API answers an already-confirmed batch with a graceful duplicate receipt), so a
+    // single retry turns that false failure into the success it actually was.
+    const idempotencyKey = createIdempotencyKey("import-confirm");
+    const request = {
+      workspaceId: officeWorkspaceId,
+      previewId: preview.previewId,
+      acceptedRowIds,
+      rejectedRowIds
+    };
+
+    let lastError: unknown = null;
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        const confirm = await client.office.confirmBankImport(request, { idempotencyKey });
+        importState = {
+          ...importState,
+          status: "success",
+          confirm,
+          message: "Statement imported to the database."
+        };
+        await Promise.all([
+          loadDashboard(),
+          loadTransactions(),
+          loadPendingTransactions(),
+          loadReconciliations()
+        ]);
+        return;
+      } catch (error: unknown) {
+        lastError = error;
+        if (attempt === 1) {
+          importState = {
+            ...importState,
+            status: "loading",
+            message: "The first attempt did not answer — checking whether the import completed…"
+          };
+          await new Promise<void>((resolve: () => void): void => { window.setTimeout(resolve, 2500); });
         }
-      );
-      importState = {
-        ...importState,
-        status: "success",
-        confirm,
-        message: "Statement imported to the database."
-      };
-      await Promise.all([
-        loadDashboard(),
-        loadTransactions(),
-        loadPendingTransactions(),
-        loadReconciliations()
-      ]);
-    } catch (error: unknown) {
-      importState = {
-        ...importState,
-        status: "error",
-        message: getErrorMessage(error)
-      };
+      }
     }
+
+    importState = {
+      ...importState,
+      status: "error",
+      message: `${getErrorMessage(lastError)} The import may still have completed server-side — check the Bank tab's raw lines before re-importing.`
+    };
   }
 
   async function createPlanNode(): Promise<void> {

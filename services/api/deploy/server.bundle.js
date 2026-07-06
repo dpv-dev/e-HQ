@@ -38438,7 +38438,26 @@ async function persistOfficeBankImportConfirmation(tx, input) {
       ${JSON.stringify(input.metadata)}::jsonb
     )
   `);
-  for (const line of input.lines) {
+  const INSERT_CHUNK_SIZE = 400;
+  for (let offset = 0; offset < input.lines.length; offset += INSERT_CHUNK_SIZE) {
+    const chunk = input.lines.slice(offset, offset + INSERT_CHUNK_SIZE);
+    const rows = chunk.map((line) => sql`(
+      ${line.id},
+      ${input.batchId},
+      ${line.accountId},
+      ${line.occurredOn},
+      ${line.valueOn},
+      ${line.description},
+      ${line.reference},
+      ${line.direction},
+      ${String(line.amountMinor)},
+      ${line.balanceMinor === null ? null : String(line.balanceMinor)},
+      ${line.currency},
+      ${String(line.amountMurMinor)},
+      ${line.balanceMurMinor === null ? null : String(line.balanceMurMinor)},
+      ${line.isDuplicateCandidate},
+      ${JSON.stringify(line.rawData)}::jsonb
+    )`);
     await tx.executor.execute(sql`
       insert into office_bank_statement_lines (
         id,
@@ -38457,23 +38476,7 @@ async function persistOfficeBankImportConfirmation(tx, input) {
         is_duplicate_candidate,
         raw_data
       )
-      values (
-        ${line.id},
-        ${input.batchId},
-        ${line.accountId},
-        ${line.occurredOn},
-        ${line.valueOn},
-        ${line.description},
-        ${line.reference},
-        ${line.direction},
-        ${String(line.amountMinor)},
-        ${line.balanceMinor === null ? null : String(line.balanceMinor)},
-        ${line.currency},
-        ${String(line.amountMurMinor)},
-        ${line.balanceMurMinor === null ? null : String(line.balanceMurMinor)},
-        ${line.isDuplicateCandidate},
-        ${JSON.stringify(line.rawData)}::jsonb
-      )
+      values ${sql.join(rows, sql`, `)}
     `);
   }
 }
