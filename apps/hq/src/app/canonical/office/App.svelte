@@ -310,7 +310,9 @@
     { label: "All", value: allValue },
     { label: "Unmatched", value: "unmatched" },
     { label: "Suggested", value: "suggested" },
-    { label: "Matched", value: "matched" }
+    { label: "Matched", value: "matched" },
+    { label: "Rejected", value: "rejected" },
+    { label: "Ignored", value: "ignored" }
   ];
   const importSourceOptions: readonly SelectOption[] = [
     { label: "MCB EUR PDF", value: "mcb" },

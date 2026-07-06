@@ -458,10 +458,15 @@ function addTransactionToGroup(
 }
 
 function addToAccumulator(accumulator: MutableAccumulator, transaction: OfficeTransactionRow, amountMinor: bigint): void {
+  // Different write paths disagree on amountMinor's sign for expenses (manual entry negates it,
+  // bank-reconciliation/ledger-import store a positive magnitude and carry the sign meaning in
+  // `type` alone) — normalize to a positive magnitude here so profit = income - expense is
+  // correct regardless of which path created the row.
+  const magnitude = amountMinor < 0n ? -amountMinor : amountMinor;
   if (transaction.type === "income") {
-    accumulator.incomeMinor += amountMinor;
+    accumulator.incomeMinor += magnitude;
   } else {
-    accumulator.expenseMinor += amountMinor;
+    accumulator.expenseMinor += magnitude;
   }
 
   accumulator.transactionIds.add(transaction.id);

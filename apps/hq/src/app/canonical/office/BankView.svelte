@@ -325,6 +325,62 @@
     { label: "Cancel match", onAction: unmatchReconciliationById },
     { label: "Reject", onAction: rejectReconciliationById, danger: true }
   ]);
+
+  async function ignoreRawLineById(lineId: string): Promise<void> {
+    await runReconciliationAction(
+      (): Promise<unknown> =>
+        props.client.ignoreBankRawLine(
+          { workspaceId: props.workspaceId, statementLineId: lineId },
+          { idempotencyKey: crypto.randomUUID() }
+        ),
+      "Bank line ignored."
+    );
+  }
+
+  let movingRawLineId = $state<string | null>(null);
+  let moveTargetAccountId = $state("");
+
+  function startMoveRawLine(lineId: string): void {
+    movingRawLineId = lineId;
+    const currentAccountId = rawRows.find((line: OfficeBankRawLine): boolean => line.id === lineId)?.accountId ?? "";
+    const fallbackAccountId = accountRows.find((account: OfficeBankAccountSummary): boolean => account.id !== currentAccountId)?.id ?? "";
+    moveTargetAccountId = fallbackAccountId;
+  }
+
+  function cancelMoveRawLine(): void {
+    movingRawLineId = null;
+    moveTargetAccountId = "";
+  }
+
+  async function confirmMoveRawLine(): Promise<void> {
+    const lineId = movingRawLineId;
+    if (lineId === null || moveTargetAccountId.length === 0) {
+      return;
+    }
+
+    await runReconciliationAction(
+      (): Promise<unknown> =>
+        props.client.reassignBankRawLineAccount(
+          { workspaceId: props.workspaceId, statementLineId: lineId, accountId: moveTargetAccountId },
+          { idempotencyKey: crypto.randomUUID() }
+        ),
+      "Bank line moved to the selected account."
+    );
+    movingRawLineId = null;
+    moveTargetAccountId = "";
+  }
+
+  const moveAccountOptions = $derived<readonly SelectOption[]>(
+    accountRows.map((account: OfficeBankAccountSummary): SelectOption => ({
+      label: `${account.bankName} · ${account.accountLabel} (${account.currency})`,
+      value: account.id
+    }))
+  );
+
+  const rawRowActions = $derived<readonly TableRowAction[]>([
+    { label: "Move account", onAction: startMoveRawLine },
+    { label: "Ignore", onAction: ignoreRawLineById, danger: true }
+  ]);
   const rawTableRows = $derived(createRawTableRows(rawRows));
   const accountsPagination = $derived<TablePagination | null>(
     createTablePagination(accountsState, accountsLoadingMore, accountsLoadMoreError, loadMoreAccounts, loadAllAccounts)
@@ -646,7 +702,7 @@
     return "loaded";
   }
 
-  function reconciliationTone(status: "unmatched" | "suggested" | "matched" | "rejected"): Tone {
+  function reconciliationTone(status: "unmatched" | "suggested" | "matched" | "rejected" | "ignored"): Tone {
     if (status === "matched") {
       return "success";
     }
@@ -657,6 +713,10 @@
 
     if (status === "rejected") {
       return "error";
+    }
+
+    if (status === "ignored") {
+      return "muted";
     }
 
     return "warning";
@@ -776,7 +836,22 @@
          loading and error statuses are handled by the view-level Loader and
          error copy above, so the table only distinguishes empty from default. -->
     <Table title="Bank accounts" columns={accountColumns} rows={accountTableRows} state={accountTableRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={accountRowActions} pagination={accountsPagination} />
-    <Table title="Raw bank lines" columns={rawColumns} rows={rawTableRows} state={rawState.status === "loading" ? "loading" : rawState.status === "error" ? "error" : rawTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={rawPagination} />
+    <Table title="Raw bank lines" columns={rawColumns} rows={rawTableRows} state={rawState.status === "loading" ? "loading" : rawState.status === "error" ? "error" : rawTableRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={rawRowActions} pagination={rawPagination} />
+    {#if movingRawLineId !== null}
+      <section class="bank-account-form ehq-edge-surface" aria-label="Move bank line to a different account">
+        <Select
+          id="office-bank-raw-move-account"
+          label="Move to account"
+          value={moveTargetAccountId}
+          options={moveAccountOptions}
+          state="default"
+          message=""
+          onchange={(value: string): void => { moveTargetAccountId = value; }}
+        />
+        <Button label="Confirm" variant="primary" size="medium" type="button" disabled={!props.writesEnabled || moveTargetAccountId.length === 0} loading={false} locked={false} focus={false} ariaLabel="Confirm move to account" title={props.writesEnabled ? "" : "Enable writes to move bank lines between accounts."} onclick={confirmMoveRawLine} />
+        <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel moving bank line" onclick={cancelMoveRawLine} />
+      </section>
+    {/if}
     <Table title="Reconciliation candidates" columns={reconciliationColumns} rows={reconciliationTableRows} state={reconciliationState.status === "loading" ? "loading" : reconciliationState.status === "error" ? "error" : reconciliationTableRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={reconciliationRowActions} pagination={reconciliationPagination} />
     {#if reconciliationActionMessage !== null}
       <p class="form-message ehq-type-body" class:error={reconciliationActionStatus === "error"} role="status">{reconciliationActionMessage}</p>

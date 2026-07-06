@@ -24633,10 +24633,11 @@ function addTransactionToGroup(groups, groupId, transaction, amountMinor) {
   groups.set(groupId, accumulator);
 }
 function addToAccumulator(accumulator, transaction, amountMinor) {
+  const magnitude = amountMinor < 0n ? -amountMinor : amountMinor;
   if (transaction.type === "income") {
-    accumulator.incomeMinor += amountMinor;
+    accumulator.incomeMinor += magnitude;
   } else {
-    accumulator.expenseMinor += amountMinor;
+    accumulator.expenseMinor += magnitude;
   }
   accumulator.transactionIds.add(transaction.id);
 }
@@ -38089,7 +38090,9 @@ var ALLOWED_MUTATING_ACTIONS = /* @__PURE__ */ new Set([
   "office_reconciliation_match",
   "office_reconciliation_unmatch",
   "office_reconciliation_reject",
+  "office_reconciliation_ignore",
   "office_reconciliation_create_transaction",
+  "office_bank_raw_reassign_account",
   "office_ledger_bulk_confirm"
 ]);
 var OFFICE_BOT_ACTIONS = /* @__PURE__ */ new Set([
@@ -38108,7 +38111,9 @@ var OFFICE_BOT_ACTIONS = /* @__PURE__ */ new Set([
   "office_reconciliation_match",
   "office_reconciliation_unmatch",
   "office_reconciliation_reject",
+  "office_reconciliation_ignore",
   "office_reconciliation_create_transaction",
+  "office_bank_raw_reassign_account",
   "office_ledger_bulk_confirm"
 ]);
 var DISTRIBUTION_BOT_ACTIONS = /* @__PURE__ */ new Set([
@@ -39291,6 +39296,10 @@ var officeReconciliationMatchSchema = workspaceBodySchema.extend({
 var officeReconciliationLineSchema = workspaceBodySchema.extend({
   statementLineId: external_exports.string().min(1)
 });
+var officeBankRawLineReassignSchema = workspaceBodySchema.extend({
+  statementLineId: external_exports.string().min(1),
+  accountId: external_exports.string().min(1)
+});
 var officeReconciliationCreateTransactionSchema = workspaceBodySchema.extend({
   statementLineId: external_exports.string().min(1),
   categoryId: nullableStringSchema,
@@ -39619,6 +39628,9 @@ function registerOfficeRoutes(app, dependencies) {
   app.post("/eof/v1/reconciliations/reject", async (context) => {
     return officeReconciliationRejectResponse(context, dependencies);
   });
+  app.post("/eof/v1/reconciliations/ignore", async (context) => {
+    return officeReconciliationIgnoreResponse(context, dependencies);
+  });
   app.post("/eof/v1/reconciliations/create-transaction", async (context) => {
     return officeReconciliationCreateTransactionResponse(context, dependencies);
   });
@@ -39729,6 +39741,9 @@ function registerOfficeRoutes(app, dependencies) {
     const batches = buildBatchWorkspaceLookup(dependencies.fixtures.office.bankImportBatches);
     const lines = dependencies.fixtures.office.bankStatementLines.map((line) => toApiBankRawLine(line, batches)).filter((line) => line.workspaceId === workspaceId).filter((line) => period === null || line.occurredOn.startsWith(period)).filter((line) => accountId === null || line.accountId === accountId);
     return context.json(pageItems(context, lines));
+  });
+  app.post("/eof/v1/bank/raw/reassign-account", async (context) => {
+    return officeBankRawLineReassignResponse(context, dependencies);
   });
   app.get("/eof/v1/projects", (context) => {
     resolveWorkspaceId(context);
@@ -40629,6 +40644,75 @@ async function officeReconciliationRejectResponse(context, dependencies) {
   });
   return context.json(result.body, result.status);
 }
+async function officeReconciliationIgnoreResponse(context, dependencies) {
+  const request = await readZodBody(context, officeReconciliationLineSchema);
+  requireOfficeBankLine(dependencies.fixtures.office, request.statementLineId);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_reconciliation_ignore",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `office:reconciliation:${request.statementLineId}`);
+      await persistOfficeReconciliationIgnore(tx, request.statementLineId);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_reconciliation_ignore",
+        targetType: "office_reconciliation_match",
+        targetId: request.statementLineId,
+        before: {},
+        after: { status: "ignored" },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      ignoreReconciliationFixture(dependencies.fixtures, request.statementLineId);
+      return mutationReceipt(request.statementLineId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+async function officeBankRawLineReassignResponse(context, dependencies) {
+  const request = await readZodBody(context, officeBankRawLineReassignSchema);
+  const line = requireOfficeBankLine(dependencies.fixtures.office, request.statementLineId);
+  const targetAccount = dependencies.fixtures.office.bankAccounts.find(
+    (account) => account.id === request.accountId && account.workspaceId === request.workspaceId
+  );
+  if (targetAccount === void 0) {
+    throw new ApiRouteError(404, "office_bank_account_not_found", "Target bank account was not found.", [
+      `path=${context.req.path}`,
+      `accountId=${request.accountId}`
+    ]);
+  }
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_bank_raw_reassign_account",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `office:bank-line:${request.statementLineId}`);
+      await persistOfficeBankRawLineReassign(tx, request.statementLineId, request.accountId);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_bank_raw_reassign_account",
+        targetType: "office_bank_statement_line",
+        targetId: request.statementLineId,
+        before: { accountId: line.accountId },
+        after: { accountId: request.accountId },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      reassignBankRawLineFixture(dependencies.fixtures, request.statementLineId, request.accountId);
+      return mutationReceipt(request.statementLineId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
 async function officeReconciliationCreateTransactionResponse(context, dependencies) {
   const request = await readZodBody(context, officeReconciliationCreateTransactionSchema);
   const line = requireOfficeBankLine(dependencies.fixtures.office, request.statementLineId);
@@ -40736,6 +40820,25 @@ async function persistOfficeReconciliationReject(tx, statementLineId) {
     update office_bank_statement_lines set reconciliation_status = 'rejected', matched_transaction_id = null where id = ${statementLineId}
   `);
 }
+async function persistOfficeReconciliationIgnore(tx, statementLineId) {
+  if (tx.kind === "memory") {
+    return;
+  }
+  await tx.executor.execute(sql`
+    update office_bank_reconciliation_matches set status = 'rejected', updated_at = now() where bank_statement_line_id = ${statementLineId}
+  `);
+  await tx.executor.execute(sql`
+    update office_bank_statement_lines set reconciliation_status = 'ignored', matched_transaction_id = null where id = ${statementLineId}
+  `);
+}
+async function persistOfficeBankRawLineReassign(tx, statementLineId, accountId) {
+  if (tx.kind === "memory") {
+    return;
+  }
+  await tx.executor.execute(sql`
+    update office_bank_statement_lines set account_id = ${accountId} where id = ${statementLineId}
+  `);
+}
 function matchReconciliationFixture(fixtures, statementLineId, transactionId, matchedAt, actorUserId) {
   const mutableOffice = fixtures.office;
   mutableOffice.bankStatementLines = fixtures.office.bankStatementLines.map(
@@ -40770,6 +40873,21 @@ function rejectReconciliationFixture(fixtures, statementLineId) {
   );
   mutableOffice.bankReconciliationMatches = fixtures.office.bankReconciliationMatches.filter(
     (match2) => match2.bankStatementLineId !== statementLineId
+  );
+}
+function ignoreReconciliationFixture(fixtures, statementLineId) {
+  const mutableOffice = fixtures.office;
+  mutableOffice.bankStatementLines = fixtures.office.bankStatementLines.map(
+    (line) => line.id === statementLineId ? { ...line, reconciliationStatus: "ignored", matchedTransactionId: null } : line
+  );
+  mutableOffice.bankReconciliationMatches = fixtures.office.bankReconciliationMatches.filter(
+    (match2) => match2.bankStatementLineId !== statementLineId
+  );
+}
+function reassignBankRawLineFixture(fixtures, statementLineId, accountId) {
+  const mutableOffice = fixtures.office;
+  mutableOffice.bankStatementLines = fixtures.office.bankStatementLines.map(
+    (line) => line.id === statementLineId ? { ...line, accountId } : line
   );
 }
 async function officePartnerCreateResponse(context, dependencies) {
@@ -45718,6 +45836,9 @@ function toApiReconciliationStatus(line) {
   }
   if (line.reconciliationStatus === "rejected") {
     return "rejected";
+  }
+  if (line.reconciliationStatus === "ignored") {
+    return "ignored";
   }
   return "unmatched";
 }

@@ -1,0 +1,1 @@
+ALTER TYPE "public"."office_bank_reconciliation_status" ADD VALUE 'ignored';

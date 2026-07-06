@@ -195,6 +195,41 @@ test("global P&L aggregates validated ledger rows and applies FX/status filters"
   });
 });
 
+test("global P&L treats a negative-signed expense amount as a positive magnitude, not a profit-inflating credit", () => {
+  // Manual "New entry" transaction creation negates the amount for expense direction, while
+  // bank-reconciliation and ledger-bulk-import paths store a positive magnitude and carry the
+  // sign meaning in `type` alone. The aggregator must be robust to either convention: profit
+  // must never be inflated by a negative-signed expense row.
+  const signedExpenseDataset: OfficePnlDataset = {
+    ...fixture,
+    transactions: [
+      {
+        id: "tx_negative_signed_expense",
+        transactionDate: "2026-05-20T10:00:00.000Z",
+        type: "expense",
+        status: "validated",
+        isActive: true,
+        description: "Expense stored with a negative amountMinor",
+        categoryId: "cat_rent",
+        partnerId: null,
+        projectId: null,
+        amountMinor: -12_000n,
+        originalCurrency: null,
+        exchangeRateE10: null
+      }
+    ]
+  };
+
+  assert.deepEqual(readGlobalPnl(signedExpenseDataset, noFilter), {
+    income: "0.00",
+    expense: "120.00",
+    profit: "-120.00",
+    tx_count: 1,
+    currency: "MUR",
+    view: "global_ledger"
+  });
+});
+
 test("department P&L and by-department rows aggregate financial allocations at department grain", () => {
   assert.deepEqual(readDepartmentPnl(fixture, "dept_office", noFilter), {
     income: "300.00",

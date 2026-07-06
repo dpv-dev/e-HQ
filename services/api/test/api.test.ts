@@ -2133,6 +2133,52 @@ test("reconciliation manual match, unmatch, and reject flip the bank line status
   assert.equal((await reconciliationLineStatus(app, "bank_line_unmatched"))?.status, "rejected");
 });
 
+test("reconciliation ignore marks a bank line ignored and distinct from rejected", async () => {
+  const app = createWriteEnabledFixtureApiService();
+  assert.equal((await reconciliationLineStatus(app, "bank_line_unmatched"))?.status, "unmatched");
+
+  assertReceipt(await jsonWrite(app, "/eof/v1/reconciliations/ignore", "POST", "recon-ignore-1", {
+    workspaceId: "workspace_1",
+    statementLineId: "bank_line_unmatched"
+  }));
+  assert.equal((await reconciliationLineStatus(app, "bank_line_unmatched"))?.status, "ignored");
+});
+
+test("bank raw line reassign-account moves a line to a different bank account", async () => {
+  const app = createWriteEnabledFixtureApiService();
+  const before = await app.request("/eof/v1/bank/raw?workspaceId=workspace_1", { headers: authHeaders() });
+  const beforeLine = ((await before.json()) as { readonly items: readonly { readonly id: string; readonly accountId: string }[] }).items.find(
+    (item) => item.id === "bank_line_unmatched"
+  );
+  assert.equal(beforeLine?.accountId, "bank_mur");
+
+  assertReceipt(await jsonWrite(app, "/eof/v1/bank/raw/reassign-account", "POST", "recon-reassign-1", {
+    workspaceId: "workspace_1",
+    statementLineId: "bank_line_unmatched",
+    accountId: "bank_eur"
+  }));
+
+  const after = await app.request("/eof/v1/bank/raw?workspaceId=workspace_1", { headers: authHeaders() });
+  const afterLine = ((await after.json()) as { readonly items: readonly { readonly id: string; readonly accountId: string }[] }).items.find(
+    (item) => item.id === "bank_line_unmatched"
+  );
+  assert.equal(afterLine?.accountId, "bank_eur");
+});
+
+test("bank raw line reassign-account rejects a nonexistent target account", async () => {
+  const app = createWriteEnabledFixtureApiService();
+  const response = await app.request("/eof/v1/bank/raw/reassign-account", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "recon-reassign-bad-1" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      statementLineId: "bank_line_unmatched",
+      accountId: "bank_does_not_exist"
+    })
+  });
+  assert.equal(response.status, 404);
+});
+
 test("reconciliation create-transaction builds a ledger line from a bank line and matches it", async () => {
   const app = createWriteEnabledFixtureApiService();
   const receipt = await jsonWrite(app, "/eof/v1/reconciliations/create-transaction", "POST", "recon-create-1", {

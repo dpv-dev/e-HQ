@@ -26,7 +26,7 @@ export const transactionSourceEnum = pgEnum("transaction_source", ["manual", "ba
 export const officeBankImportSourceEnum = pgEnum("office_bank_import_source", ["sbi", "mcb", "csv", "cashflow", "pdf"]);
 export const officeBankImportStatusEnum = pgEnum("office_bank_import_status", ["previewed", "confirmed", "failed", "void"]);
 export const officeBankLineDirectionEnum = pgEnum("office_bank_line_direction", ["credit", "debit"]);
-export const officeBankReconciliationStatusEnum = pgEnum("office_bank_reconciliation_status", ["unmatched", "suggested", "matched", "rejected"]);
+export const officeBankReconciliationStatusEnum = pgEnum("office_bank_reconciliation_status", ["unmatched", "suggested", "matched", "rejected", "ignored"]);
 
 function createdAtColumn() {
   return timestamp("created_at", { withTimezone: true, mode: "string" }).notNull().defaultNow();

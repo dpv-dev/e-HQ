@@ -52,6 +52,7 @@ import type {
   OfficeProjectPnl,
   OfficeProjectPnlQuery,
   OfficeProjectsQuery,
+  OfficeBankRawLineReassignRequest,
   OfficeProjectSummary,
   OfficeProjectWriteRequest,
   OfficeReconciliationApproveRequest,
@@ -147,6 +148,14 @@ export interface OfficeApiClient {
   ) => Promise<ApiMutationReceipt>;
   readonly createTransactionFromBankLine: (
     request: OfficeReconciliationCreateTransactionRequest,
+    options: WriteRequestOptions
+  ) => Promise<ApiMutationReceipt>;
+  readonly ignoreBankRawLine: (
+    request: OfficeReconciliationLineRequest,
+    options: WriteRequestOptions
+  ) => Promise<ApiMutationReceipt>;
+  readonly reassignBankRawLineAccount: (
+    request: OfficeBankRawLineReassignRequest,
     options: WriteRequestOptions
   ) => Promise<ApiMutationReceipt>;
   readonly getCashflow: (query: CashflowQuery) => Promise<readonly CashflowBucket[]>;
@@ -373,6 +382,16 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
       options: WriteRequestOptions
     ): Promise<ApiMutationReceipt> =>
       transport.post<ApiMutationReceipt>("reconciliations/create-transaction", request, options.idempotencyKey),
+    ignoreBankRawLine: (
+      request: OfficeReconciliationLineRequest,
+      options: WriteRequestOptions
+    ): Promise<ApiMutationReceipt> =>
+      transport.post<ApiMutationReceipt>("reconciliations/ignore", request, options.idempotencyKey),
+    reassignBankRawLineAccount: (
+      request: OfficeBankRawLineReassignRequest,
+      options: WriteRequestOptions
+    ): Promise<ApiMutationReceipt> =>
+      transport.post<ApiMutationReceipt>("bank/raw/reassign-account", request, options.idempotencyKey),
     getCashflow: (query: CashflowQuery): Promise<readonly CashflowBucket[]> =>
       transport.get<readonly CashflowBucket[]>("cashflow", {
         workspaceId: query.workspaceId,

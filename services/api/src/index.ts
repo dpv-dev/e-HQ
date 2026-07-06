@@ -135,6 +135,7 @@ import type {
   OfficePnlProjectionRow,
   OfficeProjectCoherenceViolation,
   OfficeProjectPnl,
+  OfficeBankRawLineReassignRequest,
   OfficeProjectPnlLine,
   OfficeProjectSummary,
   OfficeReconciliationCandidate,
@@ -526,6 +527,10 @@ const officeReconciliationMatchSchema = workspaceBodySchema.extend({
 });
 const officeReconciliationLineSchema = workspaceBodySchema.extend({
   statementLineId: z.string().min(1)
+});
+const officeBankRawLineReassignSchema = workspaceBodySchema.extend({
+  statementLineId: z.string().min(1),
+  accountId: z.string().min(1)
 });
 const officeReconciliationCreateTransactionSchema = workspaceBodySchema.extend({
   statementLineId: z.string().min(1),
@@ -1009,6 +1014,10 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
     return officeReconciliationRejectResponse(context, dependencies);
   });
 
+  app.post("/eof/v1/reconciliations/ignore", async (context) => {
+    return officeReconciliationIgnoreResponse(context, dependencies);
+  });
+
   app.post("/eof/v1/reconciliations/create-transaction", async (context) => {
     return officeReconciliationCreateTransactionResponse(context, dependencies);
   });
@@ -1152,6 +1161,10 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
       .filter((line) => period === null || line.occurredOn.startsWith(period))
       .filter((line) => accountId === null || line.accountId === accountId);
     return context.json(pageItems(context, lines));
+  });
+
+  app.post("/eof/v1/bank/raw/reassign-account", async (context) => {
+    return officeBankRawLineReassignResponse(context, dependencies);
   });
 
   app.get("/eof/v1/projects", (context) => {
@@ -2193,6 +2206,78 @@ async function officeReconciliationRejectResponse(context: ApiContext, dependenc
   return context.json(result.body, result.status);
 }
 
+async function officeReconciliationIgnoreResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const request = await readZodBody<OfficeReconciliationLineRequest>(context, officeReconciliationLineSchema);
+  requireOfficeBankLine(dependencies.fixtures.office, request.statementLineId);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_reconciliation_ignore",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `office:reconciliation:${request.statementLineId}`);
+      await persistOfficeReconciliationIgnore(tx, request.statementLineId);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_reconciliation_ignore",
+        targetType: "office_reconciliation_match",
+        targetId: request.statementLineId,
+        before: {},
+        after: { status: "ignored" },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      ignoreReconciliationFixture(dependencies.fixtures, request.statementLineId);
+      return mutationReceipt(request.statementLineId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function officeBankRawLineReassignResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const request = await readZodBody<OfficeBankRawLineReassignRequest>(context, officeBankRawLineReassignSchema);
+  const line = requireOfficeBankLine(dependencies.fixtures.office, request.statementLineId);
+  const targetAccount = dependencies.fixtures.office.bankAccounts.find(
+    (account: OfficeBankAccountRow): boolean => account.id === request.accountId && account.workspaceId === request.workspaceId
+  );
+  if (targetAccount === undefined) {
+    throw new ApiRouteError(404, "office_bank_account_not_found", "Target bank account was not found.", [
+      `path=${context.req.path}`,
+      `accountId=${request.accountId}`
+    ]);
+  }
+
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_bank_raw_reassign_account",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `office:bank-line:${request.statementLineId}`);
+      await persistOfficeBankRawLineReassign(tx, request.statementLineId, request.accountId);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_bank_raw_reassign_account",
+        targetType: "office_bank_statement_line",
+        targetId: request.statementLineId,
+        before: { accountId: line.accountId },
+        after: { accountId: request.accountId },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      reassignBankRawLineFixture(dependencies.fixtures, request.statementLineId, request.accountId);
+      return mutationReceipt(request.statementLineId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
 async function officeReconciliationCreateTransactionResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
   const request = await readZodBody<OfficeReconciliationCreateTransactionRequest>(context, officeReconciliationCreateTransactionSchema);
   const line = requireOfficeBankLine(dependencies.fixtures.office, request.statementLineId);
@@ -2323,6 +2408,32 @@ async function persistOfficeReconciliationReject(tx: ApiWriteTransaction, statem
   `);
 }
 
+// Ignore is for lines that are intentionally never converted into a transaction (internal
+// transfers, test rows, non-financial memos) — distinct from "rejected", which means a specific
+// match attempt was wrong but the line may still need a transaction later.
+async function persistOfficeReconciliationIgnore(tx: ApiWriteTransaction, statementLineId: string): Promise<void> {
+  if (tx.kind === "memory") {
+    return;
+  }
+
+  await tx.executor.execute(sql`
+    update office_bank_reconciliation_matches set status = 'rejected', updated_at = now() where bank_statement_line_id = ${statementLineId}
+  `);
+  await tx.executor.execute(sql`
+    update office_bank_statement_lines set reconciliation_status = 'ignored', matched_transaction_id = null where id = ${statementLineId}
+  `);
+}
+
+async function persistOfficeBankRawLineReassign(tx: ApiWriteTransaction, statementLineId: string, accountId: string): Promise<void> {
+  if (tx.kind === "memory") {
+    return;
+  }
+
+  await tx.executor.execute(sql`
+    update office_bank_statement_lines set account_id = ${accountId} where id = ${statementLineId}
+  `);
+}
+
 function matchReconciliationFixture(
   fixtures: ApiFixtureStore,
   statementLineId: string,
@@ -2365,6 +2476,23 @@ function rejectReconciliationFixture(fixtures: ApiFixtureStore, statementLineId:
   );
   mutableOffice.bankReconciliationMatches = fixtures.office.bankReconciliationMatches.filter(
     (match) => match.bankStatementLineId !== statementLineId
+  );
+}
+
+function ignoreReconciliationFixture(fixtures: ApiFixtureStore, statementLineId: string): void {
+  const mutableOffice = fixtures.office as Mutable<OfficeAnalyticsDataset>;
+  mutableOffice.bankStatementLines = fixtures.office.bankStatementLines.map((line) =>
+    line.id === statementLineId ? { ...line, reconciliationStatus: "ignored", matchedTransactionId: null } : line
+  );
+  mutableOffice.bankReconciliationMatches = fixtures.office.bankReconciliationMatches.filter(
+    (match) => match.bankStatementLineId !== statementLineId
+  );
+}
+
+function reassignBankRawLineFixture(fixtures: ApiFixtureStore, statementLineId: string, accountId: string): void {
+  const mutableOffice = fixtures.office as Mutable<OfficeAnalyticsDataset>;
+  mutableOffice.bankStatementLines = fixtures.office.bankStatementLines.map((line) =>
+    line.id === statementLineId ? { ...line, accountId } : line
   );
 }
 
@@ -8248,6 +8376,10 @@ function toApiReconciliationStatus(line: OfficeBankStatementLineRow): OfficeReco
 
   if (line.reconciliationStatus === "rejected") {
     return "rejected";
+  }
+
+  if (line.reconciliationStatus === "ignored") {
+    return "ignored";
   }
 
   return "unmatched";

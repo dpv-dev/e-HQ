@@ -498,7 +498,7 @@ export interface OfficeReconciliationCandidate {
   readonly ledgerDescription: string;
   readonly amountMicro: MoneyMicroString;
   readonly confidenceBp: BasisPoints;
-  readonly status: "unmatched" | "suggested" | "matched" | "rejected";
+  readonly status: "unmatched" | "suggested" | "matched" | "rejected" | "ignored";
 }
 
 export interface OfficeReconciliationApproveRequest {
@@ -519,6 +519,12 @@ export interface OfficeReconciliationMatchRequest {
 export interface OfficeReconciliationLineRequest {
   readonly workspaceId: EntityId;
   readonly statementLineId: EntityId;
+}
+
+export interface OfficeBankRawLineReassignRequest {
+  readonly workspaceId: EntityId;
+  readonly statementLineId: EntityId;
+  readonly accountId: EntityId;
 }
 
 // Create a ledger transaction directly from an unmatched bank line, then match it.
@@ -815,8 +821,8 @@ export interface OfficeBankRawLine {
   readonly amountMurMicro: MoneyMicroString;
   readonly currency: CurrencyCode;
   readonly isDuplicateCandidate: boolean;
-  readonly status: "unmatched" | "suggested" | "matched" | "rejected";
-  readonly reconciliationStatus: "unmatched" | "suggested" | "matched" | "rejected";
+  readonly status: "unmatched" | "suggested" | "matched" | "rejected" | "ignored";
+  readonly reconciliationStatus: "unmatched" | "suggested" | "matched" | "rejected" | "ignored";
   readonly matchedTransactionId: EntityId | null;
 }
 
