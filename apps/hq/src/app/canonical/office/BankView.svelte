@@ -31,6 +31,7 @@
   import { sortOptionsAlphabetically } from "../../select-options.js";
   import { formatMoneyValue, formatSignedMoneyValue, moneyToneForValue } from "../../money-format.js";
   import { appendPageResult, createTablePagination, readPageItems, TABLE_PAGE_SIZE } from "../../table-pagination.js";
+  import { untrack } from "svelte";
 
   interface Props {
     readonly client: OfficeApiClient;
@@ -415,10 +416,12 @@
 
   async function loadBank(): Promise<void> {
     const token = ++loadBankToken;
-    accountsState = beginReload<PageResult<OfficeBankAccountSummary>>(accountsState);
-    rawState = beginReload<PageResult<OfficeBankRawLine>>(rawState);
-    qualityState = beginReload<OfficeBankQualityResponse>(qualityState);
-    reconciliationState = beginReload<PageResult<OfficeReconciliationCandidate>>(reconciliationState);
+    untrack((): void => {
+      accountsState = beginReload<PageResult<OfficeBankAccountSummary>>(accountsState);
+      rawState = beginReload<PageResult<OfficeBankRawLine>>(rawState);
+      qualityState = beginReload<OfficeBankQualityResponse>(qualityState);
+      reconciliationState = beginReload<PageResult<OfficeReconciliationCandidate>>(reconciliationState);
+    });
 
     try {
       const [accounts, raw, quality, reconciliations] = await Promise.all([
