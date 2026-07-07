@@ -23777,6 +23777,8 @@ function buildAllocationPlan(earning, rules, costState) {
         }
       };
     }
+  }
+  for (const share of split) {
     const recoupment = applyRecoupmentForShare(earning, share, parsedCostTerms, appliedByTerm);
     for (const application of recoupment.expenseApplications) {
       expenseApplications.push(application);
@@ -24452,15 +24454,28 @@ function readPartnerPnl(dataset, partnerId, filters) {
 function readPnlByCategory(dataset, filters) {
   const resolved = resolveDataset2(dataset);
   const groups = /* @__PURE__ */ new Map();
-  for (const transaction of filterLedgerTransactions(dataset.transactions, filters)) {
-    if (transaction.categoryId === null) {
-      continue;
+  if (filters.departmentId === null) {
+    for (const transaction of filterLedgerTransactions(dataset.transactions, filters)) {
+      if (transaction.categoryId === null) {
+        continue;
+      }
+      const category = resolved.categoriesById.get(transaction.categoryId);
+      if (category === void 0 || category.divisionId === null) {
+        continue;
+      }
+      addTransactionToGroup(groups, category.id, transaction, transaction.amountMinor);
     }
-    const category = resolved.categoriesById.get(transaction.categoryId);
-    if (category === void 0 || category.divisionId === null) {
-      continue;
+  } else {
+    for (const input of filterAllocationInputs(dataset, filters, { departmentId: filters.departmentId, projectId: null, partnerId: null })) {
+      if (input.transaction.categoryId === null) {
+        continue;
+      }
+      const category = resolved.categoriesById.get(input.transaction.categoryId);
+      if (category === void 0 || category.divisionId === null) {
+        continue;
+      }
+      addTransactionToGroup(groups, category.id, input.transaction, input.allocation.amountMinor);
     }
-    addTransactionToGroup(groups, category.id, transaction, transaction.amountMinor);
   }
   return [...groups.entries()].flatMap(([categoryId, accumulator]) => {
     const category = requireCategory(resolved, categoryId);
@@ -24488,15 +24503,28 @@ function readPnlByCategory(dataset, filters) {
 function readPnlByDivision(dataset, filters) {
   const resolved = resolveDataset2(dataset);
   const groups = /* @__PURE__ */ new Map();
-  for (const transaction of filterLedgerTransactions(dataset.transactions, filters)) {
-    if (transaction.categoryId === null) {
-      continue;
+  if (filters.departmentId === null) {
+    for (const transaction of filterLedgerTransactions(dataset.transactions, filters)) {
+      if (transaction.categoryId === null) {
+        continue;
+      }
+      const category = resolved.categoriesById.get(transaction.categoryId);
+      if (category === void 0 || category.divisionId === null) {
+        continue;
+      }
+      addTransactionToGroup(groups, category.divisionId, transaction, transaction.amountMinor);
     }
-    const category = resolved.categoriesById.get(transaction.categoryId);
-    if (category === void 0 || category.divisionId === null) {
-      continue;
+  } else {
+    for (const input of filterAllocationInputs(dataset, filters, { departmentId: filters.departmentId, projectId: null, partnerId: null })) {
+      if (input.transaction.categoryId === null) {
+        continue;
+      }
+      const category = resolved.categoriesById.get(input.transaction.categoryId);
+      if (category === void 0 || category.divisionId === null) {
+        continue;
+      }
+      addTransactionToGroup(groups, category.divisionId, input.transaction, input.allocation.amountMinor);
     }
-    addTransactionToGroup(groups, category.divisionId, transaction, transaction.amountMinor);
   }
   return [...groups.entries()].map(([divisionId, accumulator]) => {
     const division = requireDivision(resolved, divisionId);
@@ -24781,7 +24809,7 @@ function readOfficeCashRunway(dataset, period, monthlyRows, runwayWindowMonths) 
   };
 }
 function readOfficeCashflowProjection(dataset, dateFrom, dateTo, accountId) {
-  const groups = /* @__PURE__ */ new Map();
+  const latestByAccountMonth = /* @__PURE__ */ new Map();
   for (const row of dataset.cashflowProjectionRows) {
     if (accountId !== null && row.accountId !== accountId) {
       continue;
@@ -24792,6 +24820,14 @@ function readOfficeCashflowProjection(dataset, dateFrom, dateTo, accountId) {
     if (row.currency !== "MUR") {
       throw new Error(`Office cashflow projection row ${row.id} is not MUR.`);
     }
+    const groupKey = `${row.accountId ?? "none"}|${row.periodMonth}`;
+    const existing = latestByAccountMonth.get(groupKey);
+    if (existing === void 0 || row.createdAt > existing.createdAt) {
+      latestByAccountMonth.set(groupKey, row);
+    }
+  }
+  const groups = /* @__PURE__ */ new Map();
+  for (const row of latestByAccountMonth.values()) {
     const current = groups.get(row.periodMonth) ?? { inflowMinor: 0n, outflowMinor: 0n, closingMinor: 0n };
     current.inflowMinor = eofMoney.add(current.inflowMinor, row.expectedInflowMinor);
     current.outflowMinor = eofMoney.add(current.outflowMinor, row.expectedOutflowMinor);
@@ -38065,6 +38101,7 @@ var SENSITIVE_ACTIONS = /* @__PURE__ */ new Set([
   "distribution_suspense_resolve",
   "distribution_track_upsert",
   "office_bank_import_reverse",
+  "office_bank_import_delete",
   "office_bank_account_delete",
   "office_partner_payee_link",
   "office_partner_payee_unlink"
@@ -39277,7 +39314,12 @@ var officeTransactionWriteSchema = workspaceBodySchema.extend({
   projectId: nullableStringSchema,
   description: external_exports.string().min(1),
   amountMicro: external_exports.string().regex(moneyStringPattern),
-  currency: external_exports.string().regex(currencyCodePattern)
+  currency: external_exports.string().regex(currencyCodePattern),
+  // Income/expense is the transaction's own attribute; the category only files it
+  // under division/department. Optional for backward compatibility: absent on
+  // create falls back to the legacy category-type derivation, absent on update
+  // preserves the stored type.
+  type: external_exports.enum(["income", "expense"]).nullable().optional()
 });
 var officePlanComptableWriteSchema = workspaceBodySchema.extend({
   parentId: nullableStringSchema,
@@ -39631,6 +39673,9 @@ function registerOfficeRoutes(app, dependencies) {
   });
   app.post("/eof/v1/bank-import/batches/:batchId/reverse", async (context) => {
     return officeBankImportReverseResponse(context, dependencies);
+  });
+  app.post("/eof/v1/bank-import/batches/:batchId/delete", async (context) => {
+    return officeBankImportDeleteResponse(context, dependencies);
   });
   app.get("/eof/v1/reconciliations", (context) => {
     resolveWorkspaceId(context);
@@ -40344,7 +40389,7 @@ async function officeTransactionCreateResponse(context, dependencies) {
   const request = await readZodBody(context, officeTransactionWriteSchema);
   const amountMinor = normalizeEofAmountField(context, request.amountMicro, "amountMicro");
   const transactionId = randomUUID2();
-  const transactionType = officeTransactionType(dependencies.fixtures.office, request.categoryId, request.amountMicro);
+  const transactionType = request.type ?? officeTransactionType(dependencies.fixtures.office, request.categoryId, request.amountMicro);
   const transactionStatus = request.categoryId === null ? "draft" : "validated";
   const idempotencyKey = requireIdempotencyKey(context);
   const actor = context.get("authUser");
@@ -40391,7 +40436,7 @@ async function officeTransactionUpdateResponse(context, dependencies) {
   const request = await readZodBody(context, officeTransactionWriteSchema);
   const before = requireOfficeTransaction(dependencies.fixtures.office, transactionId);
   const amountMinor = normalizeEofAmountField(context, request.amountMicro, "amountMicro");
-  const transactionType = officeTransactionType(dependencies.fixtures.office, request.categoryId, request.amountMicro);
+  const transactionType = request.type ?? before.type;
   const transactionStatus = request.categoryId === null ? "draft" : "validated";
   const idempotencyKey = requireIdempotencyKey(context);
   const actor = context.get("authUser");
@@ -40787,7 +40832,7 @@ async function officeReconciliationCreateTransactionResponse(context, dependenci
     currency: line.currency
   };
   const amountMinor = normalizeEofAmountField(context, writeRequest.amountMicro, "amountMicro");
-  const transactionType = request.categoryId !== null ? officeTransactionType(dependencies.fixtures.office, request.categoryId, writeRequest.amountMicro) : line.direction === "credit" ? "income" : "expense";
+  const transactionType = line.direction === "credit" ? "income" : "expense";
   const transactionStatus = request.categoryId === null ? "draft" : "validated";
   const idempotencyKey = requireIdempotencyKey(context);
   const actor = context.get("authUser");
@@ -41255,6 +41300,79 @@ function deleteOfficeBankAccountFixture(fixtures, accountId) {
   );
   mutableOffice.bankAccounts = fixtures.office.bankAccounts.filter((account) => account.id !== accountId);
 }
+async function persistOfficeBankImportDelete(tx, batchId, request) {
+  if (tx.kind === "memory") {
+    return { batchCount: 1, statementLineCount: 0, reconciliationMatchCount: 0 };
+  }
+  const rows = queryRowsFromResult(await tx.executor.execute(sql`
+    with scoped_batch as (
+      select id
+      from office_bank_import_batches
+      where id = ${batchId}
+        and workspace_id = ${request.workspaceId}
+    ),
+    scoped_lines as (
+      select line.id
+      from office_bank_statement_lines line
+      join scoped_batch batch on batch.id = line.import_batch_id
+    ),
+    deleted_matches as (
+      delete from office_bank_reconciliation_matches match
+      using scoped_lines line
+      where match.bank_statement_line_id = line.id
+      returning match.id
+    ),
+    deleted_lines as (
+      delete from office_bank_statement_lines line
+      using scoped_batch batch
+      where line.import_batch_id = batch.id
+      returning line.id
+    ),
+    deleted_batch as (
+      delete from office_bank_import_batches batch
+      using scoped_batch scoped
+      where batch.id = scoped.id
+      returning batch.id
+    )
+    select
+      (select count(*) from deleted_batch)::int as batch_count,
+      (select count(*) from deleted_lines)::int as statement_line_count,
+      (select count(*) from deleted_matches)::int as reconciliation_match_count
+  `));
+  const row = rows[0];
+  return {
+    batchCount: integerQueryField(row, "batch_count"),
+    statementLineCount: integerQueryField(row, "statement_line_count"),
+    reconciliationMatchCount: integerQueryField(row, "reconciliation_match_count")
+  };
+}
+function countOfficeBankImportFixtureDependencies(fixtures, batchId) {
+  const statementLineIds = new Set(
+    fixtures.office.bankStatementLines.filter((line) => line.importBatchId === batchId).map((line) => line.id)
+  );
+  return {
+    batchCount: fixtures.office.bankImportBatches.some((batch) => batch.id === batchId) ? 1 : 0,
+    statementLineCount: statementLineIds.size,
+    reconciliationMatchCount: fixtures.office.bankReconciliationMatches.filter(
+      (match2) => statementLineIds.has(match2.bankStatementLineId)
+    ).length
+  };
+}
+function deleteOfficeBankImportBatchFixture(fixtures, batchId) {
+  const mutableOffice = fixtures.office;
+  const statementLineIds = new Set(
+    fixtures.office.bankStatementLines.filter((line) => line.importBatchId === batchId).map((line) => line.id)
+  );
+  mutableOffice.bankReconciliationMatches = fixtures.office.bankReconciliationMatches.filter(
+    (match2) => !statementLineIds.has(match2.bankStatementLineId)
+  );
+  mutableOffice.bankStatementLines = fixtures.office.bankStatementLines.filter(
+    (line) => line.importBatchId !== batchId
+  );
+  mutableOffice.bankImportBatches = fixtures.office.bankImportBatches.filter(
+    (batch) => batch.id !== batchId
+  );
+}
 async function officeProjectCreateResponse(context, dependencies) {
   const request = await readZodBody(context, officeProjectWriteSchema);
   const projectId = randomUUID2();
@@ -41434,7 +41552,7 @@ async function officeCashflowConfirmResponse(context, dependencies) {
         after: { workspaceId, rowCount: parsed.length },
         idempotencyKey: resolvedIdempotencyKey
       });
-      upsertOfficeCashflowFixture(dependencies.fixtures, workspaceId, parsed);
+      upsertOfficeCashflowFixture(dependencies.fixtures, workspaceId, parsed, dependencies.nowIso());
       return mutationReceipt(batchId, auditEventId);
     }
   });
@@ -41455,7 +41573,7 @@ async function persistOfficeCashflowRows(tx, workspaceId, rows) {
     `);
   }
 }
-function upsertOfficeCashflowFixture(fixtures, workspaceId, rows) {
+function upsertOfficeCashflowFixture(fixtures, workspaceId, rows, nowIso) {
   const mutableOffice = fixtures.office;
   const periods = new Set(rows.map((row) => row.periodMonth));
   const kept = fixtures.office.cashflowProjectionRows.filter(
@@ -41469,7 +41587,8 @@ function upsertOfficeCashflowFixture(fixtures, workspaceId, rows) {
     expectedInflowMinor: row.inflowMinor,
     expectedOutflowMinor: row.outflowMinor,
     expectedClosingBalanceMinor: row.closingBalanceMinor,
-    currency: row.currency
+    currency: row.currency,
+    createdAt: nowIso
   }));
   mutableOffice.cashflowProjectionRows = [...kept, ...added];
 }
@@ -41568,7 +41687,7 @@ function resolveLedgerBulkRow(row, rowNumber, dataset) {
     issues.push("currency_not_mur");
   }
   let categoryId = null;
-  let resolvedType = row.type;
+  const resolvedType = row.type;
   if (row.categoryId !== null || row.accountCode !== null || row.accountLabel !== null || row.categoryName !== null && row.categoryName.trim().length > 0) {
     const resolution = resolveLedgerCategory(dataset, {
       categoryId: row.categoryId,
@@ -41584,7 +41703,6 @@ function resolveLedgerBulkRow(row, rowNumber, dataset) {
       issues.push(resolution.issue);
     } else {
       categoryId = resolution.category.id;
-      resolvedType = resolution.category.type;
     }
   }
   const partnerName = row.partnerName;
@@ -43287,6 +43405,7 @@ async function distributionPaymentRecordResponse(context, dependencies) {
     idempotencyKey,
     requestBody: request,
     write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `distribution:payment:statement:${request.statementId}`);
       const statement = requireDistributionStatement(dependencies.fixtures.distribution, request.statementId);
       assertPaymentMatchesStatement(context, request.payeeId, request.currency, statement);
       const paymentId = randomUUID2();
@@ -43343,6 +43462,7 @@ async function distributionPaymentUpdateResponse(context, dependencies) {
     write: async (tx, resolvedIdempotencyKey) => {
       const payment = requireDistributionPayment(dependencies.fixtures.distribution, paymentId);
       const link = requireDistributionPaymentLink(dependencies.fixtures.distribution, paymentId);
+      await acquireAdvisoryLock(tx, `distribution:payment:statement:${link.statementId}`);
       const statement = requireDistributionStatement(dependencies.fixtures.distribution, link.statementId);
       assertPaymentIsMutable(context, payment);
       assertPaymentMatchesStatement(context, payment.payeeId, request.currency, statement);
@@ -43397,6 +43517,7 @@ async function distributionPaymentReconcileResponse(context, dependencies) {
     write: async (tx, resolvedIdempotencyKey) => {
       const payment = requireDistributionPayment(dependencies.fixtures.distribution, paymentId);
       const link = requireDistributionPaymentLink(dependencies.fixtures.distribution, paymentId);
+      await acquireAdvisoryLock(tx, `distribution:payment:statement:${link.statementId}`);
       const statement = requireDistributionStatement(dependencies.fixtures.distribution, link.statementId);
       assertPaymentIsMutable(context, payment);
       assertPaymentMatchesStatement(context, payment.payeeId, payment.currency, statement);
@@ -43456,7 +43577,7 @@ async function distributionPaymentVoidResponse(context, dependencies) {
       const payment = requireDistributionPayment(dependencies.fixtures.distribution, paymentId);
       const link = requireDistributionPaymentLink(dependencies.fixtures.distribution, paymentId);
       assertPaymentIsMutable(context, payment);
-      await acquireAdvisoryLock(tx, `distribution:payment:void:${paymentId}`);
+      await acquireAdvisoryLock(tx, `distribution:payment:statement:${link.statementId}`);
       const persistInput = { paymentId };
       await persistDistributionPaymentVoid(tx, persistInput);
       const patch = paymentVoidFixturePatch(payment, link);
@@ -43861,6 +43982,7 @@ async function officeBankImportConfirmResponse(context, dependencies) {
     requestBody: request,
     write: async (tx, resolvedIdempotencyKey) => {
       const preview = await requireOfficeBankPreviewInWrite(context, dependencies, tx, request.previewId, request.workspaceId);
+      await acquireAdvisoryLock(tx, `office:bank-import:fingerprint:${request.workspaceId}:${preview.idempotencyFingerprint}`);
       const existingBatch = await findOfficeBankImportBatchByFingerprint(tx, request.workspaceId, preview.idempotencyFingerprint);
       if (existingBatch !== null) {
         if (existingBatch.status !== "confirmed") {
@@ -43987,6 +44109,52 @@ async function officeBankImportConfirmResponse(context, dependencies) {
         importedTransactionCount: lines.length,
         rejectedRowCount: preview.rows.length - lines.length
       };
+    }
+  });
+  return context.json(result.body, result.status);
+}
+async function officeBankImportDeleteResponse(context, dependencies) {
+  const batchId = requirePathParam(context, "batchId");
+  const request = await readZodBody(context, workspaceBodySchema);
+  const before = dependencies.fixtures.office.bankImportBatches.find(
+    (batch) => batch.id === batchId && batch.workspaceId === request.workspaceId
+  );
+  if (before === void 0) {
+    throw new ApiRouteError(404, "office_bank_import_batch_not_found", "Office bank import batch was not found.", [
+      `batchId=${batchId}`,
+      `workspaceId=${request.workspaceId}`
+    ]);
+  }
+  const fixtureCounts = countOfficeBankImportFixtureDependencies(dependencies.fixtures, batchId);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_bank_import_delete",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `office:bank-import:${batchId}`);
+      const deletedCounts = await persistOfficeBankImportDelete(tx, batchId, request);
+      if (tx.kind !== "memory" && deletedCounts.batchCount !== 1) {
+        throw new ApiRouteError(404, "office_bank_import_batch_not_found", "Office bank import batch was not found.", [
+          `batchId=${batchId}`,
+          `workspaceId=${request.workspaceId}`
+        ]);
+      }
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_bank_import_delete",
+        targetType: "office_bank_import_batch",
+        targetId: batchId,
+        before: { batch: before, counts: fixtureCounts },
+        after: { batchId, deletedCounts },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      deleteOfficeBankImportBatchFixture(dependencies.fixtures, batchId);
+      return mutationReceipt(batchId, auditEventId);
     }
   });
   return context.json(result.body, result.status);
@@ -45786,7 +45954,8 @@ function toOfficeTransaction(dataset, transaction) {
       divisionLabel: categoryPath?.division?.name ?? null,
       categoryId: categoryPath?.category.id ?? null,
       categoryLabel: categoryPath?.category.name ?? null,
-      type: categoryPath?.category.type ?? null
+      // Income/expense belongs to the transaction; the category only files it.
+      type: transaction.type
     };
   }
   if (categoryPath === null) {
@@ -45803,7 +45972,8 @@ function toOfficeTransaction(dataset, transaction) {
     divisionLabel: categoryPath.division?.name ?? null,
     categoryId: categoryPath.category.id,
     categoryLabel: categoryPath.category.name,
-    type: categoryPath.category.type
+    // Income/expense belongs to the transaction; the category only files it.
+    type: transaction.type
   };
 }
 function toApiTransactionStatus(status) {
@@ -45939,7 +46109,9 @@ function toReconciliationCandidates(dataset) {
       transactionId,
       statementLineId: line.id,
       occurredOn: line.occurredOn,
-      bankDescription: line.reference ?? line.id,
+      // Show the bank's own narration first (the CSV description column); the
+      // reference (cheque/ref number) and the internal id are fallbacks only.
+      bankDescription: line.description ?? line.reference ?? line.id,
       ledgerDescription: transaction?.description ?? "Unmatched ledger line",
       // Statement lines store magnitude + direction; expose debits as negative
       // so clients render outflows with the right sign and tone.
@@ -46371,7 +46543,6 @@ function toApiStatementSummary(row) {
     status: toApiStatementStatus(row.status),
     grossMicro: row.grossTotal,
     recoupedMicro: row.recoupmentTotal,
-    expenseMicro: row.recoupmentTotal,
     paidMicro: row.paymentsApplied,
     netPayableMicro: row.statementBalance,
     currency: row.currency
@@ -46847,7 +47018,7 @@ async function readOfficeDataset(pool) {
   );
   const cashflowProjectionRows = await queryRows(
     pool,
-    "select id::text, workspace_id, account_id::text, period_month, expected_inflow_minor::text, expected_outflow_minor::text, expected_closing_balance_minor::text, currency from office_cashflow_projection_rows order by period_month, id",
+    "select id::text, workspace_id, account_id::text, period_month, expected_inflow_minor::text, expected_outflow_minor::text, expected_closing_balance_minor::text, currency, created_at from office_cashflow_projection_rows order by period_month, id",
     []
   );
   const exchangeRates = await queryRows(
@@ -47248,7 +47419,8 @@ function toOfficeCashflowProjectionRow(row) {
     expectedInflowMinor: bigintCell(row, "expected_inflow_minor"),
     expectedOutflowMinor: bigintCell(row, "expected_outflow_minor"),
     expectedClosingBalanceMinor: bigintCell(row, "expected_closing_balance_minor"),
-    currency: currencyCell(row, "currency")
+    currency: currencyCell(row, "currency"),
+    createdAt: timestampCell(row, "created_at")
   };
 }
 function toDistributionImportBatchRow(row) {
