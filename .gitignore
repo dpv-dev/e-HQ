@@ -12,6 +12,8 @@ coverage/
 reports/
 data/dumps/*.sql
 *.zip
+app-eeee-frontend/
+app-eeee-api-hostinger/
 .env
 .env.*
 !.env.example
