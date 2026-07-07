@@ -376,7 +376,7 @@
   const handleShellNavigate = (href: string): void => {
     selectPage(href as DistributionPageId);
   };
-  let periodScope = $state<PeriodScope>("month");
+  let periodScope = $state<PeriodScope>("year");
   let selectedPeriod = $state(getLatestDataPeriod());
   const today = todayIso();
   let customRange = $state<DateRange | null>(null);

@@ -30,6 +30,7 @@
   import { formatDateOnly } from "../../date-format.js";
   import { formatMoneyValue, moneyToneForValue } from "../../money-format.js";
   import { createTablePagination, loadPageResult, readPageItems, TABLE_PAGE_SIZE, type PageLoadMode } from "../../table-pagination.js";
+  import { untrack } from "svelte";
 
   interface Props {
     readonly client: OfficeApiClient;
@@ -109,11 +110,13 @@
 
   async function loadMonitoring(): Promise<void> {
     const token = ++loadMonitoringToken;
-    integrityState = beginReload<OfficeIntegrityCheckAllResponse>(integrityState);
-    bankQualityState = beginReload<OfficeBankQualityResponse>(bankQualityState);
-    pendingState = beginReload<PageResult<OfficeTransaction>>(pendingState);
-    auditState = beginReload<PageResult<AuditLogEntry>>(auditState);
-    dashboardState = beginReload<OfficeDashboardResponse>(dashboardState);
+    untrack((): void => {
+      integrityState = beginReload<OfficeIntegrityCheckAllResponse>(integrityState);
+      bankQualityState = beginReload<OfficeBankQualityResponse>(bankQualityState);
+      pendingState = beginReload<PageResult<OfficeTransaction>>(pendingState);
+      auditState = beginReload<PageResult<AuditLogEntry>>(auditState);
+      dashboardState = beginReload<OfficeDashboardResponse>(dashboardState);
+    });
 
     const pendingQuery = {
       workspaceId: props.workspaceId,

@@ -16,6 +16,7 @@
   } from "@ehq/ui";
   import {
     beginReload,
+    createLoadingState,
     createErrorState,
     createIdleState,
     createSuccessState,
@@ -34,6 +35,7 @@
   import { formatDateOnly } from "../../date-format.js";
   import { formatMoneyValue, moneySignForValue, moneyToneForValue } from "../../money-format.js";
   import { createTablePagination, loadPageResult, readPageItems, TABLE_PAGE_SIZE, type PageLoadMode } from "../../table-pagination.js";
+  import { untrack } from "svelte";
 
   type DrawerMode = "closed" | "detail" | "create" | "edit";
   type RequestStatus = "idle" | "loading" | "success" | "error";
@@ -168,7 +170,9 @@
 
   async function loadPartners(): Promise<void> {
     const token = ++loadPartnersToken;
-    partnersState = beginReload<PageResult<OfficePartnerListItem>>(partnersState);
+    untrack((): void => {
+      partnersState = beginReload<PageResult<OfficePartnerListItem>>(partnersState);
+    });
 
     try {
       const page = await props.client.listPartners({
@@ -200,7 +204,7 @@
     payeeLinkStatus = "idle";
     formMessage = null;
     payeeLinkMessage = null;
-    detailState = beginReload<OfficePartnerDetail>(detailState);
+    detailState = createLoadingState<OfficePartnerDetail>();
     actionMessage = "Loading full partner relationship.";
 
     try {

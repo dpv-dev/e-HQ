@@ -18,6 +18,7 @@
     type OfficeVatRow
   } from "@ehq/api-client";
   import { formatMoneyValue, formatSignedMoneyValue, moneyToneForValue } from "../../money-format.js";
+  import { untrack } from "svelte";
 
   interface Props {
     readonly client: OfficeApiClient;
@@ -55,7 +56,9 @@
 
   async function loadVat(): Promise<void> {
     const token = ++loadVatToken;
-    vatState = beginReload<OfficeVatReport>(vatState);
+    untrack((): void => {
+      vatState = beginReload<OfficeVatReport>(vatState);
+    });
 
     try {
       const report = await props.client.getVatReport({ workspaceId: props.workspaceId, period: props.period, dateFrom: props.dateFrom, dateTo: props.dateTo });

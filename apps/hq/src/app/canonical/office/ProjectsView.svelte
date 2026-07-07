@@ -32,6 +32,7 @@
   import { formatDateOnly } from "../../date-format.js";
   import { formatMoneyValue, moneyToneForValue } from "../../money-format.js";
   import { createTablePagination, loadPageResult, readPageItems, TABLE_PAGE_SIZE, type PageLoadMode } from "../../table-pagination.js";
+  import { untrack } from "svelte";
 
   interface Props {
     readonly client: OfficeApiClient;
@@ -221,7 +222,9 @@
   });
 
   async function loadProjects(): Promise<void> {
-    projectsState = beginReload<PageResult<OfficeProjectSummary>>(projectsState);
+    untrack((): void => {
+      projectsState = beginReload<PageResult<OfficeProjectSummary>>(projectsState);
+    });
 
     try {
       const page = await props.client.listProjects({
@@ -253,8 +256,10 @@
   async function selectProject(projectId: EntityId): Promise<void> {
     const token = ++selectProjectToken;
     selectedProjectId = projectId;
-    projectPnlState = beginReload<OfficeProjectPnl>(projectPnlState);
-    violationsState = beginReload<PageResult<OfficeProjectCoherenceViolation>>(violationsState);
+    untrack((): void => {
+      projectPnlState = beginReload<OfficeProjectPnl>(projectPnlState);
+      violationsState = beginReload<PageResult<OfficeProjectCoherenceViolation>>(violationsState);
+    });
 
     try {
       const [projectPnlResult, violationsResult] = await Promise.all([

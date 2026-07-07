@@ -26,6 +26,7 @@
   } from "@ehq/api-client";
   import { formatMoneyValue, formatSignedMoneyValue, moneyToneForValue } from "../../money-format.js";
   import { createTablePagination, loadPageResult, readPageItems, TABLE_PAGE_SIZE, type PageLoadMode } from "../../table-pagination.js";
+  import { untrack } from "svelte";
 
   interface Props {
     readonly client: OfficeApiClient;
@@ -74,9 +75,11 @@
 
   async function loadCeo(): Promise<void> {
     const token = ++loadCeoToken;
-    dashboardState = beginReload<OfficeDashboardResponse>(dashboardState);
-    globalPnlState = beginReload<OfficeGlobalPnl>(globalPnlState);
-    divisionState = beginReload<PageResult<OfficeDivisionPnl>>(divisionState);
+    untrack((): void => {
+      dashboardState = beginReload<OfficeDashboardResponse>(dashboardState);
+      globalPnlState = beginReload<OfficeGlobalPnl>(globalPnlState);
+      divisionState = beginReload<PageResult<OfficeDivisionPnl>>(divisionState);
+    });
 
     try {
       const [dashboard, globalPnl, divisions] = await Promise.all([
