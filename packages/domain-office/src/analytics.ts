@@ -81,7 +81,7 @@ export type OfficeBankReconciliationMatchRow = Pick<
 >;
 export type OfficeCashflowProjectionRowInput = Pick<
   OfficeCashflowProjectionRow,
-  "id" | "workspaceId" | "accountId" | "periodMonth" | "expectedInflowMinor" | "expectedOutflowMinor" | "expectedClosingBalanceMinor" | "currency"
+  "id" | "workspaceId" | "accountId" | "periodMonth" | "expectedInflowMinor" | "expectedOutflowMinor" | "expectedClosingBalanceMinor" | "currency" | "createdAt"
 >;
 
 export interface OfficeBankQualityResult {
@@ -192,7 +192,12 @@ export function readOfficeCashflowProjection(
   dateTo: string | null,
   accountId: string | null
 ): readonly OfficeCashflowBucketResult[] {
-  const groups = new Map<string, CashflowAccumulator>();
+  // A closing balance is a point-in-time stock, not a flow: if the same account has more
+  // than one projection row for the same month (e.g. a re-imported cashflow file), only the
+  // most recently created row for that account+month is authoritative. Keep one row per
+  // (account, month) before aggregating, so summing across DISTINCT accounts stays correct
+  // without ever double-counting a re-imported duplicate.
+  const latestByAccountMonth = new Map<string, OfficeCashflowProjectionRowInput>();
   for (const row of dataset.cashflowProjectionRows) {
     if (accountId !== null && row.accountId !== accountId) {
       continue;
@@ -206,6 +211,15 @@ export function readOfficeCashflowProjection(
       throw new Error(`Office cashflow projection row ${row.id} is not MUR.`);
     }
 
+    const groupKey = `${row.accountId ?? "none"}|${row.periodMonth}`;
+    const existing = latestByAccountMonth.get(groupKey);
+    if (existing === undefined || row.createdAt > existing.createdAt) {
+      latestByAccountMonth.set(groupKey, row);
+    }
+  }
+
+  const groups = new Map<string, CashflowAccumulator>();
+  for (const row of latestByAccountMonth.values()) {
     const current = groups.get(row.periodMonth) ?? { inflowMinor: 0n, outflowMinor: 0n, closingMinor: 0n };
     current.inflowMinor = eofMoney.add(current.inflowMinor, row.expectedInflowMinor);
     current.outflowMinor = eofMoney.add(current.outflowMinor, row.expectedOutflowMinor);

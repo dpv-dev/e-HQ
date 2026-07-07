@@ -302,7 +302,8 @@ function createOfficeFixture(): OfficeAnalyticsDataset {
         expectedInflowMinor: 500_000n,
         expectedOutflowMinor: 133_500n,
         expectedClosingBalanceMinor: 300_000n,
-        currency: "MUR"
+        currency: "MUR",
+        createdAt: "2026-02-01T00:00:00.000Z"
       },
       {
         id: "cash_mar",
@@ -312,7 +313,8 @@ function createOfficeFixture(): OfficeAnalyticsDataset {
         expectedInflowMinor: 350_000n,
         expectedOutflowMinor: 145_000n,
         expectedClosingBalanceMinor: 505_000n,
-        currency: "MUR"
+        currency: "MUR",
+        createdAt: "2026-03-01T00:00:00.000Z"
       }
     ],
     exchangeRates: [

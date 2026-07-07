@@ -1201,7 +1201,6 @@ export interface StatementSummary {
   readonly status: "draft" | "posted" | "paid";
   readonly grossMicro: MoneyMicroString;
   readonly recoupedMicro: MoneyMicroString;
-  readonly expenseMicro: MoneyMicroString;
   readonly paidMicro: MoneyMicroString;
   readonly netPayableMicro: MoneyMicroString;
   readonly currency: CurrencyCode;

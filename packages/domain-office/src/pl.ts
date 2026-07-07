@@ -233,17 +233,32 @@ export function readPartnerPnl(dataset: OfficePnlDataset, partnerId: string, fil
 export function readPnlByCategory(dataset: OfficePnlDataset, filters: OfficePnlFilters): readonly OfficePnlCategoryRow[] {
   const resolved = resolveDataset(dataset);
   const groups = new Map<string, MutableAccumulator>();
-  for (const transaction of filterLedgerTransactions(dataset.transactions, filters)) {
-    if (transaction.categoryId === null) {
-      continue;
-    }
+  if (filters.departmentId === null) {
+    for (const transaction of filterLedgerTransactions(dataset.transactions, filters)) {
+      if (transaction.categoryId === null) {
+        continue;
+      }
 
-    const category = resolved.categoriesById.get(transaction.categoryId);
-    if (category === undefined || category.divisionId === null) {
-      continue;
-    }
+      const category = resolved.categoriesById.get(transaction.categoryId);
+      if (category === undefined || category.divisionId === null) {
+        continue;
+      }
 
-    addTransactionToGroup(groups, category.id, transaction, transaction.amountMinor);
+      addTransactionToGroup(groups, category.id, transaction, transaction.amountMinor);
+    }
+  } else {
+    for (const input of filterAllocationInputs(dataset, filters, { departmentId: filters.departmentId, projectId: null, partnerId: null })) {
+      if (input.transaction.categoryId === null) {
+        continue;
+      }
+
+      const category = resolved.categoriesById.get(input.transaction.categoryId);
+      if (category === undefined || category.divisionId === null) {
+        continue;
+      }
+
+      addTransactionToGroup(groups, category.id, input.transaction, input.allocation.amountMinor);
+    }
   }
 
   return [...groups.entries()].flatMap(([categoryId, accumulator]) => {
@@ -274,17 +289,32 @@ export function readPnlByCategory(dataset: OfficePnlDataset, filters: OfficePnlF
 export function readPnlByDivision(dataset: OfficePnlDataset, filters: OfficePnlFilters): readonly OfficePnlDivisionRow[] {
   const resolved = resolveDataset(dataset);
   const groups = new Map<string, MutableAccumulator>();
-  for (const transaction of filterLedgerTransactions(dataset.transactions, filters)) {
-    if (transaction.categoryId === null) {
-      continue;
-    }
+  if (filters.departmentId === null) {
+    for (const transaction of filterLedgerTransactions(dataset.transactions, filters)) {
+      if (transaction.categoryId === null) {
+        continue;
+      }
 
-    const category = resolved.categoriesById.get(transaction.categoryId);
-    if (category === undefined || category.divisionId === null) {
-      continue;
-    }
+      const category = resolved.categoriesById.get(transaction.categoryId);
+      if (category === undefined || category.divisionId === null) {
+        continue;
+      }
 
-    addTransactionToGroup(groups, category.divisionId, transaction, transaction.amountMinor);
+      addTransactionToGroup(groups, category.divisionId, transaction, transaction.amountMinor);
+    }
+  } else {
+    for (const input of filterAllocationInputs(dataset, filters, { departmentId: filters.departmentId, projectId: null, partnerId: null })) {
+      if (input.transaction.categoryId === null) {
+        continue;
+      }
+
+      const category = resolved.categoriesById.get(input.transaction.categoryId);
+      if (category === undefined || category.divisionId === null) {
+        continue;
+      }
+
+      addTransactionToGroup(groups, category.divisionId, input.transaction, input.allocation.amountMinor);
+    }
   }
 
   return [...groups.entries()].map(([divisionId, accumulator]) => {

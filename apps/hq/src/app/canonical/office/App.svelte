@@ -577,9 +577,14 @@
     { label: "Edit", onAction: openTransactionEditor },
     { label: "Cancel", onAction: cancelTransactionById, danger: true }
   ]);
-  const importRowActions = $derived<readonly TableRowAction[]>([
-    { label: "Cancel import", onAction: reverseImportBatch, danger: true }
-  ]);
+  const importRowActions = $derived<readonly TableRowAction[]>(
+    session.roleId === "administrator"
+      ? [
+          { label: "Cancel import", onAction: reverseImportBatch, danger: true },
+          { label: "Delete permanently", onAction: deleteImportBatch, danger: true }
+        ]
+      : [{ label: "Cancel import", onAction: reverseImportBatch, danger: true }]
+  );
   const planRowActions = $derived<readonly TableRowAction[]>([
     { label: "Activate / Deactivate", onAction: togglePlanNodeActive }
   ]);
@@ -594,7 +599,7 @@
     sortOptionsAlphabetically(
       transactionRows.map((transaction: OfficeTransaction): SelectOption => ({
         value: transaction.id,
-        label: `${transaction.description} · ${formatSignedMicro(transaction.amountMicro)}`
+        label: `${transaction.description} · ${formatSignedMicro(transaction.amountMicro, transaction.currency)}`
       })),
       0
     )
@@ -1308,6 +1313,31 @@
         batchId,
         { workspaceId: officeWorkspaceId },
         { idempotencyKey: createIdempotencyKey("import-reverse") }
+      );
+      actionReceipt = receipt;
+      await Promise.all([loadDashboard(), loadTransactions()]);
+    } catch (error: unknown) {
+      dashboardState = createErrorState<OfficeDashboardResponse>(error);
+    }
+  }
+
+  // Permanently removes the batch's own bank lines and reconciliation matches (and the
+  // batch row); any transaction created from or matched to those lines is left untouched
+  // (only its bank-line link disappears) — this cannot be undone, hence the double confirm.
+  async function deleteImportBatch(batchId: string): Promise<void> {
+    if (!window.confirm("Permanently delete this import? Its bank lines and reconciliation matches are erased and cannot be recovered. Linked transactions are kept (cancel those separately if unwanted).")) {
+      return;
+    }
+
+    if (!window.confirm("This is irreversible. Confirm permanent deletion?")) {
+      return;
+    }
+
+    try {
+      const receipt = await client.office.deleteBankImportBatch(
+        batchId,
+        { workspaceId: officeWorkspaceId },
+        { idempotencyKey: createIdempotencyKey("import-delete") }
       );
       actionReceipt = receipt;
       await Promise.all([loadDashboard(), loadTransactions()]);
@@ -2650,7 +2680,9 @@
       },
       {
         label: "Net",
-        value: formatSignedMicro(state.data.netMicro),
+        // P&L aggregates only ever include MUR-valid transactions today (isBaseIncluded
+        // excludes any foreign-currency row without a stored FX rate), so MUR is correct here.
+        value: formatSignedMicro(state.data.netMicro, "MUR"),
         detail: state.data.completeness,
         tone: moneyTone(state.data.netMicro),
         accent: false
@@ -2672,7 +2704,7 @@
         { kind: "text", value: row.departmentLabel, strong: true },
         { kind: "money", value: formatMicro(row.revenueMicro), tone: "success" },
         { kind: "money", value: formatMicro(row.expenseMicro), tone: "error" },
-        { kind: "money", value: formatSignedMicro(row.netMicro), tone: row.netTone === "positive" ? "success" : "error" },
+        { kind: "money", value: formatSignedMicro(row.netMicro, "MUR"), tone: row.netTone === "positive" ? "success" : "error" },
         { kind: "badge", value: formatDateOnly(row.validatedAt), tone: "info" }
       ]
     }));
@@ -2685,7 +2717,7 @@
         { kind: "text", value: row.label, strong: true },
         { kind: "money", value: formatMicro(row.incomeMicro), tone: "success" },
         { kind: "money", value: formatMicro(row.expenseMicro), tone: "error" },
-        { kind: "money", value: formatSignedMicro(row.netMicro), tone: moneyTone(row.netMicro) }
+        { kind: "money", value: formatSignedMicro(row.netMicro, "MUR"), tone: moneyTone(row.netMicro) }
       ]
     }));
   }
@@ -2697,7 +2729,7 @@
         { kind: "text", value: row.label, strong: true },
         { kind: "money", value: formatMicro(row.incomeMicro), tone: "success" },
         { kind: "money", value: formatMicro(row.expenseMicro), tone: "error" },
-        { kind: "money", value: formatSignedMicro(row.netMicro), tone: moneyTone(row.netMicro) }
+        { kind: "money", value: formatSignedMicro(row.netMicro, "MUR"), tone: moneyTone(row.netMicro) }
       ]
     }));
   }
@@ -2786,7 +2818,7 @@
           { kind: "text", value: transactionPathLabel(transaction), strong: false },
           { kind: "badge", value: transaction.type ?? "unvalidated", tone: transaction.type === "income" ? "success" : transaction.type === "expense" ? "warning" : "muted" },
           { kind: "text", value: transaction.projectLabel ?? "—", strong: false },
-          { kind: "money", value: formatSignedMicro(signedAmountMicro), tone: moneyTone(signedAmountMicro) },
+          { kind: "money", value: formatSignedMicro(signedAmountMicro, transaction.currency), tone: moneyTone(signedAmountMicro) },
           { kind: "badge", value: transaction.status, tone: transactionStatusTone(transaction.status) }
         ]
       };
@@ -2800,7 +2832,7 @@
         { kind: "badge", value: selectedIds.includes(transaction.id) ? "selected" : "to validate", tone: selectedIds.includes(transaction.id) ? "active" : "warning" },
         { kind: "text", value: transaction.description, strong: true },
         { kind: "text", value: transactionPathLabel(transaction), strong: false },
-        { kind: "money", value: formatSignedMicro(typedSignedAmountMicro(transaction)), tone: moneyTone(typedSignedAmountMicro(transaction)) },
+        { kind: "money", value: formatSignedMicro(typedSignedAmountMicro(transaction), transaction.currency), tone: moneyTone(typedSignedAmountMicro(transaction)) },
         { kind: "badge", value: transaction.status, tone: "warning" }
       ]
     }));
@@ -2812,7 +2844,9 @@
       cells: [
         { kind: "text", value: candidate.bankDescription, strong: true },
         { kind: "text", value: formatDateOnly(candidate.occurredOn), strong: false },
-        { kind: "money", value: formatSignedMicro(candidate.amountMicro), tone: moneyTone(candidate.amountMicro) },
+        // amountMicro here is the bank line's MUR-converted magnitude (amountMurMinor),
+        // not its original currency — MUR is the correct label, not a hardcoding bug.
+        { kind: "money", value: formatSignedMicro(candidate.amountMicro, "MUR"), tone: moneyTone(candidate.amountMicro) },
         { kind: "text", value: candidate.ledgerDescription, strong: false },
         { kind: "badge", value: formatConfidence(candidate.confidenceBp), tone: confidenceTone(candidate.confidenceBp) },
         { kind: "badge", value: candidate.status, tone: reconciliationTone(candidate.status) }
@@ -3007,8 +3041,8 @@
     return formatMoneyValue(amountMicro, currency);
   }
 
-  function formatSignedMicro(amountMicro: string): string {
-    return formatSignedMoneyValue(amountMicro, "MUR");
+  function formatSignedMicro(amountMicro: string, currency: CurrencyCode): string {
+    return formatSignedMoneyValue(amountMicro, currency);
   }
 
   function moneyTone(amountMicro: string): Tone {
@@ -3639,7 +3673,7 @@
               onclick={() => togglePendingSelection(transaction.id)}
             >
               <strong class="ehq-type-body">{transaction.description}</strong>
-              <span class="ehq-type-body">{transaction.departmentLabel ?? "to classify"} · {transaction.categoryLabel ?? "to classify"} · {formatSignedMicro(transaction.amountMicro)}</span>
+              <span class="ehq-type-body">{transaction.departmentLabel ?? "to classify"} · {transaction.categoryLabel ?? "to classify"} · {formatSignedMicro(transaction.amountMicro, transaction.currency)}</span>
             </button>
           {/each}
         </div>
@@ -3738,7 +3772,7 @@
     { label: "Status", align: "left", sortable: true }
   ];
   const reconciliationColumns: readonly TableColumn[] = [
-    { label: "Bank line", align: "left", sortable: true },
+    { label: "Description", align: "left", sortable: true },
     { label: "Date", align: "left", sortable: true },
     { label: "Amount", align: "right", sortable: true },
     { label: "Suggested match", align: "left", sortable: true },

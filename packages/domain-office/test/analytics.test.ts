@@ -221,7 +221,8 @@ const fixture: OfficeAnalyticsDataset = {
       expectedInflowMinor: 100_000n,
       expectedOutflowMinor: 200_000n,
       expectedClosingBalanceMinor: 300_000n,
-      currency: "MUR"
+      currency: "MUR",
+      createdAt: "2026-01-31T00:00:00.000Z"
     },
     {
       id: "cash_feb",
@@ -231,7 +232,8 @@ const fixture: OfficeAnalyticsDataset = {
       expectedInflowMinor: 0n,
       expectedOutflowMinor: 100_000n,
       expectedClosingBalanceMinor: 250_000n,
-      currency: "MUR"
+      currency: "MUR",
+      createdAt: "2026-02-28T00:00:00.000Z"
     }
   ]
 };
@@ -263,6 +265,30 @@ test("cashflow projection buckets stay exact MUR kernel strings", () => {
   assert.deepEqual(readOfficeCashflowProjection(fixture, "2026-01-01", "2026-02-28", null), [
     { period: "2026-01", inflowMur: "1000.00", outflowMur: "2000.00", closingMur: "3000.00" },
     { period: "2026-02", inflowMur: "0.00", outflowMur: "1000.00", closingMur: "2500.00" }
+  ]);
+});
+
+test("cashflow projection keeps only the most recent row per account+month instead of summing duplicates", () => {
+  const withDuplicateReimport = {
+    ...fixture,
+    cashflowProjectionRows: [
+      ...fixture.cashflowProjectionRows,
+      {
+        id: "cash_jan_reimport",
+        workspaceId: "workspace_1",
+        accountId: "bank_mur",
+        periodMonth: "2026-01",
+        expectedInflowMinor: 150_000n,
+        expectedOutflowMinor: 250_000n,
+        expectedClosingBalanceMinor: 400_000n,
+        currency: "MUR",
+        createdAt: "2026-02-15T00:00:00.000Z"
+      }
+    ]
+  };
+
+  assert.deepEqual(readOfficeCashflowProjection(withDuplicateReimport, "2026-01-01", "2026-01-31", null), [
+    { period: "2026-01", inflowMur: "1500.00", outflowMur: "2500.00", closingMur: "4000.00" }
   ]);
 });
 

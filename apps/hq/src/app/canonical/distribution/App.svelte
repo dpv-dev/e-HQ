@@ -288,7 +288,6 @@
     { label: "Payee", align: "left", sortable: true },
     { label: "Gross", align: "right", sortable: true },
     { label: "Recoup", align: "right", sortable: true },
-    { label: "Expenses", align: "right", sortable: true },
     { label: "Paid", align: "right", sortable: true },
     { label: "Due", align: "right", sortable: true },
     { label: "Period", align: "left", sortable: true },
@@ -3167,7 +3166,6 @@
         { kind: "text", value: statement.payeeName, strong: true },
         { kind: "money", value: formatMoney(statement.grossMicro, statement.currency), tone: "info" },
         { kind: "money", value: formatMoney(statement.recoupedMicro, statement.currency), tone: "warning" },
-        { kind: "money", value: formatMoney(statement.expenseMicro, statement.currency), tone: "error" },
         { kind: "money", value: formatMoney(statement.paidMicro, statement.currency), tone: "success" },
         { kind: "money", value: formatMoney(statement.netPayableMicro, statement.currency), tone: "active" },
         { kind: "text", value: formatDateRange(statement.period_start, statement.period_end), strong: false },
@@ -3921,7 +3919,6 @@
               <dl>
                 <div><dt>Gross</dt><dd>{formatMoney(statementPreview.grossMicro, statementPreview.currency)}</dd></div>
                 <div><dt>Recoup</dt><dd>{formatMoney(statementPreview.recoupedMicro, statementPreview.currency)}</dd></div>
-                <div><dt>Expenses</dt><dd>{formatMoney(statementPreview.expenseMicro, statementPreview.currency)}</dd></div>
                 <div><dt>Paid</dt><dd>{formatMoney(statementPreview.paidMicro, statementPreview.currency)}</dd></div>
                 <div><dt>Total due</dt><dd>{formatMoney(statementPreview.netPayableMicro, statementPreview.currency)}</dd></div>
               </dl>

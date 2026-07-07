@@ -130,6 +130,11 @@ export interface OfficeApiClient {
     request: { readonly workspaceId: EntityId },
     options: WriteRequestOptions
   ) => Promise<ApiMutationReceipt>;
+  readonly deleteBankImportBatch: (
+    batchId: EntityId,
+    request: { readonly workspaceId: EntityId },
+    options: WriteRequestOptions
+  ) => Promise<ApiMutationReceipt>;
   readonly listReconciliations: (
     query: OfficeReconciliationsQuery
   ) => Promise<PageResult<OfficeReconciliationCandidate>>;
@@ -351,6 +356,16 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
     ): Promise<ApiMutationReceipt> =>
       transport.post<ApiMutationReceipt>(
         `bank-import/batches/${encodePathSegment(batchId)}/reverse`,
+        request,
+        options.idempotencyKey
+      ),
+    deleteBankImportBatch: (
+      batchId: EntityId,
+      request: { readonly workspaceId: EntityId },
+      options: WriteRequestOptions
+    ): Promise<ApiMutationReceipt> =>
+      transport.post<ApiMutationReceipt>(
+        `bank-import/batches/${encodePathSegment(batchId)}/delete`,
         request,
         options.idempotencyKey
       ),

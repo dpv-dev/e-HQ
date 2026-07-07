@@ -178,6 +178,9 @@ export function buildAllocationPlan(
   const grossAmountUnits = parseErhAmount(earning.grossAmount);
   const referenceDate = resolveReferenceDate(earning);
 
+  // Check every share for a missing FX rate BEFORE allocating any of them: the earning is
+  // all-or-nothing, so we must not build (and then discard) allocations for shares that
+  // preceded the one missing a rate.
   for (const share of split) {
     const missingFxCurrency = findMissingFxCurrency(share, parsedCostTerms, appliedByTerm, costState.fxRates, earning.currency, referenceDate);
     if (missingFxCurrency !== null) {
@@ -191,7 +194,9 @@ export function buildAllocationPlan(
         }
       };
     }
+  }
 
+  for (const share of split) {
     const recoupment = applyRecoupmentForShare(earning, share, parsedCostTerms, appliedByTerm);
     for (const application of recoupment.expenseApplications) {
       expenseApplications.push(application);

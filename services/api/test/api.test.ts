@@ -2208,7 +2208,7 @@ test("reconciliation candidates sign bank amounts by direction", async () => {
   const response = await app.request("/eof/v1/reconciliations?workspaceId=workspace_1", { headers: authHeaders() });
   assert.equal(response.status, 200);
   const page = (await response.json()) as {
-    readonly items: readonly { readonly statementLineId: string; readonly amountMicro: string }[];
+    readonly items: readonly { readonly statementLineId: string; readonly amountMicro: string; readonly bankDescription: string }[];
   };
   const debit = page.items.find((item) => item.statementLineId === "bank_line_unmatched");
   assert.ok(debit !== undefined);
@@ -2216,6 +2216,50 @@ test("reconciliation candidates sign bank amounts by direction", async () => {
   const credit = page.items.find((item) => item.statementLineId === "bank_line_income");
   assert.ok(credit !== undefined);
   assert.ok(!credit.amountMicro.startsWith("-"), `credit line must stay positive, got ${credit.amountMicro}`);
+  // The fixture line has both a description and a non-empty reference (INV-BED-1):
+  // the CSV description must win over the reference/cheque number.
+  assert.equal(credit.bankDescription, "Fixture income");
+});
+
+test("bank import delete is administrator-only and permanently removes the batch's lines", async () => {
+  const app = createWriteEnabledFixtureApiService();
+
+  const denied = await app.request("/eof/v1/bank-import/batches/office_import_mcb_feb/delete", {
+    method: "POST",
+    headers: {
+      ...authHeadersForToken("fixture-office-token"),
+      "Content-Type": "application/json",
+      "Idempotency-Key": "import-delete-denied"
+    },
+    body: JSON.stringify({ workspaceId: "workspace_1" })
+  });
+  assert.equal(denied.status, 403);
+
+  const beforeRaw = await app.request("/eof/v1/bank/raw?workspaceId=workspace_1&accountId=bank_mur", { headers: authHeaders() });
+  const beforeRawBody = (await beforeRaw.json()) as { readonly items: readonly { readonly id: string }[] };
+  assert.ok(beforeRawBody.items.some((item) => item.id === "bank_line_unmatched"));
+
+  assertReceipt(await jsonWrite(app, "/eof/v1/bank-import/batches/office_import_mcb_feb/delete", "POST", "import-delete-1", {
+    workspaceId: "workspace_1"
+  }));
+
+  const afterRaw = await app.request("/eof/v1/bank/raw?workspaceId=workspace_1&accountId=bank_mur", { headers: authHeaders() });
+  const afterRawBody = (await afterRaw.json()) as { readonly items: readonly { readonly id: string }[] };
+  assert.ok(!afterRawBody.items.some((item) => item.id === "bank_line_unmatched"), "deleted batch's lines must no longer appear in bank/raw");
+
+  const afterReconciliations = await app.request("/eof/v1/reconciliations?workspaceId=workspace_1", { headers: authHeaders() });
+  const afterReconciliationsBody = (await afterReconciliations.json()) as { readonly items: readonly { readonly statementLineId: string }[] };
+  assert.ok(
+    !afterReconciliationsBody.items.some((item) => item.statementLineId === "bank_line_unmatched"),
+    "deleted batch's lines must no longer appear in reconciliation candidates"
+  );
+
+  const secondDelete = await app.request("/eof/v1/bank-import/batches/office_import_mcb_feb/delete", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "import-delete-2" },
+    body: JSON.stringify({ workspaceId: "workspace_1" })
+  });
+  assert.equal(secondDelete.status, 404, "the batch is already gone, so a fresh delete request must 404");
 });
 
 test("reconciliation manual match, unmatch, and reject flip the bank line status", async () => {

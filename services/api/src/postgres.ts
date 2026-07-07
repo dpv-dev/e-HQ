@@ -189,7 +189,7 @@ async function readOfficeDataset(pool: Pool): Promise<OfficeAnalyticsDataset> {
   );
   const cashflowProjectionRows = await queryRows(
     pool,
-    "select id::text, workspace_id, account_id::text, period_month, expected_inflow_minor::text, expected_outflow_minor::text, expected_closing_balance_minor::text, currency from office_cashflow_projection_rows order by period_month, id",
+    "select id::text, workspace_id, account_id::text, period_month, expected_inflow_minor::text, expected_outflow_minor::text, expected_closing_balance_minor::text, currency, created_at from office_cashflow_projection_rows order by period_month, id",
     []
   );
   const exchangeRates = await queryRows(
@@ -615,7 +615,8 @@ function toOfficeCashflowProjectionRow(row: PgRow): OfficeCashflowProjectionRowI
     expectedInflowMinor: bigintCell(row, "expected_inflow_minor"),
     expectedOutflowMinor: bigintCell(row, "expected_outflow_minor"),
     expectedClosingBalanceMinor: bigintCell(row, "expected_closing_balance_minor"),
-    currency: currencyCell(row, "currency")
+    currency: currencyCell(row, "currency"),
+    createdAt: timestampCell(row, "created_at")
   };
 }
 

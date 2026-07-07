@@ -904,7 +904,7 @@
     { label: "Reconciliation", align: "left", sortable: true }
   ];
   const reconciliationColumns: readonly TableColumn[] = [
-    { label: "Bank line", align: "left", sortable: true },
+    { label: "Description", align: "left", sortable: true },
     { label: "Date", align: "left", sortable: true },
     { label: "Amount", align: "right", sortable: true },
     { label: "Suggested match", align: "left", sortable: true },

@@ -18,6 +18,7 @@
     createSuccessState,
     type ApiRequestState,
     type AuditLogEntry,
+    type CurrencyCode,
     type OfficeApiClient,
     type OfficeBankQualityResponse,
     type OfficeDashboardResponse,
@@ -394,7 +395,7 @@
         { kind: "text", value: transaction.description, strong: true },
         { kind: "text", value: transaction.departmentLabel ?? "to classify", strong: false },
         { kind: "text", value: transaction.categoryLabel ?? "to classify", strong: false },
-        { kind: "money", value: formatMoneyMicro(transaction.amountMicro), tone: moneyTone(transaction.amountMicro) },
+        { kind: "money", value: formatMoneyMicro(transaction.amountMicro, transaction.currency), tone: moneyTone(transaction.amountMicro) },
         { kind: "badge", value: transaction.status, tone: "warning" }
       ]
     }));
@@ -478,8 +479,8 @@
     return moneyToneForValue(amountMicro);
   }
 
-  function formatMoneyMicro(amountMicro: string): string {
-    return formatMoneyValue(amountMicro, "MUR");
+  function formatMoneyMicro(amountMicro: string, currency: CurrencyCode): string {
+    return formatMoneyValue(amountMicro, currency);
   }
 
   function getErrorMessage(error: unknown): string {

@@ -334,6 +334,12 @@ interface OfficeBankAccountDeleteCounts {
   readonly cashflowProjectionCount: number;
 }
 
+interface OfficeBankImportDeleteCounts {
+  readonly batchCount: number;
+  readonly statementLineCount: number;
+  readonly reconciliationMatchCount: number;
+}
+
 interface ContractRoyaltyRuleRequest {
   readonly payeeId: string;
   readonly percentage: string;
@@ -561,6 +567,7 @@ const officeBankAccountWriteSchema = workspaceBodySchema.extend({
 });
 type OfficeBankAccountWriteRequest = z.infer<typeof officeBankAccountWriteSchema>;
 type OfficeBankAccountDeleteRequest = WorkspaceBodyRequest;
+type OfficeBankImportDeleteRequest = WorkspaceBodyRequest;
 const officeProjectWriteSchema = workspaceBodySchema.extend({
   name: z.string().min(1),
   status: z.enum(["draft", "active", "paused", "completed", "cancelled", "archived"]),
@@ -1019,6 +1026,10 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
 
   app.post("/eof/v1/bank-import/batches/:batchId/reverse", async (context) => {
     return officeBankImportReverseResponse(context, dependencies);
+  });
+
+  app.post("/eof/v1/bank-import/batches/:batchId/delete", async (context) => {
+    return officeBankImportDeleteResponse(context, dependencies);
   });
 
   app.get("/eof/v1/reconciliations", (context) => {
@@ -2900,6 +2911,93 @@ function deleteOfficeBankAccountFixture(fixtures: ApiFixtureStore, accountId: st
   mutableOffice.bankAccounts = fixtures.office.bankAccounts.filter((account: OfficeBankAccountRow): boolean => account.id !== accountId);
 }
 
+async function persistOfficeBankImportDelete(
+  tx: ApiWriteTransaction,
+  batchId: string,
+  request: OfficeBankImportDeleteRequest
+): Promise<OfficeBankImportDeleteCounts> {
+  if (tx.kind === "memory") {
+    return { batchCount: 1, statementLineCount: 0, reconciliationMatchCount: 0 };
+  }
+
+  const rows = queryRowsFromResult(await tx.executor.execute(sql`
+    with scoped_batch as (
+      select id
+      from office_bank_import_batches
+      where id = ${batchId}
+        and workspace_id = ${request.workspaceId}
+    ),
+    scoped_lines as (
+      select line.id
+      from office_bank_statement_lines line
+      join scoped_batch batch on batch.id = line.import_batch_id
+    ),
+    deleted_matches as (
+      delete from office_bank_reconciliation_matches match
+      using scoped_lines line
+      where match.bank_statement_line_id = line.id
+      returning match.id
+    ),
+    deleted_lines as (
+      delete from office_bank_statement_lines line
+      using scoped_batch batch
+      where line.import_batch_id = batch.id
+      returning line.id
+    ),
+    deleted_batch as (
+      delete from office_bank_import_batches batch
+      using scoped_batch scoped
+      where batch.id = scoped.id
+      returning batch.id
+    )
+    select
+      (select count(*) from deleted_batch)::int as batch_count,
+      (select count(*) from deleted_lines)::int as statement_line_count,
+      (select count(*) from deleted_matches)::int as reconciliation_match_count
+  `));
+  const row = rows[0];
+  return {
+    batchCount: integerQueryField(row, "batch_count"),
+    statementLineCount: integerQueryField(row, "statement_line_count"),
+    reconciliationMatchCount: integerQueryField(row, "reconciliation_match_count")
+  };
+}
+
+function countOfficeBankImportFixtureDependencies(fixtures: ApiFixtureStore, batchId: string): OfficeBankImportDeleteCounts {
+  const statementLineIds = new Set<string>(
+    fixtures.office.bankStatementLines
+      .filter((line: OfficeBankStatementLineRow): boolean => line.importBatchId === batchId)
+      .map((line: OfficeBankStatementLineRow): string => line.id)
+  );
+
+  return {
+    batchCount: fixtures.office.bankImportBatches.some((batch: OfficeBankImportBatchRow): boolean => batch.id === batchId) ? 1 : 0,
+    statementLineCount: statementLineIds.size,
+    reconciliationMatchCount: fixtures.office.bankReconciliationMatches.filter((match): boolean =>
+      statementLineIds.has(match.bankStatementLineId)
+    ).length
+  };
+}
+
+function deleteOfficeBankImportBatchFixture(fixtures: ApiFixtureStore, batchId: string): void {
+  const mutableOffice = fixtures.office as Mutable<OfficeAnalyticsDataset>;
+  const statementLineIds = new Set<string>(
+    fixtures.office.bankStatementLines
+      .filter((line: OfficeBankStatementLineRow): boolean => line.importBatchId === batchId)
+      .map((line: OfficeBankStatementLineRow): string => line.id)
+  );
+
+  mutableOffice.bankReconciliationMatches = fixtures.office.bankReconciliationMatches.filter(
+    (match): boolean => !statementLineIds.has(match.bankStatementLineId)
+  );
+  mutableOffice.bankStatementLines = fixtures.office.bankStatementLines.filter(
+    (line: OfficeBankStatementLineRow): boolean => line.importBatchId !== batchId
+  );
+  mutableOffice.bankImportBatches = fixtures.office.bankImportBatches.filter(
+    (batch: OfficeBankImportBatchRow): boolean => batch.id !== batchId
+  );
+}
+
 async function officeProjectCreateResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
   const request = await readZodBody<OfficeProjectWriteRequest>(context, officeProjectWriteSchema);
   const projectId = randomUUID();
@@ -3091,7 +3189,7 @@ async function officeCashflowConfirmResponse(context: ApiContext, dependencies: 
         after: { workspaceId, rowCount: parsed.length },
         idempotencyKey: resolvedIdempotencyKey
       });
-      upsertOfficeCashflowFixture(dependencies.fixtures, workspaceId, parsed);
+      upsertOfficeCashflowFixture(dependencies.fixtures, workspaceId, parsed, dependencies.nowIso());
       return mutationReceipt(batchId, auditEventId);
     }
   });
@@ -3114,7 +3212,7 @@ async function persistOfficeCashflowRows(tx: ApiWriteTransaction, workspaceId: s
   }
 }
 
-function upsertOfficeCashflowFixture(fixtures: ApiFixtureStore, workspaceId: string, rows: readonly ParsedCashflowRow[]): void {
+function upsertOfficeCashflowFixture(fixtures: ApiFixtureStore, workspaceId: string, rows: readonly ParsedCashflowRow[], nowIso: string): void {
   const mutableOffice = fixtures.office as Mutable<OfficeAnalyticsDataset>;
   const periods = new Set(rows.map((row: ParsedCashflowRow): string => row.periodMonth));
   const kept = fixtures.office.cashflowProjectionRows.filter(
@@ -3128,7 +3226,8 @@ function upsertOfficeCashflowFixture(fixtures: ApiFixtureStore, workspaceId: str
     expectedInflowMinor: row.inflowMinor,
     expectedOutflowMinor: row.outflowMinor,
     expectedClosingBalanceMinor: row.closingBalanceMinor,
-    currency: row.currency as CurrencyCode
+    currency: row.currency as CurrencyCode,
+    createdAt: nowIso
   }));
   mutableOffice.cashflowProjectionRows = [...kept, ...added];
 }
@@ -5248,6 +5347,10 @@ async function distributionPaymentRecordResponse(context: ApiContext, dependenci
     idempotencyKey,
     requestBody: request,
     write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<PaymentMutationResponse> => {
+      // Serialize against every other payment mutation on this statement: balances are
+      // computed by summing all of a statement's payments, so two concurrent writes
+      // (even on different payments) must not interleave their read-compute-write.
+      await acquireAdvisoryLock(tx, `distribution:payment:statement:${request.statementId}`);
       const statement = requireDistributionStatement(dependencies.fixtures.distribution, request.statementId);
       assertPaymentMatchesStatement(context, request.payeeId, request.currency, statement);
       const paymentId = randomUUID();
@@ -5305,6 +5408,8 @@ async function distributionPaymentUpdateResponse(context: ApiContext, dependenci
     write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<PaymentMutationResponse> => {
       const payment = requireDistributionPayment(dependencies.fixtures.distribution, paymentId);
       const link = requireDistributionPaymentLink(dependencies.fixtures.distribution, paymentId);
+      // Serialize against every other payment mutation on this statement (see record's lock comment).
+      await acquireAdvisoryLock(tx, `distribution:payment:statement:${link.statementId}`);
       const statement = requireDistributionStatement(dependencies.fixtures.distribution, link.statementId);
       assertPaymentIsMutable(context, payment);
       assertPaymentMatchesStatement(context, payment.payeeId, request.currency, statement);
@@ -5360,6 +5465,8 @@ async function distributionPaymentReconcileResponse(context: ApiContext, depende
     write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<PaymentMutationResponse> => {
       const payment = requireDistributionPayment(dependencies.fixtures.distribution, paymentId);
       const link = requireDistributionPaymentLink(dependencies.fixtures.distribution, paymentId);
+      // Serialize against every other payment mutation on this statement (see record's lock comment).
+      await acquireAdvisoryLock(tx, `distribution:payment:statement:${link.statementId}`);
       const statement = requireDistributionStatement(dependencies.fixtures.distribution, link.statementId);
       assertPaymentIsMutable(context, payment);
       assertPaymentMatchesStatement(context, payment.payeeId, payment.currency, statement);
@@ -5420,7 +5527,9 @@ async function distributionPaymentVoidResponse(context: ApiContext, dependencies
       const payment = requireDistributionPayment(dependencies.fixtures.distribution, paymentId);
       const link = requireDistributionPaymentLink(dependencies.fixtures.distribution, paymentId);
       assertPaymentIsMutable(context, payment);
-      await acquireAdvisoryLock(tx, `distribution:payment:void:${paymentId}`);
+      // Statement-scoped, not payment-scoped: a per-payment lock wouldn't block a concurrent
+      // record/update/reconcile on a DIFFERENT payment of the same statement (see record's lock comment).
+      await acquireAdvisoryLock(tx, `distribution:payment:statement:${link.statementId}`);
       const persistInput: PersistDistributionPaymentVoidInput = { paymentId };
       await persistDistributionPaymentVoid(tx, persistInput);
       const patch = paymentVoidFixturePatch(payment, link);
@@ -5849,6 +5958,11 @@ async function officeBankImportConfirmResponse(context: ApiContext, dependencies
     requestBody: request,
     write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<OfficeBankImportConfirmMutationResponse> => {
       const preview = await requireOfficeBankPreviewInWrite(context, dependencies, tx, request.previewId, request.workspaceId);
+      // Two concurrent confirms of the same file (different idempotency keys) must not both
+      // pass the fingerprint check before either inserts: serialize on the fingerprint so the
+      // second request sees the first request's batch and returns a clean 409, not a raw
+      // unique-constraint database error.
+      await acquireAdvisoryLock(tx, `office:bank-import:fingerprint:${request.workspaceId}:${preview.idempotencyFingerprint}`);
       const existingBatch = await findOfficeBankImportBatchByFingerprint(tx, request.workspaceId, preview.idempotencyFingerprint);
       if (existingBatch !== null) {
         if (existingBatch.status !== "confirmed") {
@@ -5981,6 +6095,59 @@ async function officeBankImportConfirmResponse(context: ApiContext, dependencies
         importedTransactionCount: lines.length,
         rejectedRowCount: preview.rows.length - lines.length
       };
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+// Administrator-only, irreversible: hard-deletes an import batch's own bank statement
+// lines and reconciliation matches (and the batch row itself). Deliberately mirrors
+// office_bank_account_delete's scope: any transaction created from or matched to these
+// lines is left untouched (only the join/line rows disappear), so a validated ledger
+// entry is never silently destroyed — the admin cancels those separately if unwanted.
+async function officeBankImportDeleteResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const batchId = requirePathParam(context, "batchId");
+  const request = await readZodBody<OfficeBankImportDeleteRequest>(context, workspaceBodySchema);
+  const before = dependencies.fixtures.office.bankImportBatches.find(
+    (batch: OfficeBankImportBatchRow): boolean => batch.id === batchId && batch.workspaceId === request.workspaceId
+  );
+  if (before === undefined) {
+    throw new ApiRouteError(404, "office_bank_import_batch_not_found", "Office bank import batch was not found.", [
+      `batchId=${batchId}`,
+      `workspaceId=${request.workspaceId}`
+    ]);
+  }
+
+  const fixtureCounts = countOfficeBankImportFixtureDependencies(dependencies.fixtures, batchId);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_bank_import_delete",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `office:bank-import:${batchId}`);
+      const deletedCounts = await persistOfficeBankImportDelete(tx, batchId, request);
+      if (tx.kind !== "memory" && deletedCounts.batchCount !== 1) {
+        throw new ApiRouteError(404, "office_bank_import_batch_not_found", "Office bank import batch was not found.", [
+          `batchId=${batchId}`,
+          `workspaceId=${request.workspaceId}`
+        ]);
+      }
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_bank_import_delete",
+        targetType: "office_bank_import_batch",
+        targetId: batchId,
+        before: { batch: before, counts: fixtureCounts },
+        after: { batchId, deletedCounts },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      deleteOfficeBankImportBatchFixture(dependencies.fixtures, batchId);
+      return mutationReceipt(batchId, auditEventId);
     }
   });
   return context.json(result.body, result.status);
@@ -8510,7 +8677,9 @@ function toReconciliationCandidates(dataset: OfficeAnalyticsDataset): readonly O
       transactionId,
       statementLineId: line.id,
       occurredOn: line.occurredOn,
-      bankDescription: line.reference ?? line.id,
+      // Show the bank's own narration first (the CSV description column); the
+      // reference (cheque/ref number) and the internal id are fallbacks only.
+      bankDescription: line.description ?? line.reference ?? line.id,
       ledgerDescription: transaction?.description ?? "Unmatched ledger line",
       // Statement lines store magnitude + direction; expose debits as negative
       // so clients render outflows with the right sign and tone.
@@ -9009,7 +9178,6 @@ function toApiStatementSummary(row: DistributionStatementReadRow): StatementSumm
     status: toApiStatementStatus(row.status),
     grossMicro: row.grossTotal,
     recoupedMicro: row.recoupmentTotal,
-    expenseMicro: row.recoupmentTotal,
     paidMicro: row.paymentsApplied,
     netPayableMicro: row.statementBalance,
     currency: row.currency
