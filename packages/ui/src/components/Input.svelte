@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Snippet } from "svelte";
   import type { FieldState } from "./types.js";
 
   interface Props {
@@ -10,6 +11,8 @@
     readonly state: FieldState;
     readonly message: string;
     readonly oninput?: ((value: string) => void) | null;
+    // Optional leading icon (design-system reference "input with icon" state).
+    readonly icon?: Snippet | null;
   }
 
   const props: Props = $props();
@@ -25,15 +28,20 @@
 
 <label class={`ehq-field ${props.state}`} for={props.id}>
   <span>{props.label}</span>
-  <input
-    id={props.id}
-    type={props.type}
-    value={props.value}
-    placeholder={props.placeholder}
-    disabled={props.state === "disabled"}
-    aria-invalid={props.state === "error"}
-    oninput={handleInput}
-  />
+  <div class="control" class:with-icon={props.icon}>
+    {#if props.icon}
+      <span class="icon" aria-hidden="true">{@render props.icon()}</span>
+    {/if}
+    <input
+      id={props.id}
+      type={props.type}
+      value={props.value}
+      placeholder={props.placeholder}
+      disabled={props.state === "disabled"}
+      aria-invalid={props.state === "error"}
+      oninput={handleInput}
+    />
+  </div>
   {#if props.message.length > 0}
     <small>{props.message}</small>
   {/if}
@@ -52,6 +60,25 @@
     font-weight: var(--ehq-type-label-weight);
     letter-spacing: 0.12em;
     text-transform: uppercase;
+  }
+
+  .control {
+    position: relative;
+  }
+
+  .control .icon {
+    position: absolute;
+    left: var(--ehq-space-3);
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--ehq-text-muted);
+    display: grid;
+    place-items: center;
+    pointer-events: none;
+  }
+
+  .control.with-icon input {
+    padding-left: calc(var(--ehq-space-3) + 22px);
   }
 
   input {

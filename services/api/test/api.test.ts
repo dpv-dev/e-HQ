@@ -333,6 +333,53 @@ test("Office transactions expose category-derived path and keep project nullable
   assert.equal(otherAccountPage.items.length, 0);
 });
 
+test("Office screen bundle returns every section in one response matching the standalone endpoints", async () => {
+  const app = createFixtureApiService();
+  const response = await app.request(
+    "/eof/v1/screen/office?workspaceId=workspace_1&period=2026-02&dateFrom=2026-02-01&dateTo=2026-02-28",
+    { headers: authHeaders() }
+  );
+  assert.equal(response.status, 200);
+  const screen = (await response.json()) as {
+    readonly status: { readonly writesEnabled: boolean };
+    readonly dashboard: { readonly period: string };
+    readonly globalPnl: { readonly incomeMicro: string };
+    readonly divisionPnl: { readonly items: readonly unknown[] };
+    readonly planComptable: readonly unknown[];
+    readonly transactions: { readonly items: readonly { readonly id: string }[] };
+    readonly pendingTransactions: { readonly items: readonly { readonly id: string }[] };
+    readonly reconciliations: { readonly items: readonly unknown[] };
+    readonly cashflow: readonly unknown[];
+    readonly auditLog: { readonly items: readonly unknown[] };
+    readonly bankAccounts: { readonly items: readonly { readonly id: string }[] };
+  };
+  assert.equal(typeof screen.status.writesEnabled, "boolean");
+  assert.equal(screen.dashboard.period, "2026-02");
+  assert.equal(typeof screen.globalPnl.incomeMicro, "string");
+  assert.ok(screen.planComptable.length > 0);
+  assert.ok(screen.transactions.items.some((item) => item.id === "tx_mcb_fee"));
+  assert.ok(screen.pendingTransactions.items.some((item) => item.id === "tx_uncategorized"));
+  assert.ok(screen.bankAccounts.items.some((item) => item.id === "bank_mur"));
+
+  const direct = await app.request(
+    "/eof/v1/transactions?workspaceId=workspace_1&period=2026-02&dateFrom=2026-02-01&dateTo=2026-02-28&limit=100",
+    { headers: authHeaders() }
+  );
+  const directPage = (await direct.json()) as { readonly items: readonly { readonly id: string }[] };
+  assert.deepEqual(
+    screen.transactions.items.map((item) => item.id),
+    directPage.items.map((item) => item.id)
+  );
+});
+
+test("Office screen bundle rejects unauthenticated calls", async () => {
+  const app = createFixtureApiService();
+  const response = await app.request(
+    "/eof/v1/screen/office?workspaceId=workspace_1&period=2026-02&dateFrom=2026-02-01&dateTo=2026-02-28"
+  );
+  assert.equal(response.status, 401);
+});
+
 test("Office partner facets are lenses over the same partner", async () => {
   const app = createFixtureApiService();
 

@@ -1,6 +1,8 @@
 export type Tone = "success" | "warning" | "error" | "info" | "muted" | "active";
 export type WorkspaceKind = "office" | "distribution" | "command-center";
-export type ButtonVariant = "primary" | "secondary" | "danger";
+export type ButtonVariant = "primary" | "secondary" | "tertiary" | "ghost" | "danger";
+export type AlertTone = "success" | "info" | "warning" | "error";
+export type StatTrendDirection = "up" | "down" | "none";
 export type ButtonSize = "small" | "medium";
 export type FieldState = "default" | "focus" | "error" | "disabled";
 export type SurfaceState = "default" | "hover" | "empty" | "error" | "locked" | "loading";

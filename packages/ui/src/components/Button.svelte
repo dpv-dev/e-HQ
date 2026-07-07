@@ -1,4 +1,6 @@
 <script lang="ts">
+  import Icon from "./Icon.svelte";
+  import type { Snippet } from "svelte";
   import type { ButtonSize, ButtonVariant } from "./types.js";
 
   interface Props {
@@ -13,6 +15,10 @@
     readonly ariaLabel: string | null;
     readonly title?: string | null;
     readonly onclick?: (() => void | Promise<void>) | null;
+    // Design-system reference additions (optional — existing call sites unaffected):
+    // a leading icon snippet and the trailing arrow shown on reference buttons.
+    readonly icon?: Snippet | null;
+    readonly arrow?: boolean;
   }
 
   const props: Props = $props();
@@ -37,7 +43,13 @@
   {#if props.locked}
     <b aria-hidden="true">×</b>
   {/if}
+  {#if props.icon}
+    <span class="icon" aria-hidden="true">{@render props.icon()}</span>
+  {/if}
   <span>{props.label}</span>
+  {#if props.arrow === true}
+    <span class="icon" aria-hidden="true"><Icon name="arrow-right" size={14} strokeWidth={2} /></span>
+  {/if}
 </button>
 
 <style>
@@ -86,6 +98,25 @@
     box-shadow: 0 0 0 3px var(--ehq-yellow-muted);
   }
 
+  .ehq-button.tertiary {
+    border-color: transparent;
+    color: var(--ehq-yellow);
+  }
+
+  .ehq-button.tertiary:hover {
+    color: var(--ehq-yellow-hover);
+  }
+
+  .ehq-button.ghost {
+    border-color: transparent;
+    color: var(--ehq-text-soft);
+  }
+
+  .ehq-button.ghost:hover {
+    background: var(--ehq-surface-high);
+    color: var(--ehq-text);
+  }
+
   .ehq-button.danger {
     background: var(--ehq-error-bg);
     border-color: var(--ehq-error);
@@ -94,6 +125,11 @@
 
   .ehq-button.danger:hover {
     background: var(--ehq-error-hover);
+  }
+
+  .icon {
+    display: grid;
+    place-items: center;
   }
 
   .ehq-button:disabled {

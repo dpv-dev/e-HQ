@@ -401,7 +401,10 @@
   let accountFilter = $state<SelectFilterValue>(allValue);
   let typeFilter = $state<SelectFilterValue>(allValue);
   let transactionStatusFilter = $state<SelectFilterValue>(allValue);
-  let reconciliationStatusFilter = $state<SelectFilterValue>("suggested");
+  // Default to "unmatched": that is the real work queue. Nothing in the write pipeline ever
+  // produces "suggested" (imports land unmatched; actions produce matched/rejected/ignored),
+  // so a "suggested" default rendered the page permanently empty in production.
+  let reconciliationStatusFilter = $state<SelectFilterValue>("unmatched");
   let selectedPendingIds = $state<readonly string[]>([]);
   let pendingClassifyCategoryId = $state("");
   let pendingClassifyProjectId = $state("");
@@ -623,6 +626,12 @@
   });
 
   async function loadInitialData(): Promise<void> {
+    // Single-request screen bundle first; the individual loaders remain as the fallback
+    // path (older API without /screen/office, or a transient bundle failure).
+    const seeded = await loadOfficeScreen();
+    if (seeded) {
+      return;
+    }
     await Promise.all([
       loadWriteGate(),
       loadDashboard(),
@@ -1294,7 +1303,7 @@
       transaction.categoryLabel ?? "",
       transaction.projectLabel ?? "",
       transaction.type ?? "",
-      (Number(transaction.amountMicro) / 1_000_000).toFixed(2),
+      (Number(typedSignedAmountMicro(transaction)) / 1_000_000).toFixed(2),
       transaction.currency,
       transaction.status
     ]);
@@ -1823,15 +1832,85 @@
     await loadCashflow();
   }
 
+  // One network round trip instead of ~10: the screen bundle seeds every period-scoped
+  // state at once. Sub-payloads are fetched with the DEFAULT filters, so any filter the
+  // user changed is refetched individually right after (still cheaper than the old
+  // full fan-out). Returns false when the bundle call failed so callers can fall back.
+  async function loadOfficeScreen(): Promise<boolean> {
+    try {
+      const screen = await client.office.getScreen({
+        workspaceId: officeWorkspaceId,
+        period,
+        dateFrom: activeRange.from,
+        dateTo: activeRange.to
+      });
+      writesEnabled = screen.status.writesEnabled;
+      writeGateMessage = screen.status.writesEnabled ? "writes enabled" : "enable writes";
+      dashboardState = createSuccessState<OfficeDashboardResponse>(screen.dashboard);
+      pnlState = createSuccessState<OfficeGlobalPnl | OfficeDepartmentPnl>(screen.globalPnl);
+      divisionPnlState = createSuccessState<PageResult<OfficeDivisionPnl>>(screen.divisionPnl);
+      setTablePaginationError("divisionPnl", null);
+      planState = createSuccessState<readonly OfficePlanComptableNode[]>(screen.planComptable);
+      transactionsState = createSuccessState<PageResult<OfficeTransaction>>(screen.transactions);
+      setTablePaginationError("transactions", null);
+      pendingState = createSuccessState<PageResult<OfficeTransaction>>(screen.pendingTransactions);
+      setTablePaginationError("pending", null);
+      reconciliationState = createSuccessState<PageResult<OfficeReconciliationCandidate>>(screen.reconciliations);
+      setTablePaginationError("reconciliation", null);
+      cashflowState = createSuccessState<readonly CashflowBucket[]>(screen.cashflow);
+      auditState = createSuccessState<PageResult<AuditLogEntry>>(screen.auditLog);
+      setTablePaginationError("audit", null);
+      importAccounts = screen.bankAccounts.items;
+      if (selectedImportAccountId.length === 0) {
+        selectedImportAccountId = defaultImportAccountId(importAccounts, null);
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function hasCustomTransactionFilters(): boolean {
+    return (
+      accountFilter !== allValue ||
+      departmentFilter !== allValue ||
+      divisionFilter !== allValue ||
+      categoryFilter !== allValue ||
+      projectFilter !== allValue ||
+      typeFilter !== allValue ||
+      transactionStatusFilter !== allValue
+    );
+  }
+
   async function reloadPeriodScopedData(): Promise<void> {
-    await Promise.all([
-      loadDashboard(),
-      loadPnlProjection(),
-      loadTransactions(),
-      loadPendingTransactions(),
-      loadReconciliations(),
-      loadCashflow()
-    ]);
+    const seeded = await loadOfficeScreen();
+    if (!seeded) {
+      await Promise.all([
+        loadDashboard(),
+        loadPnlProjection(),
+        loadTransactions(),
+        loadPendingTransactions(),
+        loadReconciliations(),
+        loadCashflow()
+      ]);
+      return;
+    }
+
+    // The bundle used default filters — refetch only the sections whose active filter differs.
+    const followUps: Promise<void>[] = [];
+    if (departmentFilter !== allValue) {
+      followUps.push(loadPnlProjection());
+    }
+    if (hasCustomTransactionFilters()) {
+      followUps.push(loadTransactions());
+    }
+    if (accountFilter !== allValue || reconciliationStatusFilter !== "unmatched") {
+      followUps.push(loadReconciliations());
+    }
+    if (accountFilter !== allValue) {
+      followUps.push(loadCashflow());
+    }
+    await Promise.all(followUps);
   }
 
   function bankRowToRecord(row: ParsedBankRow, currency: string): Readonly<Record<string, string>> {
@@ -2625,19 +2704,37 @@
     return `${transaction.departmentLabel} · ${transaction.divisionLabel} · ${transaction.categoryLabel}`;
   }
 
+  // Display sign follows the transaction TYPE, not the stored sign: write paths disagree on
+  // the stored sign convention (manual entry negates expenses, bank-derived rows store a
+  // positive magnitude), so a "Rent" expense could otherwise show as "+17,250.00" in green.
+  // Same normalization the P&L aggregator applies (magnitude + type carries the meaning).
+  function typedSignedAmountMicro(transaction: OfficeTransaction): string {
+    const magnitude = transaction.amountMicro.replace(/^[+-]/u, "");
+    if (transaction.type === "expense") {
+      return `-${magnitude}`;
+    }
+    if (transaction.type === "income") {
+      return magnitude;
+    }
+    return transaction.amountMicro;
+  }
+
   function createTransactionTableRows(rows: readonly OfficeTransaction[]): readonly TableRow[] {
-    return rows.map((transaction: OfficeTransaction): TableRow => ({
-      id: transaction.id,
-      cells: [
-        { kind: "text", value: formatDateOnly(transaction.occurredOn), strong: false },
-        { kind: "text", value: transaction.description, strong: true },
-        { kind: "text", value: transactionPathLabel(transaction), strong: false },
-        { kind: "badge", value: transaction.type ?? "unvalidated", tone: transaction.type === "income" ? "success" : transaction.type === "expense" ? "warning" : "muted" },
-        { kind: "text", value: transaction.projectLabel ?? "—", strong: false },
-        { kind: "money", value: formatSignedMicro(transaction.amountMicro), tone: moneyTone(transaction.amountMicro) },
-        { kind: "badge", value: transaction.status, tone: transactionStatusTone(transaction.status) }
-      ]
-    }));
+    return rows.map((transaction: OfficeTransaction): TableRow => {
+      const signedAmountMicro = typedSignedAmountMicro(transaction);
+      return {
+        id: transaction.id,
+        cells: [
+          { kind: "text", value: formatDateOnly(transaction.occurredOn), strong: false },
+          { kind: "text", value: transaction.description, strong: true },
+          { kind: "text", value: transactionPathLabel(transaction), strong: false },
+          { kind: "badge", value: transaction.type ?? "unvalidated", tone: transaction.type === "income" ? "success" : transaction.type === "expense" ? "warning" : "muted" },
+          { kind: "text", value: transaction.projectLabel ?? "—", strong: false },
+          { kind: "money", value: formatSignedMicro(signedAmountMicro), tone: moneyTone(signedAmountMicro) },
+          { kind: "badge", value: transaction.status, tone: transactionStatusTone(transaction.status) }
+        ]
+      };
+    });
   }
 
   function createPendingTableRows(rows: readonly OfficeTransaction[], selectedIds: readonly string[]): readonly TableRow[] {
@@ -2647,7 +2744,7 @@
         { kind: "badge", value: selectedIds.includes(transaction.id) ? "selected" : "to validate", tone: selectedIds.includes(transaction.id) ? "active" : "warning" },
         { kind: "text", value: transaction.description, strong: true },
         { kind: "text", value: transactionPathLabel(transaction), strong: false },
-        { kind: "money", value: formatSignedMicro(transaction.amountMicro), tone: moneyTone(transaction.amountMicro) },
+        { kind: "money", value: formatSignedMicro(typedSignedAmountMicro(transaction)), tone: moneyTone(typedSignedAmountMicro(transaction)) },
         { kind: "badge", value: transaction.status, tone: "warning" }
       ]
     }));

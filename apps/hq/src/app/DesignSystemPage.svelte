@@ -1,19 +1,26 @@
 <script lang="ts">
   import {
+    Alert,
     Badge,
     BarsChart,
     Button,
     Card,
+    Checkbox,
     DivergeChart,
     DonutChart,
     Drawer,
+    Icon,
+    iconNames,
     Input,
     KPI,
     LineChart,
     Loader,
     Panel,
+    Radio,
     Select,
+    StatCard,
     Table,
+    Toggle,
     Toolbar,
     type ChartPoint,
     type DivergePoint,
@@ -220,16 +227,89 @@
       <article class="reference-card" id="buttons">
         <div class="card-head">
           <h3>Button</h3>
-          <small>Primary, secondary, danger, focus, disabled, loading, locked</small>
+          <small>Primary, secondary, tertiary, ghost, danger · arrow and icon slots · focus, disabled, loading, locked</small>
         </div>
         <div class="component-grid compact">
-          <Button label="Primary" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Primary" />
-          <Button label="Secondary" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Secondary" />
-          <Button label="Danger" variant="danger" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Danger" />
+          <Button label="Primary" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Primary" arrow={true} />
+          <Button label="Secondary" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Secondary" arrow={true} />
+          <Button label="Tertiary" variant="tertiary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Tertiary" arrow={true} />
+          <Button label="Ghost" variant="ghost" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Ghost" arrow={true} />
+          <Button label="Danger" variant="danger" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Danger">
+            {#snippet icon()}<Icon name="trash" size={14} strokeWidth={2} />{/snippet}
+          </Button>
           <Button label="Focus visible" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={true} ariaLabel="Focus visible" />
           <Button label="Loading" variant="secondary" size="medium" type="button" disabled={false} loading={true} locked={false} focus={false} ariaLabel="Loading" />
           <Button label="Locked" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={true} focus={false} ariaLabel="Locked" />
-          <Button label="Disabled" variant="secondary" size="medium" type="button" disabled={true} loading={false} locked={false} focus={false} ariaLabel="Disabled" />
+          <Button label="Disabled" variant="primary" size="medium" type="button" disabled={true} loading={false} locked={false} focus={false} ariaLabel="Disabled" />
+        </div>
+      </article>
+
+      <article class="reference-card" id="icons">
+        <div class="card-head">
+          <h3>Icons</h3>
+          <small>Internal line-icon set · strokes 1 / 1.5 / 2</small>
+        </div>
+        <div class="icon-grid">
+          {#each iconNames as name (name)}
+            <span class="icon-tile" title={name}><Icon {name} size={20} strokeWidth={1.5} /></span>
+          {/each}
+        </div>
+        <div class="component-grid compact">
+          <span class="icon-strokes"><Icon name="settings" size={22} strokeWidth={1} /><Icon name="settings" size={22} strokeWidth={1.5} /><Icon name="settings" size={22} strokeWidth={2} /></span>
+        </div>
+      </article>
+
+      <article class="reference-card" id="selection-controls">
+        <div class="card-head">
+          <h3>Checkbox, Radio, Toggle</h3>
+          <small>Unchecked, checked, indeterminate, disabled · on, off</small>
+        </div>
+        <div class="component-grid compact">
+          <Checkbox id="ds-check-off" label="Unchecked" checked={false} indeterminate={false} disabled={false} />
+          <Checkbox id="ds-check-on" label="Checked" checked={true} indeterminate={false} disabled={false} />
+          <Checkbox id="ds-check-ind" label="Indeterminate" checked={false} indeterminate={true} disabled={false} />
+          <Checkbox id="ds-check-dis" label="Disabled" checked={false} indeterminate={false} disabled={true} />
+        </div>
+        <div class="component-grid compact">
+          <Radio id="ds-radio-off" name="ds-radio" label="Unselected" value="off" checked={false} disabled={false} />
+          <Radio id="ds-radio-on" name="ds-radio" label="Selected" value="on" checked={true} disabled={false} />
+          <Radio id="ds-radio-dis" name="ds-radio-dis" label="Disabled" value="dis" checked={false} disabled={true} />
+        </div>
+        <div class="component-grid compact">
+          <Toggle id="ds-toggle-on" label="On" checked={true} disabled={false} />
+          <Toggle id="ds-toggle-off" label="Off" checked={false} disabled={false} />
+          <Toggle id="ds-toggle-dis" label="Disabled" checked={false} disabled={true} />
+        </div>
+      </article>
+
+      <article class="reference-card" id="alerts">
+        <div class="card-head">
+          <h3>Alerts</h3>
+          <small>Success, info, warning, error · dismissible</small>
+        </div>
+        <div class="alert-stack">
+          <Alert tone="success" title="Success" message="Your changes have been saved." dismissible={true} />
+          <Alert tone="info" title="Information" message="This is an informational message." dismissible={true} />
+          <Alert tone="warning" title="Warning" message="Review the information before continuing." dismissible={true} />
+          <Alert tone="error" title="Error" message="Something went wrong. Try again later." dismissible={true} />
+        </div>
+      </article>
+
+      <article class="reference-card" id="stat-cards">
+        <div class="card-head">
+          <h3>Stat cards</h3>
+          <small>Icon, value, trend vs last period</small>
+        </div>
+        <div class="component-grid">
+          <StatCard label="Projects" value="128" trendDirection="up" trendValue="12.5%" trendDetail="vs last month">
+            {#snippet icon()}<Icon name="folder" size={18} strokeWidth={2} />{/snippet}
+          </StatCard>
+          <StatCard label="Revenue" value="Rs 2 450 000" trendDirection="up" trendValue="11.4%" trendDetail="vs last month">
+            {#snippet icon()}<Icon name="chart-bar" size={18} strokeWidth={2} />{/snippet}
+          </StatCard>
+          <StatCard label="Active clients" value="856" trendDirection="down" trendValue="3.2%" trendDetail="vs last month">
+            {#snippet icon()}<Icon name="users" size={18} strokeWidth={2} />{/snippet}
+          </StatCard>
         </div>
       </article>
 
@@ -624,6 +704,38 @@
     grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
     gap: var(--ehq-space-3);
     align-items: stretch;
+  }
+
+  .icon-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
+    gap: var(--ehq-space-2);
+  }
+
+  .icon-tile {
+    height: 44px;
+    border: 1px solid var(--ehq-border);
+    border-radius: var(--ehq-radius-sm);
+    color: var(--ehq-text-soft);
+    display: grid;
+    place-items: center;
+  }
+
+  .icon-tile:hover {
+    color: var(--ehq-yellow);
+    border-color: var(--ehq-yellow-border);
+  }
+
+  .icon-strokes {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ehq-space-3);
+    color: var(--ehq-text-soft);
+  }
+
+  .alert-stack {
+    display: grid;
+    gap: var(--ehq-space-2);
   }
 
   .component-grid.compact {

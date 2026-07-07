@@ -8,10 +8,9 @@
    migrations, DB, payments, or statement formulas.
 */
 
-/* Brand fonts. Calibri is the chosen UI typeface; Carlito (libre, metric-compatible with
-   Calibri) is loaded as the web fallback so the Calibri look renders even where Calibri is
-   not installed. Space Mono for labels/technical. Self-host Calibri/Carlito later if preferred. */
-@import url('https://fonts.googleapis.com/css2?family=Carlito:ital,wght@0,400;0,700;1,400;1,700&family=Space+Mono:wght@400&display=swap');
+/* Brand fonts. Inter is the UI typeface (David, 2026-07-07 — design-system reference);
+   Space Mono stays for labels/technical. */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Mono:wght@400&display=swap');
 
 :root{
   /* Core accent — #FFB800 canonical */
@@ -46,16 +45,15 @@
   --ehq-success:#22C55E; --ehq-success-bg:rgba(34,197,94,.12); --ehq-success-border:rgba(34,197,94,.35);
   --ehq-info:#3B82F6;    --ehq-info-bg:rgba(59,130,246,.12);   --ehq-info-border:rgba(59,130,246,.35);
   --ehq-warning:#FBBF24; --ehq-warning-bg:rgba(251,191,36,.12);
-  --ehq-error:#FF3B30;   --ehq-error-bg:rgba(255,59,48,.12);   --ehq-error-border:rgba(255,59,48,.40);   /* eeee.mu red */
-  --ehq-error-hover:rgba(255,59,48,.20);
+  --ehq-error:#EF4444;   --ehq-error-bg:rgba(239,68,68,.12);   --ehq-error-border:rgba(239,68,68,.40);   /* per design-system reference */
+  --ehq-error-hover:rgba(239,68,68,.20);
   --ehq-purple:#A855F7;
 
-  /* Typography — Calibri (per David) + Space Mono (labels / technical).
-     Calibri ships on Windows / MS-Office Macs but NOT stock macOS/Linux/web. To render
-     the Calibri look everywhere, self-host Carlito (libre, metric-compatible) via @font-face;
-     the stack already lists it as the first fallback. */
-  --ehq-font:'Calibri','Carlito','Segoe UI',-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif;   /* body / UI */
-  --ehq-display:'Calibri','Carlito','Segoe UI',-apple-system,BlinkMacSystemFont,sans-serif;                        /* headings */
+  /* Typography — Inter (per David, 2026-07-07 design-system reference) + Space Mono
+     (labels / technical). Reference scale: H1 32 bold, H2 24 semibold, H3 18 semibold,
+     body 16, small 14, caption 12. */
+  --ehq-font:'Inter','Segoe UI',-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif;   /* body / UI */
+  --ehq-display:'Inter','Segoe UI',-apple-system,BlinkMacSystemFont,sans-serif;                        /* headings */
   --ehq-mono:'Space Mono','SFMono-Regular','JetBrains Mono',Consolas,monospace;             /* labels, coords, editorial */
   --ehq-brand-font:var(--ehq-display);
   --ehq-h1:32px; --ehq-h2:24px; --ehq-h3:18px;
@@ -77,8 +75,8 @@
   --ehq-chart-frame-height:104px;
   --ehq-spinner-sm:14px;
   --ehq-spinner-md:18px;
-  --ehq-type-display-weight:600;
-  --ehq-type-heading-weight:500;
+  --ehq-type-display-weight:700;
+  --ehq-type-heading-weight:600;
   --ehq-type-heading-color:var(--ehq-text-secondary);
   --ehq-type-body-weight:400;
   --ehq-type-label-weight:400;

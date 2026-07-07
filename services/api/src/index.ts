@@ -787,6 +787,27 @@ function createWorkspaceDomainGuard(
 
 export function createApiService(dependencies: ApiServiceDependencies): Hono<ApiAuthBindings> {
   const app = new Hono<ApiAuthBindings>();
+
+  // Request timing: one structured stdout line per business request, so slow endpoints are
+  // measurable from the host logs (method, path, status, durationMs). OPTIONS preflights
+  // are skipped — they carry no business cost worth logging.
+  app.use("*", async (context, next): Promise<void> => {
+    if (context.req.method === "OPTIONS") {
+      await next();
+      return;
+    }
+    const startedAtMs = Date.now();
+    await next();
+    console.log(JSON.stringify({
+      level: "info",
+      msg: "http_request",
+      method: context.req.method,
+      path: context.req.path,
+      status: context.res.status,
+      durationMs: Date.now() - startedAtMs
+    }));
+  });
+
   app.use(
     "*",
     cors({
@@ -1060,6 +1081,51 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
   app.get("/eof/v1/status", (context) => {
     resolveWorkspaceId(context);
     return context.json({ writesEnabled: dependencies.persistence.writesEnabled });
+  });
+
+  // Screen bundle: one round trip for the Office console's initial/period-scoped load.
+  // The browser previously fired ~11 parallel requests, each paying the client→server
+  // network RTT; this endpoint fans out INTERNALLY to the existing routes (full reuse of
+  // their auth, filtering, and shaping logic — zero duplicated business logic) and returns
+  // the keyed results in a single response. Reads are in-memory, so the fan-out is ~free.
+  app.get("/eof/v1/screen/office", async (context) => {
+    const workspaceId = resolveWorkspaceId(context);
+    const period = requireCompatQuery(context, ["period", "month"], "period");
+    const dateFrom = requireCompatQuery(context, ["dateFrom", "from"], "dateFrom");
+    const dateTo = requireCompatQuery(context, ["dateTo", "to"], "dateTo");
+    const base = `workspaceId=${encodeURIComponent(workspaceId)}`;
+    const range = `dateFrom=${encodeURIComponent(dateFrom)}&dateTo=${encodeURIComponent(dateTo)}`;
+    const scoped = `${base}&period=${encodeURIComponent(period)}&${range}`;
+    const subRequests: Readonly<Record<string, string>> = {
+      status: `/eof/v1/status?${base}`,
+      dashboard: `/eof/v1/dashboard?${scoped}`,
+      globalPnl: `/eof/v1/pl/global?${scoped}`,
+      divisionPnl: `/eof/v1/pl/division?${scoped}&limit=100`,
+      planComptable: `/eof/v1/plan-comptable?${base}&includeInactive=true`,
+      transactions: `/eof/v1/transactions?${scoped}&limit=100`,
+      pendingTransactions: `/eof/v1/transactions?${scoped}&status=pending&limit=100`,
+      reconciliations: `/eof/v1/reconciliations?${scoped}&status=unmatched&limit=100`,
+      cashflow: `/eof/v1/cashflow?${base}&from=${encodeURIComponent(dateFrom)}&to=${encodeURIComponent(dateTo)}`,
+      auditLog: `/eof/v1/audit-log?${base}&from=${encodeURIComponent(dateFrom)}&to=${encodeURIComponent(dateTo)}&limit=100`,
+      bankAccounts: `/eof/v1/bank/accounts?${base}&limit=100`
+    };
+    const headers: Readonly<Record<string, string>> = {
+      Authorization: context.req.header("Authorization") ?? ""
+    };
+    const entries = await Promise.all(
+      Object.entries(subRequests).map(async ([key, path]): Promise<readonly [string, unknown]> => {
+        const response = await app.request(path, { headers });
+        if (!response.ok) {
+          throw new ApiRouteError(500, "screen_subrequest_failed", "A screen bundle sub-request failed.", [
+            `key=${key}`,
+            `path=${path}`,
+            `status=${String(response.status)}`
+          ]);
+        }
+        return [key, await response.json()] as const;
+      })
+    );
+    return context.json(Object.fromEntries(entries));
   });
 
   app.get("/eof/v1/audit-log", (context) => {

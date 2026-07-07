@@ -61,6 +61,8 @@ import type {
   OfficeReconciliationCreateTransactionRequest,
   OfficeReconciliationCandidate,
   OfficeReconciliationsQuery,
+  OfficeScreenQuery,
+  OfficeScreenResponse,
   OfficeTransaction,
   OfficeTransactionsQuery,
   OfficeTransactionWriteRequest,
@@ -72,6 +74,7 @@ import type {
 
 export interface OfficeApiClient {
   readonly getStatus: (query: { readonly workspaceId: EntityId }) => Promise<{ readonly writesEnabled: boolean }>;
+  readonly getScreen: (query: OfficeScreenQuery) => Promise<OfficeScreenResponse>;
   readonly getDashboard: (query: OfficeDashboardQuery) => Promise<OfficeDashboardResponse>;
   readonly getGlobalPnl: (query: OfficeGlobalPnlQuery) => Promise<OfficeGlobalPnl>;
   readonly getDepartmentPnl: (departmentId: EntityId, query: OfficeDepartmentPnlQuery) => Promise<OfficeDepartmentPnl>;
@@ -213,6 +216,13 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
   return {
     getStatus: (query: { readonly workspaceId: EntityId }): Promise<{ readonly writesEnabled: boolean }> =>
       transport.get<{ readonly writesEnabled: boolean }>("status", { workspaceId: query.workspaceId }),
+    getScreen: (query: OfficeScreenQuery): Promise<OfficeScreenResponse> =>
+      transport.get<OfficeScreenResponse>("screen/office", {
+        workspaceId: query.workspaceId,
+        period: query.period,
+        dateFrom: query.dateFrom,
+        dateTo: query.dateTo
+      }),
     getDashboard: (query: OfficeDashboardQuery): Promise<OfficeDashboardResponse> =>
       transport.get<OfficeDashboardResponse>("dashboard", {
         workspaceId: query.workspaceId,

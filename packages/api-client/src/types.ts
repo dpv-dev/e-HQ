@@ -195,6 +195,30 @@ export interface OfficeWriteStatusResponse {
   readonly writesEnabled: boolean;
 }
 
+// One-round-trip bundle for the Office console's initial/period-scoped load; the server
+// fans out internally to the individual endpoints, so every field matches its standalone
+// endpoint's response shape exactly.
+export interface OfficeScreenQuery {
+  readonly workspaceId: EntityId;
+  readonly period: IsoMonthString;
+  readonly dateFrom: IsoDateString;
+  readonly dateTo: IsoDateString;
+}
+
+export interface OfficeScreenResponse {
+  readonly status: OfficeWriteStatusResponse;
+  readonly dashboard: OfficeDashboardResponse;
+  readonly globalPnl: OfficeGlobalPnl;
+  readonly divisionPnl: PageResult<OfficeDivisionPnl>;
+  readonly planComptable: readonly OfficePlanComptableNode[];
+  readonly transactions: PageResult<OfficeTransaction>;
+  readonly pendingTransactions: PageResult<OfficeTransaction>;
+  readonly reconciliations: PageResult<OfficeReconciliationCandidate>;
+  readonly cashflow: readonly CashflowBucket[];
+  readonly auditLog: PageResult<AuditLogEntry>;
+  readonly bankAccounts: PageResult<OfficeBankAccountSummary>;
+}
+
 export interface OfficePnlProjectionQuery extends PeriodQuery {
   readonly departmentId: EntityId | null;
 }
