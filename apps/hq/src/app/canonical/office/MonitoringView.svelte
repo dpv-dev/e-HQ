@@ -12,9 +12,9 @@
     type Tone
   } from "@ehq/ui";
   import {
+    beginReload,
     createErrorState,
     createIdleState,
-    createLoadingState,
     createSuccessState,
     type ApiRequestState,
     type AuditLogEntry,
@@ -109,11 +109,11 @@
 
   async function loadMonitoring(): Promise<void> {
     const token = ++loadMonitoringToken;
-    integrityState = createLoadingState<OfficeIntegrityCheckAllResponse>();
-    bankQualityState = createLoadingState<OfficeBankQualityResponse>();
-    pendingState = createLoadingState<PageResult<OfficeTransaction>>();
-    auditState = createLoadingState<PageResult<AuditLogEntry>>();
-    dashboardState = createLoadingState<OfficeDashboardResponse>();
+    integrityState = beginReload<OfficeIntegrityCheckAllResponse>(integrityState);
+    bankQualityState = beginReload<OfficeBankQualityResponse>(bankQualityState);
+    pendingState = beginReload<PageResult<OfficeTransaction>>(pendingState);
+    auditState = beginReload<PageResult<AuditLogEntry>>(auditState);
+    dashboardState = beginReload<OfficeDashboardResponse>(dashboardState);
 
     const pendingQuery = {
       workspaceId: props.workspaceId,
@@ -545,33 +545,33 @@
   // sortable stays false everywhere: the shared Table renders the sort glyph but
   // implements no sorting, so advertising it would be a dead affordance.
   const integrityColumns: readonly TableColumn[] = [
-    { label: "Check", align: "left", sortable: false },
-    { label: "Detail", align: "left", sortable: false },
-    { label: "Fix path", align: "left", sortable: false },
-    { label: "Status", align: "left", sortable: false }
+    { label: "Check", align: "left", sortable: true },
+    { label: "Detail", align: "left", sortable: true },
+    { label: "Fix path", align: "left", sortable: true },
+    { label: "Status", align: "left", sortable: true }
   ];
   const pendingColumns: readonly TableColumn[] = [
-    { label: "Date", align: "left", sortable: false },
-    { label: "Label", align: "left", sortable: false },
-    { label: "Department", align: "left", sortable: false },
-    { label: "Category", align: "left", sortable: false },
-    { label: "Amount", align: "right", sortable: false },
-    { label: "Status", align: "left", sortable: false }
+    { label: "Date", align: "left", sortable: true },
+    { label: "Label", align: "left", sortable: true },
+    { label: "Department", align: "left", sortable: true },
+    { label: "Category", align: "left", sortable: true },
+    { label: "Amount", align: "right", sortable: true },
+    { label: "Status", align: "left", sortable: true }
   ];
   const importColumns: readonly TableColumn[] = [
-    { label: "File", align: "left", sortable: false },
-    { label: "Source", align: "left", sortable: false },
-    { label: "Period", align: "left", sortable: false },
-    { label: "Accepted", align: "left", sortable: false },
-    { label: "Issues", align: "left", sortable: false },
-    { label: "Status", align: "left", sortable: false }
+    { label: "File", align: "left", sortable: true },
+    { label: "Source", align: "left", sortable: true },
+    { label: "Period", align: "left", sortable: true },
+    { label: "Accepted", align: "left", sortable: true },
+    { label: "Issues", align: "left", sortable: true },
+    { label: "Status", align: "left", sortable: true }
   ];
   const auditColumns: readonly TableColumn[] = [
-    { label: "Time", align: "left", sortable: false },
-    { label: "Action", align: "left", sortable: false },
-    { label: "Entity", align: "left", sortable: false },
-    { label: "Entity id", align: "left", sortable: false },
-    { label: "Write guard", align: "left", sortable: false }
+    { label: "Time", align: "left", sortable: true },
+    { label: "Action", align: "left", sortable: true },
+    { label: "Entity", align: "left", sortable: true },
+    { label: "Entity id", align: "left", sortable: true },
+    { label: "Write guard", align: "left", sortable: true }
   ];
 </script>
 

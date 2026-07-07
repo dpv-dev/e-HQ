@@ -37,6 +37,67 @@
   function rowKey(row: TableRow, index: number): string {
     return `${row.id}:${String(index)}`;
   }
+
+  // Client-side column sorting over the loaded rows. Cell values are display strings,
+  // so the comparator is type-aware: dd/mm/yyyy dates compare chronologically, money and
+  // plain numbers compare numerically, everything else compares as locale text.
+  let sortColumnIndex = $state<number | null>(null);
+  let sortDirection = $state<"asc" | "desc">("asc");
+
+  const sortedRows = $derived(sortRows(props.rows, sortColumnIndex, sortDirection));
+
+  function toggleSort(columnIndex: number): void {
+    if (props.columns[columnIndex]?.sortable !== true) {
+      return;
+    }
+    if (sortColumnIndex === columnIndex) {
+      sortDirection = sortDirection === "asc" ? "desc" : "asc";
+      return;
+    }
+    sortColumnIndex = columnIndex;
+    sortDirection = "asc";
+  }
+
+  function sortRows(rows: readonly TableRow[], columnIndex: number | null, direction: "asc" | "desc"): readonly TableRow[] {
+    if (columnIndex === null) {
+      return rows;
+    }
+    const sorted = [...rows].sort((left: TableRow, right: TableRow): number =>
+      compareCellValues(cellTextAt(left, columnIndex), cellTextAt(right, columnIndex))
+    );
+    return direction === "asc" ? sorted : sorted.reverse();
+  }
+
+  function cellTextAt(row: TableRow, columnIndex: number): string {
+    return row.cells[columnIndex]?.value ?? "";
+  }
+
+  const DAY_FIRST_DATE = /^(\d{2})\/(\d{2})\/(\d{4})$/u;
+
+  function compareCellValues(left: string, right: string): number {
+    const leftDate = DAY_FIRST_DATE.exec(left);
+    const rightDate = DAY_FIRST_DATE.exec(right);
+    if (leftDate !== null && rightDate !== null) {
+      const leftKey = `${leftDate[3] ?? ""}${leftDate[2] ?? ""}${leftDate[1] ?? ""}`;
+      const rightKey = `${rightDate[3] ?? ""}${rightDate[2] ?? ""}${rightDate[1] ?? ""}`;
+      return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
+    }
+    const leftNumber = numericCellValue(left);
+    const rightNumber = numericCellValue(right);
+    if (leftNumber !== null && rightNumber !== null) {
+      return leftNumber - rightNumber;
+    }
+    return left.localeCompare(right, undefined, { sensitivity: "base", numeric: true });
+  }
+
+  function numericCellValue(value: string): number | null {
+    const cleaned = value.replace(/[^0-9.eE+-]/gu, "");
+    if (cleaned.length === 0 || !/\d/u.test(cleaned)) {
+      return null;
+    }
+    const parsed = Number.parseFloat(cleaned);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
 </script>
 
 <section class={`ehq-table-shell ehq-edge-surface ${props.state}`} aria-label={props.title}>
@@ -84,9 +145,16 @@
       <table>
         <thead>
           <tr>
-            {#each props.columns as column (column.label)}
-              <th class:right={column.align === "right"}>
-                {column.label}{column.sortable ? " ↑" : ""}
+            {#each props.columns as column, columnIndex (column.label)}
+              <th class:right={column.align === "right"} aria-sort={sortColumnIndex === columnIndex ? (sortDirection === "asc" ? "ascending" : "descending") : undefined}>
+                {#if column.sortable}
+                  <button type="button" class="sort-header" onclick={() => toggleSort(columnIndex)}>
+                    {column.label}
+                    <span class="sort-glyph" class:active={sortColumnIndex === columnIndex} aria-hidden="true">{sortColumnIndex === columnIndex ? (sortDirection === "asc" ? "↑" : "↓") : "↕"}</span>
+                  </button>
+                {:else}
+                  {column.label}
+                {/if}
               </th>
             {/each}
             {#if hasRowActions}
@@ -95,7 +163,7 @@
           </tr>
         </thead>
         <tbody>
-          {#each props.rows as row, index (rowKey(row, index))}
+          {#each sortedRows as row, index (rowKey(row, index))}
             <tr>
               {#each row.cells as cell}
                 <td class:right={cell.kind === "money"}>
@@ -129,32 +197,34 @@
     {#if showPagination && pagination !== null}
       <footer class="table-pagination" aria-label="Table pagination">
         <span>{paginationDetail}</span>
-        <div class="pagination-actions">
-          <Button
-            label={pagination.loading ? "Loading..." : "Load more"}
-            variant="secondary"
-            size="small"
-            type="button"
-            disabled={!pagination.hasMore}
-            loading={pagination.loading}
-            locked={false}
-            focus={false}
-            ariaLabel="Load more rows"
-            onclick={pagination.onLoadMore}
-          />
-          <Button
-            label={pagination.loading ? "Loading..." : "Load all"}
-            variant="secondary"
-            size="small"
-            type="button"
-            disabled={!pagination.hasMore}
-            loading={pagination.loading}
-            locked={false}
-            focus={false}
-            ariaLabel="Load all rows"
-            onclick={pagination.onLoadAll}
-          />
-        </div>
+        {#if pagination.hasMore}
+          <div class="pagination-actions">
+            <Button
+              label={pagination.loading ? "Loading..." : "Load more"}
+              variant="secondary"
+              size="small"
+              type="button"
+              disabled={false}
+              loading={pagination.loading}
+              locked={false}
+              focus={false}
+              ariaLabel="Load more rows"
+              onclick={pagination.onLoadMore}
+            />
+            <Button
+              label={pagination.loading ? "Loading..." : "Load all"}
+              variant="secondary"
+              size="small"
+              type="button"
+              disabled={false}
+              loading={pagination.loading}
+              locked={false}
+              focus={false}
+              ariaLabel="Load all rows"
+              onclick={pagination.onLoadAll}
+            />
+          </div>
+        {/if}
         {#if pagination.error !== null}
           <small>{pagination.error}</small>
         {/if}
@@ -254,6 +324,33 @@
     font-weight: var(--ehq-type-label-weight);
     letter-spacing: 0.08em;
     text-transform: uppercase;
+  }
+
+  .sort-header {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ehq-space-1);
+    font: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+  }
+
+  .sort-header:hover {
+    color: var(--ehq-text);
+  }
+
+  .sort-glyph {
+    opacity: 0.5;
+  }
+
+  .sort-glyph.active {
+    color: var(--ehq-yellow);
+    opacity: 1;
   }
 
   td {

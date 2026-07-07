@@ -15,9 +15,9 @@
     type Tone
   } from "@ehq/ui";
   import {
+    beginReload,
     createErrorState,
     createIdleState,
-    createLoadingState,
     createSuccessState,
     type ApiMutationReceipt,
     type ApiRequestState,
@@ -168,7 +168,7 @@
 
   async function loadPartners(): Promise<void> {
     const token = ++loadPartnersToken;
-    partnersState = createLoadingState<PageResult<OfficePartnerListItem>>();
+    partnersState = beginReload<PageResult<OfficePartnerListItem>>(partnersState);
 
     try {
       const page = await props.client.listPartners({
@@ -200,7 +200,7 @@
     payeeLinkStatus = "idle";
     formMessage = null;
     payeeLinkMessage = null;
-    detailState = createLoadingState<OfficePartnerDetail>();
+    detailState = beginReload<OfficePartnerDetail>(detailState);
     actionMessage = "Loading full partner relationship.";
 
     try {

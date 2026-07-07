@@ -2,9 +2,9 @@
   import { onMount } from "svelte";
   import type { AuthSession } from "@ehq/auth";
   import {
+    beginReload,
     createErrorState,
     createIdleState,
-    createLoadingState,
     createSuccessState,
     type ApiMutationReceipt,
     type ApiRequestState,
@@ -44,6 +44,7 @@
   import { formatMoneyValue, moneyToneForValue } from "../../money-format.js";
   import { createPeriodOptions, getLatestDataPeriod, periodLabel, rangeForScope, rangeLabel, todayIso, type DateRange, type PeriodScope } from "../../period-controls.js";
   import { normalizeRoutePath } from "../../route-utils.js";
+  import { sortOptionsAlphabetically } from "../../select-options.js";
   import { appendPageResult, createTablePagination, loadPageResult, readPageItems, TABLE_PAGE_SIZE, type PageLoadMode } from "../../table-pagination.js";
 
   type DistributionPageId =
@@ -225,7 +226,7 @@
     { label: "Action", align: "left", sortable: true },
     { label: "Context", align: "left", sortable: true },
     { label: "Volume", align: "right", sortable: true },
-    { label: "Fix path", align: "left", sortable: false }
+    { label: "Fix path", align: "left", sortable: true }
   ];
   const importColumns: readonly TableColumn[] = [
     { label: "File", align: "left", sortable: true },
@@ -234,9 +235,9 @@
     { label: "Rows", align: "right", sortable: true },
     { label: "Payable", align: "right", sortable: true },
     { label: "Unmatched", align: "right", sortable: true },
-    { label: "Join keys", align: "left", sortable: false },
+    { label: "Join keys", align: "left", sortable: true },
     { label: "Status", align: "left", sortable: true },
-    { label: "Exact action", align: "left", sortable: false }
+    { label: "Exact action", align: "left", sortable: true }
   ];
   const mappingColumns: readonly TableColumn[] = [
     { label: "Source title", align: "left", sortable: true },
@@ -244,7 +245,7 @@
     { label: "Store", align: "left", sortable: true },
     { label: "Suggested match", align: "left", sortable: true },
     { label: "Confidence", align: "left", sortable: true },
-    { label: "Fix path", align: "left", sortable: false }
+    { label: "Fix path", align: "left", sortable: true }
   ];
   const catalogColumns: readonly TableColumn[] = [
     { label: "Title", align: "left", sortable: true },
@@ -271,7 +272,7 @@
   const allocationColumns: readonly TableColumn[] = [
     { label: "Run", align: "left", sortable: true },
     { label: "Period", align: "left", sortable: true },
-    { label: "Lock", align: "left", sortable: false },
+    { label: "Lock", align: "left", sortable: true },
     { label: "Input", align: "right", sortable: true },
     { label: "Allocated", align: "right", sortable: true },
     { label: "Status", align: "left", sortable: true }
@@ -334,8 +335,8 @@
     { label: "Payee", align: "left", sortable: true },
     { label: "Currency", align: "left", sortable: true },
     { label: "Rows", align: "right", sortable: true },
-    { label: "First row", align: "left", sortable: false },
-    { label: "Last row", align: "left", sortable: false },
+    { label: "First row", align: "left", sortable: true },
+    { label: "Last row", align: "left", sortable: true },
     { label: "Latest closing", align: "right", sortable: true }
   ];
   const aliasColumns: readonly TableColumn[] = [
@@ -347,8 +348,8 @@
     { label: "Label", align: "left", sortable: true },
     { label: "Kind", align: "left", sortable: true },
     { label: "Count", align: "right", sortable: true },
-    { label: "Samples", align: "left", sortable: false },
-    { label: "Merge", align: "left", sortable: false }
+    { label: "Samples", align: "left", sortable: true },
+    { label: "Merge", align: "left", sortable: true }
   ];
   const auditColumns: readonly TableColumn[] = [
     { label: "When", align: "left", sortable: true },
@@ -592,29 +593,29 @@
     contracts.find((contract: DistributionContract): boolean => contract.id === expenseContractIdInput) ?? null
   );
   const expenseAmountMicro = $derived(parseExpenseAmountMicro(expenseAmountInput));
-  const expenseContractSelectOptions = $derived<readonly SelectOption[]>([
+  const expenseContractSelectOptions = $derived<readonly SelectOption[]>(sortOptionsAlphabetically([
     { label: "Select a contract", value: "" },
     ...contracts.map((contract: DistributionContract): SelectOption => ({ label: `${contract.title} · ${contract.currency}`, value: contract.id }))
-  ]);
-  const payeeSelectOptions = $derived<readonly SelectOption[]>([
+  ], 1));
+  const payeeSelectOptions = $derived<readonly SelectOption[]>(sortOptionsAlphabetically([
     { label: "Select a payee", value: "" },
     ...payees.map((payee: PayeeSummary): SelectOption => ({ label: `${payee.displayName} · ${payee.defaultCurrency}`, value: payee.id }))
-  ]);
-  const trackReleaseSelectOptions = $derived<readonly SelectOption[]>([
+  ], 1));
+  const trackReleaseSelectOptions = $derived<readonly SelectOption[]>(sortOptionsAlphabetically([
     { label: "No release", value: "" },
     ...releases.map((release: ReleaseSummary): SelectOption => ({ label: `${release.title} · ${release.artistName}`, value: release.id }))
-  ]);
-  const suspenseTrackSelectOptions = $derived<readonly SelectOption[]>([
+  ], 1));
+  const suspenseTrackSelectOptions = $derived<readonly SelectOption[]>(sortOptionsAlphabetically([
     { label: "Select a track", value: "" },
     ...(suspenseTrackOptions ?? []).map((track: TrackSummary): SelectOption => ({ label: `${track.title} · ${track.artistName}`, value: track.id }))
-  ]);
-  const openStatementSelectOptions = $derived<readonly SelectOption[]>([
+  ], 1));
+  const openStatementSelectOptions = $derived<readonly SelectOption[]>(sortOptionsAlphabetically([
     { label: "Select an open statement", value: "" },
     ...openStatements.map((statement: StatementSummary): SelectOption => ({
       label: `${statement.payeeName} · ${statement.period} · ${formatMoney(statement.netPayableMicro, statement.currency)}`,
       value: statement.id
     }))
-  ]);
+  ], 1));
   // The dashboard action list derives from suspense, statements, and payments;
   // its table state must reflect those source requests instead of a frozen default.
   const dashboardActionListStatus = $derived(
@@ -1140,7 +1141,7 @@
   }
 
   async function loadDashboard(): Promise<void> {
-    dashboardState = createLoadingState<DistributionDashboardResponse>();
+    dashboardState = beginReload<DistributionDashboardResponse>(dashboardState);
 
     try {
       dashboardState = createSuccessState<DistributionDashboardResponse>(
@@ -1157,7 +1158,7 @@
   }
 
   async function loadImportBatches(): Promise<void> {
-    importBatchesState = createLoadingState<PageResult<DistributionImportBatch>>();
+    importBatchesState = beginReload<PageResult<DistributionImportBatch>>(importBatchesState);
 
     try {
       importBatchesState = createSuccessState<PageResult<DistributionImportBatch>>(
@@ -1176,7 +1177,7 @@
   }
 
   async function loadMappingRows(): Promise<void> {
-    mappingState = createLoadingState<PageResult<DistributionMappingRow>>();
+    mappingState = beginReload<PageResult<DistributionMappingRow>>(mappingState);
 
     try {
       mappingState = createSuccessState<PageResult<DistributionMappingRow>>(
@@ -1195,7 +1196,7 @@
   }
 
   async function loadPayees(): Promise<void> {
-    payeesState = createLoadingState<PageResult<PayeeSummary>>();
+    payeesState = beginReload<PageResult<PayeeSummary>>(payeesState);
 
     try {
       payeesState = createSuccessState<PageResult<PayeeSummary>>(
@@ -1208,8 +1209,8 @@
   }
 
   async function loadCatalog(): Promise<void> {
-    releasesState = createLoadingState<PageResult<ReleaseSummary>>();
-    tracksState = createLoadingState<PageResult<TrackSummary>>();
+    releasesState = beginReload<PageResult<ReleaseSummary>>(releasesState);
+    tracksState = beginReload<PageResult<TrackSummary>>(tracksState);
 
     try {
       const [releasePage, trackPage] = await Promise.all([
@@ -1226,8 +1227,8 @@
   }
 
   async function loadContracts(): Promise<void> {
-    contractsState = createLoadingState<PageResult<DistributionContract>>();
-    expensesState = createLoadingState<PageResult<DistributionContractExpense>>();
+    contractsState = beginReload<PageResult<DistributionContract>>(contractsState);
+    expensesState = beginReload<PageResult<DistributionContractExpense>>(expensesState);
 
     try {
       const contractPage = await client.distribution.listContracts({
@@ -1256,7 +1257,7 @@
   }
 
   async function loadAllocationRuns(): Promise<void> {
-    allocationsState = createLoadingState<PageResult<AllocationRunSummary>>();
+    allocationsState = beginReload<PageResult<AllocationRunSummary>>(allocationsState);
 
     try {
       allocationsState = createSuccessState<PageResult<AllocationRunSummary>>(
@@ -1275,7 +1276,7 @@
   }
 
   async function loadSuspense(): Promise<void> {
-    suspenseState = createLoadingState<PageResult<SuspenseItem>>();
+    suspenseState = beginReload<PageResult<SuspenseItem>>(suspenseState);
 
     try {
       suspenseState = createSuccessState<PageResult<SuspenseItem>>(
@@ -1296,7 +1297,7 @@
   }
 
   async function loadStatements(): Promise<void> {
-    statementsState = createLoadingState<PageResult<StatementSummary>>();
+    statementsState = beginReload<PageResult<StatementSummary>>(statementsState);
 
     try {
       statementsState = createSuccessState<PageResult<StatementSummary>>(
@@ -1316,7 +1317,7 @@
   }
 
   async function loadPayments(): Promise<void> {
-    paymentsState = createLoadingState<PageResult<PaymentSummary>>();
+    paymentsState = beginReload<PageResult<PaymentSummary>>(paymentsState);
 
     try {
       paymentsState = createSuccessState<PageResult<PaymentSummary>>(
@@ -1338,7 +1339,7 @@
   }
 
   async function loadRevenue(): Promise<void> {
-    revenueState = createLoadingState<PageResult<DistributionRevenueRow>>();
+    revenueState = beginReload<PageResult<DistributionRevenueRow>>(revenueState);
 
     try {
       revenueState = createSuccessState<PageResult<DistributionRevenueRow>>(
@@ -1362,7 +1363,7 @@
   }
 
   async function loadReconciliation(): Promise<void> {
-    reconciliationState = createLoadingState<DistributionReconciliationResponse>();
+    reconciliationState = beginReload<DistributionReconciliationResponse>(reconciliationState);
 
     try {
       reconciliationState = createSuccessState<DistributionReconciliationResponse>(
@@ -1376,7 +1377,7 @@
   }
 
   async function loadAliases(): Promise<void> {
-    aliasesState = createLoadingState<PageResult<DistributionAlias>>();
+    aliasesState = beginReload<PageResult<DistributionAlias>>(aliasesState);
 
     try {
       aliasesState = createSuccessState<PageResult<DistributionAlias>>(
@@ -1393,7 +1394,7 @@
   }
 
   async function loadDuplicates(): Promise<void> {
-    duplicatesState = createLoadingState<PageResult<DistributionDuplicate>>();
+    duplicatesState = beginReload<PageResult<DistributionDuplicate>>(duplicatesState);
 
     try {
       duplicatesState = createSuccessState<PageResult<DistributionDuplicate>>(
@@ -1410,7 +1411,7 @@
   }
 
   async function loadAuditLog(): Promise<void> {
-    auditLogState = createLoadingState<PageResult<AuditLogEntry>>();
+    auditLogState = beginReload<PageResult<AuditLogEntry>>(auditLogState);
 
     try {
       auditLogState = createSuccessState<PageResult<AuditLogEntry>>(
@@ -1431,7 +1432,7 @@
   }
 
   async function loadSettings(): Promise<void> {
-    settingsState = createLoadingState<DistributionSettingsResponse>();
+    settingsState = beginReload<DistributionSettingsResponse>(settingsState);
 
     try {
       settingsState = createSuccessState<DistributionSettingsResponse>(

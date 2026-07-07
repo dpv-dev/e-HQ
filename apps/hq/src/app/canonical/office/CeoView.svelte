@@ -11,9 +11,9 @@
     type Tone
   } from "@ehq/ui";
   import {
+    beginReload,
     createErrorState,
     createIdleState,
-    createLoadingState,
     createSuccessState,
     type ApiRequestState,
     type OfficeApiClient,
@@ -74,9 +74,9 @@
 
   async function loadCeo(): Promise<void> {
     const token = ++loadCeoToken;
-    dashboardState = createLoadingState<OfficeDashboardResponse>();
-    globalPnlState = createLoadingState<OfficeGlobalPnl>();
-    divisionState = createLoadingState<PageResult<OfficeDivisionPnl>>();
+    dashboardState = beginReload<OfficeDashboardResponse>(dashboardState);
+    globalPnlState = beginReload<OfficeGlobalPnl>(globalPnlState);
+    divisionState = beginReload<PageResult<OfficeDivisionPnl>>(divisionState);
 
     try {
       const [dashboard, globalPnl, divisions] = await Promise.all([
@@ -292,16 +292,16 @@
   // sortable stays false everywhere: the shared Table renders the sort glyph but
   // implements no sorting, so advertising it would be a dead affordance.
   const categoryColumns: readonly TableColumn[] = [
-    { label: "Category", align: "left", sortable: false },
-    { label: "Income", align: "right", sortable: false },
-    { label: "Expenses", align: "right", sortable: false },
-    { label: "Net", align: "right", sortable: false }
+    { label: "Category", align: "left", sortable: true },
+    { label: "Income", align: "right", sortable: true },
+    { label: "Expenses", align: "right", sortable: true },
+    { label: "Net", align: "right", sortable: true }
   ];
   const divisionColumns: readonly TableColumn[] = [
-    { label: "Division", align: "left", sortable: false },
-    { label: "Income", align: "right", sortable: false },
-    { label: "Expenses", align: "right", sortable: false },
-    { label: "Net", align: "right", sortable: false }
+    { label: "Division", align: "left", sortable: true },
+    { label: "Income", align: "right", sortable: true },
+    { label: "Expenses", align: "right", sortable: true },
+    { label: "Net", align: "right", sortable: true }
   ];
 </script>
 

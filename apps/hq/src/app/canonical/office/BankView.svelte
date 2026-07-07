@@ -13,9 +13,9 @@
     type Tone
   } from "@ehq/ui";
   import {
+    beginReload,
     createErrorState,
     createIdleState,
-    createLoadingState,
     createSuccessState,
     type ApiRequestState,
     type CurrencyCode,
@@ -28,6 +28,7 @@
     type PageResult
   } from "@ehq/api-client";
   import { formatDateOnly } from "../../date-format.js";
+  import { sortOptionsAlphabetically } from "../../select-options.js";
   import { formatMoneyValue, formatSignedMoneyValue, moneyToneForValue } from "../../money-format.js";
   import { appendPageResult, createTablePagination, readPageItems, TABLE_PAGE_SIZE } from "../../table-pagination.js";
 
@@ -371,10 +372,13 @@
   }
 
   const moveAccountOptions = $derived<readonly SelectOption[]>(
-    accountRows.map((account: OfficeBankAccountSummary): SelectOption => ({
-      label: `${account.bankName} · ${account.accountLabel} (${account.currency})`,
-      value: account.id
-    }))
+    sortOptionsAlphabetically(
+      accountRows.map((account: OfficeBankAccountSummary): SelectOption => ({
+        label: `${account.bankName} · ${account.accountLabel} (${account.currency})`,
+        value: account.id
+      })),
+      0
+    )
   );
 
   const rawRowActions = $derived<readonly TableRowAction[]>([
@@ -411,10 +415,10 @@
 
   async function loadBank(): Promise<void> {
     const token = ++loadBankToken;
-    accountsState = createLoadingState<PageResult<OfficeBankAccountSummary>>();
-    rawState = createLoadingState<PageResult<OfficeBankRawLine>>();
-    qualityState = createLoadingState<OfficeBankQualityResponse>();
-    reconciliationState = createLoadingState<PageResult<OfficeReconciliationCandidate>>();
+    accountsState = beginReload<PageResult<OfficeBankAccountSummary>>(accountsState);
+    rawState = beginReload<PageResult<OfficeBankRawLine>>(rawState);
+    qualityState = beginReload<OfficeBankQualityResponse>(qualityState);
+    reconciliationState = beginReload<PageResult<OfficeReconciliationCandidate>>(reconciliationState);
 
     try {
       const [accounts, raw, quality, reconciliations] = await Promise.all([
@@ -874,7 +878,7 @@
   const rawColumns: readonly TableColumn[] = [
     { label: "Date", align: "left", sortable: true },
     { label: "Description", align: "left", sortable: true },
-    { label: "Reference", align: "left", sortable: false },
+    { label: "Reference", align: "left", sortable: true },
     { label: "Direction", align: "left", sortable: true },
     { label: "Amount", align: "right", sortable: true },
     { label: "Amount (MUR)", align: "right", sortable: true },

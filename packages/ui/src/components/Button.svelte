@@ -101,6 +101,12 @@
     cursor: not-allowed;
   }
 
+  .ehq-button.primary:disabled {
+    background: var(--ehq-yellow-muted);
+    border-color: var(--ehq-yellow-border);
+    color: var(--ehq-text-disabled);
+  }
+
   .ehq-button.locked {
     border-color: var(--ehq-border);
     color: var(--ehq-text-soft);

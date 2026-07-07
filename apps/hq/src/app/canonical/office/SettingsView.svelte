@@ -8,9 +8,9 @@
     type TableRow
   } from "@ehq/ui";
   import {
+    beginReload,
     createErrorState,
     createIdleState,
-    createLoadingState,
     createSuccessState,
     type ApiRequestState,
     type OfficeApiClient,
@@ -46,7 +46,7 @@
   });
 
   async function loadSettings(): Promise<void> {
-    accountsState = createLoadingState<PageResult<OfficeBankAccountSummary>>();
+    accountsState = beginReload<PageResult<OfficeBankAccountSummary>>(accountsState);
 
     try {
       const accounts = await props.client.listBankAccounts({ workspaceId: props.workspaceId, cursor: null, limit: TABLE_PAGE_SIZE });
@@ -206,10 +206,10 @@
   // sortable stays false everywhere: the shared Table renders the sort glyph but
   // implements no sorting, so advertising it would be a dead affordance.
   const currencyColumns: readonly TableColumn[] = [
-    { label: "Currency", align: "left", sortable: false },
-    { label: "Role", align: "left", sortable: false },
-    { label: "Converted balance (MUR)", align: "right", sortable: false },
-    { label: "As of", align: "left", sortable: false }
+    { label: "Currency", align: "left", sortable: true },
+    { label: "Role", align: "left", sortable: true },
+    { label: "Converted balance (MUR)", align: "right", sortable: true },
+    { label: "As of", align: "left", sortable: true }
   ];
 </script>
 

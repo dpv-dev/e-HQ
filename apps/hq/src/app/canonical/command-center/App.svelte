@@ -155,7 +155,7 @@
     { label: "Context", align: "left", sortable: true },
     { label: "Volume", align: "right", sortable: true },
     { label: "Status", align: "left", sortable: true },
-    { label: "Next", align: "left", sortable: false }
+    { label: "Next", align: "left", sortable: true }
   ];
   const permissionColumns: readonly TableColumn[] = [
     { label: "User", align: "left", sortable: true },
@@ -164,20 +164,20 @@
     { label: "Office", align: "left", sortable: true },
     { label: "Distribution", align: "left", sortable: true },
     { label: "Status", align: "left", sortable: true },
-    { label: "Review", align: "left", sortable: false }
+    { label: "Review", align: "left", sortable: true }
   ];
   const integrationColumns: readonly TableColumn[] = [
     { label: "Connector", align: "left", sortable: true },
     { label: "Type", align: "left", sortable: true },
     { label: "Scope", align: "left", sortable: true },
     { label: "Status", align: "left", sortable: true },
-    { label: "Action", align: "left", sortable: false }
+    { label: "Action", align: "left", sortable: true }
   ];
   const settingColumns: readonly TableColumn[] = [
     { label: "Setting", align: "left", sortable: true },
     { label: "Value", align: "left", sortable: true },
     { label: "Status", align: "left", sortable: true },
-    { label: "Review", align: "left", sortable: false }
+    { label: "Review", align: "left", sortable: true }
   ];
   const roleOptions: readonly SelectOption[] = [
     { label: "Administrator", value: "administrator" },

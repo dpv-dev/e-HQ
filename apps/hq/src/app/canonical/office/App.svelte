@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import type { AuthSession } from "@ehq/auth";
   import {
     BarsChart,
@@ -24,6 +24,7 @@
     type WorkspaceNavItem
   } from "@ehq/ui";
   import {
+    beginReload,
     createErrorState,
     createIdleState,
     createLoadingState,
@@ -60,6 +61,7 @@
   import { apiMoneyToMicroUnits, formatMoneyValue, formatSignedMoneyValue, moneyToneForValue } from "../../money-format.js";
   import { createPeriodOptions, getLatestDataPeriod, periodLabel, rangeForScope, rangeLabel, todayIso, type DateRange, type PeriodScope } from "../../period-controls.js";
   import { normalizeRoutePath } from "../../route-utils.js";
+  import { sortOptionsAlphabetically } from "../../select-options.js";
   import { createTablePagination, loadPageResult, readPageItems, TABLE_PAGE_SIZE, type PageLoadMode } from "../../table-pagination.js";
   import BankView from "./BankView.svelte";
   import CeoView from "./CeoView.svelte";
@@ -473,9 +475,12 @@
   const parentOptions = $derived(createParentOptions(planNodes));
   const projectOptions = $derived(createProjectOptions(transactionRows));
   const editCategoryOptions = $derived(
-    planNodes
-      .filter((node: OfficePlanComptableNode): boolean => node.kind === "category")
-      .map((node: OfficePlanComptableNode): SelectOption => ({ label: node.label, value: node.id }))
+    sortOptionsAlphabetically(
+      planNodes
+        .filter((node: OfficePlanComptableNode): boolean => node.kind === "category")
+        .map((node: OfficePlanComptableNode): SelectOption => ({ label: node.label, value: node.id })),
+      0
+    )
   );
   const editProjectOptions = $derived(
     createProjectOptions(transactionRows).filter((option: SelectOption): boolean => option.value !== allValue)
@@ -509,22 +514,24 @@
   const createAccountSelectOptions = $derived<readonly SelectOption[]>(
     importAccounts.length === 0
       ? [{ label: "No bank account loaded", value: "" }]
-      : importAccounts.map(bankAccountSelectOption)
+      : sortOptionsAlphabetically(importAccounts.map(bankAccountSelectOption), 0)
   );
   const importAccountSelectOptions = $derived<readonly SelectOption[]>(
     importAccounts.length === 0
       ? [{ label: "No account — create one in the Bank tab", value: "" }]
-      : [{ label: "Choose an account…", value: "" }, ...importAccounts.map(bankAccountSelectOption)]
+      : sortOptionsAlphabetically([{ label: "Choose an account…", value: "" }, ...importAccounts.map(bankAccountSelectOption)], 1)
   );
   // Account filter options come from the workspace's real bank accounts (loaded once at
   // mount via loadImportAccounts) so filter values always match server-side account ids.
-  const accountOptions = $derived<readonly SelectOption[]>([
-    { label: "All accounts", value: allValue },
-    ...importAccounts.map((account: OfficeBankAccountSummary): SelectOption => ({
-      label: `${account.bankName} · ${account.accountLabel} (${account.currency})`,
-      value: account.id
-    }))
-  ]);
+  const accountOptions = $derived<readonly SelectOption[]>(
+    sortOptionsAlphabetically([
+      { label: "All accounts", value: allValue },
+      ...importAccounts.map((account: OfficeBankAccountSummary): SelectOption => ({
+        label: `${account.bankName} · ${account.accountLabel} (${account.currency})`,
+        value: account.id
+      }))
+    ], 1)
+  );
   const canSubmitTransactionCreate = $derived(
     createOccurredOn.trim().length > 0 &&
     createDescription.trim().length > 0 &&
@@ -549,10 +556,13 @@
     { label: "Reject", onAction: rejectReconciliationById, danger: true }
   ]);
   const reconcileTransactionOptions = $derived(
-    transactionRows.map((transaction: OfficeTransaction): SelectOption => ({
-      value: transaction.id,
-      label: `${transaction.description} · ${formatSignedMicro(transaction.amountMicro)}`
-    }))
+    sortOptionsAlphabetically(
+      transactionRows.map((transaction: OfficeTransaction): SelectOption => ({
+        value: transaction.id,
+        label: `${transaction.description} · ${formatSignedMicro(transaction.amountMicro)}`
+      })),
+      0
+    )
   );
   const reconcileMatchSelectOptions = $derived<readonly SelectOption[]>([
     { label: "Choose an entry…", value: "" },
@@ -886,7 +896,7 @@
   }
 
   async function loadDashboard(): Promise<void> {
-    dashboardState = createLoadingState<OfficeDashboardResponse>();
+    dashboardState = beginReload<OfficeDashboardResponse>(dashboardState);
 
     try {
       const dashboard = await client.office.getDashboard({
@@ -902,8 +912,8 @@
   }
 
   async function loadPnlProjection(): Promise<void> {
-    pnlState = createLoadingState<OfficeGlobalPnl | OfficeDepartmentPnl>();
-    divisionPnlState = createLoadingState<PageResult<OfficeDivisionPnl>>();
+    pnlState = beginReload<OfficeGlobalPnl | OfficeDepartmentPnl>(pnlState);
+    divisionPnlState = beginReload<PageResult<OfficeDivisionPnl>>(divisionPnlState);
 
     try {
       const departmentId = toNullableFilter(departmentFilter);
@@ -940,7 +950,7 @@
   }
 
   async function loadPlanComptable(): Promise<void> {
-    planState = createLoadingState<readonly OfficePlanComptableNode[]>();
+    planState = beginReload<readonly OfficePlanComptableNode[]>(planState);
 
     try {
       const nodes = await client.office.getPlanComptable({
@@ -954,7 +964,7 @@
   }
 
   async function loadTransactions(): Promise<void> {
-    transactionsState = createLoadingState<PageResult<OfficeTransaction>>();
+    transactionsState = beginReload<PageResult<OfficeTransaction>>(transactionsState);
 
     try {
       const page = await client.office.listTransactions({
@@ -1010,6 +1020,17 @@
     return (sign * (whole * 1_000_000n + BigInt(fraction))).toString();
   }
 
+  // The edit/create panels render ABOVE the ledger table in DOM order, so when the user
+  // clicks a row action after scrolling down, the panel opens outside the viewport and the
+  // click looks like a no-op. Scroll the panel into view once Svelte has rendered it.
+  let transactionPanelElement = $state<HTMLElement | null>(null);
+
+  function scrollTransactionPanelIntoView(): void {
+    void tick().then((): void => {
+      transactionPanelElement?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }
+
   function openTransactionEditor(transactionId: string): void {
     const transaction = transactionRows.find((row: OfficeTransaction): boolean => row.id === transactionId);
     if (transaction === undefined) {
@@ -1023,6 +1044,7 @@
     editCategoryId = transaction.categoryId ?? "";
     editProjectId = transaction.projectId ?? "";
     editAccountId = transaction.accountId ?? defaultImportAccountId(importAccounts, transaction.currency);
+    scrollTransactionPanelIntoView();
   }
 
   function closeTransactionEditor(): void {
@@ -1280,7 +1302,7 @@
   }
 
   async function loadPendingTransactions(): Promise<void> {
-    pendingState = createLoadingState<PageResult<OfficeTransaction>>();
+    pendingState = beginReload<PageResult<OfficeTransaction>>(pendingState);
 
     try {
       const page = await client.office.listTransactions({
@@ -1309,7 +1331,7 @@
   }
 
   async function loadReconciliations(): Promise<void> {
-    reconciliationState = createLoadingState<PageResult<OfficeReconciliationCandidate>>();
+    reconciliationState = beginReload<PageResult<OfficeReconciliationCandidate>>(reconciliationState);
 
     try {
       const page = await client.office.listReconciliations({
@@ -1330,7 +1352,7 @@
   }
 
   async function loadCashflow(): Promise<void> {
-    cashflowState = createLoadingState<readonly CashflowBucket[]>();
+    cashflowState = beginReload<readonly CashflowBucket[]>(cashflowState);
 
     try {
       const rows = await client.office.getCashflow({
@@ -2240,6 +2262,7 @@
     createProjectId = "";
     createAmount = "";
     createDirection = "expense";
+    scrollTransactionPanelIntoView();
   }
 
   function closeTransactionCreate(): void {
@@ -2698,21 +2721,21 @@
     kind: "department" | "division" | "category",
     allLabel: string
   ): readonly SelectOption[] {
-    return [
+    return sortOptionsAlphabetically([
       { label: allLabel, value: allValue },
       ...nodes
         .filter((node: OfficePlanComptableNode): boolean => node.kind === kind)
         .map((node: OfficePlanComptableNode): SelectOption => ({ label: node.label, value: node.id }))
-    ];
+    ], 1);
   }
 
   function createParentOptions(nodes: readonly OfficePlanComptableNode[]): readonly SelectOption[] {
-    return [
+    return sortOptionsAlphabetically([
       { label: "Root", value: allValue },
       ...nodes
         .filter((node: OfficePlanComptableNode): boolean => node.kind !== "category")
         .map((node: OfficePlanComptableNode): SelectOption => ({ label: planReferenceLabel(node), value: node.id }))
-    ];
+    ], 1);
   }
 
   function createProjectOptions(rows: readonly OfficeTransaction[]): readonly SelectOption[] {
@@ -2732,7 +2755,7 @@
       }
     }
 
-    return [{ label: "All projects", value: allValue }, ...uniqueProjects];
+    return sortOptionsAlphabetically([{ label: "All projects", value: allValue }, ...uniqueProjects], 1);
   }
 
   function stateLabel(state: ApiRequestState<unknown>): string {
@@ -3131,7 +3154,7 @@
         </section>
 
         {#if creatingTransaction}
-          <section class="office-edit-panel ehq-edge-surface" aria-label="New entry">
+          <section class="office-edit-panel ehq-edge-surface" aria-label="New entry" bind:this={transactionPanelElement}>
             <div class="office-edit-grid">
               <label>
                 <span class="ehq-type-label-mono">Date</span>
@@ -3162,7 +3185,7 @@
         {/if}
 
         {#if editingTransaction !== null}
-          <section class="office-edit-panel ehq-edge-surface" aria-label="Edit transaction">
+          <section class="office-edit-panel ehq-edge-surface" aria-label="Edit transaction" bind:this={transactionPanelElement}>
             <div class="office-edit-grid">
               <label>
                 <span class="ehq-type-label-mono">Date</span>
@@ -3513,75 +3536,75 @@
   // sortable stays false everywhere: the shared Table renders the sort glyph but
   // implements no sorting, so advertising it would be a dead affordance.
   const pnlColumns: readonly TableColumn[] = [
-    { label: "Department", align: "left", sortable: false },
-    { label: "Revenue", align: "right", sortable: false },
-    { label: "Expenses", align: "right", sortable: false },
-    { label: "Net", align: "right", sortable: false },
-    { label: "Validated", align: "left", sortable: false }
+    { label: "Department", align: "left", sortable: true },
+    { label: "Revenue", align: "right", sortable: true },
+    { label: "Expenses", align: "right", sortable: true },
+    { label: "Net", align: "right", sortable: true },
+    { label: "Validated", align: "left", sortable: true }
   ];
   const divisionPnlColumns: readonly TableColumn[] = [
-    { label: "Division", align: "left", sortable: false },
-    { label: "Revenue", align: "right", sortable: false },
-    { label: "Expenses", align: "right", sortable: false },
-    { label: "Net", align: "right", sortable: false }
+    { label: "Division", align: "left", sortable: true },
+    { label: "Revenue", align: "right", sortable: true },
+    { label: "Expenses", align: "right", sortable: true },
+    { label: "Net", align: "right", sortable: true }
   ];
   const pnlLineColumns: readonly TableColumn[] = [
-    { label: "Category", align: "left", sortable: false },
-    { label: "Revenue", align: "right", sortable: false },
-    { label: "Expenses", align: "right", sortable: false },
-    { label: "Net", align: "right", sortable: false }
+    { label: "Category", align: "left", sortable: true },
+    { label: "Revenue", align: "right", sortable: true },
+    { label: "Expenses", align: "right", sortable: true },
+    { label: "Net", align: "right", sortable: true }
   ];
   const planColumns: readonly TableColumn[] = [
-    { label: "Label", align: "left", sortable: false },
-    { label: "Node", align: "left", sortable: false },
-    { label: "Reference", align: "left", sortable: false },
-    { label: "Category type", align: "left", sortable: false },
-    { label: "Path", align: "left", sortable: false },
-    { label: "Status", align: "left", sortable: false }
+    { label: "Label", align: "left", sortable: true },
+    { label: "Node", align: "left", sortable: true },
+    { label: "Reference", align: "left", sortable: true },
+    { label: "Category type", align: "left", sortable: true },
+    { label: "Path", align: "left", sortable: true },
+    { label: "Status", align: "left", sortable: true }
   ];
   const transactionColumns: readonly TableColumn[] = [
-    { label: "Date", align: "left", sortable: false },
-    { label: "Label", align: "left", sortable: false },
-    { label: "Department · Division · Category", align: "left", sortable: false },
-    { label: "Type", align: "left", sortable: false },
-    { label: "Project", align: "left", sortable: false },
-    { label: "Amount", align: "right", sortable: false },
-    { label: "Status", align: "left", sortable: false }
+    { label: "Date", align: "left", sortable: true },
+    { label: "Label", align: "left", sortable: true },
+    { label: "Department · Division · Category", align: "left", sortable: true },
+    { label: "Type", align: "left", sortable: true },
+    { label: "Project", align: "left", sortable: true },
+    { label: "Amount", align: "right", sortable: true },
+    { label: "Status", align: "left", sortable: true }
   ];
   const importColumns: readonly TableColumn[] = [
-    { label: "File", align: "left", sortable: false },
-    { label: "Source", align: "left", sortable: false },
-    { label: "Rows", align: "right", sortable: false },
-    { label: "Period", align: "left", sortable: false },
-    { label: "Status", align: "left", sortable: false }
+    { label: "File", align: "left", sortable: true },
+    { label: "Source", align: "left", sortable: true },
+    { label: "Rows", align: "right", sortable: true },
+    { label: "Period", align: "left", sortable: true },
+    { label: "Status", align: "left", sortable: true }
   ];
   const reconciliationColumns: readonly TableColumn[] = [
-    { label: "Bank line", align: "left", sortable: false },
-    { label: "Date", align: "left", sortable: false },
-    { label: "Amount", align: "right", sortable: false },
-    { label: "Suggested match", align: "left", sortable: false },
-    { label: "Conf.", align: "left", sortable: false },
-    { label: "Status", align: "left", sortable: false }
+    { label: "Bank line", align: "left", sortable: true },
+    { label: "Date", align: "left", sortable: true },
+    { label: "Amount", align: "right", sortable: true },
+    { label: "Suggested match", align: "left", sortable: true },
+    { label: "Conf.", align: "left", sortable: true },
+    { label: "Status", align: "left", sortable: true }
   ];
   const pendingColumns: readonly TableColumn[] = [
-    { label: "Selection", align: "left", sortable: false },
-    { label: "Label", align: "left", sortable: false },
-    { label: "Department · Division · Category", align: "left", sortable: false },
-    { label: "Amount", align: "right", sortable: false },
-    { label: "Status", align: "left", sortable: false }
+    { label: "Selection", align: "left", sortable: true },
+    { label: "Label", align: "left", sortable: true },
+    { label: "Department · Division · Category", align: "left", sortable: true },
+    { label: "Amount", align: "right", sortable: true },
+    { label: "Status", align: "left", sortable: true }
   ];
   const cashflowColumns: readonly TableColumn[] = [
-    { label: "Period", align: "left", sortable: false },
-    { label: "Inflows", align: "right", sortable: false },
-    { label: "Outflows", align: "right", sortable: false },
-    { label: "Closing", align: "right", sortable: false }
+    { label: "Period", align: "left", sortable: true },
+    { label: "Inflows", align: "right", sortable: true },
+    { label: "Outflows", align: "right", sortable: true },
+    { label: "Closing", align: "right", sortable: true }
   ];
   const auditColumns: readonly TableColumn[] = [
-    { label: "Time", align: "left", sortable: false },
-    { label: "Action", align: "left", sortable: false },
-    { label: "Entity", align: "left", sortable: false },
-    { label: "Entity id", align: "left", sortable: false },
-    { label: "Write guard", align: "left", sortable: false }
+    { label: "Time", align: "left", sortable: true },
+    { label: "Action", align: "left", sortable: true },
+    { label: "Entity", align: "left", sortable: true },
+    { label: "Entity id", align: "left", sortable: true },
+    { label: "Write guard", align: "left", sortable: true }
   ];
 </script>
 

@@ -78,7 +78,11 @@ export function createPostgresPool(env: Readonly<Record<string, string | undefin
   const databaseUrl = requireDatabaseUrl(env);
   return new Pool({
     connectionString: databaseUrl,
-    max: 1,
+    // max:1 forced every write to queue behind the previous one — the "heavy/slow buttons"
+    // symptom when two people (or a bot) saved at once. A small pool lets concurrent writes
+    // proceed; the Supabase transaction pooler handles the extra connections. Tunable via
+    // DB_POOL_MAX without a code change; default 5 is safe for this team's load.
+    max: parsePoolMax(env.DB_POOL_MAX),
     connectionTimeoutMillis: 15_000,
     idleTimeoutMillis: 30_000,
     keepAlive: true,
@@ -87,6 +91,17 @@ export function createPostgresPool(env: Readonly<Record<string, string | undefin
     statement_timeout: 60_000,
     ssl: sslForDatabaseUrl(databaseUrl)
   });
+}
+
+function parsePoolMax(raw: string | undefined): number {
+  if (raw === undefined || raw.trim().length === 0) {
+    return 5;
+  }
+  const parsed = Number.parseInt(raw.trim(), 10);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 20) {
+    return 5;
+  }
+  return parsed;
 }
 
 export function requireDatabaseUrl(env: Readonly<Record<string, string | undefined>>): string {
@@ -573,7 +588,7 @@ function toOfficeBankStatementLine(row: PgRow): OfficeBankStatementLineRow {
     amountMurMinor: bigintCell(row, "amount_mur_minor"),
     balanceMurMinor: nullableBigintCell(row, "balance_mur_minor"),
     isDuplicateCandidate: booleanCell(row, "is_duplicate_candidate"),
-    reconciliationStatus: enumCell(row, "reconciliation_status", ["unmatched", "suggested", "matched", "rejected"]),
+    reconciliationStatus: enumCell(row, "reconciliation_status", ["unmatched", "suggested", "matched", "rejected", "ignored"]),
     matchedTransactionId: nullableStringCell(row, "matched_transaction_id"),
     rawData: jsonRecordCell(row, "raw_data")
   };

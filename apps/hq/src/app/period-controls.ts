@@ -4,7 +4,7 @@
 // Pure functions only — the caller supplies "today" (and any custom range) so the
 // math stays deterministic and testable.
 
-export type PeriodScope = "week" | "month" | "last3" | "last6" | "year" | "all" | "custom";
+export type PeriodScope = "week" | "month" | "last3" | "last6" | "year" | "lastyear" | "all" | "custom";
 
 export interface PeriodOption {
   readonly value: PeriodScope;
@@ -40,7 +40,8 @@ export function createPeriodOptions(): readonly PeriodOption[] {
     { value: "last3", label: "Last 3 Months", detail: "Trailing 3 months" },
     { value: "last6", label: "Last 6 Months", detail: "Trailing 6 months" },
     { value: "year", label: "This Year", detail: "Year to date" },
-    { value: "all", label: "All / Tout", detail: "Entire history" },
+    { value: "lastyear", label: "Last Year", detail: "Previous calendar year" },
+    { value: "all", label: "All", detail: "Entire history" },
     { value: "custom", label: "Custom", detail: "Pick dates" }
   ];
 }
@@ -75,6 +76,10 @@ export function rangeForScope(scope: PeriodScope, today: string, customRange: Da
   }
   if (scope === "year") {
     return { from: `${today.slice(0, 4)}-01-01`, to: `${today.slice(0, 4)}-12-31` };
+  }
+  if (scope === "lastyear") {
+    const previousYear = String(Number.parseInt(today.slice(0, 4), 10) - 1);
+    return { from: `${previousYear}-01-01`, to: `${previousYear}-12-31` };
   }
   if (scope === "all") {
     return { from: allRangeFrom, to: allRangeTo };

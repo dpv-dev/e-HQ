@@ -8,9 +8,9 @@
     type Tone
   } from "@ehq/ui";
   import {
+    beginReload,
     createErrorState,
     createIdleState,
-    createLoadingState,
     createSuccessState,
     type ApiRequestState,
     type OfficeApiClient,
@@ -55,7 +55,7 @@
 
   async function loadVat(): Promise<void> {
     const token = ++loadVatToken;
-    vatState = createLoadingState<OfficeVatReport>();
+    vatState = beginReload<OfficeVatReport>(vatState);
 
     try {
       const report = await props.client.getVatReport({ workspaceId: props.workspaceId, period: props.period, dateFrom: props.dateFrom, dateTo: props.dateTo });
@@ -197,13 +197,11 @@
 <script module lang="ts">
   import type { TableColumn } from "@ehq/ui";
 
-  // sortable stays false everywhere: the shared Table renders the sort glyph but
-  // implements no sorting, so advertising it would be a dead affordance.
   const vatColumns: readonly TableColumn[] = [
-    { label: "Line", align: "left", sortable: false },
-    { label: "Base", align: "right", sortable: false },
-    { label: "Rate", align: "left", sortable: false },
-    { label: "VAT", align: "right", sortable: false }
+    { label: "Line", align: "left", sortable: true },
+    { label: "Base", align: "right", sortable: true },
+    { label: "Rate", align: "left", sortable: true },
+    { label: "VAT", align: "right", sortable: true }
   ];
 </script>
 

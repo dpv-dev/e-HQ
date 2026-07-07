@@ -13,9 +13,9 @@
     type Tone
   } from "@ehq/ui";
   import {
+    beginReload,
     createErrorState,
     createIdleState,
-    createLoadingState,
     createSuccessState,
     type ApiRequestState,
     type CurrencyCode,
@@ -221,7 +221,7 @@
   });
 
   async function loadProjects(): Promise<void> {
-    projectsState = createLoadingState<PageResult<OfficeProjectSummary>>();
+    projectsState = beginReload<PageResult<OfficeProjectSummary>>(projectsState);
 
     try {
       const page = await props.client.listProjects({
@@ -253,8 +253,8 @@
   async function selectProject(projectId: EntityId): Promise<void> {
     const token = ++selectProjectToken;
     selectedProjectId = projectId;
-    projectPnlState = createLoadingState<OfficeProjectPnl>();
-    violationsState = createLoadingState<PageResult<OfficeProjectCoherenceViolation>>();
+    projectPnlState = beginReload<OfficeProjectPnl>(projectPnlState);
+    violationsState = beginReload<PageResult<OfficeProjectCoherenceViolation>>(violationsState);
 
     try {
       const [projectPnlResult, violationsResult] = await Promise.all([
@@ -684,7 +684,7 @@
   const violationColumns: readonly TableColumn[] = [
     { label: "Severity", align: "left", sortable: true },
     { label: "Rule", align: "left", sortable: true },
-    { label: "Message", align: "left", sortable: false },
+    { label: "Message", align: "left", sortable: true },
     { label: "Fix path", align: "left", sortable: true }
   ];
 

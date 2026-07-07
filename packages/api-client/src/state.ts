@@ -59,3 +59,11 @@ export function createErrorState<TData>(error: unknown): ApiRequestState<TData> 
     error
   };
 }
+
+// Stale-while-revalidate: when re-fetching data that is already loaded (e.g. after a
+// write), keep the current rows on screen instead of flashing a blank loading state.
+// Only the very first load (idle/error/still-loading) shows the spinner. The success
+// data is replaced atomically when the fresh response arrives.
+export function beginReload<TData>(current: ApiRequestState<TData>): ApiRequestState<TData> {
+  return current.status === "success" ? current : createLoadingState<TData>();
+}

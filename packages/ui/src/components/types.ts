@@ -7,7 +7,6 @@ export type SurfaceState = "default" | "hover" | "empty" | "error" | "locked" | 
 export type TableState = "default" | "loading" | "empty" | "error" | "locked";
 export type DrawerState = "default" | "error" | "locked";
 export type OperatorState = "ready" | "loading" | "empty" | "error" | "disabled";
-export type OperatorActionVariant = "primary" | "secondary" | "danger";
 
 export interface SelectOption {
   readonly label: string;
@@ -36,35 +35,6 @@ export interface WorkspaceNavGroup {
   readonly id: string;
   readonly label: string;
   readonly items: readonly WorkspaceNavItem[];
-}
-
-export interface OperatorMetric {
-  readonly label: string;
-  readonly value: string;
-  readonly detail: string;
-  readonly tone: Tone;
-}
-
-export interface OperatorAction {
-  readonly label: string;
-  readonly detail: string;
-  readonly status: string;
-  readonly href: string | null;
-  readonly disabled: boolean;
-  readonly variant: OperatorActionVariant;
-}
-
-export interface PeriodOption {
-  readonly label: string;
-  readonly value: string;
-  readonly active: boolean;
-  readonly disabled: boolean;
-}
-
-export interface StatusItem {
-  readonly label: string;
-  readonly value: string;
-  readonly tone: Tone;
 }
 
 export type TableCell =
