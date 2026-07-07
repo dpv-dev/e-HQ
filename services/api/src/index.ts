@@ -116,6 +116,7 @@ import type {
   DistributionSettingsResponse,
   EntityId,
   OfficeBankQualityResponse,
+  OfficeDashboardPreviousPeriod,
   OfficeDashboardResponse,
   OfficeDepartmentPnl,
   OfficeGlobalPnl,
@@ -925,6 +926,7 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
       receivablesMicro: dashboard.pnl.income,
       payablesMicro: dashboard.pnl.expense,
       unreconciledTransactionCount: dashboard.bankQuality.unmatchedLineCount,
+      previous: readOfficeDashboardPrevious(dependencies, filters),
       lastAuditEventId: dependencies.fixtures.officeAuditLog[0]?.id ?? null,
       recentImports: recentImports.map((batch) => ({
         id: batch.id,
@@ -8105,6 +8107,83 @@ function rangeFiltersFromContext(context: ApiContext, period: string, department
     return { dateFrom, dateTo, departmentId };
   }
   return filtersForPeriod(period, departmentId);
+}
+
+// Window immediately preceding [dateFrom, dateTo]: calendar-aligned years and
+// months map to the previous year/month (matching the "-31" open-month
+// convention of filtersForPeriod), anything else shifts back by its own length
+// in days. Null when either bound is missing.
+function previousRangeFilters(filters: OfficePnlFilters): OfficePnlFilters | null {
+  const { dateFrom, dateTo, departmentId } = filters;
+  if (!isIsoDate(dateFrom) || !isIsoDate(dateTo)) {
+    return null;
+  }
+
+  const yearMatch = /^(\d{4})-01-01$/u.exec(dateFrom);
+  if (yearMatch !== null && dateTo === `${yearMatch[1]}-12-31`) {
+    const previousYear = String(Number(yearMatch[1]) - 1).padStart(4, "0");
+    return { dateFrom: `${previousYear}-01-01`, dateTo: `${previousYear}-12-31`, departmentId };
+  }
+
+  const month = dateFrom.slice(0, 7);
+  if (dateFrom === `${month}-01` && (dateTo === `${month}-31` || dateTo === lastDayOfMonth(month))) {
+    return filtersForPeriod(previousMonth(month), departmentId);
+  }
+
+  const fromMs = Date.parse(`${dateFrom}T00:00:00Z`);
+  const toMs = Date.parse(`${dateTo}T00:00:00Z`);
+  if (Number.isNaN(fromMs) || Number.isNaN(toMs) || toMs < fromMs) {
+    return null;
+  }
+  const dayMs = 86_400_000;
+  const lengthDays = Math.round((toMs - fromMs) / dayMs) + 1;
+  return {
+    dateFrom: isoDayFromMs(fromMs - lengthDays * dayMs),
+    dateTo: isoDayFromMs(fromMs - dayMs),
+    departmentId
+  };
+}
+
+function readOfficeDashboardPrevious(
+  dependencies: ApiServiceDependencies,
+  filters: OfficePnlFilters
+): OfficeDashboardPreviousPeriod | null {
+  const previousFilters = previousRangeFilters(filters);
+  if (previousFilters === null || !isIsoDate(previousFilters.dateFrom) || !isIsoDate(previousFilters.dateTo)) {
+    return null;
+  }
+
+  const previousPeriod = previousFilters.dateTo.slice(0, 7);
+  const monthlyRows = readMonthlyPnl(dependencies.fixtures.office, previousFilters);
+  const runwayWindowMonths = filterRunwayWindowMonths(monthlyRows, ["2026-02"]);
+  const dashboard = readOfficeDashboardFull(dependencies.fixtures.office, previousPeriod, previousFilters, runwayWindowMonths);
+  return {
+    dateFrom: previousFilters.dateFrom,
+    dateTo: previousFilters.dateTo,
+    cashBalanceMicro: dashboard.cashRunway.cashBalanceMur,
+    receivablesMicro: dashboard.pnl.income,
+    payablesMicro: dashboard.pnl.expense,
+    unreconciledTransactionCount: dashboard.bankQuality.unmatchedLineCount
+  };
+}
+
+function previousMonth(month: string): string {
+  const year = Number(month.slice(0, 4));
+  const monthIndex = Number(month.slice(5, 7));
+  const previousYear = monthIndex === 1 ? year - 1 : year;
+  const previousIndex = monthIndex === 1 ? 12 : monthIndex - 1;
+  return `${String(previousYear).padStart(4, "0")}-${String(previousIndex).padStart(2, "0")}`;
+}
+
+function lastDayOfMonth(month: string): string {
+  const year = Number(month.slice(0, 4));
+  const monthIndex = Number(month.slice(5, 7));
+  const lastDay = new Date(Date.UTC(year, monthIndex, 0)).getUTCDate();
+  return `${month}-${String(lastDay).padStart(2, "0")}`;
+}
+
+function isoDayFromMs(epochMs: number): string {
+  return new Date(epochMs).toISOString().slice(0, 10);
 }
 
 function toOfficeGlobalPnl(dataset: OfficeAnalyticsDataset, period: string, filters: OfficePnlFilters): OfficeGlobalPnl {

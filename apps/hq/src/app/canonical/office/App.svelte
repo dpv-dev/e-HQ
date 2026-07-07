@@ -2,6 +2,7 @@
   import { onMount, tick } from "svelte";
   import type { AuthSession } from "@ehq/auth";
   import {
+    Alert,
     BarsChart,
     Button,
     DivergeChart,
@@ -12,14 +13,17 @@
     PageHeader,
     SectionTemplate,
     Select,
+    StatCard,
     Table,
     WorkspaceShell,
     type ChartPoint,
     type DivergePoint,
     type SelectOption,
+    type StatTrendDirection,
     type TablePagination,
     type TableRowAction,
     type Tone,
+    type IconName,
     type WorkspaceNavGroup,
     type WorkspaceNavItem
   } from "@ehq/ui";
@@ -150,6 +154,14 @@
     readonly detail: string;
     readonly tone: Tone;
     readonly accent: boolean;
+  }
+
+  interface DashboardStat {
+    readonly label: string;
+    readonly value: string;
+    readonly trendDirection: StatTrendDirection;
+    readonly trendValue: string;
+    readonly trendDetail: string;
   }
 
   const { session, onLogout }: Props = $props();
@@ -345,6 +357,26 @@
   ];
 
   let activePageId = $state<OfficePageId>("dashboard");
+  const navIcons: Readonly<Record<OfficePageId, IconName>> = {
+    dashboard: "home",
+    ceo: "eye",
+    pnl: "chart-bar",
+    coa: "layout-grid",
+    transactions: "file-text",
+    imports: "upload",
+    reconciliation: "check",
+    pending: "clock",
+    cashflow: "trending-up",
+    clients: "users",
+    suppliers: "users",
+    projects: "folder",
+    monitoring: "search",
+    bank: "bank",
+    audit: "calendar",
+    vat: "file-text",
+    settings: "settings",
+    "wave-invoices": "download"
+  };
   const shellNavGroups = $derived<readonly WorkspaceNavGroup[]>(
     officeNavGroups.map((group: OfficeNavGroup): WorkspaceNavGroup => ({
       id: group.id,
@@ -352,7 +384,7 @@
       items: group.items.map((item: OfficeNavItem): WorkspaceNavItem => ({
         label: item.label,
         href: item.id,
-        icon: "",
+        icon: navIcons[item.id],
         active: activePageId === item.id,
         disabled: false,
         badge: null
@@ -571,7 +603,7 @@
     { label: "Choose an entry…", value: "" },
     ...reconcileTransactionOptions
   ]);
-  const dashboardKpis = $derived(createDashboardKpis(dashboardState));
+  const dashboardStats = $derived(createDashboardStats(dashboardState));
   const pnlKpis = $derived(createPnlKpis(pnlState));
   const pnlChartPoints = $derived(createPnlChartPoints(pnlRows));
   const pnlTableRows = $derived(createPnlTableRows(pnlRows));
@@ -2517,44 +2549,65 @@
     return null;
   }
 
-  function createDashboardKpis(state: ApiRequestState<OfficeDashboardResponse>): readonly OfficeKpi[] {
+  // Percent change of current vs previous, as a StatCard trend. "none" when the
+  // previous value is missing or zero (no meaningful ratio).
+  function computeStatTrend(current: number, previous: number | null): { readonly direction: StatTrendDirection; readonly value: string } {
+    if (previous === null || !Number.isFinite(previous) || previous === 0 || !Number.isFinite(current)) {
+      return { direction: "none", value: "—" };
+    }
+
+    const ratio = (current - previous) / Math.abs(previous);
+    if (ratio === 0) {
+      return { direction: "none", value: "0%" };
+    }
+
+    return { direction: ratio > 0 ? "up" : "down", value: `${Math.abs(ratio * 100).toFixed(1)}%` };
+  }
+
+  function createDashboardStats(state: ApiRequestState<OfficeDashboardResponse>): readonly DashboardStat[] {
     if (state.status !== "success") {
       return [
-        { label: "Cash", value: "—", detail: stateLabel(state), tone: "muted", accent: true },
-        { label: "Receivables", value: "—", detail: "projection", tone: "muted", accent: false },
-        { label: "Payables", value: "—", detail: "projection", tone: "muted", accent: false },
-        { label: "To reconcile", value: "—", detail: "bank", tone: "muted", accent: false }
+        { label: "Cash", value: "—", trendDirection: "none", trendValue: "—", trendDetail: stateLabel(state) },
+        { label: "Receivables", value: "—", trendDirection: "none", trendValue: "—", trendDetail: "projection" },
+        { label: "Payables", value: "—", trendDirection: "none", trendValue: "—", trendDetail: "projection" },
+        { label: "To reconcile", value: "—", trendDirection: "none", trendValue: "—", trendDetail: "bank" }
       ];
     }
 
+    const previous = state.data.previous ?? null;
+    const trendDetail = previous === null ? "no previous period" : `vs ${previous.dateFrom} → ${previous.dateTo}`;
+    const cashTrend = computeStatTrend(Number(state.data.cashBalanceMicro), previous === null ? null : Number(previous.cashBalanceMicro));
+    const receivablesTrend = computeStatTrend(Number(state.data.receivablesMicro), previous === null ? null : Number(previous.receivablesMicro));
+    const payablesTrend = computeStatTrend(Number(state.data.payablesMicro), previous === null ? null : Number(previous.payablesMicro));
+    const reconcileTrend = computeStatTrend(state.data.unreconciledTransactionCount, previous === null ? null : previous.unreconciledTransactionCount);
     return [
       {
         label: "Cash",
         value: formatMicro(state.data.cashBalanceMicro),
-        detail: state.data.period,
-        tone: "success",
-        accent: true
+        trendDirection: cashTrend.direction,
+        trendValue: cashTrend.value,
+        trendDetail
       },
       {
         label: "Receivables",
         value: formatMicro(state.data.receivablesMicro),
-        detail: "validated projection",
-        tone: "info",
-        accent: false
+        trendDirection: receivablesTrend.direction,
+        trendValue: receivablesTrend.value,
+        trendDetail
       },
       {
         label: "Payables",
         value: formatMicro(state.data.payablesMicro),
-        detail: "validated projection",
-        tone: "warning",
-        accent: false
+        trendDirection: payablesTrend.direction,
+        trendValue: payablesTrend.value,
+        trendDetail
       },
       {
         label: "To reconcile",
         value: String(state.data.unreconciledTransactionCount),
-        detail: "bank rows",
-        tone: "warning",
-        accent: false
+        trendDirection: reconcileTrend.direction,
+        trendValue: reconcileTrend.value,
+        trendDetail
       }
     ];
   }
@@ -3166,13 +3219,19 @@
       {/if}
 
       {#if actionReceipt !== null}
-        <p class="receipt ehq-type-label-mono" role="status">Action accepted · audit recorded</p>
+        <Alert tone="success" title="Action accepted" message="Audit recorded." dismissible={false} />
       {/if}
 
       {#if activePageId === "dashboard"}
         <section class="kpi-grid" aria-label="Office indicators">
-          {#each dashboardKpis as kpi (kpi.label)}
-            <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state={dashboardState.status === "loading" ? "loading" : "default"} accent={kpi.accent} />
+          {#each dashboardStats as stat (stat.label)}
+            <StatCard
+              label={stat.label}
+              value={stat.value}
+              trendDirection={stat.trendDirection}
+              trendValue={stat.trendValue}
+              trendDetail={stat.trendDetail}
+            />
           {/each}
         </section>
 
@@ -3721,7 +3780,6 @@
     overflow-x: auto;
   }
 
-  .receipt,
   .import-result {
     margin: 0;
     padding: var(--ehq-space-3);

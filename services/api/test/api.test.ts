@@ -73,6 +73,18 @@ test("Office dashboard and global P&L are served from the domain read layer", as
   const dashboard = await dashboardResponse.json();
   assert.equal(dashboard.cashBalanceMicro, "3000.00");
   assert.equal(dashboard.unreconciledTransactionCount, 1);
+  assert.notEqual(dashboard.previous, null);
+  assert.equal(dashboard.previous.dateFrom, "2026-01-01");
+  assert.equal(dashboard.previous.dateTo, "2026-01-31");
+
+  const yearScopedResponse = await app.request(
+    "/eof/v1/dashboard?workspaceId=workspace_1&period=2026-02&dateFrom=2026-01-01&dateTo=2026-12-31",
+    { headers: authHeaders() }
+  );
+  assert.equal(yearScopedResponse.status, 200);
+  const yearScoped = await yearScopedResponse.json();
+  assert.equal(yearScoped.previous.dateFrom, "2025-01-01");
+  assert.equal(yearScoped.previous.dateTo, "2025-12-31");
 
   const pnlResponse = await app.request("/eof/v1/pl/global?workspaceId=workspace_1&period=2026-02", {
     headers: authHeaders()

@@ -181,6 +181,18 @@ export interface OfficeRecentImport {
   readonly status: "previewed" | "confirmed" | "failed";
 }
 
+// Same indicators computed over the window immediately preceding the requested
+// one (previous calendar year/month for aligned ranges, day-length shift otherwise).
+// Null when the requested range has no computable predecessor.
+export interface OfficeDashboardPreviousPeriod {
+  readonly dateFrom: IsoDateString;
+  readonly dateTo: IsoDateString;
+  readonly cashBalanceMicro: MoneyMicroString;
+  readonly receivablesMicro: MoneyMicroString;
+  readonly payablesMicro: MoneyMicroString;
+  readonly unreconciledTransactionCount: number;
+}
+
 export interface OfficeDashboardResponse {
   readonly period: IsoMonthString;
   readonly cashBalanceMicro: MoneyMicroString;
@@ -189,6 +201,7 @@ export interface OfficeDashboardResponse {
   readonly unreconciledTransactionCount: number;
   readonly lastAuditEventId: EntityId | null;
   readonly recentImports?: readonly OfficeRecentImport[];
+  readonly previous?: OfficeDashboardPreviousPeriod | null;
 }
 
 export interface OfficeWriteStatusResponse {

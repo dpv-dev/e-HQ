@@ -39560,6 +39560,7 @@ function registerOfficeRoutes(app, dependencies) {
       receivablesMicro: dashboard.pnl.income,
       payablesMicro: dashboard.pnl.expense,
       unreconciledTransactionCount: dashboard.bankQuality.unmatchedLineCount,
+      previous: readOfficeDashboardPrevious(dependencies, filters),
       lastAuditEventId: dependencies.fixtures.officeAuditLog[0]?.id ?? null,
       recentImports: recentImports.map((batch) => ({
         id: batch.id,
@@ -45607,6 +45608,67 @@ function rangeFiltersFromContext(context, period, departmentId) {
     return { dateFrom, dateTo, departmentId };
   }
   return filtersForPeriod(period, departmentId);
+}
+function previousRangeFilters(filters) {
+  const { dateFrom, dateTo, departmentId } = filters;
+  if (!isIsoDate(dateFrom) || !isIsoDate(dateTo)) {
+    return null;
+  }
+  const yearMatch = /^(\d{4})-01-01$/u.exec(dateFrom);
+  if (yearMatch !== null && dateTo === `${yearMatch[1]}-12-31`) {
+    const previousYear = String(Number(yearMatch[1]) - 1).padStart(4, "0");
+    return { dateFrom: `${previousYear}-01-01`, dateTo: `${previousYear}-12-31`, departmentId };
+  }
+  const month = dateFrom.slice(0, 7);
+  if (dateFrom === `${month}-01` && (dateTo === `${month}-31` || dateTo === lastDayOfMonth(month))) {
+    return filtersForPeriod(previousMonth(month), departmentId);
+  }
+  const fromMs = Date.parse(`${dateFrom}T00:00:00Z`);
+  const toMs = Date.parse(`${dateTo}T00:00:00Z`);
+  if (Number.isNaN(fromMs) || Number.isNaN(toMs) || toMs < fromMs) {
+    return null;
+  }
+  const dayMs = 864e5;
+  const lengthDays = Math.round((toMs - fromMs) / dayMs) + 1;
+  return {
+    dateFrom: isoDayFromMs(fromMs - lengthDays * dayMs),
+    dateTo: isoDayFromMs(fromMs - dayMs),
+    departmentId
+  };
+}
+function readOfficeDashboardPrevious(dependencies, filters) {
+  const previousFilters = previousRangeFilters(filters);
+  if (previousFilters === null || !isIsoDate(previousFilters.dateFrom) || !isIsoDate(previousFilters.dateTo)) {
+    return null;
+  }
+  const previousPeriod = previousFilters.dateTo.slice(0, 7);
+  const monthlyRows = readMonthlyPnl(dependencies.fixtures.office, previousFilters);
+  const runwayWindowMonths = filterRunwayWindowMonths(monthlyRows, ["2026-02"]);
+  const dashboard = readOfficeDashboardFull(dependencies.fixtures.office, previousPeriod, previousFilters, runwayWindowMonths);
+  return {
+    dateFrom: previousFilters.dateFrom,
+    dateTo: previousFilters.dateTo,
+    cashBalanceMicro: dashboard.cashRunway.cashBalanceMur,
+    receivablesMicro: dashboard.pnl.income,
+    payablesMicro: dashboard.pnl.expense,
+    unreconciledTransactionCount: dashboard.bankQuality.unmatchedLineCount
+  };
+}
+function previousMonth(month) {
+  const year2 = Number(month.slice(0, 4));
+  const monthIndex = Number(month.slice(5, 7));
+  const previousYear = monthIndex === 1 ? year2 - 1 : year2;
+  const previousIndex = monthIndex === 1 ? 12 : monthIndex - 1;
+  return `${String(previousYear).padStart(4, "0")}-${String(previousIndex).padStart(2, "0")}`;
+}
+function lastDayOfMonth(month) {
+  const year2 = Number(month.slice(0, 4));
+  const monthIndex = Number(month.slice(5, 7));
+  const lastDay = new Date(Date.UTC(year2, monthIndex, 0)).getUTCDate();
+  return `${month}-${String(lastDay).padStart(2, "0")}`;
+}
+function isoDayFromMs(epochMs) {
+  return new Date(epochMs).toISOString().slice(0, 10);
 }
 function toOfficeGlobalPnl(dataset, period, filters) {
   const pnl = readGlobalPnl(dataset, filters);
