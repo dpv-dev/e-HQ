@@ -1,5 +1,6 @@
 <script lang="ts">
   import {
+    Alert,
     Badge,
     Button,
     Input,
@@ -7,6 +8,7 @@
     Loader,
     Select,
     Table,
+    Toggle,
     type SelectOption,
     type TablePagination,
     type TableRow,
@@ -556,14 +558,20 @@
           message=""
           oninput={(value: string): void => { projectFormDescription = value; }}
         />
-        <label class="project-form-active">
-          <input type="checkbox" bind:checked={projectFormActive} />
-          <span class="ehq-type-label-mono">Active</span>
-        </label>
+        <Toggle
+          id="project-form-active"
+          label="Active"
+          checked={projectFormActive}
+          disabled={false}
+          onchange={(checked: boolean): void => { projectFormActive = checked; }}
+        />
         {#if editingProjectId !== null}
-          <p class="form-warning" role="note">
-            The description and active flag are not read back from the API: the values above will overwrite the stored ones.
-          </p>
+          <Alert
+            tone="warning"
+            title="Heads up"
+            message="The description and active flag are not read back from the API: the values above will overwrite the stored ones."
+            dismissible={false}
+          />
         {/if}
         <div class="project-form-actions">
           <Button
@@ -595,7 +603,12 @@
           {/if}
         </div>
         {#if projectSubmitMessage !== null}
-          <p class="form-message" class:error={projectSubmitStatus === "error"} role="status">{projectSubmitMessage}</p>
+          <Alert
+            tone={projectSubmitStatus === "error" ? "error" : "success"}
+            title={projectSubmitStatus === "error" ? "Error" : "Success"}
+            message={projectSubmitMessage}
+            dismissible={false}
+          />
         {/if}
       </section>
 
@@ -736,26 +749,6 @@
     display: grid;
     gap: var(--ehq-space-2);
     margin-bottom: var(--ehq-space-3);
-  }
-
-  .project-form .project-form-active {
-    display: flex;
-    align-items: center;
-    gap: var(--ehq-space-1);
-  }
-
-  .project-form .form-warning {
-    color: var(--ehq-warning);
-    text-transform: none;
-  }
-
-  .project-form .form-message {
-    color: var(--ehq-success);
-    text-transform: none;
-  }
-
-  .project-form .form-message.error {
-    color: var(--ehq-error);
   }
 
   .project-form-actions,

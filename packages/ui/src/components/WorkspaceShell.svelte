@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
+  import Icon from "./Icon.svelte";
   import type { WorkspaceKind, WorkspaceNavGroup, WorkspaceNavItem } from "./types.js";
 
   interface Props {
@@ -71,7 +72,11 @@
             aria-disabled={item.disabled}
             onclick={(event: MouseEvent): void => handleNavClick(item, event)}
           >
-            <span class="nav-icon" aria-hidden="true">{item.icon}</span>
+            {#if item.icon !== ""}
+              <span class="nav-icon" aria-hidden="true"><Icon name={item.icon} size={16} strokeWidth={1.5} /></span>
+            {:else}
+              <span class="nav-icon" aria-hidden="true"></span>
+            {/if}
             <span class="nav-label">{item.label}</span>
             {#if item.badge !== null}
               <strong>{item.badge}</strong>
@@ -224,8 +229,9 @@
 
   .nav-icon {
     color: var(--ehq-workspace-accent);
-    font-family: var(--ehq-mono);
-    font-size: var(--ehq-type-caption-size);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
 
   .nav-label {

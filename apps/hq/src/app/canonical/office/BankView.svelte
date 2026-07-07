@@ -1,11 +1,13 @@
 <script lang="ts">
   import {
+    Alert,
     Button,
     Input,
     KPI,
     Loader,
     Select,
     Table,
+    Toggle,
     type SelectOption,
     type TablePagination,
     type TableRow,
@@ -802,10 +804,13 @@
         message=""
         onchange={(value: string): void => { bankFormCurrency = value; }}
       />
-      <label class="bank-account-active">
-        <input type="checkbox" bind:checked={bankFormActive} />
-        <span class="ehq-type-label-mono">Active</span>
-      </label>
+      <Toggle
+        id="bank-account-active"
+        label="Active"
+        checked={bankFormActive}
+        disabled={false}
+        onchange={(checked: boolean): void => { bankFormActive = checked; }}
+      />
       <div class="bank-account-actions">
         <Button
           label={accountSubmitStatus === "loading" ? "Saving…" : editingAccountId === null ? "Add account" : "Save"}
@@ -836,7 +841,12 @@
         {/if}
       </div>
       {#if accountSubmitMessage !== null}
-        <p class="form-message ehq-type-body" class:error={accountSubmitStatus === "error"} role="status">{accountSubmitMessage}</p>
+        <Alert
+          tone={accountSubmitStatus === "error" ? "error" : "success"}
+          title={accountSubmitStatus === "error" ? "Error" : "Success"}
+          message={accountSubmitMessage}
+          dismissible={false}
+        />
       {/if}
     </section>
     <!-- This branch only renders when accountsState is idle or success: the
@@ -861,7 +871,12 @@
     {/if}
     <Table title="Reconciliation candidates" columns={reconciliationColumns} rows={reconciliationTableRows} state={reconciliationState.status === "loading" ? "loading" : reconciliationState.status === "error" ? "error" : reconciliationTableRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={reconciliationRowActions} pagination={reconciliationPagination} />
     {#if reconciliationActionMessage !== null}
-      <p class="form-message ehq-type-body" class:error={reconciliationActionStatus === "error"} role="status">{reconciliationActionMessage}</p>
+      <Alert
+        tone={reconciliationActionStatus === "error" ? "error" : "success"}
+        title={reconciliationActionStatus === "error" ? "Error" : "Success"}
+        message={reconciliationActionMessage}
+        dismissible={false}
+      />
     {/if}
   {/if}
 </section>
@@ -951,25 +966,10 @@
     gap: var(--ehq-space-3);
   }
 
-  .bank-account-active {
-    display: flex;
-    align-items: center;
-    gap: var(--ehq-space-1);
-  }
-
   .bank-account-actions {
     display: flex;
     gap: var(--ehq-space-2);
     margin-left: auto;
   }
 
-  .form-message {
-    flex-basis: 100%;
-    margin: 0;
-    color: var(--ehq-success);
-  }
-
-  .form-message.error {
-    color: var(--ehq-error);
-  }
 </style>

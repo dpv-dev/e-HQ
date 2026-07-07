@@ -1,5 +1,6 @@
 <script lang="ts">
   import {
+    Alert,
     Badge,
     Button,
     Drawer,
@@ -8,6 +9,7 @@
     KPI,
     Loader,
     Table,
+    Toggle,
     type TableColumn,
     type TablePagination,
     type TableRow,
@@ -414,15 +416,6 @@
 
   function updateNotes(event: Event): void {
     partnerForm = { ...partnerForm, notes: readTextAreaValue(event) };
-  }
-
-  function updateActive(event: Event): void {
-    const target = event.target;
-    if (!(target instanceof HTMLInputElement)) {
-      throw new Error("Partner active input event target is not an input.");
-    }
-
-    partnerForm = { ...partnerForm, active: target.checked };
   }
 
   function updateLinkPayeeId(value: string): void {
@@ -834,7 +827,12 @@
                     />
                   </div>
                   {#if payeeLinkMessage !== null}
-                    <p class="outcome-message" class:error={payeeLinkStatus === "error"} role="status">{payeeLinkMessage}</p>
+                    <Alert
+                      tone={payeeLinkStatus === "error" ? "error" : "success"}
+                      title={payeeLinkStatus === "error" ? "Error" : "Success"}
+                      message={payeeLinkMessage}
+                      dismissible={false}
+                    />
                   {/if}
                 </section>
               {/if}
@@ -899,12 +897,20 @@
                     <span>Notes</span>
                     <textarea value={partnerForm.notes} oninput={updateNotes}></textarea>
                   </label>
-                  <label class="check-row">
-                    <input type="checkbox" checked={partnerForm.active} onchange={updateActive} />
-                    <span>Active partner</span>
-                  </label>
+                  <Toggle
+                    id="partner-form-active"
+                    label="Active partner"
+                    checked={partnerForm.active}
+                    disabled={false}
+                    onchange={(checked: boolean): void => { partnerForm = { ...partnerForm, active: checked }; }}
+                  />
                   {#if formMessage !== null}
-                    <p class="outcome-message" class:error={formStatus === "error"} role="status">{formMessage}</p>
+                    <Alert
+                      tone={formStatus === "error" ? "error" : "success"}
+                      title={formStatus === "error" ? "Error" : "Success"}
+                      message={formMessage}
+                      dismissible={false}
+                    />
                   {/if}
                 </form>
               {/if}
@@ -1019,21 +1025,6 @@
     color: var(--ehq-error);
   }
 
-  /* Per-action outcome line (form submit or payee link), rendered next to the
-     action it belongs to; the drawer-level .action-message stays contextual. */
-  .outcome-message {
-    margin: 0;
-    color: var(--ehq-success);
-    font-family: var(--ehq-mono);
-    font-size: var(--ehq-type-label-size);
-    font-weight: var(--ehq-type-label-weight);
-    text-transform: none;
-  }
-
-  .outcome-message.error {
-    color: var(--ehq-error);
-  }
-
   .side-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1088,17 +1079,6 @@
     background: var(--ehq-surface);
     color: var(--ehq-text);
     resize: vertical;
-  }
-
-  .check-row {
-    display: flex;
-    align-items: center;
-    gap: var(--ehq-space-2);
-  }
-
-  .check-row input {
-    width: 16px;
-    min-height: 16px;
   }
 
   @media (max-width: 980px) {

@@ -15,6 +15,7 @@
     type OfficeDashboardResponse
   } from "@ehq/api-client";
   import {
+    Alert,
     Badge,
     Button,
     DonutChart,
@@ -27,11 +28,13 @@
     Table,
     Toolbar,
     WorkspaceShell,
+    type AlertTone,
     type SelectOption,
     type SurfaceState,
     type TableColumn,
     type TableRow,
     type TableState,
+    type IconName,
     type Tone,
     type ToolbarFilter,
     type WorkspaceNavGroup,
@@ -263,6 +266,12 @@
     { id: "release", key: "Release gate", value: "Manual approval", status: "Required", tone: "warning" }
   ];
   let activePageId = $state<CommandCenterPageId>("dashboard");
+  const navIcons: Readonly<Record<CommandCenterPageId, IconName>> = {
+    dashboard: "home",
+    users: "users",
+    integrations: "layout-grid",
+    settings: "settings"
+  };
   const shellNavGroups = $derived<readonly WorkspaceNavGroup[]>(
     navGroups.map((group: NavGroup): WorkspaceNavGroup => ({
       id: group.id,
@@ -270,7 +279,7 @@
       items: group.items.map((item: NavItem): WorkspaceNavItem => ({
         label: item.label,
         href: item.id,
-        icon: "",
+        icon: navIcons[item.id],
         active: activePageId === item.id,
         disabled: false,
         badge: null
@@ -284,6 +293,12 @@
   let inviteEmail = $state("");
   let workspaceName = $state("ë • Entreprise");
   let commandNotice = $state("");
+  let commandNoticeTone = $state<AlertTone>("info");
+
+  function setCommandNotice(tone: AlertTone, text: string): void {
+    commandNoticeTone = tone;
+    commandNotice = text;
+  }
   let officeDashboardState = $state<ApiRequestState<OfficeDashboardResponse>>(createIdleState<OfficeDashboardResponse>());
   let distributionDashboardState = $state<ApiRequestState<DistributionDashboardResponse>>(
     createIdleState<DistributionDashboardResponse>()
@@ -358,19 +373,19 @@
   function selectDashboardToolbarFilter(filter: ToolbarFilter): void {
     if (filter.actionId === "scope") {
       selectPage("dashboard");
-      commandNotice = "Dashboard scope is set to all workspaces.";
+      setCommandNotice("info", "Dashboard scope is set to all workspaces.");
       return;
     }
 
     if (filter.actionId === "mode") {
       void loadWriteGate();
-      commandNotice = "Write gate refresh requested.";
+      setCommandNotice("info", "Write gate refresh requested.");
       return;
     }
 
     if (filter.actionId === "period") {
       void loadCommandReadiness();
-      commandNotice = `Readiness refresh requested for ${periodLabel(period)}.`;
+      setCommandNotice("info", `Readiness refresh requested for ${periodLabel(period)}.`);
       return;
     }
 
@@ -379,17 +394,17 @@
 
   function selectUsersToolbarFilter(filter: ToolbarFilter): void {
     if (filter.actionId === "source") {
-      commandNotice = "Permission source is the verified Supabase Auth session.";
+      setCommandNotice("info", "Permission source is the verified Supabase Auth session.");
       return;
     }
 
     if (filter.actionId === "denied-cards") {
-      commandNotice = "Denied workspace cards remain visible on HQ.";
+      setCommandNotice("info", "Denied workspace cards remain visible on HQ.");
       return;
     }
 
     if (filter.actionId === "hidden-apps") {
-      commandNotice = "Hidden app policy remains disabled; denied apps are never silently hidden.";
+      setCommandNotice("info", "Hidden app policy remains disabled; denied apps are never silently hidden.");
       return;
     }
 
@@ -399,19 +414,19 @@
   function selectIntegrationToolbarFilter(filter: ToolbarFilter): void {
     if (filter.actionId === "scope") {
       selectPage("integrations");
-      commandNotice = "Integration scope is platform-wide.";
+      setCommandNotice("info", "Integration scope is platform-wide.");
       return;
     }
 
     if (filter.actionId === "writes") {
       void loadWriteGate();
-      commandNotice = "Write gate refresh requested.";
+      setCommandNotice("info", "Write gate refresh requested.");
       return;
     }
 
     if (filter.actionId === "network") {
       void loadCommandReadiness();
-      commandNotice = "API readiness refresh requested.";
+      setCommandNotice("info", "API readiness refresh requested.");
       return;
     }
 
@@ -421,7 +436,7 @@
   function selectSettingsToolbarFilter(filter: ToolbarFilter): void {
     if (filter.actionId === "workspace") {
       selectPage("settings");
-      commandNotice = "Workspace settings are open.";
+      setCommandNotice("info", "Workspace settings are open.");
       return;
     }
 
@@ -446,7 +461,7 @@
 
   function selectPage(pageId: CommandCenterPageId): void {
     activePageId = pageId;
-    commandNotice = "";
+    setCommandNotice("info", "");
     pushPagePath(pageId);
   }
 
@@ -898,9 +913,9 @@
           idempotencyKey: createCommandIdempotencyKey("command-center-user-permission")
         }
       );
-      commandNotice = `Permission review persisted · audit ${receipt.auditEventId ?? "missing"}.`;
+      setCommandNotice("success", `Permission review persisted · audit ${receipt.auditEventId ?? "missing"}.`);
     } catch (error: unknown) {
-      commandNotice = `Permission write failed · ${errorMessage(error)}.`;
+      setCommandNotice("error", `Permission write failed · ${errorMessage(error)}.`);
     } finally {
       commandBusy = false;
     }
@@ -920,9 +935,9 @@
           idempotencyKey: createCommandIdempotencyKey(`command-center-setting-${key}`)
         }
       );
-      commandNotice = `${key} setting persisted · audit ${receipt.auditEventId ?? "missing"}.`;
+      setCommandNotice("success", `${key} setting persisted · audit ${receipt.auditEventId ?? "missing"}.`);
     } catch (error: unknown) {
-      commandNotice = `${key} setting write failed · ${errorMessage(error)}.`;
+      setCommandNotice("error", `${key} setting write failed · ${errorMessage(error)}.`);
     } finally {
       commandBusy = false;
     }
@@ -939,7 +954,7 @@
       throw new Error(`Unknown integration: ${integrationId}.`);
     }
 
-    commandNotice = `${row.connector} · ${row.kind} · ${row.scope} · status ${row.status}.`;
+    setCommandNotice("info", `${row.connector} · ${row.kind} · ${row.scope} · status ${row.status}.`);
   }
 
   function openOfficeBankStatus(): void {
@@ -1006,7 +1021,13 @@
       />
 
       {#if commandNotice.length > 0}
-        <p class="notice" role="status">{commandNotice}</p>
+        <Alert
+          tone={commandNoticeTone}
+          title={commandNoticeTone === "error" ? "Error" : commandNoticeTone === "success" ? "Success" : "Info"}
+          message={commandNotice}
+          dismissible={true}
+          ondismiss={(): void => { setCommandNotice("info", ""); }}
+        />
       {/if}
 
       {#if !canUseCommandCenter}
@@ -1229,7 +1250,6 @@
     overflow: hidden;
   }
 
-  .notice,
   .redirecting-panel p,
   .redirecting-panel span,
   .readiness-panel p,
@@ -1246,16 +1266,6 @@
     gap: var(--ehq-space-4);
     overflow-y: auto;
     overflow-x: auto;
-  }
-
-  .notice {
-    margin: 0;
-    padding: var(--ehq-space-3);
-    border: 1px solid var(--ehq-yellow-border);
-    border-radius: var(--ehq-radius-sm);
-    background: var(--ehq-yellow-muted);
-    color: var(--ehq-yellow);
-    font-size: var(--ehq-type-caption-size);
   }
 
   .redirecting-panel {

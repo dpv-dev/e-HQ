@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { AuthSession } from "@ehq/auth";
-  import { Button } from "@ehq/ui";
+  import { Button, Checkbox } from "@ehq/ui";
   import sceneCommandCenter from "../../../../packages/ui/assets/backgrounds/scene-command-center.svg?url";
   import type { AppRoute } from "./routes.js";
   import { sendSupabasePasswordReset, signInWithSupabasePassword } from "./supabase.js";
@@ -148,10 +148,14 @@
       </label>
 
       <div class="form-row">
-        <label class="remember">
-          <input bind:checked={rememberSession} type="checkbox" />
-          remember me
-        </label>
+        <Checkbox
+          id="login-remember-session"
+          label="remember me"
+          checked={rememberSession}
+          indeterminate={false}
+          disabled={false}
+          onchange={(checked: boolean): void => { rememberSession = checked; }}
+        />
         <Button
           label="forgot password?"
           variant="secondary"
@@ -400,16 +404,6 @@
     justify-content: space-between;
     gap: var(--ehq-space-3);
     font-size: var(--ehq-type-caption-size);
-  }
-
-  .remember {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--ehq-space-2);
-  }
-
-  .remember input {
-    accent-color: var(--ehq-yellow);
   }
 
   /* Stretches the design-system Button into the full-width sign-in CTA. */

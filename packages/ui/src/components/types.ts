@@ -1,3 +1,5 @@
+import type { IconName } from "./icons.js";
+
 export type Tone = "success" | "warning" | "error" | "info" | "muted" | "active";
 export type WorkspaceKind = "office" | "distribution" | "command-center";
 export type ButtonVariant = "primary" | "secondary" | "tertiary" | "ghost" | "danger";
@@ -27,7 +29,8 @@ export interface ToolbarFilter {
 export interface WorkspaceNavItem {
   readonly label: string;
   readonly href: string;
-  readonly icon: string;
+  // Line-icon name from the internal set; "" renders no icon.
+  readonly icon: IconName | "";
   readonly active: boolean;
   readonly disabled: boolean;
   readonly badge: string | null;

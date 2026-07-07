@@ -36,8 +36,8 @@
     type SuspenseItem,
     type TrackSummary
   } from "@ehq/api-client";
-  import { BarsChart, Button, Input, KPI, Loader, PageHeader, SectionTemplate, Select, Table, Toolbar, WorkspaceShell } from "@ehq/ui";
-  import type { ChartPoint, SelectOption, TableColumn, TablePagination, TableRow, TableRowAction, Tone, ToolbarFilter, WorkspaceNavGroup, WorkspaceNavItem } from "@ehq/ui";
+  import { Alert, BarsChart, Button, Input, KPI, Loader, PageHeader, SectionTemplate, Select, Table, Toolbar, WorkspaceShell } from "@ehq/ui";
+  import type { ChartPoint, IconName, SelectOption, TableColumn, TablePagination, TableRow, TableRowAction, Tone, ToolbarFilter, WorkspaceNavGroup, WorkspaceNavItem } from "@ehq/ui";
   import { createShellApiClient } from "../../app-shell-data.js";
   import { parseCsvRecords } from "../../bank-parser.js";
   import { formatDateOnly, formatDateRange } from "../../date-format.js";
@@ -359,6 +359,23 @@
   ];
 
   let activePageId = $state<DistributionPageId>("dashboard");
+  const navIcons: Readonly<Record<DistributionPageId, IconName>> = {
+    dashboard: "home",
+    imports: "upload",
+    mapping: "layout-grid",
+    catalog: "folder",
+    contracts: "file-text",
+    allocations: "chart-bar",
+    suspense: "triangle-alert",
+    statements: "file-text",
+    payments: "bank",
+    revenue: "trending-up",
+    "financial-reconciliation": "check",
+    aliases: "more-horizontal",
+    duplicates: "search",
+    "audit-log": "clock",
+    settings: "settings"
+  };
   const shellNavGroups = $derived<readonly WorkspaceNavGroup[]>(
     navGroups.map((group: DistributionNavGroup): WorkspaceNavGroup => ({
       id: group.id,
@@ -366,7 +383,7 @@
       items: group.items.map((item: DistributionNavItem): WorkspaceNavItem => ({
         label: item.label,
         href: item.id,
-        icon: "",
+        icon: navIcons[item.id],
         active: activePageId === item.id,
         disabled: false,
         badge: null
@@ -3695,15 +3712,15 @@
       {/if}
 
       {#if mutationReceipt !== null && mutationReceiptPageId === activePageId}
-        <p class="receipt" role="status">Action accepted · audit recorded.</p>
+        <Alert tone="success" title="Action accepted" message="Audit recorded." dismissible={false} />
       {/if}
 
       {#if runReceipt !== null && runReceiptPageId === activePageId}
-        <p class="receipt" role="status">Run queued · lock held by the workflow.</p>
+        <Alert tone="info" title="Run queued" message="Lock held by the workflow." dismissible={false} />
       {/if}
 
       {#if actionError !== null && actionErrorPageId === activePageId}
-        <p class="receipt error" role="alert">{actionError}</p>
+        <Alert tone="error" title="Error" message={actionError} dismissible={false} />
       {/if}
 
       {#if activePageId === "dashboard"}
@@ -3920,7 +3937,9 @@
           <h2>{statementPreview?.payeeName ?? "Payee"} Statement</h2>
           <p>Period {statementPreview === null ? periodLabel(distributionPeriod) : formatDateRange(statementPreview.period_start, statementPreview.period_end)} · currency {statementPreview?.currency ?? "MUR"}</p>
           {#if printingStatementId !== null}
-            <p class="receipt" role="status">Preparing the print view…</p>
+            <div class="print-hidden">
+              <Alert tone="info" title="Print" message="Preparing the print view…" dismissible={false} />
+            </div>
           {/if}
           {#if statementPrintError !== null}
             <span class="panel-error" role="alert">{statementPrintError}</span>
@@ -4090,7 +4109,6 @@
     overflow: hidden;
   }
 
-  .receipt,
   label span,
   .import-result,
   .contracts-actions,
@@ -4113,7 +4131,6 @@
   }
 
 
-  .receipt,
   .import-result {
     margin: 0;
     padding: var(--ehq-space-3);
@@ -4122,12 +4139,6 @@
     background: var(--ehq-yellow-muted);
     color: var(--ehq-yellow);
     font-size: var(--ehq-type-caption-size);
-  }
-
-  .receipt.error {
-    border-color: var(--ehq-error);
-    background: var(--ehq-error-bg);
-    color: var(--ehq-error);
   }
 
   .kpi-grid {
@@ -4457,7 +4468,7 @@
       overflow: visible;
     }
 
-    .receipt,
+    .print-hidden,
     .statement-summary {
       display: none;
     }

@@ -13,7 +13,7 @@
     type AuthSession,
     type WorkspaceAppId
   } from "@ehq/auth";
-  import { Button, Loader } from "@ehq/ui";
+  import { Button, Checkbox, Loader } from "@ehq/ui";
   import commandCenterPhoto from "../../../../packages/ui/assets/backgrounds/hq-card-command-center.jpg?url";
   import distributionPhoto from "../../../../packages/ui/assets/backgrounds/hq-card-distribution.jpg?url";
   import landingBackground from "../../../../packages/ui/assets/backgrounds/hq-landing-command-room.png?url";
@@ -575,10 +575,14 @@
       </label>
 
       <div class="form-row">
-        <label class="remember">
-          <input bind:checked={rememberSession} type="checkbox" />
-          remember me
-        </label>
+        <Checkbox
+          id="landing-remember-session"
+          label="remember me"
+          checked={rememberSession}
+          indeterminate={false}
+          disabled={false}
+          onchange={(checked: boolean): void => { rememberSession = checked; }}
+        />
         <Button
           label="forgot password?"
           variant="secondary"
@@ -1705,16 +1709,6 @@
     justify-content: space-between;
     gap: var(--ehq-space-3);
     font-size: var(--ehq-type-caption-size);
-  }
-
-  .remember {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--ehq-space-2);
-  }
-
-  .remember input {
-    accent-color: var(--ehq-yellow);
   }
 
   /* Stretches the design-system Button into the full-width sign-in CTA. */
