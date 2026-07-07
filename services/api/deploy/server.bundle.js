@@ -45941,7 +45941,9 @@ function toReconciliationCandidates(dataset) {
       occurredOn: line.occurredOn,
       bankDescription: line.reference ?? line.id,
       ledgerDescription: transaction?.description ?? "Unmatched ledger line",
-      amountMicro: eofMoney.format(line.amountMurMinor),
+      // Statement lines store magnitude + direction; expose debits as negative
+      // so clients render outflows with the right sign and tone.
+      amountMicro: eofMoney.format(line.direction === "debit" ? -line.amountMurMinor : line.amountMurMinor),
       confidenceBp: match2?.confidenceBp ?? (line.reconciliationStatus === "matched" ? 1e4 : 0),
       status: toApiReconciliationStatus(line)
     };
