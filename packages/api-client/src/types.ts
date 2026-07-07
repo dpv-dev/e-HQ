@@ -360,6 +360,10 @@ export interface OfficeTransactionWriteRequest {
   readonly description: string;
   readonly amountMicro: MoneyMicroString;
   readonly currency: CurrencyCode;
+  // Income/expense is the transaction's own attribute; the category only files it
+  // under division/department and never rewrites the type. Omitted on update the
+  // stored type is preserved.
+  readonly type?: "income" | "expense" | null | undefined;
 }
 
 export interface OfficePlanComptableQuery {

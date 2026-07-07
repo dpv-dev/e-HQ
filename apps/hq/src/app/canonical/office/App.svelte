@@ -1112,7 +1112,8 @@
           projectId: editProjectId.length > 0 ? editProjectId : null,
           description: editDescription,
           amountMicro: decimalAmountToMicro(editAmount),
-          currency: transaction.currency
+          currency: transaction.currency,
+          type: transaction.type
         },
         { idempotencyKey: createIdempotencyKey("transaction-update") }
       );
@@ -2401,7 +2402,8 @@
         projectId: createProjectId.length > 0 ? createProjectId : null,
         description: createDescription.trim(),
         amountMicro: (createDirection === "expense" ? -absoluteMicro : absoluteMicro).toString(),
-        currency: account.currency
+        currency: account.currency,
+        type: createDirection
       };
       const receipt = await client.office.createTransaction(request, {
         idempotencyKey: createIdempotencyKey("transaction-create")
@@ -2475,7 +2477,8 @@
               projectId: pendingClassifyProjectId.length > 0 ? pendingClassifyProjectId : transaction.projectId,
               description: transaction.description,
               amountMicro: transaction.amountMicro,
-              currency: transaction.currency
+              currency: transaction.currency,
+              type: transaction.type
             },
             { idempotencyKey: createIdempotencyKey(`pending-classify-${transaction.id}`) }
           )

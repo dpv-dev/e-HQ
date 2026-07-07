@@ -507,7 +507,12 @@ const officeTransactionWriteSchema = workspaceBodySchema.extend({
   projectId: nullableStringSchema,
   description: z.string().min(1),
   amountMicro: z.string().regex(moneyStringPattern),
-  currency: z.string().regex(currencyCodePattern)
+  currency: z.string().regex(currencyCodePattern),
+  // Income/expense is the transaction's own attribute; the category only files it
+  // under division/department. Optional for backward compatibility: absent on
+  // create falls back to the legacy category-type derivation, absent on update
+  // preserves the stored type.
+  type: z.enum(["income", "expense"]).nullable().optional()
 });
 const officePlanComptableWriteSchema = workspaceBodySchema.extend({
   parentId: nullableStringSchema,
@@ -1897,7 +1902,7 @@ async function officeTransactionCreateResponse(context: ApiContext, dependencies
   const request = await readZodBody<OfficeTransactionWriteRequest>(context, officeTransactionWriteSchema);
   const amountMinor = normalizeEofAmountField(context, request.amountMicro, "amountMicro");
   const transactionId = randomUUID();
-  const transactionType = officeTransactionType(dependencies.fixtures.office, request.categoryId, request.amountMicro);
+  const transactionType = request.type ?? officeTransactionType(dependencies.fixtures.office, request.categoryId, request.amountMicro);
   const transactionStatus: OfficeTransactionRow["status"] = request.categoryId === null ? "draft" : "validated";
   const idempotencyKey = requireIdempotencyKey(context);
   const actor = context.get("authUser");
@@ -1945,7 +1950,9 @@ async function officeTransactionUpdateResponse(context: ApiContext, dependencies
   const request = await readZodBody<OfficeTransactionWriteRequest>(context, officeTransactionWriteSchema);
   const before = requireOfficeTransaction(dependencies.fixtures.office, transactionId);
   const amountMinor = normalizeEofAmountField(context, request.amountMicro, "amountMicro");
-  const transactionType = officeTransactionType(dependencies.fixtures.office, request.categoryId, request.amountMicro);
+  // Classification must never flip income/expense: keep the stored type unless
+  // the caller explicitly asks to change it.
+  const transactionType = request.type ?? before.type;
   const transactionStatus: OfficeTransactionRow["status"] = request.categoryId === null ? "draft" : "validated";
   const idempotencyKey = requireIdempotencyKey(context);
   const actor = context.get("authUser");
@@ -2361,11 +2368,10 @@ async function officeReconciliationCreateTransactionResponse(context: ApiContext
     currency: line.currency
   };
   const amountMinor = normalizeEofAmountField(context, writeRequest.amountMicro, "amountMicro");
-  // With no category the type comes from the bank direction (credit = income, debit = expense);
-  // with a category it comes from the category's own type.
-  const transactionType: OfficeTransactionRow["type"] = request.categoryId !== null
-    ? officeTransactionType(dependencies.fixtures.office, request.categoryId, writeRequest.amountMicro)
-    : line.direction === "credit" ? "income" : "expense";
+  // The bank direction is the source of truth for income/expense (credit = money
+  // in, debit = money out); the category only files the transaction and never
+  // rewrites the type.
+  const transactionType: OfficeTransactionRow["type"] = line.direction === "credit" ? "income" : "expense";
   const transactionStatus: OfficeTransactionRow["status"] = request.categoryId === null ? "draft" : "validated";
   const idempotencyKey = requireIdempotencyKey(context);
   const actor = context.get("authUser");
@@ -3278,7 +3284,9 @@ function resolveLedgerBulkRow(row: OfficeLedgerBulkRow, rowNumber: number, datas
   }
 
   let categoryId: string | null = null;
-  let resolvedType: "income" | "expense" = row.type;
+  // The row states income/expense itself; the resolved category only files the
+  // transaction under division/department and never rewrites the type.
+  const resolvedType: "income" | "expense" = row.type;
   if (
     row.categoryId !== null ||
     row.accountCode !== null ||
@@ -3299,7 +3307,6 @@ function resolveLedgerBulkRow(row: OfficeLedgerBulkRow, rowNumber: number, datas
       issues.push(resolution.issue);
     } else {
       categoryId = resolution.category.id;
-      resolvedType = resolution.category.type;
     }
   }
 
@@ -8311,7 +8318,8 @@ function toOfficeTransaction(dataset: OfficeAnalyticsDataset, transaction: Offic
       divisionLabel: categoryPath?.division?.name ?? null,
       categoryId: categoryPath?.category.id ?? null,
       categoryLabel: categoryPath?.category.name ?? null,
-      type: categoryPath?.category.type ?? null
+      // Income/expense belongs to the transaction; the category only files it.
+      type: transaction.type
     };
   }
 
@@ -8330,7 +8338,8 @@ function toOfficeTransaction(dataset: OfficeAnalyticsDataset, transaction: Offic
     divisionLabel: categoryPath.division?.name ?? null,
     categoryId: categoryPath.category.id,
     categoryLabel: categoryPath.category.name,
-    type: categoryPath.category.type
+    // Income/expense belongs to the transaction; the category only files it.
+    type: transaction.type
   };
 }
 

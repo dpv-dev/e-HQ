@@ -2165,6 +2165,59 @@ async function reconciliationLineStatus(
   return page.items.find((item) => item.statementLineId === statementLineId);
 }
 
+test("classification files a transaction without flipping its income/expense type", async () => {
+  const app = createWriteEnabledFixtureApiService();
+  const created = await jsonWrite(app, "/eof/v1/transactions", "POST", "type-keep-create", {
+    workspaceId: "workspace_1",
+    occurredOn: "2026-02-22",
+    accountId: "bank_mur",
+    categoryId: null,
+    projectId: null,
+    description: "Performance fee collected",
+    amountMicro: "150.00",
+    currency: "MUR",
+    type: "income"
+  });
+  assertReceipt(created);
+
+  // Filing under an expense-typed category must not rewrite the transaction type.
+  assertReceipt(await jsonWrite(app, `/eof/v1/transactions/${created.id}`, "PATCH", "type-keep-classify", {
+    workspaceId: "workspace_1",
+    occurredOn: "2026-02-22",
+    accountId: "bank_mur",
+    categoryId: "cat_rental_expense",
+    projectId: null,
+    description: "Performance fee collected",
+    amountMicro: "150.00",
+    currency: "MUR"
+  }));
+
+  const page = await app.request("/eof/v1/transactions?workspaceId=workspace_1&limit=100", { headers: authHeaders() });
+  assert.equal(page.status, 200);
+  const transactions = (await page.json()) as {
+    readonly items: readonly { readonly id: string; readonly type: string; readonly categoryId: string | null }[];
+  };
+  const classified = transactions.items.find((item) => item.id === created.id);
+  assert.ok(classified !== undefined);
+  assert.equal(classified.categoryId, "cat_rental_expense");
+  assert.equal(classified.type, "income", `classification flipped the type to ${classified.type}`);
+});
+
+test("reconciliation candidates sign bank amounts by direction", async () => {
+  const app = createFixtureApiService();
+  const response = await app.request("/eof/v1/reconciliations?workspaceId=workspace_1", { headers: authHeaders() });
+  assert.equal(response.status, 200);
+  const page = (await response.json()) as {
+    readonly items: readonly { readonly statementLineId: string; readonly amountMicro: string }[];
+  };
+  const debit = page.items.find((item) => item.statementLineId === "bank_line_unmatched");
+  assert.ok(debit !== undefined);
+  assert.ok(debit.amountMicro.startsWith("-"), `debit line must be negative, got ${debit.amountMicro}`);
+  const credit = page.items.find((item) => item.statementLineId === "bank_line_income");
+  assert.ok(credit !== undefined);
+  assert.ok(!credit.amountMicro.startsWith("-"), `credit line must stay positive, got ${credit.amountMicro}`);
+});
+
 test("reconciliation manual match, unmatch, and reject flip the bank line status", async () => {
   const app = createWriteEnabledFixtureApiService();
   assert.equal((await reconciliationLineStatus(app, "bank_line_unmatched"))?.status, "unmatched");
