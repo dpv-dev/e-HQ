@@ -45004,7 +45004,7 @@ function parseOfficeBankPreviewRow(row, workspaceId, accounts, exchangeRates) {
 function accountForRow(row, workspaceId, currency, accounts) {
   const accountId = rowValue(row, ["accountId", "account_id"]);
   if (accountId !== null) {
-    return accounts.find((account) => account.id === accountId && account.workspaceId === workspaceId) ?? null;
+    return accounts.find((account) => account.id === accountId) ?? null;
   }
   return accounts.find((account) => account.workspaceId === workspaceId && account.currency === currency && account.isActive) ?? null;
 }

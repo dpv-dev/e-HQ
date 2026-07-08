@@ -7237,7 +7237,11 @@ function accountForRow(
 ): OfficeBankAccountRow | null {
   const accountId = rowValue(row, ["accountId", "account_id"]);
   if (accountId !== null) {
-    return accounts.find((account: OfficeBankAccountRow): boolean => account.id === accountId && account.workspaceId === workspaceId) ?? null;
+    // Look up by ID only — workspace access is validated upstream by resolveWorkspaceId.
+    // Filtering by workspaceId here caused the same false-null as reassign-account:
+    // accounts with a mismatched stored workspace_id fell through to the currency
+    // fallback and landed on the wrong bank.
+    return accounts.find((account: OfficeBankAccountRow): boolean => account.id === accountId) ?? null;
   }
 
   return accounts.find((account: OfficeBankAccountRow): boolean => account.workspaceId === workspaceId && account.currency === currency && account.isActive) ?? null;
