@@ -75,9 +75,28 @@ check_counter "hardcoded colors in apps/hq *.svelte" "$COLORS_NOW" "$COLORS_BASE
 check_counter "raw <button> elements in apps/hq" "$BUTTONS_NOW" "$BUTTONS_BASE" \
   "Use the @ehq/ui Button component; raw buttons are reserved for documented exceptions."
 
+# --- 4. Float-money guard -----------------------------------------------------
+# Number(x).toFixed() and parseFloat() are forbidden in financial source: use
+# BigInt arithmetic instead. The one documented exception (DesignSystemPage demo)
+# is excluded via path filter. Add "// no-float-ok" comment for any future
+# legitimate use-site that must be manually reviewed.
+FLOAT_MONEY_SOURCES=(packages/domain-finance/src packages/domain-distribution/src packages/domain-office/src services/api/src)
+FLOAT_HITS=$(
+  { grep -rn "Number(.*\.toFixed\|parseFloat(" "${FLOAT_MONEY_SOURCES[@]}" 2>/dev/null || true; } \
+  | { grep -v "// no-float-ok" || true; } \
+  | { grep -v DesignSystemPage || true; } \
+  | wc -l | tr -d ' '
+)
+if [ "$FLOAT_HITS" -gt 0 ]; then
+  echo "REGRESSION: float-money coercion detected ($FLOAT_HITS hit(s)) — use BigInt arithmetic:"
+  { grep -rn "Number(.*\.toFixed\|parseFloat(" "${FLOAT_MONEY_SOURCES[@]}" 2>/dev/null || true; } \
+    | grep -v "// no-float-ok" | grep -v "DesignSystemPage" | head -10
+  FAILED=1
+fi
+
 if [ "$FAILED" -ne 0 ]; then
   echo "check-regressions: FAILED"
   exit 1
 fi
 
-echo "check-regressions: ok (colors $COLORS_NOW/$COLORS_BASE, raw buttons $BUTTONS_NOW/$BUTTONS_BASE, stubs 0)"
+echo "check-regressions: ok (colors $COLORS_NOW/$COLORS_BASE, raw buttons $BUTTONS_NOW/$BUTTONS_BASE, stubs 0, float-money 0)"

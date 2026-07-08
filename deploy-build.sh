@@ -29,6 +29,9 @@ corepack pnpm --filter @ehq/hq build
 echo "==> Anti-regression gate (audit lock-in)"
 bash scripts/check-regressions.sh
 
+echo "==> SQL column completeness check"
+node scripts/check-sql-columns.mjs
+
 echo "==> Package upload zips (deterministic, secret-guarded)"
 bash deploy-zip.sh
 
