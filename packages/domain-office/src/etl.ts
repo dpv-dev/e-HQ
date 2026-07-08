@@ -370,6 +370,7 @@ function transformProjects(rows: readonly LegacyOfficeProjectRow[]): readonly Of
 function transformTransactions(rows: readonly LegacyOfficeTransactionRow[]): readonly OfficeTransactionRow[] {
   return rows.map((row) => ({
     id: row.id,
+    workspaceId: "eeee-mu",
     transactionDate: row.transactionDate,
     type: normalizeFinancialType(row.type, "transaction.type", row.id),
     status: normalizeTransactionStatus(row.status),

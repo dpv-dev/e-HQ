@@ -27,8 +27,8 @@
   --ehq-surface-high:#333D44;   /* visual identity: Surface High */
   --ehq-surface-raised:#3E4751; /* elevated step kept above Surface High */
 
-  /* Text — warmed off-white (visual identity: Text Primary #F6F7F9) */
-  --ehq-text:#F6F7F9;
+  /* Text — pure white */
+  --ehq-text:#ffffff;
   --ehq-text-white:rgba(255,255,255,1);
   --ehq-text-muted:rgba(255,255,255,.48);
   --ehq-text-soft:rgba(255,255,255,.74);

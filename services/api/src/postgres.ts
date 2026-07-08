@@ -163,7 +163,7 @@ async function readOfficeDataset(pool: Pool): Promise<OfficeAnalyticsDataset> {
   const projectBudgetLines = await queryRows(pool, "select id::text, project_id::text, category_id::text, type, planned_amount_minor::text from project_budget_lines order by legacy_id nulls last, id", []);
   const transactions = await queryRows(
     pool,
-    "select id::text, transaction_date, type, status, is_active, description, category_id::text, partner_id::text, project_id::text, account_id::text, amount_minor::text, original_currency, exchange_rate_e10::text from transactions order by transaction_date, id",
+    "select id::text, workspace_id, transaction_date, type, status, is_active, description, category_id::text, partner_id::text, project_id::text, account_id::text, amount_minor::text, original_currency, exchange_rate_e10::text from transactions order by transaction_date, id",
     []
   );
   const financialAllocations = await queryRows(pool, "select id::text, transaction_id::text, department_id::text, amount_minor::text from financial_allocations order by legacy_id nulls last, id", []);
@@ -265,7 +265,11 @@ async function readDistributionContracts(pool: Pool): Promise<readonly Distribut
     pool,
     `select c.id::text, c.title, c.status, c.effective_from, c.effective_to, rr.payee_id::text, rr.percentage::text,
       coalesce(ct.currency, 'MUR') as currency,
-      coalesce(sum(ct.amount) filter (where ct.recoupable = true and ct.status not in ('recovered', 'satisfied', 'cancelled', 'deleted')), 0)::text as open_expense
+      coalesce(sum(
+        ct.amount - coalesce((
+          select sum(ea.amount_applied) from expense_applications ea where ea.cost_term_id = ct.id
+        ), 0)
+      ) filter (where ct.recoupable = true and ct.status not in ('recovered', 'satisfied', 'cancelled', 'deleted')), 0)::text as open_expense
      from contracts c
      left join royalty_rules rr on rr.contract_id = c.id
      left join contract_cost_terms ct on ct.contract_id = c.id
@@ -289,20 +293,39 @@ async function readDistributionContracts(pool: Pool): Promise<readonly Distribut
 async function readDistributionContractExpenses(pool: Pool): Promise<readonly DistributionContractExpense[]> {
   const rows = await queryRows(
     pool,
-    "select id::text, contract_id::text, payee_id::text, amount::text, currency, status, created_at from contract_cost_terms order by legacy_id nulls last, id",
+    `select cct.id::text, cct.contract_id::text, cct.payee_id::text, cct.amount::text, cct.currency, cct.status, cct.created_at,
+      coalesce(sum(ea.amount_applied), 0)::text as applied_amount
+     from contract_cost_terms cct
+     left join expense_applications ea on ea.cost_term_id = cct.id
+     group by cct.id, cct.contract_id, cct.payee_id, cct.amount, cct.currency, cct.status, cct.created_at
+     order by cct.legacy_id nulls last, cct.id`,
     []
   );
-  return rows.map((row) => ({
-    id: stringCell(row, "id"),
-    contractId: stringCell(row, "contract_id"),
-    payeeId: nullableStringCell(row, "payee_id") ?? "unassigned",
-    incurredOn: timestampCell(row, "created_at").slice(0, 10),
-    label: "Contract cost term",
-    originalAmountMicro: stringCell(row, "amount"),
-    openAmountMicro: isOpenExpenseStatus(stringCell(row, "status")) ? stringCell(row, "amount") : "0.0000000000",
-    currency: currencyCell(row, "currency"),
-    status: toApiExpenseStatus(stringCell(row, "status"))
-  }));
+  return rows.map((row) => {
+    const isOpen = isOpenExpenseStatus(stringCell(row, "status"));
+    const fullAmount = stringCell(row, "amount");
+    const appliedAmount = stringCell(row, "applied_amount");
+    // Subtract already-applied amounts so the open balance reflects reality.
+    // Use integer arithmetic on the scale-10 micro strings.
+    let openAmountMicro = "0.0000000000";
+    if (isOpen) {
+      const full = BigInt(Math.round(Number(fullAmount) * 1e10));
+      const applied = BigInt(Math.round(Number(appliedAmount) * 1e10));
+      const remaining = full - applied > 0n ? full - applied : 0n;
+      openAmountMicro = (remaining / 10_000_000_000n).toString() + "." + String(remaining % 10_000_000_000n).padStart(10, "0");
+    }
+    return {
+      id: stringCell(row, "id"),
+      contractId: stringCell(row, "contract_id"),
+      payeeId: nullableStringCell(row, "payee_id") ?? "unassigned",
+      incurredOn: timestampCell(row, "created_at").slice(0, 10),
+      label: "Contract cost term",
+      originalAmountMicro: fullAmount,
+      openAmountMicro,
+      currency: currencyCell(row, "currency"),
+      status: toApiExpenseStatus(stringCell(row, "status"))
+    };
+  });
 }
 
 async function readDistributionMappingRows(pool: Pool): Promise<readonly DistributionMappingRow[]> {
@@ -392,13 +415,14 @@ async function readDistributionAllocationCostTerms(pool: Pool): Promise<readonly
 async function readDistributionExistingExpenseApplications(pool: Pool): Promise<readonly DistributionExistingExpenseApplication[]> {
   const rows = await queryRows(
     pool,
-    "select cost_term_id::text, amount_applied::text, currency from expense_applications order by legacy_id nulls last, id",
+    "select cost_term_id::text, amount_applied::text, currency, calculation_run_id::text from expense_applications order by legacy_id nulls last, id",
     []
   );
   return rows.map((row) => ({
     costTermId: stringCell(row, "cost_term_id"),
     amountApplied: stringCell(row, "amount_applied"),
-    currency: currencyCell(row, "currency")
+    currency: currencyCell(row, "currency"),
+    calculationRunId: nullableStringCell(row, "calculation_run_id")
   }));
 }
 
@@ -501,6 +525,7 @@ function toOfficeProjectBudgetLine(row: PgRow): OfficeProjectBudgetLineRow {
 function toOfficeTransaction(row: PgRow): OfficeTransactionRow {
   return {
     id: stringCell(row, "id"),
+    workspaceId: stringCell(row, "workspace_id"),
     transactionDate: timestampCell(row, "transaction_date"),
     type: enumCell(row, "type", ["income", "expense"]),
     status: enumCell(row, "status", ["validated", "draft", "cancelled"]),

@@ -91,6 +91,7 @@ function createOfficeFixture(): OfficeAnalyticsDataset {
     transactions: [
       {
         id: "tx_bedouin_income",
+        workspaceId: "workspace_1",
         transactionDate: "2026-02-04T10:00:00.000Z",
         type: "income",
         status: "validated",
@@ -106,6 +107,7 @@ function createOfficeFixture(): OfficeAnalyticsDataset {
       },
       {
         id: "tx_bedouin_rental",
+        workspaceId: "workspace_1",
         transactionDate: "2026-02-09T10:00:00.000Z",
         type: "expense",
         status: "validated",
@@ -121,6 +123,7 @@ function createOfficeFixture(): OfficeAnalyticsDataset {
       },
       {
         id: "tx_mcb_fee",
+        workspaceId: "workspace_1",
         transactionDate: "2026-02-12T10:00:00.000Z",
         type: "expense",
         status: "validated",
@@ -136,6 +139,7 @@ function createOfficeFixture(): OfficeAnalyticsDataset {
       },
       {
         id: "tx_uncategorized",
+        workspaceId: "workspace_1",
         transactionDate: "2026-02-15T10:00:00.000Z",
         type: "expense",
         status: "draft",

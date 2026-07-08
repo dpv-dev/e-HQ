@@ -340,6 +340,14 @@ interface OfficeBankImportDeleteCounts {
   readonly reconciliationMatchCount: number;
 }
 
+interface OfficeFinancialResetCounts {
+  readonly transactionCount: number;
+  readonly statementLineCount: number;
+  readonly reconciliationMatchCount: number;
+  readonly importBatchCount: number;
+  readonly bankAccountCount: number;
+}
+
 interface ContractRoyaltyRuleRequest {
   readonly payeeId: string;
   readonly percentage: string;
@@ -489,6 +497,13 @@ const optionalNullableStringSchema = z.preprocess(
   z.string().min(1).nullable()
 );
 const workspaceBodySchema = z.object({ workspaceId: z.string().min(1) });
+// Defense in depth beyond the administrator-role gate: the literal phrase must be typed
+// by a human, so this can't be triggered by a script that merely holds an admin token.
+const OFFICE_FINANCIAL_RESET_PHRASE = "DELETE ALL OFFICE DATA";
+const officeFinancialResetSchema = workspaceBodySchema.extend({
+  confirmationPhrase: z.literal(OFFICE_FINANCIAL_RESET_PHRASE)
+});
+type OfficeFinancialResetRequest = z.infer<typeof officeFinancialResetSchema>;
 const jsonRecordSchema = z.record(z.string(), z.unknown());
 const commandCenterSettingUpdateSchema = workspaceBodySchema.extend({
   key: z.string().min(1),
@@ -1030,6 +1045,10 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
 
   app.post("/eof/v1/bank-import/batches/:batchId/delete", async (context) => {
     return officeBankImportDeleteResponse(context, dependencies);
+  });
+
+  app.post("/eof/v1/office/reset-financial-data", async (context) => {
+    return officeFinancialResetResponse(context, dependencies);
   });
 
   app.get("/eof/v1/reconciliations", (context) => {
@@ -2326,8 +2345,12 @@ async function officeReconciliationIgnoreResponse(context: ApiContext, dependenc
 async function officeBankRawLineReassignResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
   const request = await readZodBody<OfficeBankRawLineReassignRequest>(context, officeBankRawLineReassignSchema);
   const line = requireOfficeBankLine(dependencies.fixtures.office, request.statementLineId);
+  // Look up target account by ID only — workspace access is already validated
+  // upstream by requirePermissionForWorkspace. Filtering by workspaceId here
+  // causes false 404s when the stored workspace_id differs from the request
+  // string (e.g. 'office' vs 'eeee-mu' from different import paths).
   const targetAccount = dependencies.fixtures.office.bankAccounts.find(
-    (account: OfficeBankAccountRow): boolean => account.id === request.accountId && account.workspaceId === request.workspaceId
+    (account: OfficeBankAccountRow): boolean => account.id === request.accountId
   );
   if (targetAccount === undefined) {
     throw new ApiRouteError(404, "office_bank_account_not_found", "Target bank account was not found.", [
@@ -3481,7 +3504,7 @@ async function officeLedgerBulkConfirmResponse(context: ApiContext, dependencies
     idempotencyKey,
     requestBody: request,
     write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string) => {
-      await persistOfficeLedgerBulk(tx, accepted, actor.userId);
+      await persistOfficeLedgerBulk(tx, accepted, actor.userId, request.workspaceId);
       const auditEventId = await appendAuditEvent(tx, {
         actor,
         action: "office_ledger_bulk_confirm",
@@ -3494,7 +3517,7 @@ async function officeLedgerBulkConfirmResponse(context: ApiContext, dependencies
         },
         idempotencyKey: resolvedIdempotencyKey
       });
-      upsertOfficeLedgerBulkFixture(dependencies.fixtures, accepted);
+      upsertOfficeLedgerBulkFixture(dependencies.fixtures, accepted, request.workspaceId);
       return { ...mutationReceipt(batchId, auditEventId), upsertedRowCount: accepted.length };
     }
   });
@@ -3503,7 +3526,7 @@ async function officeLedgerBulkConfirmResponse(context: ApiContext, dependencies
 
 // Idempotent by legacy tx_id: `on conflict (legacy_id)` updates in place, so re-pushing a batch
 // never duplicates. Also back-fills each resolved category's Mauritian statutory account code.
-async function persistOfficeLedgerBulk(tx: ApiWriteTransaction, rows: readonly ResolvedLedgerRow[], actorUserId: string): Promise<void> {
+async function persistOfficeLedgerBulk(tx: ApiWriteTransaction, rows: readonly ResolvedLedgerRow[], actorUserId: string, workspaceId: string): Promise<void> {
   if (tx.kind === "memory" || rows.length === 0) {
     return;
   }
@@ -3514,12 +3537,12 @@ async function persistOfficeLedgerBulk(tx: ApiWriteTransaction, rows: readonly R
     const amount = row.amountMinor.toString();
     await tx.executor.execute(sql`
       insert into transactions (
-        id, legacy_id, transaction_date, type, status, is_active, description,
+        id, legacy_id, workspace_id, transaction_date, type, status, is_active, description,
         category_id, partner_id, project_id, account_id, amount_minor, original_amount_minor, original_currency,
         total_amount_minor, source, created_by_user_id, approved_by_user_id, approved_at
       )
       values (
-        ${randomUUID()}, ${row.legacyId}, ${occurredAt}, ${row.type}, ${row.status}, true, ${row.description},
+        ${randomUUID()}, ${row.legacyId}, ${workspaceId}, ${occurredAt}, ${row.type}, ${row.status}, true, ${row.description},
         ${row.categoryId}, ${row.partnerId}, ${row.projectId}, null, ${amount}, ${amount}, ${row.currency === "MUR" ? null : row.currency},
         ${amount}, 'ledger_import', ${actorUserId}, ${approvedBy}, ${approvedAt}
       )
@@ -3548,13 +3571,14 @@ async function persistOfficeLedgerBulk(tx: ApiWriteTransaction, rows: readonly R
   }
 }
 
-function upsertOfficeLedgerBulkFixture(fixtures: ApiFixtureStore, rows: readonly ResolvedLedgerRow[]): void {
+function upsertOfficeLedgerBulkFixture(fixtures: ApiFixtureStore, rows: readonly ResolvedLedgerRow[], workspaceId: string): void {
   if (rows.length === 0) {
     return;
   }
   const mutableOffice = fixtures.office as Mutable<OfficeAnalyticsDataset>;
   const added = rows.map((row: ResolvedLedgerRow): OfficeTransactionRow => ({
     id: randomUUID(),
+    workspaceId,
     transactionDate: `${row.occurredOn}T00:00:00.000Z`,
     type: row.type,
     status: row.status,
@@ -4225,6 +4249,7 @@ function transactionFromOfficeRequest(
 ): OfficeTransactionRow {
   return {
     id,
+    workspaceId: request.workspaceId,
     transactionDate: `${request.occurredOn}T00:00:00.000Z`,
     type: transactionType,
     status: transactionStatus,
@@ -4323,6 +4348,7 @@ async function persistOfficeTransactionUpsert(
   await tx.executor.execute(sql`
     insert into transactions (
       id,
+      workspace_id,
       transaction_date,
       type,
       status,
@@ -4341,6 +4367,7 @@ async function persistOfficeTransactionUpsert(
     )
     values (
       ${input.id},
+      ${input.request.workspaceId},
       ${occurredAt},
       ${input.transactionType},
       ${input.transactionStatus},
@@ -5112,6 +5139,31 @@ async function persistDistributionAllocationUnpost(tx: ApiWriteTransaction, runI
     set status = 'void'
     where calculation_run_id = ${runId}
   `);
+  // P3a: return earnings to 'pending' so future runs can pick them up again.
+  await tx.executor.execute(sql`
+    update normalized_earnings
+    set calculation_status = 'pending'
+    where id in (
+      select earning_id from earning_allocations where calculation_run_id = ${runId}
+    )
+  `);
+  // P3b: delete the expense_applications this run created, then reset any
+  // cost_terms whose entire applied balance is now gone back to 'open'.
+  await tx.executor.execute(sql`
+    with deleted_apps as (
+      delete from expense_applications
+      where calculation_run_id = ${runId}
+      returning cost_term_id
+    )
+    update contract_cost_terms
+    set status = 'open'
+    where id in (select cost_term_id from deleted_apps)
+      and status in ('recovered', 'satisfied', 'partially_recovered')
+      and not exists (
+        select 1 from expense_applications
+        where cost_term_id = contract_cost_terms.id
+      )
+  `);
 }
 
 function unpostDistributionAllocationFixture(fixtures: ApiFixtureStore, runId: string): void {
@@ -5119,8 +5171,38 @@ function unpostDistributionAllocationFixture(fixtures: ApiFixtureStore, runId: s
   mutableDistribution.calculationRuns = fixtures.distribution.calculationRuns.map((run) =>
     run.id === runId ? { ...run, status: "excluded", finishedAt: run.finishedAt ?? new Date().toISOString() } : run
   );
+  // P3a: collect affected earningIds before voiding allocations so we can reset their status.
+  const allocatedEarningIds = new Set<string>(
+    fixtures.distribution.earningAllocations
+      .filter((alloc) => alloc.calculationRunId === runId)
+      .map((alloc) => alloc.earningId)
+  );
   mutableDistribution.earningAllocations = fixtures.distribution.earningAllocations.map((allocation) =>
     allocation.calculationRunId === runId ? { ...allocation, status: "void" } : allocation
+  );
+  // P3a: reset calculationStatus back to 'pending' for all affected earnings.
+  mutableDistribution.normalizedEarnings = fixtures.distribution.normalizedEarnings.map((earning) =>
+    allocatedEarningIds.has(earning.id) ? { ...earning, calculationStatus: "pending" } : earning
+  );
+  // P3b: remove expense_applications from this run and reset cost_terms that
+  // no longer have any remaining applications.
+  const mutableFixtures = fixtures as Mutable<ApiFixtureStore>;
+  const removedTermIds = new Set<string>(
+    fixtures.distributionExpenseApplications
+      .filter((app) => app.calculationRunId === runId)
+      .map((app) => app.costTermId)
+  );
+  mutableFixtures.distributionExpenseApplications = fixtures.distributionExpenseApplications.filter(
+    (app) => app.calculationRunId !== runId
+  );
+  // Reset cost_terms that have no remaining expense_applications back to 'open'.
+  const remainingTermIds = new Set<string>(
+    mutableFixtures.distributionExpenseApplications.map((app) => app.costTermId)
+  );
+  mutableFixtures.distributionCostTerms = fixtures.distributionCostTerms.map((term) =>
+    removedTermIds.has(term.id) && !remainingTermIds.has(term.id) && (term.status === "recovered" || term.status === "satisfied" || term.status === "partially_recovered")
+      ? { ...term, status: "open" }
+      : term
   );
 }
 
@@ -5297,7 +5379,9 @@ async function distributionStatementVoidResponse(context: ApiContext, dependenci
     write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<StatementVoidMutationResponse> => {
       const statement = requireStatementForVoid(dependencies, statementId);
       const ledgerRow = requireStatementLedgerRow(dependencies, statementId);
-      await acquireAdvisoryLock(tx, `distribution:statement:void:${statementId}`);
+      // P4a: use the same lock key as payment mutations so void and payment
+      // operations on the same statement are fully serialized.
+      await acquireAdvisoryLock(tx, `distribution:payment:statement:${statementId}`);
       const voidPlan = buildVoidPlan({ id: statement.id, status: statement.status }, ledgerRow);
       const persistInput: PersistDistributionStatementVoidInput = {
         statementId,
@@ -5352,6 +5436,10 @@ async function distributionPaymentRecordResponse(context: ApiContext, dependenci
       // (even on different payments) must not interleave their read-compute-write.
       await acquireAdvisoryLock(tx, `distribution:payment:statement:${request.statementId}`);
       const statement = requireDistributionStatement(dependencies.fixtures.distribution, request.statementId);
+      // P4b: reject payments against a void statement.
+      if (statement.status === "void") {
+        throw new ApiRouteError(409, "statement_void", "Cannot record a payment against a void statement.", [`statementId=${request.statementId}`]);
+      }
       assertPaymentMatchesStatement(context, request.payeeId, request.currency, statement);
       const paymentId = randomUUID();
       const statementPaymentLinkId = randomUUID();
@@ -5412,6 +5500,10 @@ async function distributionPaymentUpdateResponse(context: ApiContext, dependenci
       await acquireAdvisoryLock(tx, `distribution:payment:statement:${link.statementId}`);
       const statement = requireDistributionStatement(dependencies.fixtures.distribution, link.statementId);
       assertPaymentIsMutable(context, payment);
+      // P4b: reject updates against a void statement.
+      if (statement.status === "void") {
+        throw new ApiRouteError(409, "statement_void", "Cannot update a payment against a void statement.", [`statementId=${link.statementId}`]);
+      }
       assertPaymentMatchesStatement(context, payment.payeeId, request.currency, statement);
       const persistInput: PersistDistributionPaymentUpdateInput = {
         paymentId,
@@ -5469,6 +5561,10 @@ async function distributionPaymentReconcileResponse(context: ApiContext, depende
       await acquireAdvisoryLock(tx, `distribution:payment:statement:${link.statementId}`);
       const statement = requireDistributionStatement(dependencies.fixtures.distribution, link.statementId);
       assertPaymentIsMutable(context, payment);
+      // P4b: reject reconciliation against a void statement.
+      if (statement.status === "void") {
+        throw new ApiRouteError(409, "statement_void", "Cannot reconcile a payment against a void statement.", [`statementId=${link.statementId}`]);
+      }
       assertPaymentMatchesStatement(context, payment.payeeId, payment.currency, statement);
       const persistInput: PersistDistributionPaymentReconcileInput = {
         paymentId,
@@ -6151,6 +6247,168 @@ async function officeBankImportDeleteResponse(context: ApiContext, dependencies:
     }
   });
   return context.json(result.body, result.status);
+}
+
+// Administrator-only, irreversible: wipes every Office transaction (validated included —
+// unlike the single-batch delete above, this one is explicitly allowed to erase posted
+// ledger history) plus every bank account/import batch/statement line/reconciliation
+// match for this workspace. Never touches the chart of accounts (departments, divisions,
+// categories), projects, or partners — those are structural setup, not transactional
+// history, and were not named in the reset's scope. Distribution tables are untouched.
+async function officeFinancialResetResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const request = await readZodBody<OfficeFinancialResetRequest>(context, officeFinancialResetSchema);
+  const fixtureCounts = countOfficeFinancialResetFixtureDependencies(dependencies.fixtures, request.workspaceId);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_financial_reset",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: { workspaceId: request.workspaceId },
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `office:financial-reset:${request.workspaceId}`);
+      const deletedCounts = await persistOfficeFinancialReset(tx, request.workspaceId);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_financial_reset",
+        targetType: "office_workspace",
+        targetId: request.workspaceId,
+        before: { counts: fixtureCounts },
+        after: { workspaceId: request.workspaceId, deletedCounts },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      resetOfficeFinancialFixtures(dependencies.fixtures, request.workspaceId);
+      return mutationReceipt(request.workspaceId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function persistOfficeFinancialReset(tx: ApiWriteTransaction, workspaceId: string): Promise<OfficeFinancialResetCounts> {
+  if (tx.kind === "memory") {
+    return { transactionCount: 0, statementLineCount: 0, reconciliationMatchCount: 0, importBatchCount: 0, bankAccountCount: 0 };
+  }
+
+  const rows = queryRowsFromResult(await tx.executor.execute(sql`
+    with scoped_batches as (
+      select id from office_bank_import_batches where workspace_id = ${workspaceId}
+    ),
+    scoped_accounts as (
+      select id from office_bank_accounts where workspace_id = ${workspaceId}
+    ),
+    scoped_lines as (
+      select line.id
+      from office_bank_statement_lines line
+      where line.import_batch_id in (select id from scoped_batches)
+         or line.account_id in (select id from scoped_accounts)
+    ),
+    deleted_matches as (
+      delete from office_bank_reconciliation_matches match
+      using scoped_lines line
+      where match.bank_statement_line_id = line.id
+      returning match.id
+    ),
+    deleted_transactions as (
+      delete from transactions
+      where workspace_id = ${workspaceId}
+      returning id
+    ),
+    deleted_lines as (
+      delete from office_bank_statement_lines line
+      using scoped_lines scoped
+      where line.id = scoped.id
+      returning line.id
+    ),
+    deleted_batches as (
+      delete from office_bank_import_batches batch
+      using scoped_batches scoped
+      where batch.id = scoped.id
+      returning batch.id
+    ),
+    deleted_accounts as (
+      delete from office_bank_accounts account
+      using scoped_accounts scoped
+      where account.id = scoped.id
+      returning account.id
+    )
+    select
+      (select count(*) from deleted_transactions)::int as transaction_count,
+      (select count(*) from deleted_lines)::int as statement_line_count,
+      (select count(*) from deleted_matches)::int as reconciliation_match_count,
+      (select count(*) from deleted_batches)::int as import_batch_count,
+      (select count(*) from deleted_accounts)::int as bank_account_count
+  `));
+  const row = rows[0];
+  return {
+    transactionCount: integerQueryField(row, "transaction_count"),
+    statementLineCount: integerQueryField(row, "statement_line_count"),
+    reconciliationMatchCount: integerQueryField(row, "reconciliation_match_count"),
+    importBatchCount: integerQueryField(row, "import_batch_count"),
+    bankAccountCount: integerQueryField(row, "bank_account_count")
+  };
+}
+
+function countOfficeFinancialResetFixtureDependencies(fixtures: ApiFixtureStore, workspaceId: string): OfficeFinancialResetCounts {
+  const scopedBatchIds = new Set<string>(
+    fixtures.office.bankImportBatches
+      .filter((batch: OfficeBankImportBatchRow): boolean => batch.workspaceId === workspaceId)
+      .map((batch: OfficeBankImportBatchRow): string => batch.id)
+  );
+  const scopedAccountIds = new Set<string>(
+    fixtures.office.bankAccounts
+      .filter((account: OfficeBankAccountRow): boolean => account.workspaceId === workspaceId)
+      .map((account: OfficeBankAccountRow): string => account.id)
+  );
+  const scopedLineIds = new Set<string>(
+    fixtures.office.bankStatementLines
+      .filter((line: OfficeBankStatementLineRow): boolean => scopedBatchIds.has(line.importBatchId) || scopedAccountIds.has(line.accountId))
+      .map((line: OfficeBankStatementLineRow): string => line.id)
+  );
+
+  return {
+    transactionCount: fixtures.office.transactions.filter((transaction: OfficeTransactionRow): boolean => transaction.workspaceId === workspaceId).length,
+    statementLineCount: scopedLineIds.size,
+    reconciliationMatchCount: fixtures.office.bankReconciliationMatches.filter((match): boolean => scopedLineIds.has(match.bankStatementLineId)).length,
+    importBatchCount: scopedBatchIds.size,
+    bankAccountCount: scopedAccountIds.size
+  };
+}
+
+function resetOfficeFinancialFixtures(fixtures: ApiFixtureStore, workspaceId: string): void {
+  const mutableOffice = fixtures.office as Mutable<OfficeAnalyticsDataset>;
+  const scopedBatchIds = new Set<string>(
+    fixtures.office.bankImportBatches
+      .filter((batch: OfficeBankImportBatchRow): boolean => batch.workspaceId === workspaceId)
+      .map((batch: OfficeBankImportBatchRow): string => batch.id)
+  );
+  const scopedAccountIds = new Set<string>(
+    fixtures.office.bankAccounts
+      .filter((account: OfficeBankAccountRow): boolean => account.workspaceId === workspaceId)
+      .map((account: OfficeBankAccountRow): string => account.id)
+  );
+  const scopedLineIds = new Set<string>(
+    fixtures.office.bankStatementLines
+      .filter((line: OfficeBankStatementLineRow): boolean => scopedBatchIds.has(line.importBatchId) || scopedAccountIds.has(line.accountId))
+      .map((line: OfficeBankStatementLineRow): string => line.id)
+  );
+
+  mutableOffice.bankReconciliationMatches = fixtures.office.bankReconciliationMatches.filter(
+    (match): boolean => !scopedLineIds.has(match.bankStatementLineId)
+  );
+  mutableOffice.transactions = fixtures.office.transactions.filter(
+    (transaction: OfficeTransactionRow): boolean => transaction.workspaceId !== workspaceId
+  );
+  mutableOffice.bankStatementLines = fixtures.office.bankStatementLines.filter(
+    (line: OfficeBankStatementLineRow): boolean => !scopedLineIds.has(line.id)
+  );
+  mutableOffice.bankImportBatches = fixtures.office.bankImportBatches.filter(
+    (batch: OfficeBankImportBatchRow): boolean => !scopedBatchIds.has(batch.id)
+  );
+  mutableOffice.bankAccounts = fixtures.office.bankAccounts.filter(
+    (account: OfficeBankAccountRow): boolean => !scopedAccountIds.has(account.id)
+  );
 }
 
 async function officeBankImportReverseResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
@@ -7920,7 +8178,8 @@ function appendDistributionAllocationStateFixture(fixtures: ApiFixtureStore, inp
     ...input.expenseApplications.map((application) => ({
       costTermId: application.costTermId,
       amountApplied: application.amountApplied,
-      currency: application.currency
+      currency: application.currency,
+      calculationRunId: application.calculationRunId
     }))
   ];
   mutableFixtures.distributionCostTerms = fixtures.distributionCostTerms.map((term) => {
@@ -9054,7 +9313,11 @@ function toDistributionImportBatch(dataset: DistributionReadDataset, batchId: st
   }
 
   const rows = dataset.normalizedEarnings.filter((earning) => earning.batchId === batch.id);
-  const grossUnits = rows.reduce((sum: bigint, row) => erhMoney.add(sum, erhMoney.parse(row.grossAmount)), 0n);
+  // P6a: sum only for the primary (first) currency — never add EUR + USD together.
+  const primaryCurrency = rows[0]?.currency ?? "USD";
+  const grossUnits = rows
+    .filter((row) => row.currency === primaryCurrency)
+    .reduce((sum: bigint, row) => erhMoney.add(sum, erhMoney.parse(row.grossAmount)), 0n);
   return {
     id: batch.id,
     source: batch.source === "routenote" ? "routenote" : "kontor",
@@ -9064,7 +9327,7 @@ function toDistributionImportBatch(dataset: DistributionReadDataset, batchId: st
     accountReference: batch.source,
     rowCount: rows.length,
     unmatchedRowCount: rows.filter((row) => row.mappingStatus !== "matched").length,
-    currency: rows[0]?.currency ?? "USD",
+    currency: primaryCurrency,
     grossMicro: erhMoney.format(grossUnits),
     payableColumn: "netPayable",
     joinKeySummary: "ISRC / UPC / title / artist",

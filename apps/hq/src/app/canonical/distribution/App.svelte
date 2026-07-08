@@ -2729,8 +2729,20 @@
   }
 
   // The print payload carries 10-decimal money strings; round to cents for A4 output.
+  // Use integer arithmetic to avoid float precision drift on large amounts.
   function formatPrintAmount(value: string, currency: CurrencyCode): string {
-    return `${currency} ${Number(value).toFixed(2)}`;
+    const negative = value.startsWith("-");
+    const abs = negative ? value.slice(1) : value;
+    const dotIdx = abs.indexOf(".");
+    const intStr = dotIdx === -1 ? abs : abs.slice(0, dotIdx);
+    const fracStr = dotIdx === -1 ? "" : abs.slice(dotIdx + 1);
+    const padded = fracStr.padEnd(10, "0").slice(0, 10);
+    const micro = BigInt(intStr) * 10_000_000_000n + BigInt(padded);
+    // Round half-up to 2 decimal places (divide scale-10 by 10^8).
+    const cents = (micro + 50_000_000n) / 100_000_000n;
+    const wholePart = cents / 100n;
+    const centPart = String(cents % 100n).padStart(2, "0");
+    return `${negative ? "-" : ""}${currency} ${String(wholePart)}.${centPart}`;
   }
 
   function escapeHtml(value: string): string {

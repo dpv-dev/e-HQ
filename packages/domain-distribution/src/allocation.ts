@@ -48,6 +48,9 @@ export interface DistributionExistingExpenseApplication {
   readonly costTermId: string;
   readonly amountApplied: string;
   readonly currency: string;
+  // Present when loaded from DB or written by the allocation run fixture;
+  // absent on legacy in-memory-only entries.
+  readonly calculationRunId?: string | null;
 }
 
 export interface DistributionFxRateInput {
@@ -374,12 +377,13 @@ function findEligibleSameCurrencyCostTerms(
   currency: string,
   costTerms: readonly ParsedCostTerm[]
 ): readonly ParsedCostTerm[] {
+  // Use the same open-gate predicate as the FX path so that cancelled/satisfied/
+  // recovered terms are excluded from recoupment in both currency branches.
   return costTerms.filter(
     (term) =>
       term.contractId === contractId &&
       term.recoupable &&
-      term.status !== "deleted" &&
-      term.status !== "non_recoverable" &&
+      isOpenForFxGate(term.status) &&
       term.currency === currency &&
       payeeScopeMatches(term.payeeId, payeeId)
   );

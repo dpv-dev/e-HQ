@@ -47,10 +47,47 @@ void bootServer();
 async function bootServer(): Promise<void> {
   const host = process.env.HOST ?? "0.0.0.0";
   const port = parsePort(process.env.PORT ?? 8787);
-  process.stdout.write(`eHQ Hono API shadow booting on http://${host}:${String(port)}\n`);
-  process.stdout.write("eHQ Hono API shadow connecting to Postgres...\n");
+  process.stdout.write(`eHQ Hono API booting on http://${host}:${String(port)}\n`);
 
-  let runtime: Awaited<ReturnType<typeof createPostgresApiRuntime>>;
+  // Hostinger requires listen() within 3 seconds of process start. The Postgres
+  // fixture load can exceed that, so we bind the port immediately and serve 503
+  // while the DB initialises in the background. Once ready, the real Hono app
+  // replaces the stub handler atomically.
+  let readyApp: ReturnType<typeof createApiService> | null = null;
+  let runtime: Awaited<ReturnType<typeof createPostgresApiRuntime>> | null = null;
+
+  const server = createServer((request, response) => {
+    if (readyApp === null) {
+      const rawOrigin = request.headers["origin"];
+      const origin = Array.isArray(rawOrigin) ? (rawOrigin[0] ?? "") : (rawOrigin ?? "");
+      const allowedOrigins = ["https://app.eeee.mu", "http://localhost:5173", "http://127.0.0.1:5173"];
+      const corsOrigin = allowedOrigins.includes(origin) ? origin : "";
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (corsOrigin.length > 0) {
+        headers["Access-Control-Allow-Origin"] = corsOrigin;
+        headers["Access-Control-Allow-Methods"] = "GET,POST,PATCH,DELETE,OPTIONS";
+        headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization,Idempotency-Key";
+      }
+      if (request.method === "OPTIONS") {
+        response.writeHead(204, headers);
+        response.end();
+        return;
+      }
+      response.writeHead(503, headers);
+      response.end(JSON.stringify({ status: "starting" }));
+      return;
+    }
+    void handleRequestWithApp(readyApp, host, port, request, response);
+  });
+
+  server.listen(port, host, () => {
+    const serverWithAddress = server as unknown as { address: () => { port: number } | string | null };
+    const boundAddress = serverWithAddress.address();
+    const resolvedPort = typeof boundAddress === "object" && boundAddress !== null ? boundAddress.port : port;
+    process.stdout.write(`eHQ Hono API listening on http://${host}:${String(resolvedPort)} (DB loading...)\n`);
+  });
+
+  process.stdout.write("eHQ Hono API connecting to Postgres...\n");
   try {
     runtime = await createPostgresApiRuntime(process.env);
   } catch (error: unknown) {
@@ -59,30 +96,20 @@ async function bootServer(): Promise<void> {
     return;
   }
 
-  process.stdout.write("eHQ Hono API shadow ready\n");
-  const app = createApiService({
+  readyApp = createApiService({
     fixtures: runtime.fixtures,
     persistence: runtime.persistence,
     health: runtime.health,
     nowIso: (): string => new Date().toISOString(),
     auth: createSupabaseJwtVerifier(createSupabaseJwtAuthConfig(process.env))
   });
-  const server = createServer((request, response) => {
-    void handleRequestWithApp(app, host, port, request, response);
-  });
-
-  server.listen(port, host, () => {
-    const serverWithAddress = server as unknown as { address: () => { port: number } | string | null };
-    const boundAddress = serverWithAddress.address();
-    const resolvedPort = typeof boundAddress === "object" && boundAddress !== null ? boundAddress.port : port;
-    process.stdout.write(`eHQ Hono API shadow listening on http://${host}:${String(resolvedPort)}\n`);
-  });
+  process.stdout.write("eHQ Hono API ready\n");
 
   process.on("SIGINT", () => {
-    void shutdown(server, runtime, 0);
+    void shutdown(server, runtime!, 0);
   });
   process.on("SIGTERM", () => {
-    void shutdown(server, runtime, 0);
+    void shutdown(server, runtime!, 0);
   });
 }
 

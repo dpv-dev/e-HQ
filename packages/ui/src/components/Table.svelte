@@ -356,7 +356,7 @@
   td {
     color: var(--ehq-text-white);
     font-family: var(--ehq-font);
-    font-size: 15px;
+    font-size: 14px;
     font-weight: var(--ehq-type-body-weight);
     line-height: var(--ehq-type-ui-line);
   }

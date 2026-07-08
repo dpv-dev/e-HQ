@@ -23903,7 +23903,7 @@ function findMissingFxCurrency(share, costTerms, appliedByTerm, fxRates, earning
 }
 function findEligibleSameCurrencyCostTerms(contractId, payeeId, currency, costTerms) {
   return costTerms.filter(
-    (term) => term.contractId === contractId && term.recoupable && term.status !== "deleted" && term.status !== "non_recoverable" && term.currency === currency && payeeScopeMatches(term.payeeId, payeeId)
+    (term) => term.contractId === contractId && term.recoupable && isOpenForFxGate(term.status) && term.currency === currency && payeeScopeMatches(term.payeeId, payeeId)
   );
 }
 function sumRemainingCostTerms(terms, appliedByTerm) {
@@ -38102,6 +38102,7 @@ var SENSITIVE_ACTIONS = /* @__PURE__ */ new Set([
   "distribution_track_upsert",
   "office_bank_import_reverse",
   "office_bank_import_delete",
+  "office_financial_reset",
   "office_bank_account_delete",
   "office_partner_payee_link",
   "office_partner_payee_unlink"
@@ -39290,6 +39291,10 @@ var optionalNullableStringSchema = external_exports.preprocess(
   external_exports.string().min(1).nullable()
 );
 var workspaceBodySchema = external_exports.object({ workspaceId: external_exports.string().min(1) });
+var OFFICE_FINANCIAL_RESET_PHRASE = "DELETE ALL OFFICE DATA";
+var officeFinancialResetSchema = workspaceBodySchema.extend({
+  confirmationPhrase: external_exports.literal(OFFICE_FINANCIAL_RESET_PHRASE)
+});
 var jsonRecordSchema = external_exports.record(external_exports.string(), external_exports.unknown());
 var commandCenterSettingUpdateSchema = workspaceBodySchema.extend({
   key: external_exports.string().min(1),
@@ -39676,6 +39681,9 @@ function registerOfficeRoutes(app, dependencies) {
   });
   app.post("/eof/v1/bank-import/batches/:batchId/delete", async (context) => {
     return officeBankImportDeleteResponse(context, dependencies);
+  });
+  app.post("/eof/v1/office/reset-financial-data", async (context) => {
+    return officeFinancialResetResponse(context, dependencies);
   });
   app.get("/eof/v1/reconciliations", (context) => {
     resolveWorkspaceId(context);
@@ -40782,7 +40790,7 @@ async function officeBankRawLineReassignResponse(context, dependencies) {
   const request = await readZodBody(context, officeBankRawLineReassignSchema);
   const line = requireOfficeBankLine(dependencies.fixtures.office, request.statementLineId);
   const targetAccount = dependencies.fixtures.office.bankAccounts.find(
-    (account) => account.id === request.accountId && account.workspaceId === request.workspaceId
+    (account) => account.id === request.accountId
   );
   if (targetAccount === void 0) {
     throw new ApiRouteError(404, "office_bank_account_not_found", "Target bank account was not found.", [
@@ -41768,7 +41776,7 @@ async function officeLedgerBulkConfirmResponse(context, dependencies) {
     idempotencyKey,
     requestBody: request,
     write: async (tx, resolvedIdempotencyKey) => {
-      await persistOfficeLedgerBulk(tx, accepted, actor.userId);
+      await persistOfficeLedgerBulk(tx, accepted, actor.userId, request.workspaceId);
       const auditEventId = await appendAuditEvent(tx, {
         actor,
         action: "office_ledger_bulk_confirm",
@@ -41781,13 +41789,13 @@ async function officeLedgerBulkConfirmResponse(context, dependencies) {
         },
         idempotencyKey: resolvedIdempotencyKey
       });
-      upsertOfficeLedgerBulkFixture(dependencies.fixtures, accepted);
+      upsertOfficeLedgerBulkFixture(dependencies.fixtures, accepted, request.workspaceId);
       return { ...mutationReceipt(batchId, auditEventId), upsertedRowCount: accepted.length };
     }
   });
   return context.json(result.body, result.status);
 }
-async function persistOfficeLedgerBulk(tx, rows, actorUserId) {
+async function persistOfficeLedgerBulk(tx, rows, actorUserId, workspaceId) {
   if (tx.kind === "memory" || rows.length === 0) {
     return;
   }
@@ -41798,12 +41806,12 @@ async function persistOfficeLedgerBulk(tx, rows, actorUserId) {
     const amount = row.amountMinor.toString();
     await tx.executor.execute(sql`
       insert into transactions (
-        id, legacy_id, transaction_date, type, status, is_active, description,
+        id, legacy_id, workspace_id, transaction_date, type, status, is_active, description,
         category_id, partner_id, project_id, account_id, amount_minor, original_amount_minor, original_currency,
         total_amount_minor, source, created_by_user_id, approved_by_user_id, approved_at
       )
       values (
-        ${randomUUID2()}, ${row.legacyId}, ${occurredAt}, ${row.type}, ${row.status}, true, ${row.description},
+        ${randomUUID2()}, ${row.legacyId}, ${workspaceId}, ${occurredAt}, ${row.type}, ${row.status}, true, ${row.description},
         ${row.categoryId}, ${row.partnerId}, ${row.projectId}, null, ${amount}, ${amount}, ${row.currency === "MUR" ? null : row.currency},
         ${amount}, 'ledger_import', ${actorUserId}, ${approvedBy}, ${approvedAt}
       )
@@ -41831,13 +41839,14 @@ async function persistOfficeLedgerBulk(tx, rows, actorUserId) {
     }
   }
 }
-function upsertOfficeLedgerBulkFixture(fixtures, rows) {
+function upsertOfficeLedgerBulkFixture(fixtures, rows, workspaceId) {
   if (rows.length === 0) {
     return;
   }
   const mutableOffice = fixtures.office;
   const added = rows.map((row) => ({
     id: randomUUID2(),
+    workspaceId,
     transactionDate: `${row.occurredOn}T00:00:00.000Z`,
     type: row.type,
     status: row.status,
@@ -42455,6 +42464,7 @@ function requireOfficeTransaction(dataset, transactionId) {
 function transactionFromOfficeRequest(id, request, amountMinor, transactionType, transactionStatus) {
   return {
     id,
+    workspaceId: request.workspaceId,
     transactionDate: `${request.occurredOn}T00:00:00.000Z`,
     type: transactionType,
     status: transactionStatus,
@@ -42534,6 +42544,7 @@ async function persistOfficeTransactionUpsert(tx, input) {
   await tx.executor.execute(sql`
     insert into transactions (
       id,
+      workspace_id,
       transaction_date,
       type,
       status,
@@ -42552,6 +42563,7 @@ async function persistOfficeTransactionUpsert(tx, input) {
     )
     values (
       ${input.id},
+      ${input.request.workspaceId},
       ${occurredAt},
       ${input.transactionType},
       ${input.transactionStatus},
@@ -43184,14 +43196,55 @@ async function persistDistributionAllocationUnpost(tx, runId) {
     set status = 'void'
     where calculation_run_id = ${runId}
   `);
+  await tx.executor.execute(sql`
+    update normalized_earnings
+    set calculation_status = 'pending'
+    where id in (
+      select earning_id from earning_allocations where calculation_run_id = ${runId}
+    )
+  `);
+  await tx.executor.execute(sql`
+    with deleted_apps as (
+      delete from expense_applications
+      where calculation_run_id = ${runId}
+      returning cost_term_id
+    )
+    update contract_cost_terms
+    set status = 'open'
+    where id in (select cost_term_id from deleted_apps)
+      and status in ('recovered', 'satisfied', 'partially_recovered')
+      and not exists (
+        select 1 from expense_applications
+        where cost_term_id = contract_cost_terms.id
+      )
+  `);
 }
 function unpostDistributionAllocationFixture(fixtures, runId) {
   const mutableDistribution = fixtures.distribution;
   mutableDistribution.calculationRuns = fixtures.distribution.calculationRuns.map(
     (run) => run.id === runId ? { ...run, status: "excluded", finishedAt: run.finishedAt ?? (/* @__PURE__ */ new Date()).toISOString() } : run
   );
+  const allocatedEarningIds = new Set(
+    fixtures.distribution.earningAllocations.filter((alloc) => alloc.calculationRunId === runId).map((alloc) => alloc.earningId)
+  );
   mutableDistribution.earningAllocations = fixtures.distribution.earningAllocations.map(
     (allocation) => allocation.calculationRunId === runId ? { ...allocation, status: "void" } : allocation
+  );
+  mutableDistribution.normalizedEarnings = fixtures.distribution.normalizedEarnings.map(
+    (earning) => allocatedEarningIds.has(earning.id) ? { ...earning, calculationStatus: "pending" } : earning
+  );
+  const mutableFixtures = fixtures;
+  const removedTermIds = new Set(
+    fixtures.distributionExpenseApplications.filter((app) => app.calculationRunId === runId).map((app) => app.costTermId)
+  );
+  mutableFixtures.distributionExpenseApplications = fixtures.distributionExpenseApplications.filter(
+    (app) => app.calculationRunId !== runId
+  );
+  const remainingTermIds = new Set(
+    mutableFixtures.distributionExpenseApplications.map((app) => app.costTermId)
+  );
+  mutableFixtures.distributionCostTerms = fixtures.distributionCostTerms.map(
+    (term) => removedTermIds.has(term.id) && !remainingTermIds.has(term.id) && (term.status === "recovered" || term.status === "satisfied" || term.status === "partially_recovered") ? { ...term, status: "open" } : term
   );
 }
 function requireDistributionSuspenseItem(dataset, suspenseId) {
@@ -43356,7 +43409,7 @@ async function distributionStatementVoidResponse(context, dependencies) {
     write: async (tx, resolvedIdempotencyKey) => {
       const statement = requireStatementForVoid(dependencies, statementId);
       const ledgerRow = requireStatementLedgerRow(dependencies, statementId);
-      await acquireAdvisoryLock(tx, `distribution:statement:void:${statementId}`);
+      await acquireAdvisoryLock(tx, `distribution:payment:statement:${statementId}`);
       const voidPlan = buildVoidPlan({ id: statement.id, status: statement.status }, ledgerRow);
       const persistInput = {
         statementId,
@@ -43407,6 +43460,9 @@ async function distributionPaymentRecordResponse(context, dependencies) {
     write: async (tx, resolvedIdempotencyKey) => {
       await acquireAdvisoryLock(tx, `distribution:payment:statement:${request.statementId}`);
       const statement = requireDistributionStatement(dependencies.fixtures.distribution, request.statementId);
+      if (statement.status === "void") {
+        throw new ApiRouteError(409, "statement_void", "Cannot record a payment against a void statement.", [`statementId=${request.statementId}`]);
+      }
       assertPaymentMatchesStatement(context, request.payeeId, request.currency, statement);
       const paymentId = randomUUID2();
       const statementPaymentLinkId = randomUUID2();
@@ -43465,6 +43521,9 @@ async function distributionPaymentUpdateResponse(context, dependencies) {
       await acquireAdvisoryLock(tx, `distribution:payment:statement:${link.statementId}`);
       const statement = requireDistributionStatement(dependencies.fixtures.distribution, link.statementId);
       assertPaymentIsMutable(context, payment);
+      if (statement.status === "void") {
+        throw new ApiRouteError(409, "statement_void", "Cannot update a payment against a void statement.", [`statementId=${link.statementId}`]);
+      }
       assertPaymentMatchesStatement(context, payment.payeeId, request.currency, statement);
       const persistInput = {
         paymentId,
@@ -43520,6 +43579,9 @@ async function distributionPaymentReconcileResponse(context, dependencies) {
       await acquireAdvisoryLock(tx, `distribution:payment:statement:${link.statementId}`);
       const statement = requireDistributionStatement(dependencies.fixtures.distribution, link.statementId);
       assertPaymentIsMutable(context, payment);
+      if (statement.status === "void") {
+        throw new ApiRouteError(409, "statement_void", "Cannot reconcile a payment against a void statement.", [`statementId=${link.statementId}`]);
+      }
       assertPaymentMatchesStatement(context, payment.payeeId, payment.currency, statement);
       const persistInput = {
         paymentId,
@@ -44158,6 +44220,143 @@ async function officeBankImportDeleteResponse(context, dependencies) {
     }
   });
   return context.json(result.body, result.status);
+}
+async function officeFinancialResetResponse(context, dependencies) {
+  const request = await readZodBody(context, officeFinancialResetSchema);
+  const fixtureCounts = countOfficeFinancialResetFixtureDependencies(dependencies.fixtures, request.workspaceId);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_financial_reset",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: { workspaceId: request.workspaceId },
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `office:financial-reset:${request.workspaceId}`);
+      const deletedCounts = await persistOfficeFinancialReset(tx, request.workspaceId);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_financial_reset",
+        targetType: "office_workspace",
+        targetId: request.workspaceId,
+        before: { counts: fixtureCounts },
+        after: { workspaceId: request.workspaceId, deletedCounts },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      resetOfficeFinancialFixtures(dependencies.fixtures, request.workspaceId);
+      return mutationReceipt(request.workspaceId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+async function persistOfficeFinancialReset(tx, workspaceId) {
+  if (tx.kind === "memory") {
+    return { transactionCount: 0, statementLineCount: 0, reconciliationMatchCount: 0, importBatchCount: 0, bankAccountCount: 0 };
+  }
+  const rows = queryRowsFromResult(await tx.executor.execute(sql`
+    with scoped_batches as (
+      select id from office_bank_import_batches where workspace_id = ${workspaceId}
+    ),
+    scoped_accounts as (
+      select id from office_bank_accounts where workspace_id = ${workspaceId}
+    ),
+    scoped_lines as (
+      select line.id
+      from office_bank_statement_lines line
+      where line.import_batch_id in (select id from scoped_batches)
+         or line.account_id in (select id from scoped_accounts)
+    ),
+    deleted_matches as (
+      delete from office_bank_reconciliation_matches match
+      using scoped_lines line
+      where match.bank_statement_line_id = line.id
+      returning match.id
+    ),
+    deleted_transactions as (
+      delete from transactions
+      where workspace_id = ${workspaceId}
+      returning id
+    ),
+    deleted_lines as (
+      delete from office_bank_statement_lines line
+      using scoped_lines scoped
+      where line.id = scoped.id
+      returning line.id
+    ),
+    deleted_batches as (
+      delete from office_bank_import_batches batch
+      using scoped_batches scoped
+      where batch.id = scoped.id
+      returning batch.id
+    ),
+    deleted_accounts as (
+      delete from office_bank_accounts account
+      using scoped_accounts scoped
+      where account.id = scoped.id
+      returning account.id
+    )
+    select
+      (select count(*) from deleted_transactions)::int as transaction_count,
+      (select count(*) from deleted_lines)::int as statement_line_count,
+      (select count(*) from deleted_matches)::int as reconciliation_match_count,
+      (select count(*) from deleted_batches)::int as import_batch_count,
+      (select count(*) from deleted_accounts)::int as bank_account_count
+  `));
+  const row = rows[0];
+  return {
+    transactionCount: integerQueryField(row, "transaction_count"),
+    statementLineCount: integerQueryField(row, "statement_line_count"),
+    reconciliationMatchCount: integerQueryField(row, "reconciliation_match_count"),
+    importBatchCount: integerQueryField(row, "import_batch_count"),
+    bankAccountCount: integerQueryField(row, "bank_account_count")
+  };
+}
+function countOfficeFinancialResetFixtureDependencies(fixtures, workspaceId) {
+  const scopedBatchIds = new Set(
+    fixtures.office.bankImportBatches.filter((batch) => batch.workspaceId === workspaceId).map((batch) => batch.id)
+  );
+  const scopedAccountIds = new Set(
+    fixtures.office.bankAccounts.filter((account) => account.workspaceId === workspaceId).map((account) => account.id)
+  );
+  const scopedLineIds = new Set(
+    fixtures.office.bankStatementLines.filter((line) => scopedBatchIds.has(line.importBatchId) || scopedAccountIds.has(line.accountId)).map((line) => line.id)
+  );
+  return {
+    transactionCount: fixtures.office.transactions.filter((transaction) => transaction.workspaceId === workspaceId).length,
+    statementLineCount: scopedLineIds.size,
+    reconciliationMatchCount: fixtures.office.bankReconciliationMatches.filter((match2) => scopedLineIds.has(match2.bankStatementLineId)).length,
+    importBatchCount: scopedBatchIds.size,
+    bankAccountCount: scopedAccountIds.size
+  };
+}
+function resetOfficeFinancialFixtures(fixtures, workspaceId) {
+  const mutableOffice = fixtures.office;
+  const scopedBatchIds = new Set(
+    fixtures.office.bankImportBatches.filter((batch) => batch.workspaceId === workspaceId).map((batch) => batch.id)
+  );
+  const scopedAccountIds = new Set(
+    fixtures.office.bankAccounts.filter((account) => account.workspaceId === workspaceId).map((account) => account.id)
+  );
+  const scopedLineIds = new Set(
+    fixtures.office.bankStatementLines.filter((line) => scopedBatchIds.has(line.importBatchId) || scopedAccountIds.has(line.accountId)).map((line) => line.id)
+  );
+  mutableOffice.bankReconciliationMatches = fixtures.office.bankReconciliationMatches.filter(
+    (match2) => !scopedLineIds.has(match2.bankStatementLineId)
+  );
+  mutableOffice.transactions = fixtures.office.transactions.filter(
+    (transaction) => transaction.workspaceId !== workspaceId
+  );
+  mutableOffice.bankStatementLines = fixtures.office.bankStatementLines.filter(
+    (line) => !scopedLineIds.has(line.id)
+  );
+  mutableOffice.bankImportBatches = fixtures.office.bankImportBatches.filter(
+    (batch) => !scopedBatchIds.has(batch.id)
+  );
+  mutableOffice.bankAccounts = fixtures.office.bankAccounts.filter(
+    (account) => !scopedAccountIds.has(account.id)
+  );
 }
 async function officeBankImportReverseResponse(context, dependencies) {
   const body = await readOptionalJsonBody(context);
@@ -45514,7 +45713,8 @@ function appendDistributionAllocationStateFixture(fixtures, input) {
     ...input.expenseApplications.map((application) => ({
       costTermId: application.costTermId,
       amountApplied: application.amountApplied,
-      currency: application.currency
+      currency: application.currency,
+      calculationRunId: application.calculationRunId
     }))
   ];
   mutableFixtures.distributionCostTerms = fixtures.distributionCostTerms.map((term) => {
@@ -46435,7 +46635,8 @@ function toDistributionImportBatch(dataset, batchId) {
     ]);
   }
   const rows = dataset.normalizedEarnings.filter((earning) => earning.batchId === batch.id);
-  const grossUnits = rows.reduce((sum, row) => erhMoney.add(sum, erhMoney.parse(row.grossAmount)), 0n);
+  const primaryCurrency = rows[0]?.currency ?? "USD";
+  const grossUnits = rows.filter((row) => row.currency === primaryCurrency).reduce((sum, row) => erhMoney.add(sum, erhMoney.parse(row.grossAmount)), 0n);
   return {
     id: batch.id,
     source: batch.source === "routenote" ? "routenote" : "kontor",
@@ -46445,7 +46646,7 @@ function toDistributionImportBatch(dataset, batchId) {
     accountReference: batch.source,
     rowCount: rows.length,
     unmatchedRowCount: rows.filter((row) => row.mappingStatus !== "matched").length,
-    currency: rows[0]?.currency ?? "USD",
+    currency: primaryCurrency,
     grossMicro: erhMoney.format(grossUnits),
     payableColumn: "netPayable",
     joinKeySummary: "ISRC / UPC / title / artist",
@@ -46992,7 +47193,7 @@ async function readOfficeDataset(pool) {
   const projectBudgetLines = await queryRows(pool, "select id::text, project_id::text, category_id::text, type, planned_amount_minor::text from project_budget_lines order by legacy_id nulls last, id", []);
   const transactions = await queryRows(
     pool,
-    "select id::text, transaction_date, type, status, is_active, description, category_id::text, partner_id::text, project_id::text, account_id::text, amount_minor::text, original_currency, exchange_rate_e10::text from transactions order by transaction_date, id",
+    "select id::text, workspace_id, transaction_date, type, status, is_active, description, category_id::text, partner_id::text, project_id::text, account_id::text, amount_minor::text, original_currency, exchange_rate_e10::text from transactions order by transaction_date, id",
     []
   );
   const financialAllocations = await queryRows(pool, "select id::text, transaction_id::text, department_id::text, amount_minor::text from financial_allocations order by legacy_id nulls last, id", []);
@@ -47090,7 +47291,11 @@ async function readDistributionContracts(pool) {
     pool,
     `select c.id::text, c.title, c.status, c.effective_from, c.effective_to, rr.payee_id::text, rr.percentage::text,
       coalesce(ct.currency, 'MUR') as currency,
-      coalesce(sum(ct.amount) filter (where ct.recoupable = true and ct.status not in ('recovered', 'satisfied', 'cancelled', 'deleted')), 0)::text as open_expense
+      coalesce(sum(
+        ct.amount - coalesce((
+          select sum(ea.amount_applied) from expense_applications ea where ea.cost_term_id = ct.id
+        ), 0)
+      ) filter (where ct.recoupable = true and ct.status not in ('recovered', 'satisfied', 'cancelled', 'deleted')), 0)::text as open_expense
      from contracts c
      left join royalty_rules rr on rr.contract_id = c.id
      left join contract_cost_terms ct on ct.contract_id = c.id
@@ -47113,20 +47318,37 @@ async function readDistributionContracts(pool) {
 async function readDistributionContractExpenses(pool) {
   const rows = await queryRows(
     pool,
-    "select id::text, contract_id::text, payee_id::text, amount::text, currency, status, created_at from contract_cost_terms order by legacy_id nulls last, id",
+    `select cct.id::text, cct.contract_id::text, cct.payee_id::text, cct.amount::text, cct.currency, cct.status, cct.created_at,
+      coalesce(sum(ea.amount_applied), 0)::text as applied_amount
+     from contract_cost_terms cct
+     left join expense_applications ea on ea.cost_term_id = cct.id
+     group by cct.id, cct.contract_id, cct.payee_id, cct.amount, cct.currency, cct.status, cct.created_at
+     order by cct.legacy_id nulls last, cct.id`,
     []
   );
-  return rows.map((row) => ({
-    id: stringCell(row, "id"),
-    contractId: stringCell(row, "contract_id"),
-    payeeId: nullableStringCell(row, "payee_id") ?? "unassigned",
-    incurredOn: timestampCell(row, "created_at").slice(0, 10),
-    label: "Contract cost term",
-    originalAmountMicro: stringCell(row, "amount"),
-    openAmountMicro: isOpenExpenseStatus(stringCell(row, "status")) ? stringCell(row, "amount") : "0.0000000000",
-    currency: currencyCell(row, "currency"),
-    status: toApiExpenseStatus(stringCell(row, "status"))
-  }));
+  return rows.map((row) => {
+    const isOpen = isOpenExpenseStatus(stringCell(row, "status"));
+    const fullAmount = stringCell(row, "amount");
+    const appliedAmount = stringCell(row, "applied_amount");
+    let openAmountMicro = "0.0000000000";
+    if (isOpen) {
+      const full = BigInt(Math.round(Number(fullAmount) * 1e10));
+      const applied = BigInt(Math.round(Number(appliedAmount) * 1e10));
+      const remaining = full - applied > 0n ? full - applied : 0n;
+      openAmountMicro = (remaining / 10000000000n).toString() + "." + String(remaining % 10000000000n).padStart(10, "0");
+    }
+    return {
+      id: stringCell(row, "id"),
+      contractId: stringCell(row, "contract_id"),
+      payeeId: nullableStringCell(row, "payee_id") ?? "unassigned",
+      incurredOn: timestampCell(row, "created_at").slice(0, 10),
+      label: "Contract cost term",
+      originalAmountMicro: fullAmount,
+      openAmountMicro,
+      currency: currencyCell(row, "currency"),
+      status: toApiExpenseStatus(stringCell(row, "status"))
+    };
+  });
 }
 async function readDistributionMappingRows(pool) {
   const rows = await queryRows(
@@ -47212,13 +47434,14 @@ async function readDistributionAllocationCostTerms(pool) {
 async function readDistributionExistingExpenseApplications(pool) {
   const rows = await queryRows(
     pool,
-    "select cost_term_id::text, amount_applied::text, currency from expense_applications order by legacy_id nulls last, id",
+    "select cost_term_id::text, amount_applied::text, currency, calculation_run_id::text from expense_applications order by legacy_id nulls last, id",
     []
   );
   return rows.map((row) => ({
     costTermId: stringCell(row, "cost_term_id"),
     amountApplied: stringCell(row, "amount_applied"),
-    currency: currencyCell(row, "currency")
+    currency: currencyCell(row, "currency"),
+    calculationRunId: nullableStringCell(row, "calculation_run_id")
   }));
 }
 async function readDistributionFxRates(pool) {
@@ -47312,6 +47535,7 @@ function toOfficeProjectBudgetLine(row) {
 function toOfficeTransaction2(row) {
   return {
     id: stringCell(row, "id"),
+    workspaceId: stringCell(row, "workspace_id"),
     transactionDate: timestampCell(row, "transaction_date"),
     type: enumCell(row, "type", ["income", "expense"]),
     status: enumCell(row, "status", ["validated", "draft", "cancelled"]),
@@ -47791,10 +48015,41 @@ void bootServer();
 async function bootServer() {
   const host = process.env.HOST ?? "0.0.0.0";
   const port = parsePort(process.env.PORT ?? 8787);
-  process.stdout.write(`eHQ Hono API shadow booting on http://${host}:${String(port)}
+  process.stdout.write(`eHQ Hono API booting on http://${host}:${String(port)}
 `);
-  process.stdout.write("eHQ Hono API shadow connecting to Postgres...\n");
-  let runtime;
+  let readyApp = null;
+  let runtime = null;
+  const server = createServer((request, response) => {
+    if (readyApp === null) {
+      const rawOrigin = request.headers["origin"];
+      const origin = Array.isArray(rawOrigin) ? rawOrigin[0] ?? "" : rawOrigin ?? "";
+      const allowedOrigins = ["https://app.eeee.mu", "http://localhost:5173", "http://127.0.0.1:5173"];
+      const corsOrigin = allowedOrigins.includes(origin) ? origin : "";
+      const headers = { "Content-Type": "application/json" };
+      if (corsOrigin.length > 0) {
+        headers["Access-Control-Allow-Origin"] = corsOrigin;
+        headers["Access-Control-Allow-Methods"] = "GET,POST,PATCH,DELETE,OPTIONS";
+        headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization,Idempotency-Key";
+      }
+      if (request.method === "OPTIONS") {
+        response.writeHead(204, headers);
+        response.end();
+        return;
+      }
+      response.writeHead(503, headers);
+      response.end(JSON.stringify({ status: "starting" }));
+      return;
+    }
+    void handleRequestWithApp(readyApp, host, port, request, response);
+  });
+  server.listen(port, host, () => {
+    const serverWithAddress = server;
+    const boundAddress = serverWithAddress.address();
+    const resolvedPort = typeof boundAddress === "object" && boundAddress !== null ? boundAddress.port : port;
+    process.stdout.write(`eHQ Hono API listening on http://${host}:${String(resolvedPort)} (DB loading...)
+`);
+  });
+  process.stdout.write("eHQ Hono API connecting to Postgres...\n");
   try {
     runtime = await createPostgresApiRuntime(process.env);
   } catch (error) {
@@ -47802,24 +48057,14 @@ async function bootServer() {
     process.exit(1);
     return;
   }
-  process.stdout.write("eHQ Hono API shadow ready\n");
-  const app = createApiService({
+  readyApp = createApiService({
     fixtures: runtime.fixtures,
     persistence: runtime.persistence,
     health: runtime.health,
     nowIso: () => (/* @__PURE__ */ new Date()).toISOString(),
     auth: createSupabaseJwtVerifier(createSupabaseJwtAuthConfig(process.env))
   });
-  const server = createServer((request, response) => {
-    void handleRequestWithApp(app, host, port, request, response);
-  });
-  server.listen(port, host, () => {
-    const serverWithAddress = server;
-    const boundAddress = serverWithAddress.address();
-    const resolvedPort = typeof boundAddress === "object" && boundAddress !== null ? boundAddress.port : port;
-    process.stdout.write(`eHQ Hono API shadow listening on http://${host}:${String(resolvedPort)}
-`);
-  });
+  process.stdout.write("eHQ Hono API ready\n");
   process.on("SIGINT", () => {
     void shutdown(server, runtime, 0);
   });

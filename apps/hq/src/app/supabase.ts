@@ -84,11 +84,7 @@ export async function getSupabaseAccessToken(): Promise<string | null> {
 }
 
 export async function signOutOfSupabase(): Promise<void> {
-  const client = getSupabaseClient();
-
-  if (client === null) {
-    return;
-  }
+  const client = requireSupabaseClient();
 
   const { error } = await client.auth.signOut();
 

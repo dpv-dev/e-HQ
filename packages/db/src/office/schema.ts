@@ -226,6 +226,7 @@ export const transactions = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     legacyId: legacyIdColumn(),
+    workspaceId: text("workspace_id").notNull(),
     transactionDate: timestamp("transaction_date", { withTimezone: true, mode: "string" }).notNull(),
     type: financialTypeEnum("type").notNull(),
     status: transactionStatusEnum("status").notNull().default("draft"),
@@ -256,6 +257,7 @@ export const transactions = pgTable(
   },
   (table) => [
     uniqueIndex("transactions_legacy_id_unique").on(table.legacyId),
+    index("transactions_workspace_id_idx").on(table.workspaceId),
     index("transactions_transaction_date_idx").on(table.transactionDate),
     index("transactions_type_idx").on(table.type),
     index("transactions_status_idx").on(table.status),

@@ -38,6 +38,7 @@ export type OfficeProjectBudgetLineRow = Pick<ProjectBudgetLine, "id" | "project
 export type OfficeTransactionRow = Pick<
   Transaction,
   | "id"
+  | "workspaceId"
   | "transactionDate"
   | "type"
   | "status"

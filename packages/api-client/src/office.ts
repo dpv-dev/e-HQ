@@ -135,6 +135,10 @@ export interface OfficeApiClient {
     request: { readonly workspaceId: EntityId },
     options: WriteRequestOptions
   ) => Promise<ApiMutationReceipt>;
+  readonly resetFinancialData: (
+    request: { readonly workspaceId: EntityId; readonly confirmationPhrase: string },
+    options: WriteRequestOptions
+  ) => Promise<ApiMutationReceipt>;
   readonly listReconciliations: (
     query: OfficeReconciliationsQuery
   ) => Promise<PageResult<OfficeReconciliationCandidate>>;
@@ -369,6 +373,11 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
         request,
         options.idempotencyKey
       ),
+    resetFinancialData: (
+      request: { readonly workspaceId: EntityId; readonly confirmationPhrase: string },
+      options: WriteRequestOptions
+    ): Promise<ApiMutationReceipt> =>
+      transport.post<ApiMutationReceipt>("office/reset-financial-data", request, options.idempotencyKey),
     listReconciliations: (
       query: OfficeReconciliationsQuery
     ): Promise<PageResult<OfficeReconciliationCandidate>> =>
