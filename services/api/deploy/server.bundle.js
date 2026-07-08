@@ -39850,8 +39850,10 @@ function registerOfficeRoutes(app, dependencies) {
     const workspaceId = resolveWorkspaceId(context);
     const period = optionalCompatQuery(context, ["period", "month"]);
     const accountId = optionalCompatQuery(context, ["accountId", "account_id"]);
-    const batches = buildBatchWorkspaceLookup(dependencies.fixtures.office.bankImportBatches);
-    const lines = dependencies.fixtures.office.bankStatementLines.map((line) => toApiBankRawLine(line, batches)).filter((line) => line.workspaceId === workspaceId).filter((line) => period === null || line.occurredOn.startsWith(period)).filter((line) => accountId === null || line.accountId === accountId);
+    const accountWorkspaceMap = new Map(
+      dependencies.fixtures.office.bankAccounts.map((acc) => [acc.id, acc.workspaceId])
+    );
+    const lines = dependencies.fixtures.office.bankStatementLines.filter((line) => (accountWorkspaceMap.get(line.accountId) ?? "unknown") === workspaceId).map((line) => toApiBankRawLine(line, /* @__PURE__ */ new Map([[line.importBatchId, workspaceId]]))).filter((line) => period === null || line.occurredOn.startsWith(period)).filter((line) => accountId === null || line.accountId === accountId);
     return context.json(pageItems(context, lines));
   });
   app.post("/eof/v1/bank/raw/reassign-account", async (context) => {
@@ -45900,13 +45902,6 @@ function toOfficeVatReport(_dataset, period) {
     netVatMicro: zeroMicro,
     rows: []
   };
-}
-function buildBatchWorkspaceLookup(batches) {
-  const lookup = /* @__PURE__ */ new Map();
-  for (const batch of batches) {
-    lookup.set(batch.id, batch.workspaceId);
-  }
-  return lookup;
 }
 function toApiBankAccountSummary(account) {
   return {

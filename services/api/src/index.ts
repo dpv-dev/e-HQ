@@ -1257,10 +1257,15 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
     const workspaceId = resolveWorkspaceId(context);
     const period = optionalCompatQuery(context, ["period", "month"]);
     const accountId = optionalCompatQuery(context, ["accountId", "account_id"]);
-    const batches = buildBatchWorkspaceLookup(dependencies.fixtures.office.bankImportBatches);
+    // Derive workspaceId from the account (always loaded, always has workspace_id)
+    // rather than from the batch (can be missing if a batch failed to commit or was
+    // voided). Using the batch caused lines to silently disappear between reads.
+    const accountWorkspaceMap = new Map<string, string>(
+      dependencies.fixtures.office.bankAccounts.map((acc) => [acc.id, acc.workspaceId])
+    );
     const lines = dependencies.fixtures.office.bankStatementLines
-      .map((line) => toApiBankRawLine(line, batches))
-      .filter((line) => line.workspaceId === workspaceId)
+      .filter((line) => (accountWorkspaceMap.get(line.accountId) ?? "unknown") === workspaceId)
+      .map((line) => toApiBankRawLine(line, new Map([[line.importBatchId, workspaceId]])))
       .filter((line) => period === null || line.occurredOn.startsWith(period))
       .filter((line) => accountId === null || line.accountId === accountId);
     return context.json(pageItems(context, lines));
