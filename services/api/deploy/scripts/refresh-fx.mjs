@@ -85,11 +85,18 @@ async function fetchPayload() {
 }
 
 function sslFromUrl(databaseUrl) {
-  // Supabase's pooler presents a self-signed chain; sslmode=no-verify / require
-  // means "encrypt but don't verify the chain".
-  return databaseUrl.includes("sslmode=no-verify") || databaseUrl.includes("sslmode=require")
-    ? { rejectUnauthorized: false }
-    : undefined;
+  // Supabase's pooler always requires SSL and presents a self-signed chain.
+  // Force { rejectUnauthorized: false } for any Supabase/pooler URL, and also
+  // when the caller already set sslmode=no-verify or sslmode=require explicitly.
+  if (
+    databaseUrl.includes("supabase.com") ||
+    databaseUrl.includes("pooler.supabase") ||
+    databaseUrl.includes("sslmode=no-verify") ||
+    databaseUrl.includes("sslmode=require")
+  ) {
+    return { rejectUnauthorized: false };
+  }
+  return undefined;
 }
 
 async function main() {

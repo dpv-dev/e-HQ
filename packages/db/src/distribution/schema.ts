@@ -167,6 +167,7 @@ export const importBatches = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     legacyId: legacyIdColumn(),
+    workspaceId: text("workspace_id").notNull(),
     source: varchar("source", { length: 160 }).notNull(),
     fileName: text("file_name").notNull(),
     status: distributionImportStatusEnum("status").notNull().default("draft"),
@@ -177,6 +178,7 @@ export const importBatches = pgTable(
   },
   (table) => [
     uniqueIndex("import_batches_legacy_id_unique").on(table.legacyId),
+    index("import_batches_workspace_id_idx").on(table.workspaceId),
     index("import_batches_source_idx").on(table.source),
     index("import_batches_status_idx").on(table.status),
     index("import_batches_imported_at_idx").on(table.importedAt)
@@ -287,6 +289,7 @@ export const payees = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     legacyId: legacyIdColumn(),
+    workspaceId: text("workspace_id").notNull(),
     name: text("name").notNull(),
     linkedArtistIds: jsonb("linked_artist_ids").$type<readonly string[]>().notNull().default(sql`'[]'::jsonb`),
     preferredCurrency: char("preferred_currency", { length: 3 }).notNull().default("MUR"),
@@ -299,6 +302,7 @@ export const payees = pgTable(
   (table) => [
     uniqueIndex("payees_legacy_id_unique").on(table.legacyId),
     index("payees_is_active_idx").on(table.isActive),
+    index("payees_workspace_id_idx").on(table.workspaceId),
     index("payees_preferred_currency_idx").on(table.preferredCurrency)
   ]
 );
@@ -308,6 +312,7 @@ export const contracts = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     legacyId: legacyIdColumn(),
+    workspaceId: text("workspace_id").notNull(),
     contractNumber: varchar("contract_number", { length: 160 }),
     title: text("title").notNull(),
     status: distributionContractStatusEnum("status").notNull().default("draft"),
@@ -704,6 +709,7 @@ export const statements = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     legacyId: legacyIdColumn(),
+    workspaceId: text("workspace_id").notNull(),
     payeeId: uuid("payee_id")
       .notNull()
       .references(() => payees.id, { onDelete: "restrict", onUpdate: "cascade" }),
@@ -725,6 +731,7 @@ export const statements = pgTable(
     uniqueIndex("statements_legacy_id_unique").on(table.legacyId),
     uniqueIndex("statements_payee_period_currency_version_unique").on(table.payeeId, table.periodStart, table.periodEnd, table.currency, table.version),
     index("statements_payee_id_idx").on(table.payeeId),
+    index("statements_workspace_id_idx").on(table.workspaceId),
     index("statements_calculation_run_id_idx").on(table.calculationRunId),
     index("statements_status_idx").on(table.status)
   ]
@@ -784,6 +791,7 @@ export const payments = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     legacyId: legacyIdColumn(),
+    workspaceId: text("workspace_id").notNull(),
     payeeId: uuid("payee_id")
       .notNull()
       .references(() => payees.id, { onDelete: "restrict", onUpdate: "cascade" }),

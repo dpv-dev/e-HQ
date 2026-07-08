@@ -3635,6 +3635,14 @@ async function officePartnerPayeeUnlinkResponse(context: ApiContext, dependencie
 async function distributionMappingApplyRulesResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
   const request = await readZodBody<DistributionMappingApplyRulesRequest>(context, distributionMappingApplyRulesSchema);
   const rows = request.rowIds.map((rowId) => requireDistributionMappingRow(dependencies.fixtures, rowId));
+  // P7b: verify every requested row belongs to the stated batch — reject mismatched
+  // rowIds that could silently apply rules across different import batches.
+  const mismatch = rows.find((row) => row.batchId !== request.batchId);
+  if (mismatch !== undefined) {
+    throw new ApiRouteError(400, "mapping_row_batch_mismatch",
+      "One or more mapping rows do not belong to the requested batch.",
+      [`batchId=${request.batchId}`, `rowId=${mismatch.id}`, `rowBatchId=${mismatch.batchId}`]);
+  }
   const idempotencyKey = requireIdempotencyKey(context);
   const actor = context.get("authUser");
   const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
@@ -5812,6 +5820,10 @@ async function identityLinkResponse(
     idempotencyKey,
     requestBody: input.requestBody,
     write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<IdentityLinkMutationResponse> => {
+      // P7a: serialize concurrent identity-link writes for the same payee/partner pair
+      // so two simultaneous requests cannot both pass the before-snapshot read and
+      // write duplicate rows.
+      await acquireAdvisoryLock(tx, `distribution:identity-link:${input.payee.id}:${input.partner.id}`);
       const beforeOfficeLink = toPartnerPayeeLink(dependencies.fixtures, input.partner);
       const beforeDistributionLink = toDistributionPayeePartnerLink(dependencies.fixtures, input.payee);
       const persistInput: PersistIdentityLinkInput = {
@@ -5906,6 +5918,20 @@ async function distributionImportConfirmResponse(context: ApiContext, dependenci
     requestBody: request,
     write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<DistributionImportConfirmMutationResponse> => {
       const preview = await requireDistributionPreviewInWrite(context, dependencies, tx, request.previewId, request.workspaceId);
+      // P7c: light dedup guard — if a non-failed batch with the same fileName+source
+      // already exists for this workspace, reject with 409 instead of writing a
+      // duplicate. The idempotency key protects same-key retries; this catches
+      // re-uploads of the same file with a fresh idempotency key.
+      const existingBatch = dependencies.fixtures.distribution.importBatches.find(
+        (batch) => batch.fileName === preview.fileName &&
+                   batch.source === preview.source &&
+                   batch.status !== "failed" && batch.status !== "void"
+      );
+      if (existingBatch !== null && existingBatch !== undefined) {
+        throw new ApiRouteError(409, "distribution_import_duplicate",
+          "A non-failed batch with the same file name and source already exists. Delete or void the existing batch before re-importing.",
+          [`existingBatchId=${existingBatch.id}`, `fileName=${preview.fileName}`, `source=${preview.source}`]);
+      }
       const batchId = randomUUID();
       const importedAtIso = dependencies.nowIso();
       await persistDistributionImportConfirmation(tx, {
