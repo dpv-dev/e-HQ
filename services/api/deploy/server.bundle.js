@@ -48052,6 +48052,7 @@ async function bootServer() {
         response.end();
         return;
       }
+      headers["Retry-After"] = "5";
       response.writeHead(503, headers);
       response.end(JSON.stringify({ status: "starting" }));
       return;

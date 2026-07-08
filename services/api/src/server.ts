@@ -73,6 +73,9 @@ async function bootServer(): Promise<void> {
         response.end();
         return;
       }
+      // Retry-After: 5 tells the API client (standardApiRetryPolicy reads this header)
+      // to wait 5 seconds before retrying — giving DB fixtures time to finish loading.
+      headers["Retry-After"] = "5";
       response.writeHead(503, headers);
       response.end(JSON.stringify({ status: "starting" }));
       return;
