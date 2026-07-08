@@ -210,6 +210,7 @@ export const normalizedEarnings = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     legacyId: legacyIdColumn(),
+    workspaceId: text("workspace_id").notNull(),
     batchId: uuid("batch_id")
       .notNull()
       .references(() => importBatches.id, { onDelete: "cascade", onUpdate: "cascade" }),
@@ -231,6 +232,7 @@ export const normalizedEarnings = pgTable(
   (table) => [
     uniqueIndex("normalized_earnings_legacy_id_unique").on(table.legacyId),
     index("normalized_earnings_batch_id_idx").on(table.batchId),
+    index("normalized_earnings_workspace_id_idx").on(table.workspaceId),
     index("normalized_earnings_raw_import_row_id_idx").on(table.rawImportRowId),
     index("normalized_earnings_isrc_idx").on(table.isrc),
     index("normalized_earnings_upc_idx").on(table.upc),
@@ -377,6 +379,7 @@ export const releases = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     legacyId: legacyIdColumn(),
+    workspaceId: text("workspace_id").notNull(),
     title: text("title").notNull(),
     upc: varchar("upc", { length: 32 }),
     labelId: uuid("label_id").references(() => labels.id, { onDelete: "set null", onUpdate: "cascade" }),
@@ -387,6 +390,7 @@ export const releases = pgTable(
   },
   (table) => [
     uniqueIndex("releases_legacy_id_unique").on(table.legacyId),
+    index("releases_workspace_id_idx").on(table.workspaceId),
     index("releases_label_id_idx").on(table.labelId),
     index("releases_upc_idx").on(table.upc)
   ]
@@ -397,6 +401,7 @@ export const tracks = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     legacyId: legacyIdColumn(),
+    workspaceId: text("workspace_id").notNull(),
     title: text("title").notNull(),
     isrc: varchar("isrc", { length: 32 }),
     releaseId: uuid("release_id").references(() => releases.id, { onDelete: "set null", onUpdate: "cascade" }),
@@ -406,6 +411,7 @@ export const tracks = pgTable(
   },
   (table) => [
     uniqueIndex("tracks_legacy_id_unique").on(table.legacyId),
+    index("tracks_workspace_id_idx").on(table.workspaceId),
     index("tracks_isrc_idx").on(table.isrc),
     index("tracks_release_id_idx").on(table.releaseId)
   ]
@@ -629,6 +635,7 @@ export const calculationRuns = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     legacyId: legacyIdColumn(),
+    workspaceId: text("workspace_id").notNull(),
     batchId: uuid("batch_id").references(() => importBatches.id, { onDelete: "set null", onUpdate: "cascade" }),
     status: distributionCalculationStatusEnum("status").notNull().default("pending"),
     reconciliationJson: jsonb("reconciliation_json").$type<Readonly<Record<string, unknown>>>().notNull().default(sql`'{}'::jsonb`),
@@ -638,6 +645,7 @@ export const calculationRuns = pgTable(
   },
   (table) => [
     uniqueIndex("calculation_runs_legacy_id_unique").on(table.legacyId),
+    index("calculation_runs_workspace_id_idx").on(table.workspaceId),
     index("calculation_runs_batch_id_idx").on(table.batchId),
     index("calculation_runs_status_idx").on(table.status)
   ]
@@ -688,6 +696,7 @@ export const suspenseItems = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     legacyId: legacyIdColumn(),
+    workspaceId: text("workspace_id").notNull(),
     earningId: uuid("earning_id").references(() => normalizedEarnings.id, { onDelete: "set null", onUpdate: "cascade" }),
     amount: amountColumn("amount").notNull(),
     currency: char("currency", { length: 3 }).notNull(),
