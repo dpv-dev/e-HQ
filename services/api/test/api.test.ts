@@ -418,6 +418,114 @@ test("Office transactions expose category-derived path and keep project nullable
   assert.equal(otherAccountPage.items.length, 0);
 });
 
+test("Office transactions honor from/to compatibility query parameters", async () => {
+  const app = createFixtureApiService();
+
+  const response = await app.request(
+    "/eof/v1/transactions?workspaceId=workspace_1&from=2026-02-01&to=2026-02-28&limit=100",
+    { headers: authHeaders() }
+  );
+  assert.equal(response.status, 200);
+  const page = await response.json() as {
+    readonly items: readonly { readonly occurredOn: string }[];
+  };
+  assert.ok(page.items.length > 0);
+  assert.ok(page.items.every((row) => row.occurredOn >= "2026-02-01" && row.occurredOn <= "2026-02-28"));
+});
+
+test("Office bank raw honors from/to compatibility query parameters", async () => {
+  const app = createFixtureApiService();
+
+  const response = await app.request(
+    "/eof/v1/bank/raw?workspaceId=workspace_1&from=2026-02-01&to=2026-02-28&limit=100",
+    { headers: authHeaders() }
+  );
+  assert.equal(response.status, 200);
+  const page = await response.json() as {
+    readonly items: readonly { readonly occurredOn: string }[];
+  };
+  assert.ok(page.items.length > 0);
+  assert.ok(page.items.every((row) => row.occurredOn >= "2026-02-01" && row.occurredOn <= "2026-02-28"));
+});
+
+test("Projects list defaults to all-history totals when period/range is omitted", async () => {
+  const app = createFixtureApiService();
+
+  const response = await app.request("/eof/v1/projects?workspaceId=workspace_1", {
+    headers: authHeaders()
+  });
+  assert.equal(response.status, 200);
+  const page = await response.json() as {
+    readonly items: readonly {
+      readonly id: string;
+      readonly periodIncomeMicro: string;
+      readonly periodExpenseMicro: string;
+      readonly netMicro: string;
+    }[];
+  };
+  const kaya = page.items.find((item) => item.id === "project_kaya");
+  assert.notEqual(kaya, undefined);
+  assert.equal(kaya.periodIncomeMicro, "5000.00");
+  assert.equal(kaya.periodExpenseMicro, "1200.00");
+  assert.equal(kaya.netMicro, "3800.00");
+});
+
+test("Bank import preview warns when file profile mismatches selected account bank", async () => {
+  const fixture = createFixtureStore();
+  const app = createApiService({
+    fixtures: {
+      ...fixture,
+      office: {
+        ...fixture.office,
+        bankAccounts: [
+          ...fixture.office.bankAccounts,
+          {
+            id: "bank_sbi",
+            workspaceId: "workspace_1",
+            bankName: "State Bank of Mauritius",
+            accountLabel: "SBI Current",
+            accountReferenceHash: "sbi-current",
+            currency: "MUR",
+            currentBalanceMinor: 0n,
+            currentBalanceMurMinor: 0n,
+            isActive: true,
+            balanceAsOf: null
+          }
+        ]
+      }
+    },
+    persistence: createMemoryPersistenceRuntime({ WRITES_ENABLED: "false" }),
+    health: null,
+    nowIso: (): string => "2026-06-21T00:00:00.000Z",
+    auth: createTestAuthVerifier()
+  });
+
+  const response = await app.request("/eof/v1/bank-import/preview", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      source: "pdf",
+      fileName: "mismatch.pdf",
+      checksum: "mismatch-pdf",
+      rows: [
+        {
+          accountId: "bank_sbi",
+          occurredOn: "2026-02-11",
+          description: "IB Own Account Transfer FT26107LWQWP",
+          amount: "100.00",
+          currency: "MUR",
+          transactionDetails: "TRANS DATE VALUE DATE TRANSACTION DETAILS Mauritius Commercial Bank"
+        }
+      ]
+    })
+  });
+
+  assert.equal(response.status, 200);
+  const preview = await response.json() as { readonly warnings: readonly string[] };
+  assert.ok(preview.warnings.some((warning) => warning.includes("Bank profile mismatch")));
+});
+
 test("Office screen bundle returns every section in one response matching the standalone endpoints", async () => {
   const app = createFixtureApiService();
   const response = await app.request(

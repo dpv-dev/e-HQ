@@ -40013,11 +40013,18 @@ function registerOfficeRoutes(app, dependencies) {
   app.get("/eof/v1/bank/raw", (context) => {
     const workspaceId = resolveWorkspaceId(context);
     const period = optionalCompatQuery(context, ["period", "month"]);
+    const dateFrom = optionalCompatQuery(context, ["dateFrom", "date_from", "from", "fromDate", "from_date"]);
+    const dateTo = optionalCompatQuery(context, ["dateTo", "date_to", "to", "toDate", "to_date"]);
     const accountId = optionalCompatQuery(context, ["accountId", "account_id"]);
     const accountWorkspaceMap = new Map(
       dependencies.fixtures.office.bankAccounts.map((acc) => [acc.id, acc.workspaceId])
     );
-    const lines = dependencies.fixtures.office.bankStatementLines.filter((line) => (accountWorkspaceMap.get(line.accountId) ?? "unknown") === workspaceId).map((line) => toApiBankRawLine(line, /* @__PURE__ */ new Map([[line.importBatchId, workspaceId]]))).filter((line) => period === null || line.occurredOn.startsWith(period)).filter((line) => accountId === null || line.accountId === accountId);
+    const lines = dependencies.fixtures.office.bankStatementLines.filter((line) => (accountWorkspaceMap.get(line.accountId) ?? "unknown") === workspaceId).map((line) => toApiBankRawLine(line, /* @__PURE__ */ new Map([[line.importBatchId, workspaceId]]))).filter((line) => {
+      if (isIsoDate(dateFrom) && isIsoDate(dateTo)) {
+        return !(line.occurredOn < dateFrom || line.occurredOn > dateTo);
+      }
+      return period === null || line.occurredOn.startsWith(period);
+    }).filter((line) => accountId === null || line.accountId === accountId);
     return context.json(pageItems(context, lines));
   });
   app.post("/eof/v1/bank/raw/reassign-account", async (context) => {
@@ -40025,8 +40032,10 @@ function registerOfficeRoutes(app, dependencies) {
   });
   app.get("/eof/v1/projects", (context) => {
     resolveWorkspaceId(context);
-    const period = optionalCompatQuery(context, ["period", "month"]) ?? dependencies.nowIso().slice(0, 7);
-    const filters = rangeFiltersFromContext(context, period, null);
+    const period = optionalCompatQuery(context, ["period", "month"]);
+    const dateFrom = optionalCompatQuery(context, ["dateFrom", "date_from", "from", "fromDate", "from_date"]);
+    const dateTo = optionalCompatQuery(context, ["dateTo", "date_to", "to", "toDate", "to_date"]);
+    const filters = period === null && !(isIsoDate(dateFrom) && isIsoDate(dateTo)) ? { dateFrom: null, dateTo: null, departmentId: null } : rangeFiltersFromContext(context, period ?? dependencies.nowIso().slice(0, 7), null);
     const status = nullableQuery(context, "status");
     const projects = dependencies.fixtures.office.projects.map((project) => toProjectSummary(dependencies.fixtures.office, project, filters)).filter((project) => status === null || project.status === status);
     return context.json(pageItems(context, projects));
@@ -44611,11 +44620,94 @@ async function officeBankImportPreviewResponse(context, dependencies) {
     parsingNotes: [
       "Preview accepts structured JSON rows only; raw PDF/XLS parsing is not implemented in services/api."
     ],
-    warnings: parsedRows.length === previewRows.length ? [] : ["Some rows could not be converted into bank statement lines and will remain in batch metadata instead of being fabricated."],
+    warnings: [
+      ...parsedRows.length === previewRows.length ? [] : ["Some rows could not be converted into bank statement lines and will remain in batch metadata instead of being fabricated."],
+      ...bankImportAccountMismatchWarnings(request.rows, dependencies.fixtures.office.bankAccounts)
+    ],
     rejectionReasons: aggregateRejectionReasons(allParsedRows),
     rowResults: allParsedRows.map(previewRowResult)
   };
   return context.json(response);
+}
+function bankImportAccountMismatchWarnings(rows, accounts) {
+  if (rows.length === 0) {
+    return [];
+  }
+  const firstRow = rows[0];
+  if (firstRow === void 0) {
+    return [];
+  }
+  const selectedAccountId = rowValue(firstRow, ["accountId", "account_id"]);
+  if (selectedAccountId === null) {
+    return [];
+  }
+  const selectedAccount = accounts.find((account) => account.id === selectedAccountId);
+  if (selectedAccount === void 0) {
+    return [];
+  }
+  const detection = detectBankProfileFromRows(rows);
+  if (detection.detectedBank === "unknown") {
+    return detection.confidence === "low" ? ["Could not confidently detect bank profile from file content. Verify selected account before confirm."] : [];
+  }
+  const selectedBank = normalizeBankName(selectedAccount.bankName);
+  if (selectedBank === "unknown" || selectedBank === detection.detectedBank) {
+    return [];
+  }
+  return [
+    `Bank profile mismatch: file looks like ${detection.detectedBank.toUpperCase()} (${detection.confidence} confidence) but selected account is ${selectedAccount.bankName} \xB7 ${selectedAccount.accountLabel}. Confirm only if intentional.`
+  ];
+}
+function normalizeBankName(value) {
+  const normalized = value.trim().toLowerCase();
+  if (normalized.includes("state bank") || normalized === "sbi") {
+    return "sbi";
+  }
+  if (normalized.includes("commercial bank") || normalized === "mcb") {
+    return "mcb";
+  }
+  return "unknown";
+}
+function detectBankProfileFromRows(rows) {
+  const text = rows.flatMap((row) => Object.values(row)).join("\n").toLowerCase();
+  let sbiSignals = 0;
+  let mcbSignals = 0;
+  if (/\bparticulars\b/u.test(text)) {
+    sbiSignals += 1;
+  }
+  if (/\binstrument\s*id\b/u.test(text)) {
+    sbiSignals += 1;
+  }
+  if (/\bgeneral\s+details\b/u.test(text) || /\bbalance\s+details\b/u.test(text)) {
+    sbiSignals += 1;
+  }
+  if (/\bsb103\b/u.test(text) || /\bsbi\s*\(mauritius\)\b/u.test(text)) {
+    sbiSignals += 2;
+  }
+  if (/\bremittance\s*id\b/u.test(text) || /\beft\s+bo\b/u.test(text) || /\bin\.\s*clg\b/u.test(text)) {
+    sbiSignals += 1;
+  }
+  if (/\btrans\s*date\b/u.test(text) && /\bvalue\s*date\b/u.test(text)) {
+    mcbSignals += 1;
+  }
+  if (/\btransaction\s*details\b/u.test(text)) {
+    mcbSignals += 1;
+  }
+  if (/\bcurrent\s+account\s+statement\b/u.test(text) || /\bdespatch\s+code\b/u.test(text)) {
+    mcbSignals += 1;
+  }
+  if (/\bmauritius\s+commercial\s+bank\b/u.test(text) || /\bmcblmumu\b/u.test(text) || /\bwww\.mcb\.mu\b/u.test(text)) {
+    mcbSignals += 2;
+  }
+  if (/\b[a-z]{2}\d{2}mcbl[a-z0-9]{6,}\b/u.test(text)) {
+    mcbSignals += 2;
+  }
+  if (mcbSignals >= sbiSignals + 2 && mcbSignals >= 3) {
+    return { detectedBank: "mcb", confidence: mcbSignals >= 5 ? "high" : "medium" };
+  }
+  if (sbiSignals >= mcbSignals + 2 && sbiSignals >= 3) {
+    return { detectedBank: "sbi", confidence: sbiSignals >= 5 ? "high" : "medium" };
+  }
+  return { detectedBank: "unknown", confidence: "low" };
 }
 async function officeBankImportConfirmResponse(context, dependencies) {
   const request = await readJsonBody(context);
@@ -47071,8 +47163,8 @@ function matchesOfficeTransactionQuery(context, transaction) {
   const projectId = nullableQuery(context, "projectId");
   const type = nullableQuery(context, "type");
   const status = nullableQuery(context, "status");
-  const dateFrom = nullableQuery(context, "dateFrom");
-  const dateTo = nullableQuery(context, "dateTo");
+  const dateFrom = optionalCompatQuery(context, ["dateFrom", "date_from", "from", "fromDate", "from_date"]);
+  const dateTo = optionalCompatQuery(context, ["dateTo", "date_to", "to", "toDate", "to_date"]);
   if (isIsoDate(dateFrom) && isIsoDate(dateTo)) {
     if (transaction.occurredOn < dateFrom || transaction.occurredOn > dateTo) {
       return false;
