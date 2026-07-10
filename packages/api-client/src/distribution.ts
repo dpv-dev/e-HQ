@@ -40,6 +40,8 @@ import type {
   DistributionReleaseUpsertRequest,
   DistributionRevenueQuery,
   DistributionRevenueRow,
+  DistributionScreenQuery,
+  DistributionScreenResponse,
   DistributionSettingsResponse,
   DistributionPayeePartnerLink,
   DistributionPayeePartnerLinkQuery,
@@ -76,6 +78,7 @@ import type {
 
 export interface DistributionApiClient {
   readonly getStatus: (query: { readonly workspaceId: EntityId }) => Promise<{ readonly writesEnabled: boolean }>;
+  readonly getScreen: (query: DistributionScreenQuery) => Promise<DistributionScreenResponse>;
   readonly getDashboard: (query: DistributionDashboardQuery) => Promise<DistributionDashboardResponse>;
   readonly listImportBatches: (query: DistributionImportBatchesQuery) => Promise<PageResult<DistributionImportBatch>>;
   readonly previewImport: (
@@ -205,6 +208,18 @@ export function createDistributionApiClient(config: ApiClientConfig): Distributi
   return {
     getStatus: (query: { readonly workspaceId: EntityId }): Promise<{ readonly writesEnabled: boolean }> =>
       transport.get<{ readonly writesEnabled: boolean }>("status", { workspaceId: query.workspaceId }),
+    getScreen: (query: DistributionScreenQuery): Promise<DistributionScreenResponse> =>
+      transport.get<DistributionScreenResponse>("screen", {
+        workspaceId: query.workspaceId,
+        period: query.period,
+        dateFrom: query.dateFrom ?? null,
+        dateTo: query.dateTo ?? null,
+        importSource: query.importSource,
+        mappingStatus: query.mappingStatus,
+        suspenseStatus: query.suspenseStatus,
+        paymentStatus: query.paymentStatus,
+        revenueGroupBy: query.revenueGroupBy
+      }),
     getDashboard: (query: DistributionDashboardQuery): Promise<DistributionDashboardResponse> =>
       transport.get<DistributionDashboardResponse>("dashboard", {
         workspaceId: query.workspaceId,

@@ -371,6 +371,8 @@ export interface OfficePlanComptableQuery {
   readonly includeInactive: boolean;
 }
 
+export interface OfficePlanComptableNodesQuery extends OfficePlanComptableQuery, PageQuery {}
+
 export interface OfficePlanComptableBaseNode {
   readonly id: EntityId;
   readonly code: string;
@@ -696,7 +698,7 @@ export interface OfficePartnerPayeeLinkRequest {
   readonly payeeId: EntityId | null;
 }
 
-export interface OfficeProjectsQuery extends PageQuery {
+export interface OfficeProjectsQuery extends PageQuery, PeriodQuery {
   readonly workspaceId: EntityId;
   readonly status: "active" | "archived" | null;
 }
@@ -903,6 +905,42 @@ export interface DistributionDashboardResponse {
   readonly suspenseCount: number;
   readonly openStatementCount: number;
   readonly lastAuditEventId: EntityId | null;
+}
+
+export interface DistributionScreenQuery {
+  readonly workspaceId: EntityId;
+  readonly period: IsoMonthString;
+  readonly dateFrom: IsoDateString;
+  readonly dateTo: IsoDateString;
+  readonly importSource: "kontor" | "routenote" | null;
+  readonly mappingStatus: "unmapped" | "suggested" | "mapped" | null;
+  readonly suspenseStatus: "open" | "resolved" | null;
+  readonly paymentStatus: "draft" | "queued" | "paid" | "voided" | null;
+  readonly revenueGroupBy: "payee" | "track" | "currency" | "store" | "period";
+}
+
+export interface DistributionScreenResponse {
+  readonly status: {
+    readonly writesEnabled: boolean;
+  };
+  readonly dashboard: DistributionDashboardResponse;
+  readonly importBatches: PageResult<DistributionImportBatch>;
+  readonly mappingRows: PageResult<DistributionMappingRow>;
+  readonly payees: PageResult<PayeeSummary>;
+  readonly releases: PageResult<ReleaseSummary>;
+  readonly tracks: PageResult<TrackSummary>;
+  readonly contracts: PageResult<DistributionContract>;
+  readonly expenses: PageResult<DistributionContractExpense>;
+  readonly allocations: PageResult<AllocationRunSummary>;
+  readonly suspense: PageResult<SuspenseItem>;
+  readonly statements: PageResult<StatementSummary>;
+  readonly payments: PageResult<PaymentSummary>;
+  readonly revenue: PageResult<DistributionRevenueRow>;
+  readonly reconciliation: DistributionReconciliationResponse;
+  readonly aliases: PageResult<DistributionAlias>;
+  readonly duplicates: PageResult<DistributionDuplicate>;
+  readonly auditLog: PageResult<AuditLogEntry>;
+  readonly settings: DistributionSettingsResponse;
 }
 
 export interface DistributionImportBatchesQuery extends PageQuery {

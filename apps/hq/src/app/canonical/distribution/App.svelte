@@ -25,6 +25,7 @@
     type DistributionReconciliationAction,
     type DistributionReconciliationResponse,
     type DistributionRevenueRow,
+    type DistributionScreenResponse,
     type DistributionSettingsResponse,
     type PageResult,
     type PayeeSummary,
@@ -668,25 +669,65 @@
   });
 
   async function loadInitialData(): Promise<void> {
-    await Promise.all([
-      loadWriteGate(),
-      loadDashboard(),
-      loadImportBatches(),
-      loadMappingRows(),
-      loadPayees(),
-      loadCatalog(),
-      loadContracts(),
-      loadAllocationRuns(),
-      loadSuspense(),
-      loadStatements(),
-      loadPayments(),
-      loadRevenue(),
-      loadReconciliation(),
-      loadAliases(),
-      loadDuplicates(),
-      loadAuditLog(),
-      loadSettings()
-    ]);
+    try {
+      const screen = await client.distribution.getScreen({
+        workspaceId: distributionWorkspaceId,
+        period: distributionPeriod,
+        dateFrom: activeRange.from,
+        dateTo: activeRange.to,
+        importSource: toNullableImportSource(importSourceFilter),
+        mappingStatus: toNullableMappingStatus(mappingStatusFilter),
+        suspenseStatus: toNullableSuspenseStatus(suspenseStatusFilter),
+        paymentStatus: toNullablePaymentStatus(paymentStatusFilter),
+        revenueGroupBy
+      });
+      applyScreenBundle(screen);
+    } catch {
+      await Promise.all([
+        loadWriteGate(),
+        loadDashboard(),
+        loadImportBatches(),
+        loadMappingRows(),
+        loadPayees(),
+        loadCatalog(),
+        loadContracts(),
+        loadAllocationRuns(),
+        loadSuspense(),
+        loadStatements(),
+        loadPayments(),
+        loadRevenue(),
+        loadReconciliation(),
+        loadAliases(),
+        loadDuplicates(),
+        loadAuditLog(),
+        loadSettings()
+      ]);
+    }
+  }
+
+  function applyScreenBundle(screen: DistributionScreenResponse): void {
+    writesEnabled = screen.status.writesEnabled;
+    writeGateMessage = screen.status.writesEnabled ? "writes enabled" : "enable writes";
+    dashboardState = createSuccessState<DistributionDashboardResponse>(screen.dashboard);
+    importBatchesState = createSuccessState<PageResult<DistributionImportBatch>>(screen.importBatches);
+    mappingState = createSuccessState<PageResult<DistributionMappingRow>>(screen.mappingRows);
+    payeesState = createSuccessState<PageResult<PayeeSummary>>(screen.payees);
+    releasesState = createSuccessState<PageResult<ReleaseSummary>>(screen.releases);
+    tracksState = createSuccessState<PageResult<TrackSummary>>(screen.tracks);
+    contractsState = createSuccessState<PageResult<DistributionContract>>(screen.contracts);
+    expensesState = createSuccessState<PageResult<DistributionContractExpense>>(screen.expenses);
+    allocationsState = createSuccessState<PageResult<AllocationRunSummary>>(screen.allocations);
+    suspenseState = createSuccessState<PageResult<SuspenseItem>>(screen.suspense);
+    statementsState = createSuccessState<PageResult<StatementSummary>>(screen.statements);
+    paymentsState = createSuccessState<PageResult<PaymentSummary>>(screen.payments);
+    revenueState = createSuccessState<PageResult<DistributionRevenueRow>>(screen.revenue);
+    reconciliationState = createSuccessState<DistributionReconciliationResponse>(screen.reconciliation);
+    aliasesState = createSuccessState<PageResult<DistributionAlias>>(screen.aliases);
+    duplicatesState = createSuccessState<PageResult<DistributionDuplicate>>(screen.duplicates);
+    auditLogState = createSuccessState<PageResult<AuditLogEntry>>(screen.auditLog);
+    settingsState = createSuccessState<DistributionSettingsResponse>(screen.settings);
+    tablePaginationLoading = null;
+    tablePaginationErrors = {};
   }
 
   function tablePaginationError(tableId: DistributionPagedTableId): string | null {

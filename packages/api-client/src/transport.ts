@@ -32,7 +32,7 @@ export interface RestTransport {
 }
 
 export const standardApiRetryPolicy: RetryPolicy = {
-  maxAttempts: 4,
+  maxAttempts: 5,
   baseDelayMs: 150,
   maxRetryAfterMs: 16_000,
   retryableStatuses: [408, 429, 500, 502, 503, 504],

@@ -1,9 +1,6 @@
 <script lang="ts">
   import { getWorkspaceAccess, type AuthSession, type WorkspaceAppId } from "@ehq/auth";
-  import { Button, EmptyState } from "@ehq/ui";
-  import CommandCenterApp from "./canonical/command-center/App.svelte";
-  import DistributionApp from "./canonical/distribution/App.svelte";
-  import OfficeApp from "./canonical/office/App.svelte";
+  import { Button, EmptyState, Loader } from "@ehq/ui";
   import type { PlatformPageId } from "./platform-data.js";
   import { getWorkspaceForPage, workspaces, type WorkspaceDefinition } from "./platform-data.js";
   import type { AppRoute } from "./routes.js";
@@ -24,9 +21,14 @@
     requestedAccess.status === "allowed" ? requestedWorkspaceId : resolveFallbackWorkspaceId(requestedWorkspaceId, session)
   );
   const fallbackAccess = $derived(getWorkspaceAccess(session, activeWorkspaceId));
+  const workspaceComponentModule = $derived(loadWorkspaceComponent(activeWorkspaceId));
   const lockedMessage = $derived(
     requestedAccess.status === "locked" ? requestedAccess.reason ?? "Access locked. Request access required." : ""
   );
+
+  interface WorkspaceComponentModule {
+    readonly default: any;
+  }
 
   function resolveRequestedWorkspaceId(
     workspaceId: WorkspaceAppId,
@@ -53,6 +55,18 @@
 
   function openHqLanding(): void {
     onNavigate("/app");
+  }
+
+  function loadWorkspaceComponent(workspaceId: WorkspaceAppId): Promise<WorkspaceComponentModule> {
+    if (workspaceId === "office") {
+      return import("./canonical/office/App.svelte") as unknown as Promise<WorkspaceComponentModule>;
+    }
+
+    if (workspaceId === "distribution") {
+      return import("./canonical/distribution/App.svelte") as unknown as Promise<WorkspaceComponentModule>;
+    }
+
+    return import("./canonical/command-center/App.svelte") as unknown as Promise<WorkspaceComponentModule>;
   }
 </script>
 
@@ -104,13 +118,24 @@
     <p class="workspace-notice ehq-type-label-mono" role="status">{lockedMessage}</p>
   {/if}
 
-  {#if activeWorkspaceId === "office"}
-    <OfficeApp {session} {onLogout} />
-  {:else if activeWorkspaceId === "distribution"}
-    <DistributionApp {session} {onLogout} />
-  {:else}
-    <CommandCenterApp {session} {onLogout} />
-  {/if}
+  {#await workspaceComponentModule}
+    <main class="workspace-loader" aria-live="polite" aria-busy="true">
+      <Loader label="Loading workspace" detail="Preparing the selected console." size="medium" />
+    </main>
+  {:then module}
+    <module.default {session} {onLogout} />
+  {:catch}
+    <main class="workspace-loader">
+      <EmptyState
+        title="Workspace unavailable"
+        detail="The selected workspace failed to load. Reload the page or return to HQ."
+        state="error"
+        actionLabel=""
+        actionHref={null}
+        disabledReason=""
+      />
+    </main>
+  {/await}
 {/if}
 
 <style>
@@ -149,5 +174,14 @@
     display: flex;
     flex-wrap: wrap;
     gap: var(--ehq-space-2);
+  }
+
+  .workspace-loader {
+    min-height: 100vh;
+    padding: var(--ehq-space-6);
+    display: grid;
+    place-items: center;
+    background: var(--ehq-bg);
+    color: var(--ehq-text);
   }
 </style>

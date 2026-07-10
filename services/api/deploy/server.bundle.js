@@ -39813,6 +39813,12 @@ function registerOfficeRoutes(app, dependencies) {
     const includeInactive = queryBoolean(context, "includeInactive", "include_inactive");
     return context.json(toPlanComptableNodes(dependencies.fixtures.office, includeInactive));
   });
+  app.get("/eof/v1/plan-comptable/nodes", (context) => {
+    resolveWorkspaceId(context);
+    const includeInactive = queryBoolean(context, "includeInactive", "include_inactive");
+    const nodes = toPlanComptableNodes(dependencies.fixtures.office, includeInactive);
+    return context.json(pageItems(context, nodes));
+  });
   app.post("/eof/v1/plan-comptable", async (context) => {
     return officePlanComptableCreateResponse(context, dependencies);
   });
@@ -39985,7 +39991,13 @@ function registerOfficeRoutes(app, dependencies) {
   app.get("/eof/v1/bank/accounts", (context) => {
     const workspaceId = resolveWorkspaceId(context);
     const limit = requirePositiveInteger(context, optionalCompatQuery(context, ["limit"]), "limit");
-    const accounts = dependencies.fixtures.office.bankAccounts.filter((account) => account.workspaceId === workspaceId).map((account) => toApiBankAccountSummary(account));
+    const latestLineByAccount = latestBankLineByAccount(dependencies.fixtures.office.bankStatementLines);
+    const derivedSnapshotByAccount = derivedBankSnapshotByAccount(dependencies.fixtures.office.bankStatementLines);
+    const accounts = dependencies.fixtures.office.bankAccounts.filter((account) => account.workspaceId === workspaceId).map(
+      (account) => toApiBankAccountSummary(
+        resolveBankAccountSnapshot(account, latestLineByAccount.get(account.id), derivedSnapshotByAccount.get(account.id))
+      )
+    );
     const page = pageItems(context, accounts);
     return context.json(page);
   });
@@ -40013,8 +40025,10 @@ function registerOfficeRoutes(app, dependencies) {
   });
   app.get("/eof/v1/projects", (context) => {
     resolveWorkspaceId(context);
+    const period = optionalCompatQuery(context, ["period", "month"]) ?? dependencies.nowIso().slice(0, 7);
+    const filters = rangeFiltersFromContext(context, period, null);
     const status = nullableQuery(context, "status");
-    const projects = dependencies.fixtures.office.projects.map((project) => toProjectSummary(dependencies.fixtures.office, project, "2026-02")).filter((project) => status === null || project.status === status);
+    const projects = dependencies.fixtures.office.projects.map((project) => toProjectSummary(dependencies.fixtures.office, project, filters)).filter((project) => status === null || project.status === status);
     return context.json(pageItems(context, projects));
   });
   app.post("/eof/v1/projects", async (context) => {
@@ -40040,7 +40054,8 @@ function registerOfficeRoutes(app, dependencies) {
   app.get("/eof/v1/analytics/bank-quality", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
     resolveWorkspaceId(context);
-    const result = readOfficeBankQuality(dependencies.fixtures.office, period);
+    const filters = rangeFiltersFromContext(context, period, null);
+    const result = readOfficeBankQualityForFilters(dependencies.fixtures.office, period, filters);
     const response = {
       period: result.period,
       matchedRateBp: result.matchedRateBp,
@@ -40063,6 +40078,82 @@ function filterRunwayWindowMonths(monthlyRows, runwayWindowMonths) {
   return runwayWindowMonths.filter((month) => availableMonths.has(month));
 }
 function registerDistributionRoutes(app, dependencies) {
+  app.get("/erh/v1/screen", (context) => {
+    const period = requireQuery(context, "period");
+    requireQuery(context, "workspaceId");
+    const source = nullableQuery(context, "importSource");
+    const mappingStatus = nullableQuery(context, "mappingStatus") ?? "unmapped";
+    const suspenseStatus = nullableQuery(context, "suspenseStatus") ?? "open";
+    const paymentStatus = nullableQuery(context, "paymentStatus");
+    const revenueGroupBy = nullableQuery(context, "revenueGroupBy") ?? "store";
+    const importBatches = dependencies.fixtures.distribution.importBatches.map((batch) => toDistributionImportBatch(dependencies.fixtures.distribution, batch.id)).filter((batch) => source === null || batch.source === source);
+    const mappingRows = dependencies.fixtures.distributionMappingRows.filter(
+      (row) => mappingStatus === null || row.status === mappingStatus
+    );
+    const payees = dependencies.fixtures.distribution.payees.map((payee) => ({
+      id: payee.id,
+      displayName: payee.name,
+      email: null,
+      status: payee.isActive ? "active" : "inactive",
+      defaultCurrency: payee.preferredCurrency
+    }));
+    const releases = toReleaseSummaries(dependencies.fixtures.distribution);
+    const tracks = dependencies.fixtures.distribution.tracks.map((track) => ({
+      id: track.id,
+      releaseId: track.releaseId,
+      title: track.title,
+      artistName: "Kaya",
+      isrc: track.isrc,
+      status: "released",
+      splitStatus: "balanced",
+      contributorCount: 1
+    }));
+    const contracts = dependencies.fixtures.distributionContracts;
+    const firstContract = contracts[0];
+    const expenses = dependencies.fixtures.distributionContractExpenses.filter(
+      (expense) => expense.contractId === (firstContract?.id ?? "contract_alma")
+    );
+    const allocations = dependencies.fixtures.distribution.calculationRuns.map(
+      (run) => toAllocationRunSummary(dependencies.fixtures.distribution, run)
+    );
+    const suspense = readSuspense(dependencies.fixtures.distribution, {
+      status: toDomainSuspenseStatus(suspenseStatus),
+      reasonCode: null
+    }).rows.map((row) => toApiSuspenseItem(row, period));
+    const statements = readStatementSummaries(dependencies.fixtures.distribution, {
+      period: null,
+      payeeId: null,
+      status: null
+    }).rows.map(toApiStatementSummary);
+    const payments = toPaymentSummaries(dependencies.fixtures.distribution).filter(
+      (payment) => paymentStatus === null || payment.status === paymentStatus
+    );
+    const response = {
+      status: { writesEnabled: dependencies.persistence.writesEnabled },
+      dashboard: toDistributionDashboard(dependencies.fixtures.distribution, period),
+      importBatches: pageItems(context, importBatches),
+      mappingRows: pageItems(context, mappingRows),
+      payees: {
+        items: payees,
+        nextCursor: null
+      },
+      releases: pageItems(context, releases),
+      tracks: pageItems(context, tracks),
+      contracts: pageItems(context, contracts),
+      expenses: pageItems(context, expenses),
+      allocations: pageItems(context, allocations),
+      suspense: pageItems(context, suspense),
+      statements: pageItems(context, statements),
+      payments: pageItems(context, payments),
+      revenue: pageItems(context, toRevenueRows(dependencies.fixtures.distribution, revenueGroupBy)),
+      reconciliation: toDistributionReconciliation(dependencies.fixtures),
+      aliases: pageItems(context, toDistributionAliases(dependencies.fixtures)),
+      duplicates: pageItems(context, toDistributionDuplicates(dependencies.fixtures)),
+      auditLog: pageItems(context, toDistributionAuditLog(dependencies.fixtures)),
+      settings: toDistributionSettings(context, dependencies.fixtures, dependencies.persistence.writesEnabled)
+    };
+    return context.json(response);
+  });
   app.get("/erh/v1/dashboard", (context) => {
     const period = requireQuery(context, "period");
     requireQuery(context, "workspaceId");
@@ -46511,6 +46602,82 @@ function toApiBankAccountSummary(account) {
     balanceAsOf: account.balanceAsOf
   };
 }
+function latestBankLineByAccount(lines) {
+  const latest = /* @__PURE__ */ new Map();
+  for (const line of lines) {
+    if (line.balanceMinor === null && line.balanceMurMinor === null) {
+      continue;
+    }
+    const current = latest.get(line.accountId);
+    if (current === void 0 || line.occurredOn > current.occurredOn || line.occurredOn === current.occurredOn && line.id > current.id) {
+      latest.set(line.accountId, line);
+    }
+  }
+  return latest;
+}
+function derivedBankSnapshotByAccount(lines) {
+  const aggregations = /* @__PURE__ */ new Map();
+  for (const line of lines) {
+    const existing = aggregations.get(line.accountId);
+    const sign = line.direction === "credit" ? 1n : -1n;
+    const next = existing ?? {
+      currentBalanceMinor: 0n,
+      currentBalanceMurMinor: 0n,
+      hasMurBalance: false,
+      balanceAsOf: line.occurredOn,
+      latestLineId: line.id
+    };
+    next.currentBalanceMinor += sign * line.amountMinor;
+    if (line.amountMurMinor !== null) {
+      next.currentBalanceMurMinor += sign * line.amountMurMinor;
+      next.hasMurBalance = true;
+    }
+    if (line.occurredOn > next.balanceAsOf || line.occurredOn === next.balanceAsOf && line.id > next.latestLineId) {
+      next.balanceAsOf = line.occurredOn;
+      next.latestLineId = line.id;
+    }
+    aggregations.set(line.accountId, next);
+  }
+  const result = /* @__PURE__ */ new Map();
+  for (const [accountId, value] of aggregations.entries()) {
+    result.set(accountId, {
+      currentBalanceMinor: value.currentBalanceMinor,
+      currentBalanceMurMinor: value.hasMurBalance ? value.currentBalanceMurMinor : null,
+      balanceAsOf: value.balanceAsOf
+    });
+  }
+  return result;
+}
+function resolveBankAccountSnapshot(account, latestLine, derivedSnapshot) {
+  if (account.balanceAsOf !== null || latestLine === void 0) {
+    if (account.balanceAsOf !== null || derivedSnapshot === void 0) {
+      return account;
+    }
+    return {
+      ...account,
+      currentBalanceMinor: derivedSnapshot.currentBalanceMinor,
+      currentBalanceMurMinor: derivedSnapshot.currentBalanceMurMinor,
+      balanceAsOf: derivedSnapshot.balanceAsOf
+    };
+  }
+  if (latestLine.balanceMinor === null && latestLine.balanceMurMinor === null) {
+    if (derivedSnapshot === void 0) {
+      return account;
+    }
+    return {
+      ...account,
+      currentBalanceMinor: derivedSnapshot.currentBalanceMinor,
+      currentBalanceMurMinor: derivedSnapshot.currentBalanceMurMinor,
+      balanceAsOf: derivedSnapshot.balanceAsOf
+    };
+  }
+  return {
+    ...account,
+    currentBalanceMinor: latestLine.balanceMinor ?? account.currentBalanceMinor,
+    currentBalanceMurMinor: latestLine.balanceMurMinor ?? account.currentBalanceMurMinor,
+    balanceAsOf: latestLine.occurredOn
+  };
+}
 function toApiBankRawLine(line, batchWorkspaceLookup) {
   return {
     id: line.id,
@@ -46572,6 +46739,16 @@ function previousRangeFilters(filters) {
   if (!isIsoDate(dateFrom) || !isIsoDate(dateTo)) {
     return null;
   }
+  const fromMs = Date.parse(`${dateFrom}T00:00:00Z`);
+  const toMs = Date.parse(`${dateTo}T00:00:00Z`);
+  if (Number.isNaN(fromMs) || Number.isNaN(toMs) || toMs < fromMs) {
+    return null;
+  }
+  const dayMs = 864e5;
+  const lengthDays = Math.round((toMs - fromMs) / dayMs) + 1;
+  if (lengthDays > 370) {
+    return null;
+  }
   const yearMatch = /^(\d{4})-01-01$/u.exec(dateFrom);
   if (yearMatch !== null && dateTo === `${yearMatch[1]}-12-31`) {
     const previousYear = String(Number(yearMatch[1]) - 1).padStart(4, "0");
@@ -46581,13 +46758,6 @@ function previousRangeFilters(filters) {
   if (dateFrom === `${month}-01` && (dateTo === `${month}-31` || dateTo === lastDayOfMonth(month))) {
     return filtersForPeriod(previousMonth(month), departmentId);
   }
-  const fromMs = Date.parse(`${dateFrom}T00:00:00Z`);
-  const toMs = Date.parse(`${dateTo}T00:00:00Z`);
-  if (Number.isNaN(fromMs) || Number.isNaN(toMs) || toMs < fromMs) {
-    return null;
-  }
-  const dayMs = 864e5;
-  const lengthDays = Math.round((toMs - fromMs) / dayMs) + 1;
   return {
     dateFrom: isoDayFromMs(fromMs - lengthDays * dayMs),
     dateTo: isoDayFromMs(fromMs - dayMs),
@@ -46638,6 +46808,7 @@ function toOfficeGlobalPnl(dataset, period, filters) {
   const incomeMicro = ledgerSummary === null ? fallbackPnl.income : eofMoney.format(ledgerSummary.income.amountMicro);
   const expenseMicro = ledgerSummary === null ? fallbackPnl.expense : eofMoney.format(ledgerSummary.expense.amountMicro);
   const netMicro = ledgerSummary === null ? fallbackPnl.profit : eofMoney.format(ledgerSummary.profit.amountMicro);
+  const projectionRows = readProjectionRowsForGlobalPnl(dataset, filters);
   return {
     scope: "global",
     completeness: "complete",
@@ -46646,7 +46817,7 @@ function toOfficeGlobalPnl(dataset, period, filters) {
     expenseMicro,
     netMicro,
     validatedProjectionId: `projection_global_${period}`,
-    projectionRows: toProjectionRows(readPnlByDepartment(dataset, filters), period),
+    projectionRows: toProjectionRows(projectionRows, period),
     lines: readPnlByCategory(dataset, filters).map((row) => ({
       id: row.category_id,
       label: `${row.department_name} \xB7 ${row.division_name} \xB7 ${row.category_name}`,
@@ -46655,6 +46826,44 @@ function toOfficeGlobalPnl(dataset, period, filters) {
       netMicro: row.profit
     }))
   };
+}
+function readProjectionRowsForGlobalPnl(dataset, filters) {
+  const allocatedRows = readPnlByDepartment(dataset, filters);
+  if (allocatedRows.length > 0 || filters.departmentId !== null) {
+    return allocatedRows;
+  }
+  const divisions = readPnlByDivision(dataset, filters);
+  if (divisions.length === 0) {
+    return allocatedRows;
+  }
+  const departmentsById = new Map(dataset.departments.map((department) => [department.id, department]));
+  const grouped = /* @__PURE__ */ new Map();
+  for (const row of divisions) {
+    const departmentType = departmentsById.get(row.department_id)?.type ?? "mixed";
+    const current = grouped.get(row.department_id);
+    if (current === void 0) {
+      grouped.set(row.department_id, {
+        departmentName: row.department_name,
+        departmentType,
+        incomeUnits: eofMoney.parse(row.income),
+        expenseUnits: eofMoney.parse(row.expense),
+        txCount: row.tx_count
+      });
+      continue;
+    }
+    current.incomeUnits = eofMoney.add(current.incomeUnits, eofMoney.parse(row.income));
+    current.expenseUnits = eofMoney.add(current.expenseUnits, eofMoney.parse(row.expense));
+    current.txCount += row.tx_count;
+  }
+  return [...grouped.entries()].map(([departmentId, row]) => ({
+    department_id: departmentId,
+    department_name: row.departmentName,
+    department_type: row.departmentType,
+    income: eofMoney.format(row.incomeUnits),
+    expense: eofMoney.format(row.expenseUnits),
+    profit: eofMoney.format(row.incomeUnits - row.expenseUnits),
+    tx_count: row.txCount
+  }));
 }
 function toOfficeLedgerTransactions(dataset, filters) {
   const categoriesById = new Map(dataset.categories.map((category) => [category.id, category]));
@@ -47115,8 +47324,8 @@ function latestDate(left, right) {
   }
   return left > right ? left : right;
 }
-function toProjectSummary(dataset, project, period) {
-  const pnl = readProjectPnl(dataset, project.id, filtersForPeriod(period, null));
+function toProjectSummary(dataset, project, filters) {
+  const pnl = readProjectPnl(dataset, project.id, filters);
   return {
     id: project.id,
     code: project.id,
@@ -47142,6 +47351,48 @@ function latestProjectActivityOn(dataset, projectId) {
     latest = latestDate(latest, transaction.transactionDate.slice(0, 10));
   }
   return latest;
+}
+function readOfficeBankQualityForFilters(dataset, period, filters) {
+  const lines = dataset.bankStatementLines.filter((line) => dateInFilters(line.occurredOn, filters));
+  const matchedLineIds = new Set(
+    dataset.bankReconciliationMatches.filter((match2) => match2.status === "matched").map((match2) => match2.bankStatementLineId)
+  );
+  const matchedCount = lines.filter((line) => line.reconciliationStatus === "matched" || matchedLineIds.has(line.id)).length;
+  const totalCount = lines.length;
+  const matchedRateBp = totalCount === 0 ? 0 : Number((BigInt(matchedCount) * 10000n + BigInt(totalCount) / 2n) / BigInt(totalCount));
+  const periodImports = dataset.bankImportBatches.filter(
+    (batch) => batch.status === "confirmed" && bankImportBatchIntersectsFilters(batch, filters)
+  );
+  return {
+    period,
+    matchedRateBp,
+    unmatchedLineCount: lines.filter((line) => line.reconciliationStatus === "unmatched" && !matchedLineIds.has(line.id)).length,
+    duplicateCandidateCount: lines.filter((line) => line.isDuplicateCandidate).length,
+    missingReferenceCount: lines.filter((line) => line.reference === null || line.reference.trim() === "").length,
+    staleImportCount: dataset.bankImportBatches.filter((batch) => batch.status === "confirmed" && isBankImportStaleForFilters(batch, filters)).length,
+    lastImportAt: latestTimestamp2(periodImports.map((batch) => batch.importedAt))
+  };
+}
+function bankImportBatchIntersectsFilters(batch, filters) {
+  if (batch.periodStart !== null && batch.periodEnd !== null) {
+    const windowStart = filters.dateFrom ?? "0000-01-01";
+    const windowEnd = filters.dateTo ?? "9999-12-31";
+    return batch.periodStart <= windowEnd && batch.periodEnd >= windowStart;
+  }
+  if (batch.importedAt !== null) {
+    return dateInFilters(batch.importedAt, filters);
+  }
+  return false;
+}
+function isBankImportStaleForFilters(batch, filters) {
+  if (batch.periodEnd === null || filters.dateFrom === null) {
+    return false;
+  }
+  return batch.periodEnd < filters.dateFrom;
+}
+function latestTimestamp2(values) {
+  const timestamps = values.filter((value) => value !== null).sort((left, right) => right.localeCompare(left));
+  return timestamps[0] ?? null;
 }
 function toProjectPnl(dataset, projectId, period, filters) {
   const pnl = readProjectPnl(dataset, projectId, filters);
@@ -47781,17 +48032,31 @@ function requireDatabaseUrl(env) {
   return value;
 }
 async function readApiFixtureStoreFromPostgres(pool) {
-  const office = await readOfficeDataset(pool);
-  const distribution = await readDistributionDataset(pool);
-  const distributionContracts = await readDistributionContracts(pool);
-  const distributionContractExpenses = await readDistributionContractExpenses(pool);
-  const distributionMappingRows = await readDistributionMappingRows(pool);
-  const distributionRoyaltyRules = await readDistributionRoyaltyRules(pool);
-  const distributionCostTerms = await readDistributionAllocationCostTerms(pool);
-  const distributionExpenseApplications = await readDistributionExistingExpenseApplications(pool);
-  const distributionFxRates = await readDistributionFxRates(pool);
-  const distributionPayeeBalances = await readDistributionPayeeBalances(pool);
-  const officePartnerPayeeLinks = await readOfficePartnerPayeeLinks(pool);
+  const [
+    office,
+    distribution,
+    distributionContracts,
+    distributionContractExpenses,
+    distributionMappingRows,
+    distributionRoyaltyRules,
+    distributionCostTerms,
+    distributionExpenseApplications,
+    distributionFxRates,
+    distributionPayeeBalances,
+    officePartnerPayeeLinks
+  ] = await Promise.all([
+    readOfficeDataset(pool),
+    readDistributionDataset(pool),
+    readDistributionContracts(pool),
+    readDistributionContractExpenses(pool),
+    readDistributionMappingRows(pool),
+    readDistributionRoyaltyRules(pool),
+    readDistributionAllocationCostTerms(pool),
+    readDistributionExistingExpenseApplications(pool),
+    readDistributionFxRates(pool),
+    readDistributionPayeeBalances(pool),
+    readOfficePartnerPayeeLinks(pool)
+  ]);
   return {
     office,
     officeAuditLog: [],
@@ -47820,48 +48085,65 @@ async function readPostgresHealth(pool) {
   };
 }
 async function readOfficeDataset(pool) {
-  const departments = await queryRows(pool, "select id::text, name, type, color, is_active from departments order by legacy_id nulls last, id", []);
-  const divisions = await queryRows(pool, "select id::text, department_id::text, name, is_active from divisions order by legacy_id nulls last, id", []);
-  const categories = await queryRows(pool, "select id::text, division_id::text, name, type, account_code, account_label, is_active from categories order by legacy_id nulls last, id", []);
-  const partners = await queryRows(pool, "select id::text, name, type, is_active from partners order by legacy_id nulls last, id", []);
-  const projects = await queryRows(pool, "select id::text, name, description, status, state, is_active from projects order by legacy_id nulls last, id", []);
-  const projectBudgetLines = await queryRows(pool, "select id::text, project_id::text, category_id::text, type, planned_amount_minor::text from project_budget_lines order by legacy_id nulls last, id", []);
-  const transactions = await queryRows(
-    pool,
-    "select id::text, workspace_id, transaction_date, type, status, is_active, description, category_id::text, partner_id::text, project_id::text, account_id::text, amount_minor::text, original_currency, exchange_rate_e10::text, vat_applicable, vat_rate_bp::text, vat_amount_minor::text from transactions order by transaction_date, id",
-    []
-  );
-  const financialAllocations = await queryRows(pool, "select id::text, transaction_id::text, department_id::text, amount_minor::text from financial_allocations order by legacy_id nulls last, id", []);
-  const bankAccounts = await queryRows(
-    pool,
-    "select id::text, workspace_id, bank_name, account_label, account_reference_hash, currency, current_balance_minor::text, current_balance_mur_minor::text, is_active, balance_as_of from office_bank_accounts order by legacy_id nulls last, id",
-    []
-  );
-  const bankImportBatches = await queryRows(
-    pool,
-    "select id::text, workspace_id, source, file_name, checksum, account_id::text, period_start, period_end, opening_balance_minor::text, closing_balance_minor::text, currency, accepted_row_count, rejected_row_count, duplicate_row_count, idempotency_fingerprint, status, imported_at, metadata from office_bank_import_batches order by legacy_id nulls last, id",
-    []
-  );
-  const bankStatementLines = await queryRows(
-    pool,
-    "select id::text, import_batch_id::text, account_id::text, occurred_on, value_on, description, reference, direction, amount_minor::text, balance_minor::text, currency, amount_mur_minor::text, balance_mur_minor::text, is_duplicate_candidate, reconciliation_status, matched_transaction_id::text, raw_data from office_bank_statement_lines order by occurred_on, id",
-    []
-  );
-  const bankReconciliationMatches = await queryRows(
-    pool,
-    "select id::text, bank_statement_line_id::text, transaction_id::text, confidence_bp, status, approved_by_user_id, approved_at from office_bank_reconciliation_matches order by legacy_id nulls last, id",
-    []
-  );
-  const cashflowProjectionRows = await queryRows(
-    pool,
-    "select id::text, workspace_id, account_id::text, period_month, expected_inflow_minor::text, expected_outflow_minor::text, expected_closing_balance_minor::text, currency, created_at from office_cashflow_projection_rows order by period_month, id",
-    []
-  );
-  const exchangeRates = await queryRows(
-    pool,
-    "select from_currency, to_currency, rate_e10::text, effective_date from exchange_rates order by effective_date, from_currency, to_currency",
-    []
-  );
+  const [
+    departments,
+    divisions,
+    categories,
+    partners,
+    projects,
+    projectBudgetLines,
+    transactions,
+    financialAllocations,
+    bankAccounts,
+    bankImportBatches,
+    bankStatementLines,
+    bankReconciliationMatches,
+    cashflowProjectionRows,
+    exchangeRates
+  ] = await Promise.all([
+    queryRows(pool, "select id::text, name, type, color, is_active from departments order by legacy_id nulls last, id", []),
+    queryRows(pool, "select id::text, department_id::text, name, is_active from divisions order by legacy_id nulls last, id", []),
+    queryRows(pool, "select id::text, division_id::text, name, type, account_code, account_label, is_active from categories order by legacy_id nulls last, id", []),
+    queryRows(pool, "select id::text, name, type, is_active from partners order by legacy_id nulls last, id", []),
+    queryRows(pool, "select id::text, name, description, status, state, is_active from projects order by legacy_id nulls last, id", []),
+    queryRows(pool, "select id::text, project_id::text, category_id::text, type, planned_amount_minor::text from project_budget_lines order by legacy_id nulls last, id", []),
+    queryRows(
+      pool,
+      "select id::text, workspace_id, transaction_date, type, status, is_active, description, category_id::text, partner_id::text, project_id::text, account_id::text, amount_minor::text, original_currency, exchange_rate_e10::text, vat_applicable, vat_rate_bp::text, vat_amount_minor::text from transactions order by transaction_date, id",
+      []
+    ),
+    queryRows(pool, "select id::text, transaction_id::text, department_id::text, amount_minor::text from financial_allocations order by legacy_id nulls last, id", []),
+    queryRows(
+      pool,
+      "select id::text, workspace_id, bank_name, account_label, account_reference_hash, currency, current_balance_minor::text, current_balance_mur_minor::text, is_active, balance_as_of from office_bank_accounts order by legacy_id nulls last, id",
+      []
+    ),
+    queryRows(
+      pool,
+      "select id::text, workspace_id, source, file_name, checksum, account_id::text, period_start, period_end, opening_balance_minor::text, closing_balance_minor::text, currency, accepted_row_count, rejected_row_count, duplicate_row_count, idempotency_fingerprint, status, imported_at, metadata from office_bank_import_batches order by legacy_id nulls last, id",
+      []
+    ),
+    queryRows(
+      pool,
+      "select id::text, import_batch_id::text, account_id::text, occurred_on, value_on, description, reference, direction, amount_minor::text, balance_minor::text, currency, amount_mur_minor::text, balance_mur_minor::text, is_duplicate_candidate, reconciliation_status, matched_transaction_id::text, raw_data from office_bank_statement_lines order by occurred_on, id",
+      []
+    ),
+    queryRows(
+      pool,
+      "select id::text, bank_statement_line_id::text, transaction_id::text, confidence_bp, status, approved_by_user_id, approved_at from office_bank_reconciliation_matches order by legacy_id nulls last, id",
+      []
+    ),
+    queryRows(
+      pool,
+      "select id::text, workspace_id, account_id::text, period_month, expected_inflow_minor::text, expected_outflow_minor::text, expected_closing_balance_minor::text, currency, created_at from office_cashflow_projection_rows order by period_month, id",
+      []
+    ),
+    queryRows(
+      pool,
+      "select from_currency, to_currency, rate_e10::text, effective_date from exchange_rates order by effective_date, from_currency, to_currency",
+      []
+    )
+  ]);
   return {
     departments: departments.map(toOfficeDepartment),
     divisions: divisions.map(toOfficeDivision),
@@ -47880,33 +48162,47 @@ async function readOfficeDataset(pool) {
   };
 }
 async function readDistributionDataset(pool) {
-  const importBatches = await queryRows(pool, "select id::text, source, file_name, status, imported_at from import_batches order by legacy_id nulls last, id", []);
-  const normalizedEarnings = await queryRows(
-    pool,
-    "select id::text, batch_id::text, dsp, gross_amount::text, quantity::text, currency, isrc, upc, raw_title, raw_artist, raw_label, mapping_status, calculation_status from normalized_earnings order by legacy_id nulls last, id",
-    []
-  );
-  const calculationRuns = await queryRows(pool, "select id::text, batch_id::text, status, started_at, finished_at, created_at from calculation_runs order by legacy_id nulls last, id", []);
-  const earningAllocations = await queryRows(
-    pool,
-    "select id::text, earning_id::text, calculation_run_id::text, payee_id::text, contract_id::text, track_id::text, gross_amount::text, gross_share::text, recoupment_applied::text, net_payable::text, split_percentage::text, currency, status, created_at from earning_allocations order by legacy_id nulls last, id",
-    []
-  );
-  const suspenseItems = await queryRows(pool, "select id::text, earning_id::text, amount::text, currency, reason_code, resolved, resolved_at, created_at from suspense_items order by legacy_id nulls last, id", []);
-  const statements = await queryRows(
-    pool,
-    "select id::text, payee_id::text, calculation_run_id::text, period_start, period_end, currency, gross_total::text, recoupment_total::text, net_payable::text, amount_due::text, version, status, created_at from statements order by period_end, id",
-    []
-  );
-  const statementLines = await queryRows(
-    pool,
-    "select id::text, statement_id::text, earning_allocation_id::text, track_id::text, gross_share::text, recoupment_applied::text, net_payable::text, quantity::text, currency from statement_lines order by legacy_id nulls last, id",
-    []
-  );
-  const statementPaymentLinks = await queryRows(pool, "select id::text, statement_id::text, payment_id::text, amount_applied::text from statement_payment_links order by legacy_id nulls last, id", []);
-  const payments = await queryRows(pool, "select id::text, payee_id::text, amount::text, currency, status, paid_at, reference from payments order by legacy_id nulls last, id", []);
-  const payees = await queryRows(pool, "select id::text, name, preferred_currency, is_active from payees order by legacy_id nulls last, id", []);
-  const tracks = await queryRows(pool, "select id::text, title, isrc, release_id::text from tracks order by legacy_id nulls last, id", []);
+  const [
+    importBatches,
+    normalizedEarnings,
+    calculationRuns,
+    earningAllocations,
+    suspenseItems,
+    statements,
+    statementLines,
+    statementPaymentLinks,
+    payments,
+    payees,
+    tracks
+  ] = await Promise.all([
+    queryRows(pool, "select id::text, source, file_name, status, imported_at from import_batches order by legacy_id nulls last, id", []),
+    queryRows(
+      pool,
+      "select id::text, batch_id::text, dsp, gross_amount::text, quantity::text, currency, isrc, upc, raw_title, raw_artist, raw_label, mapping_status, calculation_status from normalized_earnings order by legacy_id nulls last, id",
+      []
+    ),
+    queryRows(pool, "select id::text, batch_id::text, status, started_at, finished_at, created_at from calculation_runs order by legacy_id nulls last, id", []),
+    queryRows(
+      pool,
+      "select id::text, earning_id::text, calculation_run_id::text, payee_id::text, contract_id::text, track_id::text, gross_amount::text, gross_share::text, recoupment_applied::text, net_payable::text, split_percentage::text, currency, status, created_at from earning_allocations order by legacy_id nulls last, id",
+      []
+    ),
+    queryRows(pool, "select id::text, earning_id::text, amount::text, currency, reason_code, resolved, resolved_at, created_at from suspense_items order by legacy_id nulls last, id", []),
+    queryRows(
+      pool,
+      "select id::text, payee_id::text, calculation_run_id::text, period_start, period_end, currency, gross_total::text, recoupment_total::text, net_payable::text, amount_due::text, version, status, created_at from statements order by period_end, id",
+      []
+    ),
+    queryRows(
+      pool,
+      "select id::text, statement_id::text, earning_allocation_id::text, track_id::text, gross_share::text, recoupment_applied::text, net_payable::text, quantity::text, currency from statement_lines order by legacy_id nulls last, id",
+      []
+    ),
+    queryRows(pool, "select id::text, statement_id::text, payment_id::text, amount_applied::text from statement_payment_links order by legacy_id nulls last, id", []),
+    queryRows(pool, "select id::text, payee_id::text, amount::text, currency, status, paid_at, reference from payments order by legacy_id nulls last, id", []),
+    queryRows(pool, "select id::text, name, preferred_currency, is_active from payees order by legacy_id nulls last, id", []),
+    queryRows(pool, "select id::text, title, isrc, release_id::text from tracks order by legacy_id nulls last, id", [])
+  ]);
   return {
     importBatches: importBatches.map(toDistributionImportBatchRow),
     normalizedEarnings: normalizedEarnings.map(toDistributionNormalizedEarning),

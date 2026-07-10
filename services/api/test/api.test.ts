@@ -97,6 +97,79 @@ test("Office dashboard and global P&L are served from the domain read layer", as
   assert.equal(pnl.completeness, "complete");
 });
 
+test("Projects list totals follow period and explicit date range filters", async () => {
+  const app = createFixtureApiService();
+
+  const februaryResponse = await app.request("/eof/v1/projects?workspaceId=workspace_1&period=2026-02", {
+    headers: authHeaders()
+  });
+  assert.equal(februaryResponse.status, 200);
+  const februaryProjects = await februaryResponse.json() as { readonly items: readonly { readonly id: string; readonly periodIncomeMicro: string; readonly periodExpenseMicro: string; readonly netMicro: string }[] };
+  const februaryKaya = februaryProjects.items.find((project) => project.id === "project_kaya");
+  assert.notEqual(februaryKaya, undefined);
+  assert.equal(februaryKaya.periodIncomeMicro, "5000.00");
+  assert.equal(februaryKaya.periodExpenseMicro, "1200.00");
+  assert.equal(februaryKaya.netMicro, "3800.00");
+
+  const januaryResponse = await app.request("/eof/v1/projects?workspaceId=workspace_1&period=2026-01", {
+    headers: authHeaders()
+  });
+  assert.equal(januaryResponse.status, 200);
+  const januaryProjects = await januaryResponse.json() as { readonly items: readonly { readonly id: string; readonly periodIncomeMicro: string; readonly periodExpenseMicro: string; readonly netMicro: string }[] };
+  const januaryKaya = januaryProjects.items.find((project) => project.id === "project_kaya");
+  assert.notEqual(januaryKaya, undefined);
+  assert.equal(januaryKaya.periodIncomeMicro, "0.00");
+  assert.equal(januaryKaya.periodExpenseMicro, "0.00");
+  assert.equal(januaryKaya.netMicro, "0.00");
+
+  const narrowRangeResponse = await app.request(
+    "/eof/v1/projects?workspaceId=workspace_1&period=2026-02&dateFrom=2026-02-01&dateTo=2026-02-05",
+    { headers: authHeaders() }
+  );
+  assert.equal(narrowRangeResponse.status, 200);
+  const narrowRangeProjects = await narrowRangeResponse.json() as { readonly items: readonly { readonly id: string; readonly periodIncomeMicro: string; readonly periodExpenseMicro: string; readonly netMicro: string }[] };
+  const narrowRangeKaya = narrowRangeProjects.items.find((project) => project.id === "project_kaya");
+  assert.notEqual(narrowRangeKaya, undefined);
+  assert.equal(narrowRangeKaya.periodIncomeMicro, "5000.00");
+  assert.equal(narrowRangeKaya.periodExpenseMicro, "0.00");
+  assert.equal(narrowRangeKaya.netMicro, "5000.00");
+});
+
+test("Bank quality analytics follow explicit date range filters", async () => {
+  const app = createFixtureApiService();
+
+  const fullMonthResponse = await app.request("/eof/v1/analytics/bank-quality?workspaceId=workspace_1&period=2026-02", {
+    headers: authHeaders()
+  });
+  assert.equal(fullMonthResponse.status, 200);
+  const fullMonth = await fullMonthResponse.json() as {
+    readonly matchedRateBp: number;
+    readonly unmatchedLineCount: number;
+    readonly duplicateCandidateCount: number;
+    readonly missingReferenceCount: number;
+  };
+  assert.equal(fullMonth.matchedRateBp, 6667);
+  assert.equal(fullMonth.unmatchedLineCount, 1);
+  assert.equal(fullMonth.duplicateCandidateCount, 1);
+  assert.equal(fullMonth.missingReferenceCount, 1);
+
+  const narrowRangeResponse = await app.request(
+    "/eof/v1/analytics/bank-quality?workspaceId=workspace_1&period=2026-02&dateFrom=2026-02-01&dateTo=2026-02-05",
+    { headers: authHeaders() }
+  );
+  assert.equal(narrowRangeResponse.status, 200);
+  const narrowRange = await narrowRangeResponse.json() as {
+    readonly matchedRateBp: number;
+    readonly unmatchedLineCount: number;
+    readonly duplicateCandidateCount: number;
+    readonly missingReferenceCount: number;
+  };
+  assert.equal(narrowRange.matchedRateBp, 10000);
+  assert.equal(narrowRange.unmatchedLineCount, 0);
+  assert.equal(narrowRange.duplicateCandidateCount, 0);
+  assert.equal(narrowRange.missingReferenceCount, 0);
+});
+
 test("Business routes require Supabase bearer auth and auth/me returns the verified identity", async () => {
   const app = createFixtureApiService();
 
@@ -480,6 +553,109 @@ test("Bank accounts expose source labels and workspace fallback resolves eeee-mu
   assert.equal(account?.bankName, "Mauritius Commercial Bank");
   assert.equal(account?.accountLabel, "MCB MUR");
   assert.equal(account?.currentBalanceMicro, "2500.00");
+});
+
+test("Bank accounts derive balance from latest bank line when snapshot is missing", async () => {
+  const fixture = createFixtureStore();
+  const app = createApiService({
+    fixtures: {
+      ...fixture,
+      office: {
+        ...fixture.office,
+        bankAccounts: fixture.office.bankAccounts.map((account) =>
+          account.id === "bank_mur"
+            ? {
+                ...account,
+                workspaceId: "eeee-mu",
+                currentBalanceMinor: 0n,
+                currentBalanceMurMinor: null,
+                balanceAsOf: null
+              }
+            : {
+                ...account,
+                workspaceId: "eeee-mu"
+              }
+        )
+      }
+    },
+    persistence: createMemoryPersistenceRuntime({ WRITES_ENABLED: "false" }),
+    health: null,
+    nowIso: (): string => "2026-06-21T00:00:00.000Z",
+    auth: createTestAuthVerifier()
+  });
+
+  const response = await app.request("/eof/v1/bank/accounts?limit=10", {
+    headers: authHeaders()
+  });
+  assert.equal(response.status, 200);
+  const page = (await response.json()) as {
+    readonly items: readonly {
+      readonly id: string;
+      readonly currentBalanceMicro: string;
+      readonly currentBalanceMurMicro: string | null;
+      readonly balanceAsOf: string | null;
+    }[];
+  };
+  const account = page.items.find((item) => item.id === "bank_mur");
+  assert.equal(account?.currentBalanceMicro, "3715.00");
+  assert.equal(account?.currentBalanceMurMicro, "3715.00");
+  assert.equal(account?.balanceAsOf, "2026-02-15");
+});
+
+test("Bank accounts derive balance from signed movement when line balances are missing", async () => {
+  const fixture = createFixtureStore();
+  const app = createApiService({
+    fixtures: {
+      ...fixture,
+      office: {
+        ...fixture.office,
+        bankAccounts: fixture.office.bankAccounts.map((account) =>
+          account.id === "bank_mur"
+            ? {
+                ...account,
+                workspaceId: "eeee-mu",
+                currentBalanceMinor: 0n,
+                currentBalanceMurMinor: 0n,
+                balanceAsOf: null
+              }
+            : {
+                ...account,
+                workspaceId: "eeee-mu"
+              }
+        ),
+        bankStatementLines: fixture.office.bankStatementLines.map((line) =>
+          line.accountId === "bank_mur"
+            ? {
+                ...line,
+                balanceMinor: null,
+                balanceMurMinor: null
+              }
+            : line
+        )
+      }
+    },
+    persistence: createMemoryPersistenceRuntime({ WRITES_ENABLED: "false" }),
+    health: null,
+    nowIso: (): string => "2026-06-21T00:00:00.000Z",
+    auth: createTestAuthVerifier()
+  });
+
+  const response = await app.request("/eof/v1/bank/accounts?limit=10", {
+    headers: authHeaders()
+  });
+  assert.equal(response.status, 200);
+  const page = (await response.json()) as {
+    readonly items: readonly {
+      readonly id: string;
+      readonly currentBalanceMicro: string;
+      readonly currentBalanceMurMicro: string | null;
+      readonly balanceAsOf: string | null;
+    }[];
+  };
+  const account = page.items.find((item) => item.id === "bank_mur");
+  assert.equal(account?.currentBalanceMicro, "3715.00");
+  assert.equal(account?.currentBalanceMurMicro, "3715.00");
+  assert.equal(account?.balanceAsOf, "2026-02-15");
 });
 
 test("Statements list keeps scale-10 money and includes full period range", async () => {

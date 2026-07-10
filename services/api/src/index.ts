@@ -72,6 +72,7 @@ import {
   readPnlByDepartment,
   readProjectPnl,
   type OfficeBankAccountRow,
+  type OfficeBankQualityResult,
   type OfficeWriteExchangeRateRow,
   type OfficeAnalyticsDataset,
   type OfficeBankStatementLineRow,
@@ -124,6 +125,7 @@ import type {
   DistributionReconciliationMatchedUnallocated,
   DistributionReconciliationPayeeBalance,
   DistributionReconciliationResponse,
+  DistributionScreenResponse,
   DistributionReconciliationStatementGap,
   DistributionRevenueRow,
   DistributionSettingsResponse,
@@ -162,6 +164,7 @@ import type {
   OfficeTransactionStatus,
   OfficeTransactionWriteRequest,
   PageResult,
+  PayeeSummary,
   PaymentRecordRequest,
   PaymentReconcileRequest,
   PaymentSummary,
@@ -1047,6 +1050,13 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
     return context.json(toPlanComptableNodes(dependencies.fixtures.office, includeInactive));
   });
 
+  app.get("/eof/v1/plan-comptable/nodes", (context) => {
+    resolveWorkspaceId(context);
+    const includeInactive = queryBoolean(context, "includeInactive", "include_inactive");
+    const nodes = toPlanComptableNodes(dependencies.fixtures.office, includeInactive);
+    return context.json(pageItems(context, nodes));
+  });
+
   app.post("/eof/v1/plan-comptable", async (context) => {
     return officePlanComptableCreateResponse(context, dependencies);
   });
@@ -1264,9 +1274,15 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
   app.get("/eof/v1/bank/accounts", (context) => {
     const workspaceId = resolveWorkspaceId(context);
     const limit = requirePositiveInteger(context, optionalCompatQuery(context, ["limit"]), "limit");
+    const latestLineByAccount = latestBankLineByAccount(dependencies.fixtures.office.bankStatementLines);
+    const derivedSnapshotByAccount = derivedBankSnapshotByAccount(dependencies.fixtures.office.bankStatementLines);
     const accounts = dependencies.fixtures.office.bankAccounts
       .filter((account) => account.workspaceId === workspaceId)
-      .map((account) => toApiBankAccountSummary(account));
+      .map((account) =>
+        toApiBankAccountSummary(
+          resolveBankAccountSnapshot(account, latestLineByAccount.get(account.id), derivedSnapshotByAccount.get(account.id))
+        )
+      );
     const page = pageItems(context, accounts);
     return context.json(page);
   });
@@ -1307,9 +1323,11 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
 
   app.get("/eof/v1/projects", (context) => {
     resolveWorkspaceId(context);
+    const period = optionalCompatQuery(context, ["period", "month"]) ?? dependencies.nowIso().slice(0, 7);
+    const filters = rangeFiltersFromContext(context, period, null);
     const status = nullableQuery(context, "status");
     const projects = dependencies.fixtures.office.projects
-      .map((project) => toProjectSummary(dependencies.fixtures.office, project, "2026-02"))
+      .map((project) => toProjectSummary(dependencies.fixtures.office, project, filters))
       .filter((project) => status === null || project.status === status);
     return context.json(pageItems(context, projects));
   });
@@ -1342,7 +1360,8 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
   app.get("/eof/v1/analytics/bank-quality", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
     resolveWorkspaceId(context);
-    const result = readOfficeBankQuality(dependencies.fixtures.office, period);
+    const filters = rangeFiltersFromContext(context, period, null);
+    const result = readOfficeBankQualityForFilters(dependencies.fixtures.office, period, filters);
     const response: OfficeBankQualityResponse = {
       period: result.period,
       matchedRateBp: result.matchedRateBp,
@@ -1371,6 +1390,86 @@ function filterRunwayWindowMonths(
 }
 
 function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServiceDependencies): void {
+  app.get("/erh/v1/screen", (context) => {
+    const period = requireQuery(context, "period");
+    requireQuery(context, "workspaceId");
+    const source = nullableQuery(context, "importSource");
+    const mappingStatus = nullableQuery(context, "mappingStatus") ?? "unmapped";
+    const suspenseStatus = nullableQuery(context, "suspenseStatus") ?? "open";
+    const paymentStatus = nullableQuery(context, "paymentStatus");
+    const revenueGroupBy = nullableQuery(context, "revenueGroupBy") ?? "store";
+
+    const importBatches = dependencies.fixtures.distribution.importBatches
+      .map((batch) => toDistributionImportBatch(dependencies.fixtures.distribution, batch.id))
+      .filter((batch) => source === null || batch.source === source);
+    const mappingRows = dependencies.fixtures.distributionMappingRows.filter(
+      (row) => mappingStatus === null || row.status === mappingStatus
+    );
+    const payees: readonly PayeeSummary[] = dependencies.fixtures.distribution.payees.map((payee) => ({
+      id: payee.id,
+      displayName: payee.name,
+      email: null,
+      status: payee.isActive ? "active" : "inactive",
+      defaultCurrency: payee.preferredCurrency
+    }));
+    const releases = toReleaseSummaries(dependencies.fixtures.distribution);
+    const tracks: readonly TrackSummary[] = dependencies.fixtures.distribution.tracks.map((track) => ({
+      id: track.id,
+      releaseId: track.releaseId,
+      title: track.title,
+      artistName: "Kaya",
+      isrc: track.isrc,
+      status: "released",
+      splitStatus: "balanced",
+      contributorCount: 1
+    }));
+    const contracts = dependencies.fixtures.distributionContracts;
+    const firstContract = contracts[0];
+    const expenses = dependencies.fixtures.distributionContractExpenses.filter(
+      (expense) => expense.contractId === (firstContract?.id ?? "contract_alma")
+    );
+    const allocations = dependencies.fixtures.distribution.calculationRuns.map((run) =>
+      toAllocationRunSummary(dependencies.fixtures.distribution, run)
+    );
+    const suspense = readSuspense(dependencies.fixtures.distribution, {
+      status: toDomainSuspenseStatus(suspenseStatus),
+      reasonCode: null
+    }).rows.map((row) => toApiSuspenseItem(row, period));
+    const statements = readStatementSummaries(dependencies.fixtures.distribution, {
+      period: null,
+      payeeId: null,
+      status: null
+    }).rows.map(toApiStatementSummary);
+    const payments = toPaymentSummaries(dependencies.fixtures.distribution).filter(
+      (payment) => paymentStatus === null || payment.status === paymentStatus
+    );
+    const response: DistributionScreenResponse = {
+      status: { writesEnabled: dependencies.persistence.writesEnabled },
+      dashboard: toDistributionDashboard(dependencies.fixtures.distribution, period),
+      importBatches: pageItems(context, importBatches),
+      mappingRows: pageItems(context, mappingRows),
+      payees: {
+        items: payees,
+        nextCursor: null
+      },
+      releases: pageItems(context, releases),
+      tracks: pageItems(context, tracks),
+      contracts: pageItems(context, contracts),
+      expenses: pageItems(context, expenses),
+      allocations: pageItems(context, allocations),
+      suspense: pageItems(context, suspense),
+      statements: pageItems(context, statements),
+      payments: pageItems(context, payments),
+      revenue: pageItems(context, toRevenueRows(dependencies.fixtures.distribution, revenueGroupBy)),
+      reconciliation: toDistributionReconciliation(dependencies.fixtures),
+      aliases: pageItems(context, toDistributionAliases(dependencies.fixtures)),
+      duplicates: pageItems(context, toDistributionDuplicates(dependencies.fixtures)),
+      auditLog: pageItems(context, toDistributionAuditLog(dependencies.fixtures)),
+      settings: toDistributionSettings(context, dependencies.fixtures, dependencies.persistence.writesEnabled)
+    };
+    return context.json(response);
+  });
+
   app.get("/erh/v1/dashboard", (context) => {
     const period = requireQuery(context, "period");
     requireQuery(context, "workspaceId");
@@ -9048,6 +9147,114 @@ function toApiBankAccountSummary(account: OfficeBankAccountRow): {
   };
 }
 
+function latestBankLineByAccount(
+  lines: readonly OfficeBankStatementLineRow[]
+): ReadonlyMap<string, OfficeBankStatementLineRow> {
+  const latest = new Map<string, OfficeBankStatementLineRow>();
+  for (const line of lines) {
+    if (line.balanceMinor === null && line.balanceMurMinor === null) {
+      continue;
+    }
+    const current = latest.get(line.accountId);
+    if (current === undefined || line.occurredOn > current.occurredOn || (line.occurredOn === current.occurredOn && line.id > current.id)) {
+      latest.set(line.accountId, line);
+    }
+  }
+  return latest;
+}
+
+interface DerivedBankSnapshot {
+  readonly currentBalanceMinor: bigint;
+  readonly currentBalanceMurMinor: bigint | null;
+  readonly balanceAsOf: string;
+}
+
+function derivedBankSnapshotByAccount(
+  lines: readonly OfficeBankStatementLineRow[]
+): ReadonlyMap<string, DerivedBankSnapshot> {
+  const aggregations = new Map<string, {
+    currentBalanceMinor: bigint;
+    currentBalanceMurMinor: bigint;
+    hasMurBalance: boolean;
+    balanceAsOf: string;
+    latestLineId: string;
+  }>();
+
+  for (const line of lines) {
+    const existing = aggregations.get(line.accountId);
+    const sign = line.direction === "credit" ? 1n : -1n;
+    const next = existing ?? {
+      currentBalanceMinor: 0n,
+      currentBalanceMurMinor: 0n,
+      hasMurBalance: false,
+      balanceAsOf: line.occurredOn,
+      latestLineId: line.id
+    };
+
+    next.currentBalanceMinor += sign * line.amountMinor;
+    if (line.amountMurMinor !== null) {
+      next.currentBalanceMurMinor += sign * line.amountMurMinor;
+      next.hasMurBalance = true;
+    }
+    if (line.occurredOn > next.balanceAsOf || (line.occurredOn === next.balanceAsOf && line.id > next.latestLineId)) {
+      next.balanceAsOf = line.occurredOn;
+      next.latestLineId = line.id;
+    }
+    aggregations.set(line.accountId, next);
+  }
+
+  const result = new Map<string, DerivedBankSnapshot>();
+  for (const [accountId, value] of aggregations.entries()) {
+    result.set(accountId, {
+      currentBalanceMinor: value.currentBalanceMinor,
+      currentBalanceMurMinor: value.hasMurBalance ? value.currentBalanceMurMinor : null,
+      balanceAsOf: value.balanceAsOf
+    });
+  }
+  return result;
+}
+
+function resolveBankAccountSnapshot(
+  account: OfficeBankAccountRow,
+  latestLine: OfficeBankStatementLineRow | undefined,
+  derivedSnapshot: DerivedBankSnapshot | undefined
+): OfficeBankAccountRow {
+  // Some imported production accounts have never had current_balance*/balance_as_of
+  // backfilled in office_bank_accounts even though statement lines exist. For those,
+  // surface the latest line balance so the Bank table reflects connected data.
+  if (account.balanceAsOf !== null || latestLine === undefined) {
+    if (account.balanceAsOf !== null || derivedSnapshot === undefined) {
+      return account;
+    }
+
+    return {
+      ...account,
+      currentBalanceMinor: derivedSnapshot.currentBalanceMinor,
+      currentBalanceMurMinor: derivedSnapshot.currentBalanceMurMinor,
+      balanceAsOf: derivedSnapshot.balanceAsOf
+    };
+  }
+
+  if (latestLine.balanceMinor === null && latestLine.balanceMurMinor === null) {
+    if (derivedSnapshot === undefined) {
+      return account;
+    }
+    return {
+      ...account,
+      currentBalanceMinor: derivedSnapshot.currentBalanceMinor,
+      currentBalanceMurMinor: derivedSnapshot.currentBalanceMurMinor,
+      balanceAsOf: derivedSnapshot.balanceAsOf
+    };
+  }
+
+  return {
+    ...account,
+    currentBalanceMinor: latestLine.balanceMinor ?? account.currentBalanceMinor,
+    currentBalanceMurMinor: latestLine.balanceMurMinor ?? account.currentBalanceMurMinor,
+    balanceAsOf: latestLine.occurredOn
+  };
+}
+
 function toApiBankRawLine(
   line: OfficeBankStatementLineRow,
   batchWorkspaceLookup: ReadonlyMap<string, string>
@@ -9158,6 +9365,20 @@ function previousRangeFilters(filters: OfficePnlFilters): OfficePnlFilters | nul
     return null;
   }
 
+  // Wide custom windows (for example the "All" period spanning many years)
+  // produce misleading "previous" comparisons. Keep dashboard comparison only
+  // for short/regular windows where the adjacent range is meaningful.
+  const fromMs = Date.parse(`${dateFrom}T00:00:00Z`);
+  const toMs = Date.parse(`${dateTo}T00:00:00Z`);
+  if (Number.isNaN(fromMs) || Number.isNaN(toMs) || toMs < fromMs) {
+    return null;
+  }
+  const dayMs = 86_400_000;
+  const lengthDays = Math.round((toMs - fromMs) / dayMs) + 1;
+  if (lengthDays > 370) {
+    return null;
+  }
+
   const yearMatch = /^(\d{4})-01-01$/u.exec(dateFrom);
   if (yearMatch !== null && dateTo === `${yearMatch[1]}-12-31`) {
     const previousYear = String(Number(yearMatch[1]) - 1).padStart(4, "0");
@@ -9169,13 +9390,6 @@ function previousRangeFilters(filters: OfficePnlFilters): OfficePnlFilters | nul
     return filtersForPeriod(previousMonth(month), departmentId);
   }
 
-  const fromMs = Date.parse(`${dateFrom}T00:00:00Z`);
-  const toMs = Date.parse(`${dateTo}T00:00:00Z`);
-  if (Number.isNaN(fromMs) || Number.isNaN(toMs) || toMs < fromMs) {
-    return null;
-  }
-  const dayMs = 86_400_000;
-  const lengthDays = Math.round((toMs - fromMs) / dayMs) + 1;
   return {
     dateFrom: isoDayFromMs(fromMs - lengthDays * dayMs),
     dateTo: isoDayFromMs(fromMs - dayMs),
@@ -9240,6 +9454,8 @@ function toOfficeGlobalPnl(dataset: OfficeAnalyticsDataset, period: string, filt
   const expenseMicro = ledgerSummary === null ? fallbackPnl.expense : eofMoney.format(ledgerSummary.expense.amountMicro);
   const netMicro = ledgerSummary === null ? fallbackPnl.profit : eofMoney.format(ledgerSummary.profit.amountMicro);
 
+  const projectionRows = readProjectionRowsForGlobalPnl(dataset, filters);
+
   return {
     scope: "global",
     completeness: "complete",
@@ -9248,7 +9464,7 @@ function toOfficeGlobalPnl(dataset: OfficeAnalyticsDataset, period: string, filt
     expenseMicro,
     netMicro,
     validatedProjectionId: `projection_global_${period}`,
-    projectionRows: toProjectionRows(readPnlByDepartment(dataset, filters), period),
+    projectionRows: toProjectionRows(projectionRows, period),
     lines: readPnlByCategory(dataset, filters).map((row) => ({
       id: row.category_id,
       label: `${row.department_name} · ${row.division_name} · ${row.category_name}`,
@@ -9257,6 +9473,50 @@ function toOfficeGlobalPnl(dataset: OfficeAnalyticsDataset, period: string, filt
       netMicro: row.profit
     }))
   };
+}
+
+function readProjectionRowsForGlobalPnl(dataset: OfficeAnalyticsDataset, filters: OfficePnlFilters): readonly OfficePnlDepartmentRow[] {
+  const allocatedRows = readPnlByDepartment(dataset, filters);
+  if (allocatedRows.length > 0 || filters.departmentId !== null) {
+    return allocatedRows;
+  }
+
+  const divisions = readPnlByDivision(dataset, filters);
+  if (divisions.length === 0) {
+    return allocatedRows;
+  }
+
+  const departmentsById = new Map<string, OfficeDepartmentRow>(dataset.departments.map((department) => [department.id, department]));
+  const grouped = new Map<string, { readonly departmentName: string; readonly departmentType: OfficeDepartmentRow["type"]; incomeUnits: bigint; expenseUnits: bigint; txCount: number }>();
+
+  for (const row of divisions) {
+    const departmentType = departmentsById.get(row.department_id)?.type ?? "mixed";
+    const current = grouped.get(row.department_id);
+    if (current === undefined) {
+      grouped.set(row.department_id, {
+        departmentName: row.department_name,
+        departmentType,
+        incomeUnits: eofMoney.parse(row.income),
+        expenseUnits: eofMoney.parse(row.expense),
+        txCount: row.tx_count
+      });
+      continue;
+    }
+
+    current.incomeUnits = eofMoney.add(current.incomeUnits, eofMoney.parse(row.income));
+    current.expenseUnits = eofMoney.add(current.expenseUnits, eofMoney.parse(row.expense));
+    current.txCount += row.tx_count;
+  }
+
+  return [...grouped.entries()].map(([departmentId, row]) => ({
+    department_id: departmentId,
+    department_name: row.departmentName,
+    department_type: row.departmentType,
+    income: eofMoney.format(row.incomeUnits),
+    expense: eofMoney.format(row.expenseUnits),
+    profit: eofMoney.format(row.incomeUnits - row.expenseUnits),
+    tx_count: row.txCount
+  }));
 }
 
 function toOfficeLedgerTransactions(dataset: OfficeAnalyticsDataset, filters: OfficePnlFilters): readonly LedgerTransaction[] {
@@ -9809,8 +10069,8 @@ function latestDate(left: string | null, right: string): string {
   return left > right ? left : right;
 }
 
-function toProjectSummary(dataset: OfficeAnalyticsDataset, project: OfficeProjectRow, period: string): OfficeProjectSummary {
-  const pnl = readProjectPnl(dataset, project.id, filtersForPeriod(period, null));
+function toProjectSummary(dataset: OfficeAnalyticsDataset, project: OfficeProjectRow, filters: OfficePnlFilters): OfficeProjectSummary {
+  const pnl = readProjectPnl(dataset, project.id, filters);
   return {
     id: project.id,
     code: project.id,
@@ -9839,6 +10099,60 @@ function latestProjectActivityOn(dataset: OfficeAnalyticsDataset, projectId: str
   }
 
   return latest;
+}
+
+function readOfficeBankQualityForFilters(
+  dataset: OfficeAnalyticsDataset,
+  period: string,
+  filters: OfficePnlFilters
+): OfficeBankQualityResult {
+  const lines = dataset.bankStatementLines.filter((line) => dateInFilters(line.occurredOn, filters));
+  const matchedLineIds = new Set<string>(
+    dataset.bankReconciliationMatches.filter((match) => match.status === "matched").map((match) => match.bankStatementLineId)
+  );
+  const matchedCount = lines.filter((line) => line.reconciliationStatus === "matched" || matchedLineIds.has(line.id)).length;
+  const totalCount = lines.length;
+  const matchedRateBp = totalCount === 0 ? 0 : Number((BigInt(matchedCount) * 10000n + BigInt(totalCount) / 2n) / BigInt(totalCount));
+  const periodImports = dataset.bankImportBatches.filter(
+    (batch) => batch.status === "confirmed" && bankImportBatchIntersectsFilters(batch, filters)
+  );
+
+  return {
+    period,
+    matchedRateBp,
+    unmatchedLineCount: lines.filter((line) => line.reconciliationStatus === "unmatched" && !matchedLineIds.has(line.id)).length,
+    duplicateCandidateCount: lines.filter((line) => line.isDuplicateCandidate).length,
+    missingReferenceCount: lines.filter((line) => line.reference === null || line.reference.trim() === "").length,
+    staleImportCount: dataset.bankImportBatches.filter((batch) => batch.status === "confirmed" && isBankImportStaleForFilters(batch, filters)).length,
+    lastImportAt: latestTimestamp(periodImports.map((batch) => batch.importedAt))
+  };
+}
+
+function bankImportBatchIntersectsFilters(batch: OfficeBankImportBatchRow, filters: OfficePnlFilters): boolean {
+  if (batch.periodStart !== null && batch.periodEnd !== null) {
+    const windowStart = filters.dateFrom ?? "0000-01-01";
+    const windowEnd = filters.dateTo ?? "9999-12-31";
+    return batch.periodStart <= windowEnd && batch.periodEnd >= windowStart;
+  }
+
+  if (batch.importedAt !== null) {
+    return dateInFilters(batch.importedAt, filters);
+  }
+
+  return false;
+}
+
+function isBankImportStaleForFilters(batch: OfficeBankImportBatchRow, filters: OfficePnlFilters): boolean {
+  if (batch.periodEnd === null || filters.dateFrom === null) {
+    return false;
+  }
+
+  return batch.periodEnd < filters.dateFrom;
+}
+
+function latestTimestamp(values: readonly (string | null)[]): string | null {
+  const timestamps = values.filter((value): value is string => value !== null).sort((left, right) => right.localeCompare(left));
+  return timestamps[0] ?? null;
 }
 
 function toProjectPnl(dataset: OfficeAnalyticsDataset, projectId: string, period: string, filters: OfficePnlFilters): OfficeProjectPnl {

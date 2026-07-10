@@ -96,7 +96,7 @@
   type SelectFilterValue = string;
   type ImportSource = "mcb" | "sbi" | "csv" | "cashflow" | "pdf";
   type RequestStatus = "idle" | "loading" | "success" | "error";
-  type OfficePagedTableId = "divisionPnl" | "transactions" | "pending" | "reconciliation" | "audit";
+  type OfficePagedTableId = "divisionPnl" | "planComptable" | "transactions" | "pending" | "reconciliation" | "audit";
 
   interface Props {
     readonly session: AuthSession;
@@ -395,6 +395,9 @@
   let divisionPnlState = $state<ApiRequestState<PageResult<OfficeDivisionPnl>>>(
     createIdleState<PageResult<OfficeDivisionPnl>>()
   );
+  let planTableState = $state<ApiRequestState<PageResult<OfficePlanComptableNode>>>(
+    createIdleState<PageResult<OfficePlanComptableNode>>()
+  );
   let planState = $state<ApiRequestState<readonly OfficePlanComptableNode[]>>(
     createIdleState<readonly OfficePlanComptableNode[]>()
   );
@@ -486,6 +489,7 @@
   const activeRange = $derived(rangeForScope(periodScope, today, customRange));
   const periodControlVisible = $derived(pageUsesPeriodControl(activePageId));
   const planNodes = $derived(readArrayState(planState));
+  const planTableNodes = $derived(readPageItems(planTableState));
   const transactionRows = $derived(readPageItems(transactionsState));
   const pendingRows = $derived(readPageItems(pendingState));
   const reconciliationRows = $derived(readPageItems(reconciliationState));
@@ -607,12 +611,15 @@
   const pnlTableRows = $derived(createPnlTableRows(pnlRows));
   const pnlLineTableRows = $derived(createPnlLineTableRows(pnlLineRows));
   const divisionPnlTableRows = $derived(createDivisionPnlTableRows(divisionPnlRows));
-  const planTableRows = $derived(createPlanTableRows(planNodes));
+  const planTableRows = $derived(createPlanTableRows(planTableNodes));
   const transactionTableRows = $derived(createTransactionTableRows(transactionRows));
   const pendingTableRows = $derived(createPendingTableRows(pendingRows, selectedPendingIds));
   const reconciliationTableRows = $derived(createReconciliationTableRows(reconciliationRows));
   const divisionPnlPagination = $derived<TablePagination | null>(
     createTablePagination(divisionPnlState, tablePaginationLoading === "divisionPnl", tablePaginationError("divisionPnl"), loadMoreDivisionPnl, loadAllDivisionPnl)
+  );
+  const planPagination = $derived<TablePagination | null>(
+    createTablePagination(planTableState, tablePaginationLoading === "planComptable", tablePaginationError("planComptable"), loadMorePlanComptableNodes, loadAllPlanComptableNodes)
   );
   const transactionPagination = $derived<TablePagination | null>(
     createTablePagination(transactionsState, tablePaginationLoading === "transactions", tablePaginationError("transactions"), loadMoreTransactions, loadAllTransactions)
@@ -729,6 +736,32 @@
           period,
           dateFrom: activeRange.from,
           dateTo: activeRange.to,
+          cursor,
+          limit: TABLE_PAGE_SIZE
+        }),
+      mode
+    );
+  }
+
+  async function loadMorePlanComptableNodes(): Promise<void> {
+    await loadPlanComptableNodesPage("one");
+  }
+
+  async function loadAllPlanComptableNodes(): Promise<void> {
+    await loadPlanComptableNodesPage("all");
+  }
+
+  async function loadPlanComptableNodesPage(mode: PageLoadMode): Promise<void> {
+    await loadOfficePageResult(
+      "planComptable",
+      planTableState,
+      (state: ApiRequestState<PageResult<OfficePlanComptableNode>>): void => {
+        planTableState = state;
+      },
+      (cursor: string): Promise<PageResult<OfficePlanComptableNode>> =>
+        client.office.listPlanComptableNodes({
+          workspaceId: officeWorkspaceId,
+          includeInactive: true,
           cursor,
           limit: TABLE_PAGE_SIZE
         }),
@@ -990,15 +1023,27 @@
 
   async function loadPlanComptable(): Promise<void> {
     planState = beginReload<readonly OfficePlanComptableNode[]>(planState);
+    planTableState = beginReload<PageResult<OfficePlanComptableNode>>(planTableState);
 
     try {
-      const nodes = await client.office.getPlanComptable({
-        workspaceId: officeWorkspaceId,
-        includeInactive: true
-      });
+      const [nodes, pagedNodes] = await Promise.all([
+        client.office.getPlanComptable({
+          workspaceId: officeWorkspaceId,
+          includeInactive: true
+        }),
+        client.office.listPlanComptableNodes({
+          workspaceId: officeWorkspaceId,
+          includeInactive: true,
+          cursor: null,
+          limit: TABLE_PAGE_SIZE
+        })
+      ]);
       planState = createSuccessState<readonly OfficePlanComptableNode[]>(nodes);
+      planTableState = createSuccessState<PageResult<OfficePlanComptableNode>>(pagedNodes);
+      setTablePaginationError("planComptable", null);
     } catch (error: unknown) {
       planState = createErrorState<readonly OfficePlanComptableNode[]>(error);
+      planTableState = createErrorState<PageResult<OfficePlanComptableNode>>(error);
     }
   }
 
@@ -1918,6 +1963,11 @@
       divisionPnlState = createSuccessState<PageResult<OfficeDivisionPnl>>(screen.divisionPnl);
       setTablePaginationError("divisionPnl", null);
       planState = createSuccessState<readonly OfficePlanComptableNode[]>(screen.planComptable);
+      planTableState = createSuccessState<PageResult<OfficePlanComptableNode>>({
+        items: screen.planComptable.slice(0, TABLE_PAGE_SIZE),
+        nextCursor: screen.planComptable.length > TABLE_PAGE_SIZE ? String(TABLE_PAGE_SIZE) : null
+      });
+      setTablePaginationError("planComptable", null);
       transactionsState = createSuccessState<PageResult<OfficeTransaction>>(screen.transactions);
       setTablePaginationError("transactions", null);
       pendingState = createSuccessState<PageResult<OfficeTransaction>>(screen.pendingTransactions);
@@ -2604,26 +2654,24 @@
   function createDashboardStats(state: ApiRequestState<OfficeDashboardResponse>): readonly DashboardStat[] {
     if (state.status !== "success") {
       return [
-        { label: "Cash", value: "—", trendDirection: "none", trendValue: "—", trendDetail: stateLabel(state) },
+        { label: "Cash", value: "—", trendDirection: "none", trendValue: "—", trendDetail: "under review" },
         { label: "Receivables", value: "—", trendDirection: "none", trendValue: "—", trendDetail: "projection" },
         { label: "Payables", value: "—", trendDirection: "none", trendValue: "—", trendDetail: "projection" },
-        { label: "To reconcile", value: "—", trendDirection: "none", trendValue: "—", trendDetail: "bank" }
+        { label: "To reconcile", value: "—", trendDirection: "none", trendValue: "—", trendDetail: "under review" }
       ];
     }
 
     const previous = state.data.previous ?? null;
     const trendDetail = previous === null ? "no previous period" : `vs ${previous.dateFrom} → ${previous.dateTo}`;
-    const cashTrend = computeStatTrend(Number(state.data.cashBalanceMicro), previous === null ? null : Number(previous.cashBalanceMicro));
     const receivablesTrend = computeStatTrend(Number(state.data.receivablesMicro), previous === null ? null : Number(previous.receivablesMicro));
     const payablesTrend = computeStatTrend(Number(state.data.payablesMicro), previous === null ? null : Number(previous.payablesMicro));
-    const reconcileTrend = computeStatTrend(state.data.unreconciledTransactionCount, previous === null ? null : previous.unreconciledTransactionCount);
     return [
       {
         label: "Cash",
-        value: formatMicro(state.data.cashBalanceMicro),
-        trendDirection: cashTrend.direction,
-        trendValue: cashTrend.value,
-        trendDetail
+        value: "—",
+        trendDirection: "none",
+        trendValue: "—",
+        trendDetail: "under review"
       },
       {
         label: "Receivables",
@@ -2641,10 +2689,10 @@
       },
       {
         label: "To reconcile",
-        value: String(state.data.unreconciledTransactionCount),
-        trendDirection: reconcileTrend.direction,
-        trendValue: reconcileTrend.value,
-        trendDetail
+        value: "—",
+        trendDirection: "none",
+        trendValue: "—",
+        trendDetail: "under review"
       }
     ];
   }
@@ -3333,7 +3381,7 @@
           <Button label="Deactivate a category" variant="secondary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Deactivate a category" title={writeDisabledTitle()} onclick={deactivateFirstCategory} />
         </section>
 
-        <Table title="Department → Division → Category" columns={planColumns} rows={planTableRows} state={planState.status === "loading" ? "loading" : planState.status === "error" ? "error" : "default"} actionLabel="" rowActions={planRowActions} />
+        <Table title="Department → Division → Category" columns={planColumns} rows={planTableRows} state={planTableState.status === "loading" ? "loading" : planTableState.status === "error" ? "error" : planTableRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={planRowActions} pagination={planPagination} />
       {:else if activePageId === "transactions"}
         <section class="filter-grid ehq-edge-surface" aria-label="Transaction filters">
           <Select id="office-filter-account" label="Account" value={accountFilter} options={accountOptions} state="default" message="" onchange={updateAccountFilter} />

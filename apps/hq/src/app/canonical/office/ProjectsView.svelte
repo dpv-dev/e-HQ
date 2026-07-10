@@ -227,6 +227,9 @@
     try {
       const page = await props.client.listProjects({
         workspaceId: props.workspaceId,
+        period: props.period,
+        dateFrom: props.dateFrom,
+        dateTo: props.dateTo,
         status: "active",
         cursor: null,
         limit: TABLE_PAGE_SIZE
@@ -312,6 +315,9 @@
       fetchPage: (cursor: string): Promise<PageResult<OfficeProjectSummary>> =>
         props.client.listProjects({
           workspaceId: props.workspaceId,
+          period: props.period,
+          dateFrom: props.dateFrom,
+          dateTo: props.dateTo,
           status: "active",
           cursor,
           limit: TABLE_PAGE_SIZE

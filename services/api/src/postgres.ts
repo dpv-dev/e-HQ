@@ -114,17 +114,31 @@ export function requireDatabaseUrl(env: Readonly<Record<string, string | undefin
 }
 
 export async function readApiFixtureStoreFromPostgres(pool: Pool): Promise<ApiFixtureStore> {
-  const office = await readOfficeDataset(pool);
-  const distribution = await readDistributionDataset(pool);
-  const distributionContracts = await readDistributionContracts(pool);
-  const distributionContractExpenses = await readDistributionContractExpenses(pool);
-  const distributionMappingRows = await readDistributionMappingRows(pool);
-  const distributionRoyaltyRules = await readDistributionRoyaltyRules(pool);
-  const distributionCostTerms = await readDistributionAllocationCostTerms(pool);
-  const distributionExpenseApplications = await readDistributionExistingExpenseApplications(pool);
-  const distributionFxRates = await readDistributionFxRates(pool);
-  const distributionPayeeBalances = await readDistributionPayeeBalances(pool);
-  const officePartnerPayeeLinks = await readOfficePartnerPayeeLinks(pool);
+  const [
+    office,
+    distribution,
+    distributionContracts,
+    distributionContractExpenses,
+    distributionMappingRows,
+    distributionRoyaltyRules,
+    distributionCostTerms,
+    distributionExpenseApplications,
+    distributionFxRates,
+    distributionPayeeBalances,
+    officePartnerPayeeLinks
+  ] = await Promise.all([
+    readOfficeDataset(pool),
+    readDistributionDataset(pool),
+    readDistributionContracts(pool),
+    readDistributionContractExpenses(pool),
+    readDistributionMappingRows(pool),
+    readDistributionRoyaltyRules(pool),
+    readDistributionAllocationCostTerms(pool),
+    readDistributionExistingExpenseApplications(pool),
+    readDistributionFxRates(pool),
+    readDistributionPayeeBalances(pool),
+    readOfficePartnerPayeeLinks(pool)
+  ]);
   return {
     office,
     officeAuditLog: [],
@@ -155,48 +169,65 @@ async function readPostgresHealth(pool: Pool): Promise<ApiPostgresHealth> {
 }
 
 async function readOfficeDataset(pool: Pool): Promise<OfficeAnalyticsDataset> {
-  const departments = await queryRows(pool, "select id::text, name, type, color, is_active from departments order by legacy_id nulls last, id", []);
-  const divisions = await queryRows(pool, "select id::text, department_id::text, name, is_active from divisions order by legacy_id nulls last, id", []);
-  const categories = await queryRows(pool, "select id::text, division_id::text, name, type, account_code, account_label, is_active from categories order by legacy_id nulls last, id", []);
-  const partners = await queryRows(pool, "select id::text, name, type, is_active from partners order by legacy_id nulls last, id", []);
-  const projects = await queryRows(pool, "select id::text, name, description, status, state, is_active from projects order by legacy_id nulls last, id", []);
-  const projectBudgetLines = await queryRows(pool, "select id::text, project_id::text, category_id::text, type, planned_amount_minor::text from project_budget_lines order by legacy_id nulls last, id", []);
-  const transactions = await queryRows(
-    pool,
-    "select id::text, workspace_id, transaction_date, type, status, is_active, description, category_id::text, partner_id::text, project_id::text, account_id::text, amount_minor::text, original_currency, exchange_rate_e10::text, vat_applicable, vat_rate_bp::text, vat_amount_minor::text from transactions order by transaction_date, id",
-    []
-  );
-  const financialAllocations = await queryRows(pool, "select id::text, transaction_id::text, department_id::text, amount_minor::text from financial_allocations order by legacy_id nulls last, id", []);
-  const bankAccounts = await queryRows(
-    pool,
-    "select id::text, workspace_id, bank_name, account_label, account_reference_hash, currency, current_balance_minor::text, current_balance_mur_minor::text, is_active, balance_as_of from office_bank_accounts order by legacy_id nulls last, id",
-    []
-  );
-  const bankImportBatches = await queryRows(
-    pool,
-    "select id::text, workspace_id, source, file_name, checksum, account_id::text, period_start, period_end, opening_balance_minor::text, closing_balance_minor::text, currency, accepted_row_count, rejected_row_count, duplicate_row_count, idempotency_fingerprint, status, imported_at, metadata from office_bank_import_batches order by legacy_id nulls last, id",
-    []
-  );
-  const bankStatementLines = await queryRows(
-    pool,
-    "select id::text, import_batch_id::text, account_id::text, occurred_on, value_on, description, reference, direction, amount_minor::text, balance_minor::text, currency, amount_mur_minor::text, balance_mur_minor::text, is_duplicate_candidate, reconciliation_status, matched_transaction_id::text, raw_data from office_bank_statement_lines order by occurred_on, id",
-    []
-  );
-  const bankReconciliationMatches = await queryRows(
-    pool,
-    "select id::text, bank_statement_line_id::text, transaction_id::text, confidence_bp, status, approved_by_user_id, approved_at from office_bank_reconciliation_matches order by legacy_id nulls last, id",
-    []
-  );
-  const cashflowProjectionRows = await queryRows(
-    pool,
-    "select id::text, workspace_id, account_id::text, period_month, expected_inflow_minor::text, expected_outflow_minor::text, expected_closing_balance_minor::text, currency, created_at from office_cashflow_projection_rows order by period_month, id",
-    []
-  );
-  const exchangeRates = await queryRows(
-    pool,
-    "select from_currency, to_currency, rate_e10::text, effective_date from exchange_rates order by effective_date, from_currency, to_currency",
-    []
-  );
+  const [
+    departments,
+    divisions,
+    categories,
+    partners,
+    projects,
+    projectBudgetLines,
+    transactions,
+    financialAllocations,
+    bankAccounts,
+    bankImportBatches,
+    bankStatementLines,
+    bankReconciliationMatches,
+    cashflowProjectionRows,
+    exchangeRates
+  ] = await Promise.all([
+    queryRows(pool, "select id::text, name, type, color, is_active from departments order by legacy_id nulls last, id", []),
+    queryRows(pool, "select id::text, department_id::text, name, is_active from divisions order by legacy_id nulls last, id", []),
+    queryRows(pool, "select id::text, division_id::text, name, type, account_code, account_label, is_active from categories order by legacy_id nulls last, id", []),
+    queryRows(pool, "select id::text, name, type, is_active from partners order by legacy_id nulls last, id", []),
+    queryRows(pool, "select id::text, name, description, status, state, is_active from projects order by legacy_id nulls last, id", []),
+    queryRows(pool, "select id::text, project_id::text, category_id::text, type, planned_amount_minor::text from project_budget_lines order by legacy_id nulls last, id", []),
+    queryRows(
+      pool,
+      "select id::text, workspace_id, transaction_date, type, status, is_active, description, category_id::text, partner_id::text, project_id::text, account_id::text, amount_minor::text, original_currency, exchange_rate_e10::text, vat_applicable, vat_rate_bp::text, vat_amount_minor::text from transactions order by transaction_date, id",
+      []
+    ),
+    queryRows(pool, "select id::text, transaction_id::text, department_id::text, amount_minor::text from financial_allocations order by legacy_id nulls last, id", []),
+    queryRows(
+      pool,
+      "select id::text, workspace_id, bank_name, account_label, account_reference_hash, currency, current_balance_minor::text, current_balance_mur_minor::text, is_active, balance_as_of from office_bank_accounts order by legacy_id nulls last, id",
+      []
+    ),
+    queryRows(
+      pool,
+      "select id::text, workspace_id, source, file_name, checksum, account_id::text, period_start, period_end, opening_balance_minor::text, closing_balance_minor::text, currency, accepted_row_count, rejected_row_count, duplicate_row_count, idempotency_fingerprint, status, imported_at, metadata from office_bank_import_batches order by legacy_id nulls last, id",
+      []
+    ),
+    queryRows(
+      pool,
+      "select id::text, import_batch_id::text, account_id::text, occurred_on, value_on, description, reference, direction, amount_minor::text, balance_minor::text, currency, amount_mur_minor::text, balance_mur_minor::text, is_duplicate_candidate, reconciliation_status, matched_transaction_id::text, raw_data from office_bank_statement_lines order by occurred_on, id",
+      []
+    ),
+    queryRows(
+      pool,
+      "select id::text, bank_statement_line_id::text, transaction_id::text, confidence_bp, status, approved_by_user_id, approved_at from office_bank_reconciliation_matches order by legacy_id nulls last, id",
+      []
+    ),
+    queryRows(
+      pool,
+      "select id::text, workspace_id, account_id::text, period_month, expected_inflow_minor::text, expected_outflow_minor::text, expected_closing_balance_minor::text, currency, created_at from office_cashflow_projection_rows order by period_month, id",
+      []
+    ),
+    queryRows(
+      pool,
+      "select from_currency, to_currency, rate_e10::text, effective_date from exchange_rates order by effective_date, from_currency, to_currency",
+      []
+    )
+  ]);
 
   return {
     departments: departments.map(toOfficeDepartment),
@@ -217,33 +248,47 @@ async function readOfficeDataset(pool: Pool): Promise<OfficeAnalyticsDataset> {
 }
 
 async function readDistributionDataset(pool: Pool): Promise<DistributionReadDataset> {
-  const importBatches = await queryRows(pool, "select id::text, source, file_name, status, imported_at from import_batches order by legacy_id nulls last, id", []);
-  const normalizedEarnings = await queryRows(
-    pool,
-    "select id::text, batch_id::text, dsp, gross_amount::text, quantity::text, currency, isrc, upc, raw_title, raw_artist, raw_label, mapping_status, calculation_status from normalized_earnings order by legacy_id nulls last, id",
-    []
-  );
-  const calculationRuns = await queryRows(pool, "select id::text, batch_id::text, status, started_at, finished_at, created_at from calculation_runs order by legacy_id nulls last, id", []);
-  const earningAllocations = await queryRows(
-    pool,
-    "select id::text, earning_id::text, calculation_run_id::text, payee_id::text, contract_id::text, track_id::text, gross_amount::text, gross_share::text, recoupment_applied::text, net_payable::text, split_percentage::text, currency, status, created_at from earning_allocations order by legacy_id nulls last, id",
-    []
-  );
-  const suspenseItems = await queryRows(pool, "select id::text, earning_id::text, amount::text, currency, reason_code, resolved, resolved_at, created_at from suspense_items order by legacy_id nulls last, id", []);
-  const statements = await queryRows(
-    pool,
-    "select id::text, payee_id::text, calculation_run_id::text, period_start, period_end, currency, gross_total::text, recoupment_total::text, net_payable::text, amount_due::text, version, status, created_at from statements order by period_end, id",
-    []
-  );
-  const statementLines = await queryRows(
-    pool,
-    "select id::text, statement_id::text, earning_allocation_id::text, track_id::text, gross_share::text, recoupment_applied::text, net_payable::text, quantity::text, currency from statement_lines order by legacy_id nulls last, id",
-    []
-  );
-  const statementPaymentLinks = await queryRows(pool, "select id::text, statement_id::text, payment_id::text, amount_applied::text from statement_payment_links order by legacy_id nulls last, id", []);
-  const payments = await queryRows(pool, "select id::text, payee_id::text, amount::text, currency, status, paid_at, reference from payments order by legacy_id nulls last, id", []);
-  const payees = await queryRows(pool, "select id::text, name, preferred_currency, is_active from payees order by legacy_id nulls last, id", []);
-  const tracks = await queryRows(pool, "select id::text, title, isrc, release_id::text from tracks order by legacy_id nulls last, id", []);
+  const [
+    importBatches,
+    normalizedEarnings,
+    calculationRuns,
+    earningAllocations,
+    suspenseItems,
+    statements,
+    statementLines,
+    statementPaymentLinks,
+    payments,
+    payees,
+    tracks
+  ] = await Promise.all([
+    queryRows(pool, "select id::text, source, file_name, status, imported_at from import_batches order by legacy_id nulls last, id", []),
+    queryRows(
+      pool,
+      "select id::text, batch_id::text, dsp, gross_amount::text, quantity::text, currency, isrc, upc, raw_title, raw_artist, raw_label, mapping_status, calculation_status from normalized_earnings order by legacy_id nulls last, id",
+      []
+    ),
+    queryRows(pool, "select id::text, batch_id::text, status, started_at, finished_at, created_at from calculation_runs order by legacy_id nulls last, id", []),
+    queryRows(
+      pool,
+      "select id::text, earning_id::text, calculation_run_id::text, payee_id::text, contract_id::text, track_id::text, gross_amount::text, gross_share::text, recoupment_applied::text, net_payable::text, split_percentage::text, currency, status, created_at from earning_allocations order by legacy_id nulls last, id",
+      []
+    ),
+    queryRows(pool, "select id::text, earning_id::text, amount::text, currency, reason_code, resolved, resolved_at, created_at from suspense_items order by legacy_id nulls last, id", []),
+    queryRows(
+      pool,
+      "select id::text, payee_id::text, calculation_run_id::text, period_start, period_end, currency, gross_total::text, recoupment_total::text, net_payable::text, amount_due::text, version, status, created_at from statements order by period_end, id",
+      []
+    ),
+    queryRows(
+      pool,
+      "select id::text, statement_id::text, earning_allocation_id::text, track_id::text, gross_share::text, recoupment_applied::text, net_payable::text, quantity::text, currency from statement_lines order by legacy_id nulls last, id",
+      []
+    ),
+    queryRows(pool, "select id::text, statement_id::text, payment_id::text, amount_applied::text from statement_payment_links order by legacy_id nulls last, id", []),
+    queryRows(pool, "select id::text, payee_id::text, amount::text, currency, status, paid_at, reference from payments order by legacy_id nulls last, id", []),
+    queryRows(pool, "select id::text, name, preferred_currency, is_active from payees order by legacy_id nulls last, id", []),
+    queryRows(pool, "select id::text, title, isrc, release_id::text from tracks order by legacy_id nulls last, id", [])
+  ]);
 
   return {
     importBatches: importBatches.map(toDistributionImportBatchRow),

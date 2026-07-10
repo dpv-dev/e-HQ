@@ -43,6 +43,7 @@ import type {
   OfficePartnerWriteRequest,
   OfficePlanComptableNode,
   OfficePlanComptableDeleteRequest,
+  OfficePlanComptableNodesQuery,
   OfficePlanComptableQuery,
   OfficePlanComptableWriteRequest,
   OfficeProjectCoherenceViolation,
@@ -98,6 +99,7 @@ export interface OfficeApiClient {
     options: WriteRequestOptions
   ) => Promise<ApiMutationReceipt>;
   readonly getPlanComptable: (query: OfficePlanComptableQuery) => Promise<readonly OfficePlanComptableNode[]>;
+  readonly listPlanComptableNodes: (query: OfficePlanComptableNodesQuery) => Promise<PageResult<OfficePlanComptableNode>>;
   readonly createPlanComptableNode: (
     request: OfficePlanComptableWriteRequest,
     options: WriteRequestOptions
@@ -313,6 +315,13 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
         workspaceId: query.workspaceId,
         includeInactive: query.includeInactive
       }),
+    listPlanComptableNodes: (query: OfficePlanComptableNodesQuery): Promise<PageResult<OfficePlanComptableNode>> =>
+      transport.get<PageResult<OfficePlanComptableNode>>("plan-comptable/nodes", {
+        workspaceId: query.workspaceId,
+        includeInactive: query.includeInactive,
+        cursor: query.cursor,
+        limit: query.limit
+      }),
     createPlanComptableNode: (
       request: OfficePlanComptableWriteRequest,
       options: WriteRequestOptions
@@ -512,6 +521,9 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
     listProjects: (query: OfficeProjectsQuery): Promise<PageResult<OfficeProjectSummary>> =>
       transport.get<PageResult<OfficeProjectSummary>>("projects", {
         workspaceId: query.workspaceId,
+        period: query.period,
+        dateFrom: query.dateFrom ?? null,
+        dateTo: query.dateTo ?? null,
         status: query.status,
         cursor: query.cursor,
         limit: query.limit
@@ -546,7 +558,9 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
     getBankQuality: (query: OfficeBankQualityQuery): Promise<OfficeBankQualityResponse> =>
       transport.get<OfficeBankQualityResponse>("analytics/bank-quality", {
         workspaceId: query.workspaceId,
-        period: query.period
+        period: query.period,
+        dateFrom: query.dateFrom ?? null,
+        dateTo: query.dateTo ?? null
       }),
     listBankAccounts: (query: OfficeBankAccountsQuery): Promise<PageResult<OfficeBankAccountSummary>> =>
       transport.get<PageResult<OfficeBankAccountSummary>>("bank/accounts", {
