@@ -39538,6 +39538,11 @@ var officeReconciliationApproveSchema = workspaceBodySchema.extend({
   reconciliationIds: external_exports.array(external_exports.string().min(1)).min(1),
   approvedAt: external_exports.string().regex(isoDateTimePattern)
 });
+var officeReconciliationApproveSuggestedSchema = workspaceBodySchema.extend({
+  approvedAt: external_exports.string().regex(isoDateTimePattern),
+  minConfidenceBp: external_exports.number().int().min(0).max(1e4).optional(),
+  limit: external_exports.number().int().min(1).max(1e3).optional()
+});
 var officeReconciliationMatchSchema = workspaceBodySchema.extend({
   statementLineId: external_exports.string().min(1),
   transactionId: external_exports.string().min(1),
@@ -39908,11 +39913,34 @@ function registerOfficeRoutes(app, dependencies) {
     return officeFinancialResetResponse(context, dependencies);
   });
   app.get("/eof/v1/reconciliations", (context) => {
-    resolveWorkspaceId(context);
-    return context.json(pageItems(context, toReconciliationCandidates(dependencies.fixtures.office).filter((candidate) => matchesReconciliationQuery(context, candidate))));
+    const workspaceId = resolveWorkspaceId(context);
+    return context.json(pageItems(context, toReconciliationCandidates(dependencies.fixtures.office).filter((candidate) => {
+      return isReconciliationCandidateInWorkspace(dependencies.fixtures.office, candidate, workspaceId) && matchesReconciliationQuery(context, candidate);
+    })));
+  });
+  app.get("/eof/v1/reconciliations/operations", (context) => {
+    const workspaceId = resolveWorkspaceId(context);
+    const period = nullableQuery(context, "period");
+    const dateFrom = nullableQuery(context, "dateFrom");
+    const dateTo = nullableQuery(context, "dateTo");
+    const accountId = nullableQuery(context, "accountId");
+    return context.json(
+      readOfficeReconciliationOperations(
+        dependencies.fixtures.office,
+        workspaceId,
+        accountId,
+        period,
+        dateFrom,
+        dateTo,
+        dependencies.nowIso()
+      )
+    );
   });
   app.post("/eof/v1/reconciliations/approve", async (context) => {
     return officeReconciliationApproveResponse(context, dependencies);
+  });
+  app.post("/eof/v1/reconciliations/approve-suggested", async (context) => {
+    return officeReconciliationApproveSuggestedResponse(context, dependencies);
   });
   app.post("/eof/v1/reconciliations/match", async (context) => {
     return officeReconciliationMatchResponse(context, dependencies);
@@ -40996,6 +41024,76 @@ async function officeReconciliationApproveResponse(context, dependencies) {
       });
       approveReconciliationFixture(dependencies.fixtures, candidates, request.approvedAt, actor.userId);
       return mutationReceipt(primaryReconciliationId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+async function officeReconciliationApproveSuggestedResponse(context, dependencies) {
+  const request = await readZodBody(context, officeReconciliationApproveSuggestedSchema);
+  const minConfidenceBp = request.minConfidenceBp ?? 9500;
+  const limit = request.limit ?? 200;
+  const nowIso = dependencies.nowIso();
+  const allCandidates = toReconciliationCandidates(dependencies.fixtures.office).filter((candidate) => candidate.status === "suggested" && candidate.confidenceBp >= minConfidenceBp).sort((left, right) => right.confidenceBp - left.confidenceBp || left.id.localeCompare(right.id));
+  const candidates = allCandidates.slice(0, limit);
+  const reconciliationIds = candidates.map((candidate) => candidate.id);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_reconciliation_approve",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: {
+      workspaceId: request.workspaceId,
+      approvedAt: request.approvedAt,
+      reconciliationIds,
+      minConfidenceBp,
+      limit
+    },
+    write: async (tx, resolvedIdempotencyKey) => {
+      if (reconciliationIds.length > 0) {
+        await acquireAdvisoryLock(tx, `office:reconciliation:${reconciliationIds.join(":")}`);
+        await persistOfficeReconciliationApproval(
+          tx,
+          {
+            workspaceId: request.workspaceId,
+            reconciliationIds,
+            approvedAt: request.approvedAt
+          },
+          actor.userId,
+          candidates
+        );
+      }
+      const auditTargetId = reconciliationIds[0] ?? `auto-suggested:${request.workspaceId}`;
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_reconciliation_approve",
+        targetType: "office_reconciliation_match",
+        targetId: auditTargetId,
+        before: { candidateCount: allCandidates.length },
+        after: {
+          mode: "approve_suggested",
+          status: "matched",
+          processedCount: reconciliationIds.length,
+          minConfidenceBp,
+          limit,
+          approvedAt: request.approvedAt
+        },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      if (reconciliationIds.length > 0) {
+        approveReconciliationFixture(dependencies.fixtures, candidates, request.approvedAt, actor.userId);
+      }
+      return {
+        id: auditTargetId,
+        status: "completed",
+        auditEventId,
+        processedCount: reconciliationIds.length,
+        candidateCount: allCandidates.length,
+        minConfidenceBp,
+        limit
+      };
     }
   });
   return context.json(result.body, result.status);
@@ -45790,7 +45888,7 @@ function buildOfficeReconciliationSuggestions(dataset, workspaceId, lines) {
     return [];
   }
   const transactionPool = dataset.transactions.filter(
-    (transaction) => transaction.workspaceId === workspaceId && transaction.isActive && transaction.status !== "cancelled"
+    (transaction) => transaction.workspaceId === workspaceId && transaction.isActive && transaction.status !== "cancelled" && isSuggestibleOfficeTransactionStatus(transaction.status)
   );
   const alreadyMatchedTransactionIds = /* @__PURE__ */ new Set([
     ...dataset.bankStatementLines.filter((line) => line.reconciliationStatus === "matched" && line.matchedTransactionId !== null).map((line) => line.matchedTransactionId),
@@ -45805,12 +45903,23 @@ function buildOfficeReconciliationSuggestions(dataset, workspaceId, lines) {
     const expectedType = line.direction === "debit" ? "expense" : "income";
     const rankedCandidates = transactionPool.filter(
       (transaction) => transaction.type === expectedType && absBigInt2(transaction.amountMinor) === line.amountMurMinor && !alreadyMatchedTransactionIds.has(transaction.id) && !usedTransactionIds.has(transaction.id)
-    ).map((transaction) => ({
-      transaction,
-      confidenceBp: reconciliationSuggestionConfidence(line, transaction)
-    })).filter((candidate) => candidate.confidenceBp >= 7800).sort((left, right) => right.confidenceBp - left.confidenceBp);
+    ).map((transaction) => {
+      const score = reconciliationSuggestionScore(line, transaction);
+      return {
+        transaction,
+        confidenceBp: score.confidenceBp,
+        dayDistance: score.dayDistance,
+        sharedTokenCount: score.sharedTokenCount,
+        referenceMatched: score.referenceMatched
+      };
+    }).filter(
+      (candidate) => candidate.confidenceBp >= 7800 && hasReconciliationSuggestionEvidence(candidate)
+    ).sort(compareReconciliationSuggestionCandidates);
     const best = rankedCandidates[0];
     if (best === void 0) {
+      continue;
+    }
+    if (!isReconciliationSuggestionUnambiguous(best, rankedCandidates[1])) {
       continue;
     }
     usedTransactionIds.add(best.transaction.id);
@@ -45822,35 +45931,119 @@ function buildOfficeReconciliationSuggestions(dataset, workspaceId, lines) {
   }
   return suggestions;
 }
-function reconciliationSuggestionConfidence(line, transaction) {
+function isSuggestibleOfficeTransactionStatus(status) {
+  return status === "draft" || status === "validated";
+}
+function compareReconciliationSuggestionCandidates(left, right) {
+  if (right.confidenceBp !== left.confidenceBp) {
+    return right.confidenceBp - left.confidenceBp;
+  }
+  if (left.dayDistance !== right.dayDistance) {
+    return left.dayDistance - right.dayDistance;
+  }
+  if (right.sharedTokenCount !== left.sharedTokenCount) {
+    return right.sharedTokenCount - left.sharedTokenCount;
+  }
+  return left.transaction.id.localeCompare(right.transaction.id);
+}
+function hasReconciliationSuggestionEvidence(candidate) {
+  if (candidate.referenceMatched) {
+    return true;
+  }
+  if (candidate.sharedTokenCount > 0) {
+    return true;
+  }
+  return candidate.dayDistance <= 1;
+}
+function isReconciliationSuggestionUnambiguous(best, second) {
+  if (second === void 0) {
+    return true;
+  }
+  const confidenceGap = best.confidenceBp - second.confidenceBp;
+  if (confidenceGap >= 500) {
+    return true;
+  }
+  if (best.referenceMatched && confidenceGap >= 200) {
+    return true;
+  }
+  if (best.dayDistance === 0 && confidenceGap >= 300 && best.sharedTokenCount > second.sharedTokenCount) {
+    return true;
+  }
+  return false;
+}
+function reconciliationSuggestionScore(line, transaction) {
   const lineDate = line.occurredOn;
   const transactionDate = transaction.transactionDate.slice(0, 10);
-  const dayDistance = absoluteIsoDayDistance(lineDate, transactionDate);
-  if (dayDistance > 7) {
-    return 0;
+  const occurredOnDistance = absoluteIsoDayDistance(lineDate, transactionDate);
+  const valueOnDistance = line.valueOn === null ? Number.MAX_SAFE_INTEGER : absoluteIsoDayDistance(line.valueOn, transactionDate);
+  const dayDistance = Math.min(occurredOnDistance, valueOnDistance);
+  if (dayDistance > 10) {
+    return {
+      confidenceBp: 0,
+      dayDistance,
+      sharedTokenCount: 0,
+      referenceMatched: false
+    };
   }
-  let confidence = 7e3;
+  let confidence = 6200;
   if (dayDistance === 0) {
-    confidence += 2500;
+    confidence += 2600;
   } else if (dayDistance <= 1) {
-    confidence += 2e3;
+    confidence += 2200;
   } else if (dayDistance <= 3) {
-    confidence += 1400;
+    confidence += 1500;
   } else if (dayDistance <= 5) {
     confidence += 900;
+  } else if (dayDistance <= 7) {
+    confidence += 500;
   } else {
-    confidence += 400;
+    confidence += 200;
   }
   const lineText = normalizedSuggestionText(`${line.description} ${line.reference ?? ""}`);
   const transactionText = normalizedSuggestionText(transaction.description ?? "");
+  const lineReference = normalizedSuggestionReference(line.reference);
+  const transactionCompactText = compactSuggestionText(transaction.description ?? "");
+  const referenceMatched = lineReference !== null && transactionCompactText.includes(lineReference);
+  const sharedTokenCount = lineText.length > 0 && transactionText.length > 0 ? sharedSuggestionTokenCount(lineText, transactionText) : 0;
+  if (transaction.accountId !== null && transaction.accountId === line.accountId) {
+    confidence += 350;
+  } else if (transaction.accountId !== null && transaction.accountId !== line.accountId) {
+    confidence -= 300;
+  }
   if (lineText.length > 0 && transactionText.length > 0) {
-    const sharedTokenCount = sharedSuggestionTokenCount(lineText, transactionText);
-    confidence += Math.min(1200, sharedTokenCount * 200);
+    confidence += Math.min(1400, sharedTokenCount * 250);
     if (transactionText.length >= 6 && lineText.includes(transactionText) || lineText.length >= 6 && transactionText.includes(lineText)) {
-      confidence += 600;
+      confidence += 700;
     }
   }
-  return Math.min(9999, confidence);
+  if (referenceMatched) {
+    confidence += 1100;
+  }
+  if (!referenceMatched && sharedTokenCount === 0 && dayDistance > 1) {
+    confidence -= 900;
+  }
+  if (transaction.status === "draft") {
+    confidence += 150;
+  }
+  return {
+    confidenceBp: Math.max(0, Math.min(9999, confidence)),
+    dayDistance,
+    sharedTokenCount,
+    referenceMatched
+  };
+}
+function normalizedSuggestionReference(value) {
+  if (value === null) {
+    return null;
+  }
+  const compact = compactSuggestionText(value);
+  if (compact.length < 4) {
+    return null;
+  }
+  return compact;
+}
+function compactSuggestionText(value) {
+  return normalizedSuggestionText(value).replace(/\s+/gu, "");
 }
 function normalizedSuggestionText(value) {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/gu, " ").replace(/\s+/gu, " ");
@@ -47763,6 +47956,69 @@ function matchesReconciliationQuery(context, candidate) {
     return false;
   }
   return !(status !== null && candidate.status !== status);
+}
+function isReconciliationCandidateInWorkspace(dataset, candidate, workspaceId) {
+  const line = dataset.bankStatementLines.find((item) => item.id === candidate.statementLineId);
+  if (line === void 0) {
+    return false;
+  }
+  const account = dataset.bankAccounts.find((item) => item.id === line.accountId);
+  if (account === void 0) {
+    return false;
+  }
+  return account.workspaceId === workspaceId;
+}
+function readOfficeReconciliationOperations(dataset, workspaceId, accountId, period, dateFrom, dateTo, nowIso) {
+  const candidates = toReconciliationCandidates(dataset).filter((candidate) => {
+    if (!isReconciliationCandidateInWorkspace(dataset, candidate, workspaceId)) {
+      return false;
+    }
+    if (accountId !== null) {
+      const line = dataset.bankStatementLines.find((item) => item.id === candidate.statementLineId);
+      if (line === void 0 || line.accountId !== accountId) {
+        return false;
+      }
+    }
+    if (isIsoDate(dateFrom) && isIsoDate(dateTo)) {
+      if (candidate.occurredOn < dateFrom || candidate.occurredOn > dateTo) {
+        return false;
+      }
+    } else if (period !== null && !candidate.occurredOn.startsWith(period)) {
+      return false;
+    }
+    return true;
+  });
+  const totalCount = candidates.length;
+  const unmatchedCount = candidates.filter((candidate) => candidate.status === "unmatched").length;
+  const suggestedCount = candidates.filter((candidate) => candidate.status === "suggested").length;
+  const matchedCount = candidates.filter((candidate) => candidate.status === "matched").length;
+  const rejectedCount = candidates.filter((candidate) => candidate.status === "rejected").length;
+  const ignoredCount = candidates.filter((candidate) => candidate.status === "ignored").length;
+  const autoApprovableCount = candidates.filter((candidate) => candidate.status === "suggested" && candidate.confidenceBp >= 9500).length;
+  const staleSuggestedCount = candidates.filter((candidate) => {
+    if (candidate.status !== "suggested") {
+      return false;
+    }
+    return absoluteIsoDayDistance(candidate.occurredOn, nowIso.slice(0, 10)) > 7;
+  }).length;
+  const oldestUnmatchedDays = candidates.filter((candidate) => candidate.status === "unmatched").map((candidate) => absoluteIsoDayDistance(candidate.occurredOn, nowIso.slice(0, 10))).reduce((max, value) => max === null || value > max ? value : max, null);
+  return {
+    workspaceId,
+    period,
+    dateFrom,
+    dateTo,
+    generatedAt: nowIso,
+    totalCount,
+    unmatchedCount,
+    suggestedCount,
+    matchedCount,
+    rejectedCount,
+    ignoredCount,
+    autoApprovableCount,
+    staleSuggestedCount,
+    oldestUnmatchedDays,
+    matchedRateBp: totalCount === 0 ? 0 : Math.round(matchedCount * 1e4 / totalCount)
+  };
 }
 function toCashflowBuckets(rows) {
   const maxUnits = maxAbsoluteOfficeUnits(rows.flatMap((row) => [row.inflowMur, row.outflowMur]));
