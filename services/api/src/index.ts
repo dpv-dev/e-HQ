@@ -11731,7 +11731,7 @@ function toDistributionReconciliation(store: ApiFixtureStore): DistributionRecon
 
   const actions: readonly DistributionReconciliationAction[] = [
     { id: "link-statement-payment", label: "Link statement payment", description: "Records and links a payment to the first open statement gap.", maintenance: false },
-    { id: "recompute-payee-balance", label: "Recompute payee balance", description: "Recomputes statement/payment balances through the payment write path.", maintenance: false },
+    { id: "recompute-payee-balance", label: "Recompute payee balance", description: "Temporarily disabled until a dedicated recompute endpoint is implemented.", maintenance: true },
     { id: "assign-expense-payee", label: "Assign expense payee", description: "Creates a guarded contract expense with an explicit payee.", maintenance: false },
     { id: "allocate-matched-row", label: "Allocate matched row", description: "Runs the locked allocation engine for matched rows.", maintenance: false },
     { id: "void-statement", label: "Void statement", description: "Voids a statement and appends the reversal balance row.", maintenance: false },

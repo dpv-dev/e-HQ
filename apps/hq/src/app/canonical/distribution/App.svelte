@@ -498,6 +498,7 @@
   let ruleContractId = $state<string | null>(null);
   let rulePayeeIdInput = $state("");
   let rulePercentageInput = $state("");
+  let expenseContractFilterId = $state("");
   let expensePanelOpen = $state(false);
   let expenseContractIdInput = $state("");
   let expenseLabelInput = $state("");
@@ -607,7 +608,11 @@
   const suspenseResolveTarget = $derived(resolveSuspenseTargetFor(selectedSuspenseResolution, selectedSuspenseTrack));
   const selectedRun = $derived(allocationRuns.find((run: AllocationRunSummary): boolean => run.id === selectedRunId) ?? null);
   const selectedRuleContract = $derived(contracts.find((contract: DistributionContract): boolean => contract.id === ruleContractId) ?? null);
+  const selectedExpenseFilterContract = $derived(
+    contracts.find((contract: DistributionContract): boolean => contract.id === expenseContractFilterId) ?? null
+  );
   const contractSplitBp = $derived(parseSplitBasisPoints(contractSplitPercentInput));
+  const ruleReplacementPercentage = $derived(normalizeSingleRuleReplacementPercentage(rulePercentageInput));
   const selectedExpenseContract = $derived(
     contracts.find((contract: DistributionContract): boolean => contract.id === expenseContractIdInput) ?? null
   );
@@ -616,6 +621,11 @@
     { label: "Select a contract", value: "" },
     ...contracts.map((contract: DistributionContract): SelectOption => ({ label: `${contract.title} · ${contract.currency}`, value: contract.id }))
   ], 1));
+  const expenseTableTitle = $derived(
+    selectedExpenseFilterContract === null
+      ? "Expenses / recoupments"
+      : `Expenses / recoupments · ${selectedExpenseFilterContract.title}`
+  );
   const payeeSelectOptions = $derived<readonly SelectOption[]>(sortOptionsAlphabetically([
     { label: "Select a payee", value: "" },
     ...payees.map((payee: PayeeSummary): SelectOption => ({ label: `${payee.displayName} · ${payee.defaultCurrency}`, value: payee.id }))
@@ -646,7 +656,7 @@
     { label: "Void", onAction: (rowId: string): void => openPaymentPanel(rowId, "void"), danger: true }
   ];
   const contractRowActions: readonly TableRowAction[] = [
-    { label: "Add rule", onAction: openContractRulePanel }
+    { label: "Replace rule set", onAction: openContractRulePanel }
   ];
   const statementRowActions: readonly TableRowAction[] = [
     { label: "Print PDF", onAction: printStatementPdf }
@@ -715,7 +725,11 @@
     releasesState = createSuccessState<PageResult<ReleaseSummary>>(screen.releases);
     tracksState = createSuccessState<PageResult<TrackSummary>>(screen.tracks);
     contractsState = createSuccessState<PageResult<DistributionContract>>(screen.contracts);
-    expensesState = createSuccessState<PageResult<DistributionContractExpense>>(screen.expenses);
+    const resolvedExpenseContractFilterId = resolveExpenseContractFilterId(screen.contracts.items, expenseContractFilterId);
+    expenseContractFilterId = resolvedExpenseContractFilterId;
+    expensesState = createSuccessState<PageResult<DistributionContractExpense>>(
+      resolvedExpenseContractFilterId === "" ? emptyPageResult<DistributionContractExpense>() : screen.expenses
+    );
     allocationsState = createSuccessState<PageResult<AllocationRunSummary>>(screen.allocations);
     suspenseState = createSuccessState<PageResult<SuspenseItem>>(screen.suspense);
     statementsState = createSuccessState<PageResult<StatementSummary>>(screen.statements);
@@ -941,6 +955,12 @@
   }
 
   async function loadExpensesPage(mode: PageLoadMode): Promise<void> {
+    if (expenseContractFilterId === "") {
+      expensesState = createSuccessState<PageResult<DistributionContractExpense>>(emptyPageResult<DistributionContractExpense>());
+      setTablePaginationError("expenses", null);
+      return;
+    }
+
     await loadDistributionPageResult(
       "expenses",
       expensesState,
@@ -950,7 +970,7 @@
       (cursor: string): Promise<PageResult<DistributionContractExpense>> =>
         client.distribution.listContractExpenses({
           workspaceId: distributionWorkspaceId,
-          contractId: contracts[0]?.id ?? "contract_alma",
+          contractId: expenseContractFilterId,
           status: null,
           cursor,
           limit: TABLE_PAGE_SIZE
@@ -1300,20 +1320,48 @@
         cursor: null,
         limit: TABLE_PAGE_SIZE
       });
-      const firstContract = contractPage.items[0];
-      const expensePage = await client.distribution.listContractExpenses({
-        workspaceId: distributionWorkspaceId,
-        contractId: firstContract?.id ?? "contract_alma",
-        status: null,
-        cursor: null,
-        limit: TABLE_PAGE_SIZE
-      });
+      const resolvedExpenseContractFilterId = resolveExpenseContractFilterId(contractPage.items, expenseContractFilterId);
+      expenseContractFilterId = resolvedExpenseContractFilterId;
+      const expensePage = resolvedExpenseContractFilterId === ""
+        ? emptyPageResult<DistributionContractExpense>()
+        : await client.distribution.listContractExpenses({
+            workspaceId: distributionWorkspaceId,
+            contractId: resolvedExpenseContractFilterId,
+            status: null,
+            cursor: null,
+            limit: TABLE_PAGE_SIZE
+          });
       contractsState = createSuccessState<PageResult<DistributionContract>>(contractPage);
       expensesState = createSuccessState<PageResult<DistributionContractExpense>>(expensePage);
       setTablePaginationError("contracts", null);
       setTablePaginationError("expenses", null);
     } catch (error: unknown) {
       contractsState = createErrorState<PageResult<DistributionContract>>(error);
+      expensesState = createErrorState<PageResult<DistributionContractExpense>>(error);
+    }
+  }
+
+  async function loadExpenses(): Promise<void> {
+    expensesState = beginReload<PageResult<DistributionContractExpense>>(expensesState);
+
+    if (expenseContractFilterId === "") {
+      expensesState = createSuccessState<PageResult<DistributionContractExpense>>(emptyPageResult<DistributionContractExpense>());
+      setTablePaginationError("expenses", null);
+      return;
+    }
+
+    try {
+      expensesState = createSuccessState<PageResult<DistributionContractExpense>>(
+        await client.distribution.listContractExpenses({
+          workspaceId: distributionWorkspaceId,
+          contractId: expenseContractFilterId,
+          status: null,
+          cursor: null,
+          limit: TABLE_PAGE_SIZE
+        })
+      );
+      setTablePaginationError("expenses", null);
+    } catch (error: unknown) {
       expensesState = createErrorState<PageResult<DistributionContractExpense>>(error);
     }
   }
@@ -2165,7 +2213,7 @@
 
   function openExpensePanel(): void {
     expensePanelOpen = true;
-    expenseContractIdInput = "";
+    expenseContractIdInput = expenseContractFilterId;
     expenseLabelInput = "";
     expenseAmountInput = "";
     expenseDateInput = today;
@@ -2177,6 +2225,11 @@
 
   function updateExpenseContract(value: string): void {
     expenseContractIdInput = value;
+  }
+
+  function updateExpenseContractFilter(value: string): void {
+    expenseContractFilterId = value;
+    void loadExpenses();
   }
 
   function updateExpenseLabel(value: string): void {
@@ -2360,6 +2413,39 @@
     return basisPoints;
   }
 
+  // Guardrail: this UI path currently submits a one-line ruleset, so only
+  // allow an explicit 100% replacement for one payee.
+  function normalizeSingleRuleReplacementPercentage(value: string): string | null {
+    const match = /^(\d+)(?:[.,](\d{1,6}))?$/u.exec(value.trim());
+
+    if (match === null || match[1] === undefined) {
+      return null;
+    }
+
+    const units = BigInt(match[1]) * 1_000_000n + BigInt((match[2] ?? "").padEnd(6, "0"));
+
+    if (units !== 100_000_000n) {
+      return null;
+    }
+
+    return "100.000000";
+  }
+
+  function resolveExpenseContractFilterId(contractItems: readonly DistributionContract[], currentContractId: string): string {
+    if (currentContractId !== "" && contractItems.some((contract: DistributionContract): boolean => contract.id === currentContractId)) {
+      return currentContractId;
+    }
+
+    return contractItems[0]?.id ?? "";
+  }
+
+  function emptyPageResult<TItem>(): PageResult<TItem> {
+    return {
+      items: [],
+      nextCursor: null
+    };
+  }
+
   async function createContract(): Promise<void> {
     const title = contractTitleInput.trim();
     const currency = contractCurrencyInput.trim().toUpperCase();
@@ -2406,6 +2492,8 @@
     ruleContractId = rowId;
     rulePayeeIdInput = contract.payeeId;
     rulePercentageInput = "";
+    expenseContractFilterId = rowId;
+    void loadExpenses();
   }
 
   function closeContractRulePanel(): void {
@@ -2416,9 +2504,12 @@
 
   async function addContractRule(): Promise<void> {
     const contract = selectedRuleContract;
-    const percentage = rulePercentageInput.trim();
+    const percentage = ruleReplacementPercentage;
 
-    if (contract === null || rulePayeeIdInput === "" || percentage === "") {
+    if (contract === null || rulePayeeIdInput === "" || percentage === null) {
+      if (rulePercentageInput.trim() !== "" && percentage === null) {
+        reportActionError(new Error("This action replaces the full rule set and currently accepts only 100.000000."));
+      }
       return;
     }
 
@@ -2703,6 +2794,16 @@
         URL.revokeObjectURL(url);
         throw new Error("The print tab was blocked by the browser; allow pop-ups for this console and retry.");
       }
+
+      // Revoke the blob URL after printing/navigation to avoid leaking object URLs.
+      const cleanupUrl = (): void => {
+        URL.revokeObjectURL(url);
+        printWindow.removeEventListener("afterprint", cleanupUrl);
+        printWindow.removeEventListener("beforeunload", cleanupUrl);
+      };
+      printWindow.addEventListener("afterprint", cleanupUrl);
+      printWindow.addEventListener("beforeunload", cleanupUrl);
+      window.setTimeout(cleanupUrl, 60_000);
     } catch (error: unknown) {
       statementPrintError = getErrorMessage(error);
     } finally {
@@ -2980,27 +3081,7 @@
     }
 
     if (action.id === "recompute-payee-balance") {
-      const payment = payments[0];
-      if (payment === undefined) {
-        return;
-      }
-
-      try {
-        mutationReceipt = await client.distribution.updatePayment(
-          payment.id,
-          {
-            workspaceId: distributionWorkspaceId,
-            amountMicro: payment.amountMicro,
-            currency: payment.currency,
-            reference: payment.reference ?? "CODEx-BALANCE-RECOMPUTE"
-          },
-          { idempotencyKey: createIdempotencyKey("recon-recompute-balance") }
-        );
-        mutationReceiptPageId = activePageId;
-        await Promise.all([loadPayments(), loadReconciliation(), loadAuditLog()]);
-      } catch (error: unknown) {
-        reportActionError(error);
-      }
+      reportActionError(new Error("Recompute payee balance is disabled until a dedicated endpoint is available."));
       return;
     }
 
@@ -3904,20 +3985,24 @@
           </section>
         {/if}
         {#if selectedRuleContract !== null}
-          <section class="form-panel ehq-edge-surface" aria-label="Add royalty rule">
+          <section class="form-panel ehq-edge-surface" aria-label="Replace royalty rule set">
             <div class="panel-context">
               <strong>{selectedRuleContract.title}</strong>
-              <span>Rules replace the previous set and must total exactly 100%.</span>
+              <span>This action replaces the previous rule set; only a 100% single-payee replacement is allowed here.</span>
             </div>
             <Select id="distribution-rule-payee" label="Payee" value={rulePayeeIdInput} options={payeeSelectOptions} state="default" message="" onchange={updateRulePayee} />
             <Input id="distribution-rule-percentage" label="Percentage" value={rulePercentageInput} placeholder="100" type="text" state="default" message="" oninput={updateRulePercentage} />
-            <Button label="Save rule set" variant="primary" size="medium" type="button" disabled={!writesEnabled || rulePayeeIdInput === "" || rulePercentageInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Save rule set" title={writesEnabled ? (rulePayeeIdInput === "" ? "Select a payee first" : rulePercentageInput.trim() === "" ? "Enter the rule percentage first" : "") : writeGateMessage} onclick={addContractRule} />
+            <Button label="Replace rule set" variant="primary" size="medium" type="button" disabled={!writesEnabled || rulePayeeIdInput === "" || ruleReplacementPercentage === null} loading={false} locked={false} focus={false} ariaLabel="Replace rule set" title={writesEnabled ? (rulePayeeIdInput === "" ? "Select a payee first" : ruleReplacementPercentage === null ? "This guarded path accepts only 100.000000" : "") : writeGateMessage} onclick={addContractRule} />
             <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel rule editing" onclick={closeContractRulePanel} />
           </section>
         {/if}
+        <section class="filter-strip ehq-edge-surface" aria-label="Expense contract filter">
+          <Select id="distribution-expense-contract-filter" label="Expense contract" value={expenseContractFilterId} options={expenseContractSelectOptions} state="default" message="" onchange={updateExpenseContractFilter} />
+          <Button label="Reload expenses" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Reload expenses for selected contract" onclick={loadExpenses} />
+        </section>
         <section class="dashboard-grid">
           <Table title="Splits / contracts" columns={contractColumns} rows={contractRows} state={tableStateFor(contractsState.status, contracts.length)} actionLabel="" rowActions={contractRowActions} pagination={contractsPagination} />
-          <Table title="Expenses / recoupments" columns={expenseColumns} rows={expenseRows} state={tableStateFor(expensesState.status, expenses.length)} actionLabel="" pagination={expensesPagination} />
+          <Table title={expenseTableTitle} columns={expenseColumns} rows={expenseRows} state={tableStateFor(expensesState.status, expenses.length)} actionLabel="" pagination={expensesPagination} />
         </section>
       {:else if activePageId === "allocations"}
         <section class="lock-panel ehq-edge-surface">
