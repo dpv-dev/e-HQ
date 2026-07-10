@@ -625,6 +625,46 @@ export interface OfficeReconciliationApproveRequest {
   readonly approvedAt: IsoDateTimeString;
 }
 
+export interface OfficeReconciliationApproveSuggestedRequest {
+  readonly workspaceId: EntityId;
+  readonly approvedAt: IsoDateTimeString;
+  readonly minConfidenceBp?: BasisPoints;
+  readonly limit?: number;
+}
+
+export interface OfficeReconciliationApproveSuggestedResponse extends ApiMutationReceipt {
+  readonly processedCount: number;
+  readonly candidateCount: number;
+  readonly minConfidenceBp: BasisPoints;
+  readonly limit: number;
+}
+
+export interface OfficeReconciliationOperationsQuery {
+  readonly workspaceId: EntityId;
+  readonly accountId: EntityId | null;
+  readonly period: IsoMonthString | null;
+  readonly dateFrom?: IsoDateString | null;
+  readonly dateTo?: IsoDateString | null;
+}
+
+export interface OfficeReconciliationOperationsResponse {
+  readonly workspaceId: EntityId;
+  readonly period: IsoMonthString | null;
+  readonly dateFrom: IsoDateString | null;
+  readonly dateTo: IsoDateString | null;
+  readonly generatedAt: IsoDateTimeString;
+  readonly totalCount: number;
+  readonly unmatchedCount: number;
+  readonly suggestedCount: number;
+  readonly matchedCount: number;
+  readonly rejectedCount: number;
+  readonly ignoredCount: number;
+  readonly autoApprovableCount: number;
+  readonly staleSuggestedCount: number;
+  readonly oldestUnmatchedDays: number | null;
+  readonly matchedRateBp: BasisPoints;
+}
+
 // Manually match one bank statement line to a chosen ledger transaction.
 export interface OfficeReconciliationMatchRequest {
   readonly workspaceId: EntityId;

@@ -50,6 +50,7 @@
     type OfficePnlLine,
     type OfficeRecentImport,
     type OfficeReconciliationCandidate,
+    type OfficeReconciliationOperationsResponse,
     type OfficeBankAccountSummary,
     type OfficeBankPreviewRowResult,
     type OfficeTransaction,
@@ -426,6 +427,9 @@
   let reconciliationState = $state<ApiRequestState<PageResult<OfficeReconciliationCandidate>>>(
     createIdleState<PageResult<OfficeReconciliationCandidate>>()
   );
+  let reconciliationOperationsState = $state<ApiRequestState<OfficeReconciliationOperationsResponse>>(
+    createIdleState<OfficeReconciliationOperationsResponse>()
+  );
   let cashflowState = $state<ApiRequestState<readonly CashflowBucket[]>>(
     createIdleState<readonly CashflowBucket[]>()
   );
@@ -444,9 +448,8 @@
   let accountFilter = $state<SelectFilterValue>(allValue);
   let typeFilter = $state<SelectFilterValue>(allValue);
   let transactionStatusFilter = $state<SelectFilterValue>(allValue);
-  // Default to "unmatched": that is the real work queue. Nothing in the write pipeline ever
-  // produces "suggested" (imports land unmatched; actions produce matched/rejected/ignored),
-  // so a "suggested" default rendered the page permanently empty in production.
+  // Default to "unmatched": this remains the primary queue even though imports can
+  // produce suggested candidates for optional batch approval.
   let reconciliationStatusFilter = $state<SelectFilterValue>("unmatched");
   let selectedPendingIds = $state<readonly string[]>([]);
   let pendingClassifyCategoryId = $state("");
@@ -690,6 +693,7 @@
   const transactionStatusPoints = $derived(createTransactionStatusPoints(transactionRows));
   const importQualityPoints = $derived(createImportQualityPoints(importState));
   const reconciliationStatusPoints = $derived(createReconciliationStatusPoints(reconciliationRows));
+  const reconciliationOperationsKpis = $derived(createReconciliationOperationsKpis(reconciliationOperationsState));
   const pendingStatusPoints = $derived(createPendingStatusPoints(pendingRows));
   const auditActionPoints = $derived(createAuditActionPoints(auditRows));
 
@@ -708,7 +712,7 @@
     // path (older API without /screen/office, or a transient bundle failure).
     const seeded = await loadOfficeScreen();
     if (seeded) {
-      await loadDashboardAnalytics();
+      await Promise.all([loadDashboardAnalytics(), loadReconciliationOperations()]);
       return;
     }
     await Promise.all([
@@ -720,6 +724,7 @@
       loadTransactions(),
       loadPendingTransactions(),
       loadReconciliations(),
+      loadReconciliationOperations(),
       loadCashflow(),
       loadAuditLog(),
       loadImportAccounts()
@@ -1350,7 +1355,7 @@
         { idempotencyKey: createIdempotencyKey("reconcile-accept") }
       );
       actionReceipt = receipt;
-      await loadReconciliations();
+      await refreshReconciliationViews();
     } catch (error: unknown) {
       reconciliationState = createErrorState<PageResult<OfficeReconciliationCandidate>>(error);
     }
@@ -1401,7 +1406,7 @@
       );
       actionReceipt = receipt;
       reconcileDrawerLineId = null;
-      await loadReconciliations();
+      await refreshReconciliationViews();
     } catch (error: unknown) {
       reconciliationState = createErrorState<PageResult<OfficeReconciliationCandidate>>(error);
     }
@@ -1425,7 +1430,7 @@
       );
       actionReceipt = receipt;
       reconcileDrawerLineId = null;
-      await Promise.all([loadReconciliations(), loadTransactions(), loadPendingTransactions()]);
+      await Promise.all([refreshReconciliationViews(), loadTransactions(), loadPendingTransactions()]);
     } catch (error: unknown) {
       reconciliationState = createErrorState<PageResult<OfficeReconciliationCandidate>>(error);
     }
@@ -1442,7 +1447,7 @@
         { idempotencyKey: createIdempotencyKey("reconcile-unmatch") }
       );
       actionReceipt = receipt;
-      await loadReconciliations();
+      await refreshReconciliationViews();
     } catch (error: unknown) {
       reconciliationState = createErrorState<PageResult<OfficeReconciliationCandidate>>(error);
     }
@@ -1459,7 +1464,7 @@
         { idempotencyKey: createIdempotencyKey("reconcile-reject") }
       );
       actionReceipt = receipt;
-      await loadReconciliations();
+      await refreshReconciliationViews();
     } catch (error: unknown) {
       reconciliationState = createErrorState<PageResult<OfficeReconciliationCandidate>>(error);
     }
@@ -1583,6 +1588,27 @@
     } catch (error: unknown) {
       reconciliationState = createErrorState<PageResult<OfficeReconciliationCandidate>>(error);
     }
+  }
+
+  async function loadReconciliationOperations(): Promise<void> {
+    reconciliationOperationsState = beginReload<OfficeReconciliationOperationsResponse>(reconciliationOperationsState);
+
+    try {
+      const operations = await client.office.getReconciliationOperations({
+        workspaceId: officeWorkspaceId,
+        accountId: toNullableFilter(accountFilter),
+        period,
+        dateFrom: activeRange.from,
+        dateTo: activeRange.to
+      });
+      reconciliationOperationsState = createSuccessState<OfficeReconciliationOperationsResponse>(operations);
+    } catch (error: unknown) {
+      reconciliationOperationsState = createErrorState<OfficeReconciliationOperationsResponse>(error);
+    }
+  }
+
+  async function refreshReconciliationViews(): Promise<void> {
+    await Promise.all([loadReconciliations(), loadReconciliationOperations()]);
   }
 
   async function loadCashflow(): Promise<void> {
@@ -2046,7 +2072,7 @@
   }
 
   async function applyReconciliationFilters(): Promise<void> {
-    await loadReconciliations();
+    await refreshReconciliationViews();
   }
 
   async function applyCashflowFilters(): Promise<void> {
@@ -2123,13 +2149,14 @@
         loadTransactions(),
         loadPendingTransactions(),
         loadReconciliations(),
+        loadReconciliationOperations(),
         loadCashflow()
       ]);
       return;
     }
 
     // The bundle used default filters — refetch only the sections whose active filter differs.
-    const followUps: Promise<void>[] = [loadDashboardAnalytics()];
+    const followUps: Promise<void>[] = [loadDashboardAnalytics(), loadReconciliationOperations()];
     if (departmentFilter !== allValue) {
       followUps.push(loadPnlProjection());
     }
@@ -2617,28 +2644,27 @@
   }
 
   async function approveSuggestedReconciliations(): Promise<void> {
-    const reconciliationIds = reconciliationRows
-      .filter((candidate: OfficeReconciliationCandidate): boolean => candidate.status === "suggested")
-      .map((candidate: OfficeReconciliationCandidate): string => candidate.id);
-
-    if (reconciliationIds.length === 0) {
+    const operations = reconciliationOperationsState.status === "success"
+      ? reconciliationOperationsState.data
+      : null;
+    if (operations !== null && operations.autoApprovableCount === 0) {
       return;
     }
 
     try {
-      const receipt = await client.office.approveReconciliations(
+      const receipt = await client.office.approveSuggestedReconciliations(
         {
           workspaceId: officeWorkspaceId,
-          reconciliationIds,
-          approvedAt: new Date().toISOString()
+          approvedAt: new Date().toISOString(),
+          minConfidenceBp: 9500,
+          limit: 500
         },
         {
-          idempotencyKey: createIdempotencyKey("reconciliation-approve")
+          idempotencyKey: createIdempotencyKey("reconciliation-approve-suggested")
         }
       );
       actionReceipt = receipt;
-      // Reload the server truth instead of marking the local rows as matched.
-      await loadReconciliations();
+      await refreshReconciliationViews();
     } catch (error: unknown) {
       reconciliationState = createErrorState<PageResult<OfficeReconciliationCandidate>>(error);
     }
@@ -3229,6 +3255,60 @@
       ],
       6
     );
+  }
+
+  function createReconciliationOperationsKpis(
+    state: ApiRequestState<OfficeReconciliationOperationsResponse>
+  ): readonly OfficeKpi[] {
+    if (state.status !== "success") {
+      return [
+        { label: "Matched rate", value: "—", detail: stateLabel(state), tone: "muted", accent: true },
+        { label: "Unmatched", value: "—", detail: "queue", tone: "muted", accent: false },
+        { label: "Auto-approvable", value: "—", detail: "suggested >= 95%", tone: "muted", accent: false },
+        { label: "Stale suggested", value: "—", detail: "> 7 days", tone: "muted", accent: false },
+        { label: "Oldest unmatched", value: "—", detail: "ageing", tone: "muted", accent: false }
+      ];
+    }
+
+    const matchedRateBp = state.data.matchedRateBp;
+    const oldestUnmatchedDays = state.data.oldestUnmatchedDays;
+    return [
+      {
+        label: "Matched rate",
+        value: formatBasisPoints(matchedRateBp),
+        detail: `${String(state.data.matchedCount)} / ${String(state.data.totalCount)} lines`,
+        tone: matchedRateBp >= 9000 ? "success" : matchedRateBp >= 7500 ? "info" : "warning",
+        accent: true
+      },
+      {
+        label: "Unmatched",
+        value: String(state.data.unmatchedCount),
+        detail: "active queue",
+        tone: state.data.unmatchedCount === 0 ? "success" : "warning",
+        accent: false
+      },
+      {
+        label: "Auto-approvable",
+        value: String(state.data.autoApprovableCount),
+        detail: "suggested >= 95%",
+        tone: state.data.autoApprovableCount > 0 ? "info" : "muted",
+        accent: false
+      },
+      {
+        label: "Stale suggested",
+        value: String(state.data.staleSuggestedCount),
+        detail: "older than 7 days",
+        tone: state.data.staleSuggestedCount > 0 ? "warning" : "success",
+        accent: false
+      },
+      {
+        label: "Oldest unmatched",
+        value: oldestUnmatchedDays === null ? "0 day" : `${String(oldestUnmatchedDays)} day(s)`,
+        detail: "bank ageing",
+        tone: oldestUnmatchedDays === null ? "success" : oldestUnmatchedDays > 30 ? "error" : "warning",
+        accent: false
+      }
+    ];
   }
 
   function createPendingStatusPoints(rows: readonly OfficeTransaction[]): readonly ChartPoint[] {
@@ -3996,11 +4076,6 @@
       {/if}
 
       {#if activePageId === "dashboard"}
-        <section class="dashboard-board-intro ehq-edge-surface" aria-label="5 KPI board intro">
-          <h2>Office — 5 nouveaux KPI</h2>
-          <p>Spec board · champs reels eof/v1 · Rs = MUR · chiffres de validation du doc</p>
-        </section>
-
         <section class="kpi-grid" aria-label="Office indicators">
           {#each dashboardStats as stat (stat.label)}
             <StatCard
@@ -4391,7 +4466,20 @@
           <Select id="office-reconciliation-account" label="Account" value={accountFilter} options={accountOptions} state="default" message="" onchange={updateAccountFilter} />
           <Select id="office-reconciliation-status" label="Status" value={reconciliationStatusFilter} options={reconciliationStatusOptions} state="default" message="" onchange={updateReconciliationStatusFilter} />
           <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Apply reconciliation filters" onclick={applyReconciliationFilters} />
-          <Button label="Approve batch" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Approve suggested reconciliations" title={writeDisabledTitle()} onclick={approveSuggestedReconciliations} />
+          <Button label="Auto-approve strong suggested" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Auto-approve suggested reconciliations above confidence threshold" title={writeDisabledTitle()} onclick={approveSuggestedReconciliations} />
+        </section>
+
+        <section class="kpi-grid" aria-label="Reconciliation operations indicators">
+          {#each reconciliationOperationsKpis as kpi (kpi.label)}
+            <KPI
+              label={kpi.label}
+              value={kpi.value}
+              detail={kpi.detail}
+              tone={kpi.tone}
+              state={reconciliationOperationsState.status === "loading" ? "loading" : "default"}
+              accent={kpi.accent}
+            />
+          {/each}
         </section>
 
         <section class="dashboard-grid">
@@ -4652,24 +4740,6 @@
     gap: var(--ehq-space-4);
     overflow-y: auto;
     overflow-x: auto;
-  }
-
-  .dashboard-board-intro {
-    display: grid;
-    gap: var(--ehq-space-1);
-    padding: var(--ehq-space-3) var(--ehq-space-4);
-  }
-
-  .dashboard-board-intro h2 {
-    margin: 0;
-    font-size: var(--ehq-type-page-title-size);
-  }
-
-  .dashboard-board-intro p {
-    margin: 0;
-    color: var(--ehq-text-muted);
-    font-size: var(--ehq-type-caption-size);
-    font-family: var(--ehq-mono);
   }
 
   .runway-meta {

@@ -59,10 +59,14 @@ import type {
   OfficeProjectSummary,
   OfficeProjectWriteRequest,
   OfficeReconciliationApproveRequest,
+  OfficeReconciliationApproveSuggestedRequest,
+  OfficeReconciliationApproveSuggestedResponse,
   OfficeReconciliationMatchRequest,
   OfficeReconciliationLineRequest,
   OfficeReconciliationCreateTransactionRequest,
   OfficeReconciliationCandidate,
+  OfficeReconciliationOperationsQuery,
+  OfficeReconciliationOperationsResponse,
   OfficeReconciliationsQuery,
   OfficeScreenQuery,
   OfficeScreenResponse,
@@ -149,6 +153,13 @@ export interface OfficeApiClient {
     request: OfficeReconciliationApproveRequest,
     options: WriteRequestOptions
   ) => Promise<ApiMutationReceipt>;
+  readonly approveSuggestedReconciliations: (
+    request: OfficeReconciliationApproveSuggestedRequest,
+    options: WriteRequestOptions
+  ) => Promise<OfficeReconciliationApproveSuggestedResponse>;
+  readonly getReconciliationOperations: (
+    query: OfficeReconciliationOperationsQuery
+  ) => Promise<OfficeReconciliationOperationsResponse>;
   readonly matchReconciliation: (
     request: OfficeReconciliationMatchRequest,
     options: WriteRequestOptions
@@ -423,6 +434,25 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
       options: WriteRequestOptions
     ): Promise<ApiMutationReceipt> =>
       transport.post<ApiMutationReceipt>("reconciliations/approve", request, options.idempotencyKey),
+    approveSuggestedReconciliations: (
+      request: OfficeReconciliationApproveSuggestedRequest,
+      options: WriteRequestOptions
+    ): Promise<OfficeReconciliationApproveSuggestedResponse> =>
+      transport.post<OfficeReconciliationApproveSuggestedResponse>(
+        "reconciliations/approve-suggested",
+        request,
+        options.idempotencyKey
+      ),
+    getReconciliationOperations: (
+      query: OfficeReconciliationOperationsQuery
+    ): Promise<OfficeReconciliationOperationsResponse> =>
+      transport.get<OfficeReconciliationOperationsResponse>("reconciliations/operations", {
+        workspaceId: query.workspaceId,
+        accountId: query.accountId,
+        period: query.period,
+        dateFrom: query.dateFrom ?? null,
+        dateTo: query.dateTo ?? null
+      }),
     matchReconciliation: (
       request: OfficeReconciliationMatchRequest,
       options: WriteRequestOptions
