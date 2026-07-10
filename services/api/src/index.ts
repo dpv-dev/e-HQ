@@ -143,6 +143,7 @@ import type {
   OfficePartnerPayeeLinkRequest,
   OfficePartnerPnl,
   OfficePartnerWriteRequest,
+  OfficePlanComptableDeleteRequest,
   OfficePlanComptableWriteRequest,
   OfficePartnerSideActivity,
   OfficePlanComptableNode,
@@ -351,6 +352,16 @@ interface OfficeBankImportDeleteCounts {
   readonly batchCount: number;
   readonly statementLineCount: number;
   readonly reconciliationMatchCount: number;
+}
+
+interface OfficePlanComptableDeleteCounts {
+  readonly nodeCount: number;
+  readonly childDivisionCount: number;
+  readonly childCategoryCount: number;
+  readonly transactionCount: number;
+  readonly projectBudgetLineCount: number;
+  readonly financialAllocationCount: number;
+  readonly projectDepartmentCount: number;
 }
 
 interface OfficeFinancialResetCounts {
@@ -1042,6 +1053,10 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
 
   app.patch("/eof/v1/plan-comptable/:nodeId", async (context) => {
     return officePlanComptableUpdateResponse(context, dependencies);
+  });
+
+  app.delete("/eof/v1/plan-comptable/:nodeId", async (context) => {
+    return officePlanComptableDeleteResponse(context, dependencies);
   });
 
   app.post("/eof/v1/bank-import/preview", async (context) => {
@@ -2179,6 +2194,48 @@ async function officePlanComptableUpdateResponse(context: ApiContext, dependenci
         idempotencyKey: resolvedIdempotencyKey
       });
       upsertOfficePlanComptableFixture(dependencies.fixtures, nodeId, request);
+      return mutationReceipt(nodeId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function officePlanComptableDeleteResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const nodeId = requirePathParam(context, "nodeId");
+  const request = await readZodBody<OfficePlanComptableDeleteRequest>(context, workspaceBodySchema);
+  const before = requirePlanComptableNode(dependencies.fixtures.office, nodeId);
+  const fixtureCounts = countOfficePlanComptableFixtureDependencies(dependencies.fixtures.office, nodeId, before.kind);
+  assertPlanComptableDeleteAllowed(context, before, fixtureCounts);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_plan_comptable_delete",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `office:plan-comptable:${nodeId}`);
+      const deletedCounts = await persistOfficePlanComptableDelete(tx, nodeId, before.kind);
+      if (tx.kind !== "memory" && deletedCounts.nodeCount !== 1) {
+        if (hasPlanComptableDeleteDependencies(before.kind, deletedCounts)) {
+          throw planComptableDeleteBlockedError(context, before, deletedCounts);
+        }
+
+        throw new ApiRouteError(404, "office_plan_node_not_found", "Office chart node was not found.", [`nodeId=${nodeId}`]);
+      }
+
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_plan_comptable_delete",
+        targetType: "office_chart_node",
+        targetId: nodeId,
+        before: { node: before, counts: fixtureCounts },
+        after: { nodeId, kind: before.kind, deletedCounts },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      deleteOfficePlanComptableFixture(dependencies.fixtures, nodeId, before.kind);
       return mutationReceipt(nodeId, auditEventId);
     }
   });
@@ -4579,6 +4636,124 @@ function requirePlanComptableNode(dataset: OfficeAnalyticsDataset, nodeId: strin
   return node;
 }
 
+function assertPlanComptableDeleteAllowed(
+  context: ApiContext,
+  node: OfficePlanComptableNode,
+  counts: OfficePlanComptableDeleteCounts
+): void {
+  if (!hasPlanComptableDeleteDependencies(node.kind, counts)) {
+    return;
+  }
+
+  throw planComptableDeleteBlockedError(context, node, counts);
+}
+
+function hasPlanComptableDeleteDependencies(
+  kind: OfficePlanComptableNode["kind"],
+  counts: OfficePlanComptableDeleteCounts
+): boolean {
+  if (kind === "department") {
+    return counts.childDivisionCount > 0 || counts.financialAllocationCount > 0 || counts.projectDepartmentCount > 0;
+  }
+
+  if (kind === "division") {
+    return counts.childCategoryCount > 0;
+  }
+
+  return counts.transactionCount > 0 || counts.projectBudgetLineCount > 0;
+}
+
+function planComptableDeleteBlockedError(
+  context: ApiContext,
+  node: OfficePlanComptableNode,
+  counts: OfficePlanComptableDeleteCounts
+): ApiRouteError {
+  const contextLines: string[] = [`path=${context.req.path}`, `nodeId=${node.id}`, `kind=${node.kind}`];
+
+  if (node.kind === "department") {
+    contextLines.push(
+      `childDivisionCount=${String(counts.childDivisionCount)}`,
+      `financialAllocationCount=${String(counts.financialAllocationCount)}`,
+      `projectDepartmentCount=${String(counts.projectDepartmentCount)}`
+    );
+    return new ApiRouteError(
+      409,
+      "office_plan_node_has_dependencies",
+      "Department cannot be deleted while divisions, project links, or allocations still exist.",
+      contextLines
+    );
+  }
+
+  if (node.kind === "division") {
+    contextLines.push(`childCategoryCount=${String(counts.childCategoryCount)}`);
+    return new ApiRouteError(
+      409,
+      "office_plan_node_has_dependencies",
+      "Division cannot be deleted while categories still exist.",
+      contextLines
+    );
+  }
+
+  contextLines.push(
+    `transactionCount=${String(counts.transactionCount)}`,
+    `projectBudgetLineCount=${String(counts.projectBudgetLineCount)}`
+  );
+  return new ApiRouteError(
+    409,
+    "office_plan_node_has_dependencies",
+    "Category cannot be deleted while transactions or project budget lines still reference it.",
+    contextLines
+  );
+}
+
+function countOfficePlanComptableFixtureDependencies(
+  dataset: OfficeAnalyticsDataset,
+  nodeId: string,
+  kind: OfficePlanComptableNode["kind"]
+): OfficePlanComptableDeleteCounts {
+  const nodeCount = kind === "department"
+    ? dataset.departments.some((department: OfficeDepartmentRow): boolean => department.id === nodeId) ? 1 : 0
+    : kind === "division"
+      ? dataset.divisions.some((division: OfficeDivisionRow): boolean => division.id === nodeId) ? 1 : 0
+      : dataset.categories.some((category: OfficeCategoryRow): boolean => category.id === nodeId) ? 1 : 0;
+
+  if (kind === "department") {
+    return {
+      nodeCount,
+      childDivisionCount: dataset.divisions.filter((division: OfficeDivisionRow): boolean => division.departmentId === nodeId).length,
+      childCategoryCount: 0,
+      transactionCount: 0,
+      projectBudgetLineCount: 0,
+      financialAllocationCount: dataset.financialAllocations.filter(
+        (allocation): boolean => allocation.departmentId === nodeId
+      ).length,
+      projectDepartmentCount: 0
+    };
+  }
+
+  if (kind === "division") {
+    return {
+      nodeCount,
+      childDivisionCount: 0,
+      childCategoryCount: dataset.categories.filter((category: OfficeCategoryRow): boolean => category.divisionId === nodeId).length,
+      transactionCount: 0,
+      projectBudgetLineCount: 0,
+      financialAllocationCount: 0,
+      projectDepartmentCount: 0
+    };
+  }
+
+  return {
+    nodeCount,
+    childDivisionCount: 0,
+    childCategoryCount: 0,
+    transactionCount: dataset.transactions.filter((transaction: OfficeTransactionRow): boolean => transaction.categoryId === nodeId).length,
+    projectBudgetLineCount: dataset.projectBudgetLines.filter((line): boolean => line.categoryId === nodeId).length,
+    financialAllocationCount: 0,
+    projectDepartmentCount: 0
+  };
+}
+
 async function persistOfficePlanComptableCreate(tx: ApiWriteTransaction, nodeId: string, request: OfficePlanComptableWriteRequest): Promise<void> {
   if (tx.kind === "memory") {
     return;
@@ -4638,6 +4813,127 @@ async function persistOfficePlanComptableUpdate(tx: ApiWriteTransaction, nodeId:
   `);
 }
 
+async function persistOfficePlanComptableDelete(
+  tx: ApiWriteTransaction,
+  nodeId: string,
+  kind: OfficePlanComptableNode["kind"]
+): Promise<OfficePlanComptableDeleteCounts> {
+  if (tx.kind === "memory") {
+    return {
+      nodeCount: 1,
+      childDivisionCount: 0,
+      childCategoryCount: 0,
+      transactionCount: 0,
+      projectBudgetLineCount: 0,
+      financialAllocationCount: 0,
+      projectDepartmentCount: 0
+    };
+  }
+
+  if (kind === "department") {
+    const rows = queryRowsFromResult(await tx.executor.execute(sql`
+      with dependency_counts as (
+        select
+          (select count(*) from divisions where department_id = ${nodeId})::int as child_division_count,
+          0::int as child_category_count,
+          0::int as transaction_count,
+          0::int as project_budget_line_count,
+          (select count(*) from financial_allocations where department_id = ${nodeId})::int as financial_allocation_count,
+          (select count(*) from project_departments where department_id = ${nodeId})::int as project_department_count
+      ),
+      deleted_node as (
+        delete from departments
+        where id = ${nodeId}
+          and (select child_division_count from dependency_counts) = 0
+          and (select financial_allocation_count from dependency_counts) = 0
+          and (select project_department_count from dependency_counts) = 0
+        returning id
+      )
+      select
+        (select count(*) from deleted_node)::int as node_count,
+        dependency_counts.child_division_count,
+        dependency_counts.child_category_count,
+        dependency_counts.transaction_count,
+        dependency_counts.project_budget_line_count,
+        dependency_counts.financial_allocation_count,
+        dependency_counts.project_department_count
+      from dependency_counts
+    `));
+    return readOfficePlanComptableDeleteCounts(rows[0]);
+  }
+
+  if (kind === "division") {
+    const rows = queryRowsFromResult(await tx.executor.execute(sql`
+      with dependency_counts as (
+        select
+          0::int as child_division_count,
+          (select count(*) from categories where division_id = ${nodeId})::int as child_category_count,
+          0::int as transaction_count,
+          0::int as project_budget_line_count,
+          0::int as financial_allocation_count,
+          0::int as project_department_count
+      ),
+      deleted_node as (
+        delete from divisions
+        where id = ${nodeId}
+          and (select child_category_count from dependency_counts) = 0
+        returning id
+      )
+      select
+        (select count(*) from deleted_node)::int as node_count,
+        dependency_counts.child_division_count,
+        dependency_counts.child_category_count,
+        dependency_counts.transaction_count,
+        dependency_counts.project_budget_line_count,
+        dependency_counts.financial_allocation_count,
+        dependency_counts.project_department_count
+      from dependency_counts
+    `));
+    return readOfficePlanComptableDeleteCounts(rows[0]);
+  }
+
+  const rows = queryRowsFromResult(await tx.executor.execute(sql`
+    with dependency_counts as (
+      select
+        0::int as child_division_count,
+        0::int as child_category_count,
+        (select count(*) from transactions where category_id = ${nodeId})::int as transaction_count,
+        (select count(*) from project_budget_lines where category_id = ${nodeId})::int as project_budget_line_count,
+        0::int as financial_allocation_count,
+        0::int as project_department_count
+    ),
+    deleted_node as (
+      delete from categories
+      where id = ${nodeId}
+        and (select transaction_count from dependency_counts) = 0
+        and (select project_budget_line_count from dependency_counts) = 0
+      returning id
+    )
+    select
+      (select count(*) from deleted_node)::int as node_count,
+      dependency_counts.child_division_count,
+      dependency_counts.child_category_count,
+      dependency_counts.transaction_count,
+      dependency_counts.project_budget_line_count,
+      dependency_counts.financial_allocation_count,
+      dependency_counts.project_department_count
+    from dependency_counts
+  `));
+  return readOfficePlanComptableDeleteCounts(rows[0]);
+}
+
+function readOfficePlanComptableDeleteCounts(row: JsonRecord | undefined): OfficePlanComptableDeleteCounts {
+  return {
+    nodeCount: integerQueryField(row, "node_count"),
+    childDivisionCount: integerQueryField(row, "child_division_count"),
+    childCategoryCount: integerQueryField(row, "child_category_count"),
+    transactionCount: integerQueryField(row, "transaction_count"),
+    projectBudgetLineCount: integerQueryField(row, "project_budget_line_count"),
+    financialAllocationCount: integerQueryField(row, "financial_allocation_count"),
+    projectDepartmentCount: integerQueryField(row, "project_department_count")
+  };
+}
+
 function upsertOfficePlanComptableFixture(fixtures: ApiFixtureStore, nodeId: string, request: OfficePlanComptableWriteRequest): void {
   const mutableOffice = fixtures.office as Mutable<OfficeAnalyticsDataset>;
   if (request.kind === "department") {
@@ -4654,6 +4950,25 @@ function upsertOfficePlanComptableFixture(fixtures: ApiFixtureStore, nodeId: str
 
   const category: OfficeCategoryRow = { id: nodeId, divisionId: request.parentId, name: request.label.trim(), type: request.type ?? "expense", isActive: request.active };
   mutableOffice.categories = upsertById(fixtures.office.categories, category);
+}
+
+function deleteOfficePlanComptableFixture(
+  fixtures: ApiFixtureStore,
+  nodeId: string,
+  kind: OfficePlanComptableNode["kind"]
+): void {
+  const mutableOffice = fixtures.office as Mutable<OfficeAnalyticsDataset>;
+  if (kind === "department") {
+    mutableOffice.departments = fixtures.office.departments.filter((department: OfficeDepartmentRow): boolean => department.id !== nodeId);
+    return;
+  }
+
+  if (kind === "division") {
+    mutableOffice.divisions = fixtures.office.divisions.filter((division: OfficeDivisionRow): boolean => division.id !== nodeId);
+    return;
+  }
+
+  mutableOffice.categories = fixtures.office.categories.filter((category: OfficeCategoryRow): boolean => category.id !== nodeId);
 }
 
 function slugify(code: string, label: string): string {

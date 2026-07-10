@@ -415,6 +415,10 @@ export interface OfficePlanComptableWriteRequest {
   readonly type: OfficeCategoryType | null;
 }
 
+export interface OfficePlanComptableDeleteRequest {
+  readonly workspaceId: EntityId;
+}
+
 export interface BankImportPreviewRequest {
   readonly workspaceId: EntityId;
   readonly source: "sbi" | "mcb" | "csv" | "cashflow" | "pdf";

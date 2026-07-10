@@ -350,6 +350,7 @@ const ALLOWED_MUTATING_ACTIONS = new Set<string>([
   "office_partner_update",
   "office_plan_comptable_create",
   "office_plan_comptable_update",
+  "office_plan_comptable_delete",
   "office_transaction_create",
   "office_transaction_update",
   "office_transaction_validate",

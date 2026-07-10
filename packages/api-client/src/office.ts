@@ -42,6 +42,7 @@ import type {
   OfficePartnersQuery,
   OfficePartnerWriteRequest,
   OfficePlanComptableNode,
+  OfficePlanComptableDeleteRequest,
   OfficePlanComptableQuery,
   OfficePlanComptableWriteRequest,
   OfficeProjectCoherenceViolation,
@@ -104,6 +105,11 @@ export interface OfficeApiClient {
   readonly updatePlanComptableNode: (
     nodeId: EntityId,
     request: OfficePlanComptableWriteRequest,
+    options: WriteRequestOptions
+  ) => Promise<ApiMutationReceipt>;
+  readonly deletePlanComptableNode: (
+    nodeId: EntityId,
+    request: OfficePlanComptableDeleteRequest,
     options: WriteRequestOptions
   ) => Promise<ApiMutationReceipt>;
   readonly previewBankImport: (
@@ -318,6 +324,16 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
       options: WriteRequestOptions
     ): Promise<ApiMutationReceipt> =>
       transport.patch<ApiMutationReceipt>(
+        `plan-comptable/${encodePathSegment(nodeId)}`,
+        request,
+        options.idempotencyKey
+      ),
+    deletePlanComptableNode: (
+      nodeId: EntityId,
+      request: OfficePlanComptableDeleteRequest,
+      options: WriteRequestOptions
+    ): Promise<ApiMutationReceipt> =>
+      transport.delete<ApiMutationReceipt>(
         `plan-comptable/${encodePathSegment(nodeId)}`,
         request,
         options.idempotencyKey

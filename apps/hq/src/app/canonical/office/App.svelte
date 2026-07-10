@@ -578,7 +578,8 @@
       : [{ label: "Cancel import", onAction: reverseImportBatch, danger: true }]
   );
   const planRowActions = $derived<readonly TableRowAction[]>([
-    { label: "Activate / Deactivate", onAction: togglePlanNodeActive }
+    { label: "Activate / Deactivate", onAction: togglePlanNodeActive },
+    { label: "Delete", onAction: deletePlanNode, danger: true }
   ]);
   const reconciliationRowActions = $derived<readonly TableRowAction[]>([
     { label: "Accept", onAction: acceptReconciliation },
@@ -1161,6 +1162,29 @@
           type: node.kind === "category" ? node.type : null
         },
         { idempotencyKey: createIdempotencyKey("plan-toggle") }
+      );
+      actionReceipt = receipt;
+      await loadPlanComptable();
+    } catch (error: unknown) {
+      planState = createErrorState<readonly OfficePlanComptableNode[]>(error);
+    }
+  }
+
+  async function deletePlanNode(nodeId: string): Promise<void> {
+    const node = planNodes.find((candidate: OfficePlanComptableNode): boolean => candidate.id === nodeId);
+    if (node === undefined) {
+      return;
+    }
+
+    if (!window.confirm(`Delete ${node.kind} \"${node.label}\" permanently? This cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      const receipt = await client.office.deletePlanComptableNode(
+        nodeId,
+        { workspaceId: officeWorkspaceId },
+        { idempotencyKey: createIdempotencyKey("plan-delete") }
       );
       actionReceipt = receipt;
       await loadPlanComptable();

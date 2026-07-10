@@ -797,6 +797,52 @@ test("formerly disabled write routes are activated with receipts and audit ids",
   assert.equal(viewerDenied.status, 403);
 });
 
+test("plan-comptable delete removes unreferenced nodes and blocks referenced categories", async () => {
+  const app = createWriteEnabledFixtureApiService();
+
+  const nodeCreate = await jsonWrite(app, "/eof/v1/plan-comptable", "POST", "plan-delete-create", {
+    workspaceId: "workspace_1",
+    parentId: "div_admin",
+    kind: "category",
+    code: "DEL",
+    label: "Delete me",
+    active: true,
+    type: "expense"
+  });
+  assertReceipt(nodeCreate);
+  assert.ok((nodeCreate.id ?? "").length > 0);
+
+  const deleteCreated = await app.request(`/eof/v1/plan-comptable/${nodeCreate.id}`, {
+    method: "DELETE",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "plan-delete-created" },
+    body: JSON.stringify({ workspaceId: "workspace_1" })
+  });
+  assert.equal(deleteCreated.status, 200);
+  assertReceipt(await deleteCreated.json());
+
+  const planAfterDeleteResponse = await app.request("/eof/v1/plan-comptable?workspaceId=workspace_1&includeInactive=true", {
+    headers: authHeaders()
+  });
+  assert.equal(planAfterDeleteResponse.status, 200);
+  const planAfterDelete = (await planAfterDeleteResponse.json()) as readonly { readonly id: string }[];
+  assert.equal(planAfterDelete.some((node) => node.id === nodeCreate.id), false);
+
+  const deleteReferenced = await app.request("/eof/v1/plan-comptable/cat_bank_fee", {
+    method: "DELETE",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "plan-delete-referenced" },
+    body: JSON.stringify({ workspaceId: "workspace_1" })
+  });
+  assert.equal(deleteReferenced.status, 409);
+  const blocked = (await deleteReferenced.json()) as {
+    readonly error: {
+      readonly code: string;
+      readonly context: readonly string[];
+    };
+  };
+  assert.equal(blocked.error.code, "office_plan_node_has_dependencies");
+  assert.ok(blocked.error.context.some((entry) => entry === "transactionCount=1"));
+});
+
 test("allocation preview is dry-run and allocation run stays disabled when writes are off", async () => {
   const app = createDisabledFixtureApiService();
   const response = await app.request("/erh/v1/allocations/runs/preview", {
