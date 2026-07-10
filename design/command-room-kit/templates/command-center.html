@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Template Command Center — Command Room Kit</title>
+    <link rel="icon" href="../assets/icons/command-center.svg">
+    <link rel="stylesheet" href="../styles/tokens.css">
+    <link rel="stylesheet" href="../styles/components.css">
+  </head>
+  <body>
+    <main class="cr-page">
+      <section class="cr-template-stage cr-template-stage--command" style="padding: 24px;">
+        <section class="cr-shell" style="min-height: 712px;">
+          <aside class="cr-sidebar">
+            <div class="cr-brand">
+              <div class="cr-brand__mark">ë</div>
+              <div class="cr-brand__text">
+                <strong>Command Center</strong>
+                <span>ADMIN</span>
+              </div>
+            </div>
+            <nav class="cr-nav">
+              <a href="#" data-active="true"><img src="../assets/icons/command-center.svg" alt="">Monitoring</a>
+              <a href="#"><img src="../assets/icons/lock.svg" alt="">Permissions</a>
+              <a href="#"><img src="../assets/icons/audit.svg" alt="">Audit</a>
+              <a href="#"><img src="../assets/icons/kpi.svg" alt="">Diagnostics</a>
+              <a href="#"><img src="../assets/icons/transactions.svg" alt="">Jobs</a>
+            </nav>
+          </aside>
+
+          <section class="cr-main">
+            <header class="cr-topbar">
+              <div class="cr-title">
+                <h2>Santé plateforme</h2>
+                <p>Vue admin pour API, Postgres, workflows, CORS et validation gate.</p>
+              </div>
+              <div class="cr-actions">
+                <button class="cr-button">Logs</button>
+                <button class="cr-button cr-button--primary">Relancer smoke</button>
+              </div>
+            </header>
+
+            <section class="cr-health-grid" aria-label="Statuts système">
+              <article class="cr-health-card">
+                <div class="cr-stat__label"><span class="cr-status-dot" style="--status-color: var(--cr-success);"></span>API</div>
+                <div class="cr-stat__meta">healthy, fixtures chargées</div>
+              </article>
+              <article class="cr-health-card">
+                <div class="cr-stat__label"><span class="cr-status-dot" style="--status-color: var(--cr-success);"></span>DB</div>
+                <div class="cr-stat__meta">18 migrations appliquées</div>
+              </article>
+              <article class="cr-health-card">
+                <div class="cr-stat__label"><span class="cr-status-dot" style="--status-color: var(--cr-warning);"></span>FX</div>
+                <div class="cr-stat__meta">cron à vérifier hPanel</div>
+              </article>
+              <article class="cr-health-card">
+                <div class="cr-stat__label"><span class="cr-status-dot" style="--status-color: var(--cr-success);"></span>Smoke</div>
+                <div class="cr-stat__meta">routes live valides</div>
+              </article>
+            </section>
+
+            <div class="cr-grid">
+              <article class="cr-panel cr-card--span-7">
+                <div class="cr-panel__head">
+                  <h3>Journal opérationnel</h3>
+                  <span class="cr-chip cr-chip--success">audit actif</span>
+                </div>
+                <table class="cr-table">
+                  <thead>
+                    <tr>
+                      <th>Événement</th>
+                      <th>Acteur</th>
+                      <th>Scope</th>
+                      <th class="amount">Heure</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>office_bank_import_delete</td>
+                      <td>administrator</td>
+                      <td>eeee-mu</td>
+                      <td class="amount">10:42</td>
+                    </tr>
+                    <tr>
+                      <td>distribution_statement_void</td>
+                      <td>administrator</td>
+                      <td>statement</td>
+                      <td class="amount">10:17</td>
+                    </tr>
+                    <tr>
+                      <td>financial_reset</td>
+                      <td>administrator</td>
+                      <td>office</td>
+                      <td class="amount">09:58</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </article>
+
+              <article class="cr-panel cr-card--span-5">
+                <div class="cr-panel__head">
+                  <h3>Console</h3>
+                  <span class="cr-chip">read only</span>
+                </div>
+                <div class="cr-terminal">
+                  <span>$ curl https://api.eeee.mu/healthz</span>
+                  <span>{ "status": "ok", "runtime": "node20" }</span>
+                  <span>$ smoke office/bank</span>
+                  <span>route protected: 401 expected</span>
+                  <span>cors startup stub: verified</span>
+                </div>
+              </article>
+            </div>
+          </section>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>

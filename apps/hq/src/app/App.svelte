@@ -3,7 +3,6 @@
   import type { AuthSession, WorkspaceAppId } from "@ehq/auth";
   import DesignSystemPage from "./DesignSystemPage.svelte";
   import LandingPage from "./LandingPage.svelte";
-  import LoginPage from "./LoginPage.svelte";
   import PlatformShell from "./PlatformShell.svelte";
   import type { PlatformPageId } from "./platform-data.js";
   import {
@@ -300,7 +299,14 @@
 </script>
 
 {#if route === "/login"}
-  <LoginPage onLogin={setSession} onNavigate={navigate} />
+  <LandingPage
+    session={session}
+    onLogin={setSession}
+    onLogout={clearSession}
+    onNavigate={navigate}
+    onOpenWorkspace={openWorkspace}
+    loginMode={true}
+  />
 {:else if session !== null && isProtectedRoute(route)}
   <PlatformShell
     initialWorkspaceId={initialWorkspaceId}

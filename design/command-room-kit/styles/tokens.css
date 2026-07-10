@@ -1,0 +1,59 @@
+:root {
+  color-scheme: dark;
+
+  --cr-ink: #0d0f14;
+  --cr-bg: #0d0f14;
+  --cr-bg-raised: #171b22;
+  --cr-surface: rgba(23, 27, 34, 0.86);
+  --cr-surface-strong: rgba(51, 61, 68, 0.92);
+  --cr-glass: rgba(255, 255, 255, 0.035);
+  --cr-glass-strong: rgba(255, 255, 255, 0.06);
+  --cr-line: rgba(255, 255, 255, 0.1);
+  --cr-line-strong: rgba(255, 184, 0, 0.42);
+  --cr-text: #f6f7f9;
+  --cr-muted: #8a8f98;
+  --cr-subtle: #333d44;
+  --cr-cyan: #7cecff;
+  --cr-cyan-soft: #b8f7ff;
+  --cr-accent: #ffb800;
+  --cr-success: #22c55e;
+  --cr-danger: #ef4444;
+  --cr-warning: #fbbf24;
+  --cr-info: #3b82f6;
+  --cr-workspace-office: #7cecff;
+  --cr-workspace-distribution: #ffb800;
+  --cr-workspace-command: #b8f7ff;
+
+  --cr-chart-income: #22c55e;
+  --cr-chart-expense: #ef4444;
+  --cr-chart-net: #ffb800;
+  --cr-chart-forecast: #3b82f6;
+  --cr-chart-grid: rgba(255, 255, 255, 0.065);
+  --cr-chart-axis: rgba(255, 255, 255, 0.18);
+
+  --cr-font-body: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --cr-font-mono: "Space Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+
+  --cr-radius-sm: 6px;
+  --cr-radius-md: 8px;
+  --cr-radius-lg: 12px;
+  --cr-radius-xl: 16px;
+  --cr-radius-orb: 999px;
+
+  --cr-space-1: 4px;
+  --cr-space-2: 8px;
+  --cr-space-3: 12px;
+  --cr-space-4: 16px;
+  --cr-space-5: 24px;
+  --cr-space-6: 32px;
+  --cr-space-7: 48px;
+  --cr-space-8: 64px;
+
+  --cr-shadow-cyan: 0 0 28px rgba(124, 236, 255, 0.14);
+  --cr-shadow-panel: 0 18px 58px rgba(0, 0, 0, 0.38);
+  --cr-shadow-accent: 0 0 30px rgba(255, 184, 0, 0.2);
+
+  --cr-motion-fast: 140ms;
+  --cr-motion-base: 220ms;
+  --cr-motion-slow: 680ms;
+}

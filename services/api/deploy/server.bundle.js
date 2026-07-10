@@ -23488,6 +23488,7 @@ function raiseFinanceDomainError(code, message2, context) {
 }
 
 // ../../packages/domain-finance/src/money.ts
+var BASIS_POINTS_PER_WHOLE = 1e4;
 var EOF_MONEY_SCALE = 2;
 var ERH_MONEY_SCALE = 10;
 var eofMoney = {
@@ -23516,6 +23517,31 @@ var erhMoney = {
   mulScaled: mulScaledErh,
   divScaled: divScaledErh
 };
+function createCurrencyCode(value) {
+  if (!/^[A-Z]{3}$/.test(value)) {
+    raiseFinanceDomainError("currency_invalid", "Currency code must be exactly three uppercase ISO letters.", {
+      value
+    });
+  }
+  return value;
+}
+function createMoneyMicroUnits(value) {
+  return value;
+}
+function createBasisPoints(value) {
+  if (!Number.isSafeInteger(value) || value < 0 || value > BASIS_POINTS_PER_WHOLE) {
+    raiseFinanceDomainError("basis_points_invalid", "Basis points must be an integer between 0 and 10000.", {
+      value: String(value)
+    });
+  }
+  return value;
+}
+function createMoneyAmount(amountMicro, currency) {
+  return {
+    amountMicro,
+    currency
+  };
+}
 function parse(value, scale, mode) {
   return parseDecimalToUnits(value, {
     scale,
@@ -23568,6 +23594,14 @@ function divScaled(left, right, scale, mode) {
   }
   return roundQuotient(left * scaleMultiplier, right, mode);
 }
+function addMoney(left, right) {
+  assertSameCurrency(left, right);
+  return createMoneyAmount(createMoneyMicroUnits(left.amountMicro + right.amountMicro), left.currency);
+}
+function subtractMoney(left, right) {
+  assertSameCurrency(left, right);
+  return createMoneyAmount(createMoneyMicroUnits(left.amountMicro - right.amountMicro), left.currency);
+}
 function formatScaledUnits(units, scale) {
   if (!Number.isSafeInteger(scale) || scale < 0) {
     raiseFinanceDomainError("decimal_scale_invalid", "Decimal format scale must be a non-negative safe integer.", {
@@ -23582,6 +23616,14 @@ function formatScaledUnits(units, scale) {
   const wholeText = absoluteText.slice(0, absoluteText.length - scale);
   const fractionText = absoluteText.slice(absoluteText.length - scale);
   return `${negative ? "-" : ""}${wholeText}.${fractionText}`;
+}
+function assertSameCurrency(left, right) {
+  if (left.currency !== right.currency) {
+    raiseFinanceDomainError("currency_mismatch", "Money amounts must use the same currency.", {
+      leftCurrency: left.currency,
+      rightCurrency: right.currency
+    });
+  }
 }
 function parseEofMoney(value) {
   return parseDecimalToUnits(value, {
@@ -23728,25 +23770,157 @@ function scaleFactor(scale) {
   return 10n ** BigInt(scale);
 }
 
+// ../../packages/domain-finance/src/ledger.ts
+function summarizeLedger(transactions, period) {
+  assertLedgerPeriod(period);
+  const periodTransactions = transactions.filter(
+    (transaction) => transaction.transactionDate >= period.startsOn && transaction.transactionDate <= period.endsOn
+  );
+  const first = periodTransactions[0];
+  if (first === void 0) {
+    raiseFinanceDomainError("allocation_invalid", "Ledger summary requires at least one transaction to infer currency.", {
+      startsOn: period.startsOn,
+      endsOn: period.endsOn
+    });
+  }
+  const zero = createMoneyAmount(createMoneyMicroUnits(0n), first.amount.currency);
+  let income = zero;
+  let expense = zero;
+  for (const transaction of periodTransactions) {
+    if (transaction.direction === "income") {
+      income = addMoney(income, transaction.amount);
+      continue;
+    }
+    expense = addMoney(expense, transaction.amount);
+  }
+  return {
+    period,
+    income,
+    expense,
+    profit: subtractMoney(income, expense)
+  };
+}
+function assertLedgerPeriod(period) {
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(period.startsOn) || !/^\d{4}-\d{2}-\d{2}$/u.test(period.endsOn)) {
+    raiseFinanceDomainError("allocation_invalid", "Ledger period dates must use YYYY-MM-DD.", {
+      startsOn: period.startsOn,
+      endsOn: period.endsOn
+    });
+  }
+  if (period.startsOn > period.endsOn) {
+    raiseFinanceDomainError("allocation_invalid", "Ledger period start must be before or equal to period end.", {
+      startsOn: period.startsOn,
+      endsOn: period.endsOn
+    });
+  }
+}
+
+// ../../packages/domain-finance/src/reconciliation.ts
+function reconcileTransaction(request) {
+  if (request.transactionId.length === 0) {
+    raiseFinanceDomainError("allocation_invalid", "Reconciliation transaction id is required.", {
+      transactionId: request.transactionId
+    });
+  }
+  const zero = createMoneyAmount(createMoneyMicroUnits(0n), request.expectedAmount.currency);
+  const reconciledAmount = request.candidates.reduce((sum, candidate) => {
+    if (candidate.id.length === 0) {
+      raiseFinanceDomainError("allocation_invalid", "Bank transaction candidate id is required.", {
+        transactionId: request.transactionId
+      });
+    }
+    assertSameCurrency(request.expectedAmount, candidate.amount);
+    return addMoney(sum, candidate.amount);
+  }, zero);
+  if (reconciledAmount.amountMicro !== request.expectedAmount.amountMicro) {
+    raiseFinanceDomainError("allocation_invalid", "Reconciled amount must equal the expected transaction amount.", {
+      transactionId: request.transactionId,
+      expectedMicro: request.expectedAmount.amountMicro.toString(),
+      reconciledMicro: reconciledAmount.amountMicro.toString()
+    });
+  }
+  return {
+    transactionId: request.transactionId,
+    linkedBankTransactionIds: request.candidates.map((candidate) => candidate.id),
+    reconciledAmount
+  };
+}
+
+// ../../packages/domain-finance/src/fx.ts
+function convertMoney(amount, targetCurrency, rate) {
+  if (rate.fromCurrency !== amount.currency) {
+    raiseFinanceDomainError("currency_mismatch", "FX rate source currency must match the amount currency.", {
+      amountCurrency: amount.currency,
+      rateFromCurrency: rate.fromCurrency
+    });
+  }
+  if (rate.toCurrency !== targetCurrency) {
+    raiseFinanceDomainError("currency_mismatch", "FX rate target currency must match the requested currency.", {
+      targetCurrency,
+      rateToCurrency: rate.toCurrency
+    });
+  }
+  return createMoneyAmount(
+    createMoneyMicroUnits(applyDecimalFactor(amount.amountMicro, rate.rateDecimal, "HALF_UP")),
+    targetCurrency
+  );
+}
+
+// ../../packages/domain-finance/src/vat.ts
+function calculateVat(grossAmount, vatRateBasisPoints) {
+  const denominator = BigInt(BASIS_POINTS_PER_WHOLE + vatRateBasisPoints);
+  const vatAmount = createMoneyAmount(
+    createMoneyMicroUnits(roundRatioHalfUp(grossAmount.amountMicro * BigInt(vatRateBasisPoints), denominator)),
+    grossAmount.currency
+  );
+  const netAmount = subtractMoney(grossAmount, vatAmount);
+  return {
+    netAmount,
+    vatAmount,
+    grossAmount
+  };
+}
+
 // ../../packages/domain-finance/src/schemas.ts
-var todoMessage = "TODO(domain-finance): replace Zod placeholder after schema approval.";
-var moneyAmountSchema = external_exports.custom((input) => {
-  throw new Error(todoMessage);
+var currencyCodeSchema = external_exports.string().regex(/^[A-Z]{3}$/u).transform(createCurrencyCode);
+var moneyMicroUnitsSchema = external_exports.bigint().transform(createMoneyMicroUnits);
+var moneyAmountSchema = external_exports.object({
+  amountMicro: moneyMicroUnitsSchema,
+  currency: currencyCodeSchema
+}).transform((value) => createMoneyAmount(value.amountMicro, value.currency));
+var basisPointShareSchema = external_exports.object({
+  participantId: external_exports.string().min(1),
+  shareBasisPoints: external_exports.number().int().min(0).max(1e4).transform(createBasisPoints)
 });
-var basisPointShareSchema = external_exports.custom((input) => {
-  throw new Error(todoMessage);
+var ledgerTransactionSchema = external_exports.object({
+  id: external_exports.string().min(1),
+  transactionDate: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
+  direction: external_exports.enum(["income", "expense"]),
+  amount: moneyAmountSchema,
+  categoryId: external_exports.string().min(1).nullable(),
+  departmentId: external_exports.string().min(1).nullable(),
+  divisionId: external_exports.string().min(1).nullable(),
+  sourceSystem: external_exports.enum(["office", "distribution"])
 });
-var ledgerTransactionSchema = external_exports.custom((input) => {
-  throw new Error(todoMessage);
+var expenseSchema = external_exports.object({
+  id: external_exports.string().min(1),
+  contractId: external_exports.string().min(1),
+  payeeId: external_exports.string().min(1).nullable(),
+  amount: moneyAmountSchema,
+  recoupable: external_exports.boolean(),
+  status: external_exports.enum(["open", "partially-recovered", "recovered", "non-recoverable", "deleted"])
 });
-var expenseSchema = external_exports.custom((input) => {
-  throw new Error(todoMessage);
+var allocationLineSchema = external_exports.object({
+  sourceId: external_exports.string().min(1),
+  participantId: external_exports.string().min(1),
+  grossAmount: moneyAmountSchema,
+  recoupmentAmount: moneyAmountSchema,
+  netAmount: moneyAmountSchema
 });
-var allocationLineSchema = external_exports.custom((input) => {
-  throw new Error(todoMessage);
-});
-var reconciliationResultSchema = external_exports.custom((input) => {
-  throw new Error(todoMessage);
+var reconciliationResultSchema = external_exports.object({
+  transactionId: external_exports.string().min(1),
+  linkedBankTransactionIds: external_exports.array(external_exports.string().min(1)),
+  reconciledAmount: moneyAmountSchema
 });
 
 // ../../packages/domain-distribution/src/allocation.ts
@@ -24903,32 +25077,6 @@ function toBasisPointValue(value) {
     throw new Error(`Basis-point result is out of range: ${value.toString()}`);
   }
   return parseInt(value.toString(), 10);
-}
-var EXCHANGE_RATE_SCALE = 10000000000n;
-function pickMurExchangeRate(fromCurrency, occurredOn, exchangeRates) {
-  const candidates = exchangeRates.filter(
-    (rate) => rate.fromCurrency === fromCurrency && rate.toCurrency === "MUR"
-  );
-  if (candidates.length === 0) {
-    return null;
-  }
-  const onOrBefore = candidates.filter((rate) => rate.effectiveDate <= occurredOn);
-  const pool = onOrBefore.length > 0 ? onOrBefore : candidates;
-  return pool.reduce(
-    (best, rate) => best === null || rate.effectiveDate > best.effectiveDate ? rate : best,
-    null
-  );
-}
-function convertMinorToMur(amountMinor, fromCurrency, occurredOn, exchangeRates) {
-  if (fromCurrency === "MUR") {
-    return amountMinor;
-  }
-  const rate = pickMurExchangeRate(fromCurrency, occurredOn, exchangeRates);
-  if (rate === null) {
-    return null;
-  }
-  const product = amountMinor * rate.rateE10;
-  return (product + EXCHANGE_RATE_SCALE / 2n) / EXCHANGE_RATE_SCALE;
 }
 
 // ../../node_modules/.pnpm/@supabase+supabase-js@2.108.2/node_modules/@supabase/supabase-js/dist/index.mjs
@@ -40667,10 +40815,80 @@ function requireOfficeBankLine(dataset, statementLineId) {
 function bankLineAmountText(line) {
   return eofMoney.format(line.amountMurMinor ?? line.amountMinor);
 }
+function assertOfficeReconciliationKernelMatch(context, line, transaction) {
+  const candidateAmount = officeReconciliationLineMoney(line);
+  const expectedAmount = officeReconciliationTransactionMoney(transaction);
+  try {
+    void reconcileTransaction({
+      transactionId: transaction.id,
+      expectedAmount,
+      candidates: [
+        {
+          id: line.id,
+          amount: candidateAmount,
+          transactionDate: line.occurredOn
+        }
+      ]
+    });
+  } catch (error) {
+    throw new ApiRouteError(409, "office_reconciliation_amount_mismatch", "Bank line amount does not match the selected transaction.", [
+      `path=${context.req.path}`,
+      `statementLineId=${line.id}`,
+      `transactionId=${transaction.id}`,
+      `error=${error instanceof Error ? error.message : "unknown"}`
+    ]);
+  }
+}
+function assertOfficeReconciliationKernelCreate(context, line, transactionId, amountMinor, currency) {
+  const candidateAmount = officeReconciliationLineMoney(line);
+  const expectedAmount = createFinanceMoneyAmount(context, amountMinor, currency);
+  try {
+    void reconcileTransaction({
+      transactionId,
+      expectedAmount,
+      candidates: [
+        {
+          id: line.id,
+          amount: candidateAmount,
+          transactionDate: line.occurredOn
+        }
+      ]
+    });
+  } catch (error) {
+    throw new ApiRouteError(409, "office_reconciliation_amount_mismatch", "Created transaction amount does not match the selected bank line.", [
+      `path=${context.req.path}`,
+      `statementLineId=${line.id}`,
+      `transactionId=${transactionId}`,
+      `error=${error instanceof Error ? error.message : "unknown"}`
+    ]);
+  }
+}
+function officeReconciliationLineMoney(line) {
+  const currency = line.amountMurMinor === null ? line.currency : "MUR";
+  const amountMinor = line.amountMurMinor ?? line.amountMinor;
+  return createMoneyAmount(createMoneyMicroUnits(absBigInt(amountMinor)), createCurrencyCode(currency));
+}
+function officeReconciliationTransactionMoney(transaction) {
+  const originalCurrency = transaction.originalCurrency?.trim().toUpperCase() ?? null;
+  const currency = originalCurrency === null || originalCurrency.length === 0 || originalCurrency === "MUR" || transaction.exchangeRateE10 !== null ? "MUR" : originalCurrency;
+  return createMoneyAmount(createMoneyMicroUnits(absBigInt(transaction.amountMinor)), createCurrencyCode(currency));
+}
+function createFinanceMoneyAmount(context, amountMinor, currency) {
+  try {
+    return createMoneyAmount(createMoneyMicroUnits(absBigInt(amountMinor)), createCurrencyCode(currency));
+  } catch (error) {
+    throw new ApiRouteError(400, "currency_invalid", "Currency must be a valid ISO-4217 code.", [
+      `path=${context.req.path}`,
+      `currency=${currency}`,
+      `error=${error instanceof Error ? error.message : "unknown"}`
+    ]);
+  }
+}
 async function officeReconciliationMatchResponse(context, dependencies) {
   const request = await readZodBody(context, officeReconciliationMatchSchema);
-  requireOfficeBankLine(dependencies.fixtures.office, request.statementLineId);
-  requireOfficeTransaction(dependencies.fixtures.office, request.transactionId);
+  const line = requireOfficeBankLine(dependencies.fixtures.office, request.statementLineId);
+  const transaction = requireOfficeTransaction(dependencies.fixtures.office, request.transactionId);
+  assertOfficeReconciliationKernelMatch(context, line, transaction);
   const idempotencyKey = requireIdempotencyKey(context);
   const actor = context.get("authUser");
   const result = await runIdempotentMutation({
@@ -40844,6 +41062,7 @@ async function officeReconciliationCreateTransactionResponse(context, dependenci
   const amountMinor = normalizeEofAmountField(context, writeRequest.amountMicro, "amountMicro");
   const transactionType = line.direction === "credit" ? "income" : "expense";
   const transactionStatus = request.categoryId === null ? "draft" : "validated";
+  assertOfficeReconciliationKernelCreate(context, line, transactionId, amountMinor, line.amountMurMinor === null ? line.currency : "MUR");
   const idempotencyKey = requireIdempotencyKey(context);
   const actor = context.get("authUser");
   const result = await runIdempotentMutation({
@@ -43877,7 +44096,7 @@ async function distributionImportPreviewResponse(context, dependencies) {
     createdAtIso: dependencies.nowIso()
   };
   await dependencies.persistence.storeDistributionImportPreview(preview);
-  const currencyCodes = currencyCodesFromRows(request.rows, request.source === "kontor" ? "EUR" : "USD");
+  const currencyCodes = currencyCodesFromRows(request.rows, null);
   const response = {
     previewId,
     source: request.source,
@@ -44932,7 +45151,10 @@ function currencyCodesFromRows(rows, fallback) {
   const codes = uniqueStrings(
     rows.map((row) => normalizedCurrency(rowValue(row, ["currency", "currency_code", "Currency", "CURRENCY"]))).filter((currency) => currency !== null)
   );
-  return codes.length === 0 ? [fallback] : codes;
+  if (codes.length > 0) {
+    return codes;
+  }
+  return fallback === null ? [] : [fallback];
 }
 function normalizedCurrency(value) {
   if (value === null) {
@@ -44986,7 +45208,7 @@ function parseOfficeBankPreviewRow(row, workspaceId, accounts, exchangeRates) {
   const occurredOn = isoDateValue(row.rawData, ["occurredOn", "occurred_on", "transactionDate", "transaction_date", "date", "DATE", "Date", "paid_on", "paidOn"]);
   const description = rowValue(row.rawData, ["description", "label", "particulars", "details", "narrative", "memo"]);
   const amount = amountForBankRow(row.rawData);
-  const amountMurMinor = amount === null ? null : amount.amountMurMinor !== null ? amount.amountMurMinor : occurredOn !== null ? convertMinorToMur(amount.amountMinor, amount.currency, occurredOn, exchangeRates) : null;
+  const amountMurMinor = amount === null ? null : amount.amountMurMinor !== null ? amount.amountMurMinor : occurredOn !== null ? convertMinorToMurViaFinanceKernel(amount.amountMinor, amount.currency, occurredOn, exchangeRates) : null;
   const issues = [
     ...account === null ? ["account_not_found"] : [],
     ...occurredOn === null ? ["occurred_on_missing"] : [],
@@ -45069,6 +45291,52 @@ function amountForBankRow(row) {
     currency,
     direction
   };
+}
+function convertMinorToMurViaFinanceKernel(amountMinor, fromCurrency, occurredOn, exchangeRates) {
+  if (fromCurrency === "MUR") {
+    return amountMinor;
+  }
+  const rate = pickMurExchangeRateForPreview(fromCurrency, occurredOn, exchangeRates);
+  if (rate === null) {
+    return null;
+  }
+  try {
+    const converted = convertMoney(
+      createMoneyAmount(createMoneyMicroUnits(absBigInt(amountMinor)), createCurrencyCode(fromCurrency)),
+      createCurrencyCode("MUR"),
+      {
+        fromCurrency: createCurrencyCode(rate.fromCurrency),
+        toCurrency: createCurrencyCode(rate.toCurrency),
+        rateDecimal: decimalFromE10(rate.rateE10),
+        effectiveDate: rate.effectiveDate,
+        source: "office.exchange_rates"
+      }
+    );
+    return converted.amountMicro;
+  } catch (_error) {
+    return null;
+  }
+}
+function pickMurExchangeRateForPreview(fromCurrency, occurredOn, exchangeRates) {
+  const candidates = exchangeRates.filter(
+    (rate) => rate.fromCurrency === fromCurrency && rate.toCurrency === "MUR"
+  );
+  if (candidates.length === 0) {
+    return null;
+  }
+  const onOrBefore = candidates.filter((rate) => rate.effectiveDate <= occurredOn);
+  const pool = onOrBefore.length > 0 ? onOrBefore : candidates;
+  return pool.reduce(
+    (best, rate) => best === null || rate.effectiveDate > best.effectiveDate ? rate : best,
+    null
+  );
+}
+function decimalFromE10(rateE10) {
+  const sign = rateE10 < 0n ? "-" : "";
+  const digits = absBigInt(rateE10).toString().padStart(11, "0");
+  const integer = digits.slice(0, -10);
+  const fraction = digits.slice(-10);
+  return `${sign}${integer}.${fraction}`;
 }
 function directionValue(row) {
   const value = rowValue(row, ["direction", "type", "debitCredit", "debit_credit"]);
@@ -45913,15 +46181,67 @@ function toApiDivisionPnl(row) {
     netMicro: row.profit
   };
 }
-function toOfficeVatReport(_dataset, period) {
-  const zeroMicro = eofMoney.format(0n);
+function toOfficeVatReport(dataset, period) {
+  const scopedTransactions = dataset.transactions.filter(
+    (transaction) => transaction.transactionDate.slice(0, 7) === period && transaction.status === "validated" && transaction.isActive
+  );
+  let outputVatMinor = 0n;
+  let inputVatMinor = 0n;
+  let hasVatSource = false;
+  const rows = [];
+  for (const transaction of scopedTransactions) {
+    const vatMeta = readOfficeTransactionVatMeta(transaction);
+    if (!vatMeta.hasSource) {
+      continue;
+    }
+    hasVatSource = true;
+    if (!vatMeta.isApplicable) {
+      continue;
+    }
+    const grossMinor = absBigInt(transaction.amountMinor);
+    const rateBp = vatMeta.rateBp;
+    const breakdown = rateBp > 0 ? calculateVat(
+      createMoneyAmount(createMoneyMicroUnits(grossMinor), createCurrencyCode("MUR")),
+      createBasisPoints(rateBp)
+    ) : null;
+    const vatMinor = vatMeta.vatAmountMinor ?? breakdown?.vatAmount.amountMicro ?? 0n;
+    const baseMinor = breakdown?.netAmount.amountMicro ?? (grossMinor > vatMinor ? grossMinor - vatMinor : 0n);
+    if (transaction.type === "income") {
+      outputVatMinor += vatMinor;
+    } else {
+      inputVatMinor += vatMinor;
+    }
+    rows.push({
+      id: transaction.id,
+      label: transaction.description?.trim() || `Transaction ${transaction.id}`,
+      baseMicro: eofMoney.format(baseMinor),
+      rateBp,
+      vatMicro: eofMoney.format(vatMinor)
+    });
+  }
   return {
     period,
-    hasVatSource: false,
-    outputVatMicro: zeroMicro,
-    inputVatMicro: zeroMicro,
-    netVatMicro: zeroMicro,
-    rows: []
+    hasVatSource,
+    outputVatMicro: eofMoney.format(outputVatMinor),
+    inputVatMicro: eofMoney.format(inputVatMinor),
+    netVatMicro: eofMoney.format(outputVatMinor - inputVatMinor),
+    rows
+  };
+}
+function readOfficeTransactionVatMeta(transaction) {
+  const value = transaction;
+  const hasVatApplicable = typeof value.vatApplicable === "boolean";
+  const hasVatRate = typeof value.vatRateBp === "number" || value.vatRateBp === null;
+  const hasVatAmount = typeof value.vatAmountMinor === "bigint" || value.vatAmountMinor === null;
+  const hasSource = hasVatApplicable || hasVatRate || hasVatAmount;
+  const normalizedRate = typeof value.vatRateBp === "number" && Number.isInteger(value.vatRateBp) && value.vatRateBp >= 0 && value.vatRateBp <= 1e4 ? value.vatRateBp : 0;
+  const normalizedVatAmount = typeof value.vatAmountMinor === "bigint" ? absBigInt(value.vatAmountMinor) : null;
+  const isApplicable = value.vatApplicable === true || typeof value.vatAmountMinor === "bigint" && absBigInt(value.vatAmountMinor) > 0n || normalizedRate > 0;
+  return {
+    hasSource,
+    isApplicable,
+    rateBp: normalizedRate,
+    vatAmountMinor: normalizedVatAmount
   };
 }
 function toApiBankAccountSummary(account) {
@@ -46055,14 +46375,22 @@ function isoDayFromMs(epochMs) {
   return new Date(epochMs).toISOString().slice(0, 10);
 }
 function toOfficeGlobalPnl(dataset, period, filters) {
-  const pnl = readGlobalPnl(dataset, filters);
+  const fallbackPnl = readGlobalPnl(dataset, filters);
+  const ledgerTransactions = toOfficeLedgerTransactions(dataset, filters);
+  const ledgerSummary = ledgerTransactions.length === 0 ? null : summarizeLedger(ledgerTransactions, {
+    startsOn: filters.dateFrom ?? `${period}-01`,
+    endsOn: filters.dateTo ?? lastDayOfMonth(period)
+  });
+  const incomeMicro = ledgerSummary === null ? fallbackPnl.income : eofMoney.format(ledgerSummary.income.amountMicro);
+  const expenseMicro = ledgerSummary === null ? fallbackPnl.expense : eofMoney.format(ledgerSummary.expense.amountMicro);
+  const netMicro = ledgerSummary === null ? fallbackPnl.profit : eofMoney.format(ledgerSummary.profit.amountMicro);
   return {
     scope: "global",
     completeness: "complete",
     period,
-    incomeMicro: pnl.income,
-    expenseMicro: pnl.expense,
-    netMicro: pnl.profit,
+    incomeMicro,
+    expenseMicro,
+    netMicro,
     validatedProjectionId: `projection_global_${period}`,
     projectionRows: toProjectionRows(readPnlByDepartment(dataset, filters), period),
     lines: readPnlByCategory(dataset, filters).map((row) => ({
@@ -46073,6 +46401,40 @@ function toOfficeGlobalPnl(dataset, period, filters) {
       netMicro: row.profit
     }))
   };
+}
+function toOfficeLedgerTransactions(dataset, filters) {
+  const categoriesById = new Map(dataset.categories.map((category) => [category.id, category]));
+  const divisionsById = new Map(dataset.divisions.map((division) => [division.id, division]));
+  return dataset.transactions.filter(
+    (transaction) => transaction.status === "validated" && transaction.isActive && isOfficeFxValidForLedger(transaction) && isOfficeTransactionInRange(transaction, filters)
+  ).map((transaction) => {
+    const category = transaction.categoryId === null ? void 0 : categoriesById.get(transaction.categoryId);
+    const divisionId = category?.divisionId ?? null;
+    const departmentId = divisionId === null ? null : divisionsById.get(divisionId)?.departmentId ?? null;
+    return {
+      id: transaction.id,
+      transactionDate: transaction.transactionDate.slice(0, 10),
+      direction: transaction.type,
+      amount: createMoneyAmount(createMoneyMicroUnits(absBigInt(transaction.amountMinor)), createCurrencyCode("MUR")),
+      categoryId: transaction.categoryId,
+      departmentId,
+      divisionId,
+      sourceSystem: "office"
+    };
+  });
+}
+function isOfficeFxValidForLedger(transaction) {
+  if (transaction.originalCurrency === null || transaction.originalCurrency === "" || transaction.originalCurrency === "MUR") {
+    return true;
+  }
+  return transaction.exchangeRateE10 !== null;
+}
+function isOfficeTransactionInRange(transaction, filters) {
+  const date = transaction.transactionDate.slice(0, 10);
+  if (filters.dateFrom !== null && date < filters.dateFrom) {
+    return false;
+  }
+  return !(filters.dateTo !== null && date > filters.dateTo);
 }
 function toOfficeDepartmentPnl(dataset, departmentId, period, filters) {
   const pnl = readDepartmentPnl(dataset, departmentId, filters);
@@ -47209,7 +47571,7 @@ async function readOfficeDataset(pool) {
   const projectBudgetLines = await queryRows(pool, "select id::text, project_id::text, category_id::text, type, planned_amount_minor::text from project_budget_lines order by legacy_id nulls last, id", []);
   const transactions = await queryRows(
     pool,
-    "select id::text, workspace_id, transaction_date, type, status, is_active, description, category_id::text, partner_id::text, project_id::text, account_id::text, amount_minor::text, original_currency, exchange_rate_e10::text from transactions order by transaction_date, id",
+    "select id::text, workspace_id, transaction_date, type, status, is_active, description, category_id::text, partner_id::text, project_id::text, account_id::text, amount_minor::text, original_currency, exchange_rate_e10::text, vat_applicable, vat_rate_bp::text, vat_amount_minor::text from transactions order by transaction_date, id",
     []
   );
   const financialAllocations = await queryRows(pool, "select id::text, transaction_id::text, department_id::text, amount_minor::text from financial_allocations order by legacy_id nulls last, id", []);
@@ -47563,7 +47925,10 @@ function toOfficeTransaction2(row) {
     accountId: nullableStringCell(row, "account_id"),
     amountMinor: bigintCell(row, "amount_minor"),
     originalCurrency: nullableStringCell(row, "original_currency"),
-    exchangeRateE10: nullableBigintCell(row, "exchange_rate_e10")
+    exchangeRateE10: nullableBigintCell(row, "exchange_rate_e10"),
+    vatApplicable: booleanCell(row, "vat_applicable"),
+    vatRateBp: nullableIntegerCell(row, "vat_rate_bp"),
+    vatAmountMinor: bigintCell(row, "vat_amount_minor")
   };
 }
 function toOfficeFinancialAllocation(row) {
@@ -47887,6 +48252,10 @@ function bigintCell(row, columnName) {
 function nullableBigintCell(row, columnName) {
   const value = nullableStringCell(row, columnName);
   return value === null ? null : BigInt(value);
+}
+function nullableIntegerCell(row, columnName) {
+  const value = nullableStringCell(row, columnName);
+  return value === null ? null : numberFromText(value, columnName);
 }
 function numberCell(row, columnName) {
   return numberFromText(stringCell(row, columnName), columnName);

@@ -1,0 +1,42 @@
+<svg width="1600" height="900" viewBox="0 0 1600 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1600" height="900" fill="#020508"/>
+  <rect width="1600" height="900" fill="url(#bg)"/>
+  <g opacity=".28" stroke="#B8F7FF">
+    <path d="M130 180H450L560 250H718"/>
+    <path d="M1470 178H1146L1038 248H882"/>
+    <path d="M130 722H450L560 650H718"/>
+    <path d="M1470 722H1146L1038 650H882"/>
+    <rect x="104" y="252" width="310" height="132" rx="8"/>
+    <rect x="1186" y="252" width="310" height="132" rx="8"/>
+    <rect x="104" y="514" width="310" height="132" rx="8"/>
+    <rect x="1186" y="514" width="310" height="132" rx="8"/>
+  </g>
+  <g filter="url(#glow)">
+    <ellipse cx="800" cy="450" rx="404" ry="196" stroke="#7CECFF" stroke-opacity=".34" stroke-width="2"/>
+    <ellipse cx="800" cy="450" rx="284" ry="136" stroke="#B8F7FF" stroke-opacity=".42" stroke-width="2"/>
+    <circle cx="800" cy="450" r="124" fill="url(#orb)"/>
+    <circle cx="800" cy="450" r="124" stroke="#B8F7FF" stroke-opacity=".68" stroke-width="2"/>
+    <path d="M560 450H1040M800 210V690" stroke="#7CECFF" stroke-opacity=".36" stroke-width="2"/>
+    <circle cx="800" cy="254" r="8" fill="#FFB800"/>
+    <circle cx="1016" cy="450" r="8" fill="#FFB800"/>
+    <circle cx="800" cy="646" r="8" fill="#FFB800"/>
+    <circle cx="584" cy="450" r="8" fill="#FFB800"/>
+  </g>
+  <defs>
+    <radialGradient id="bg" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(800 450) scale(700)">
+      <stop stop-color="#102A34"/>
+      <stop offset=".44" stop-color="#071319"/>
+      <stop offset="1" stop-color="#010305"/>
+    </radialGradient>
+    <radialGradient id="orb" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(760 372) rotate(64) scale(234)">
+      <stop stop-color="#EFFFFF"/>
+      <stop offset=".36" stop-color="#80EEFF"/>
+      <stop offset=".72" stop-color="#0B1B23"/>
+      <stop offset="1" stop-color="#010305"/>
+    </radialGradient>
+    <filter id="glow" x="340" y="150" width="920" height="600" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="9" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+</svg>

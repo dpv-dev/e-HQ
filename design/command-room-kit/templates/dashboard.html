@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Template Dashboard — Command Room Kit</title>
+    <link rel="icon" href="../assets/icons/command-center.svg">
+    <link rel="stylesheet" href="../styles/tokens.css">
+    <link rel="stylesheet" href="../styles/components.css">
+  </head>
+  <body>
+    <main class="cr-page">
+      <section class="cr-shell">
+        <aside class="cr-sidebar">
+          <div class="cr-brand">
+            <div class="cr-brand__mark">DA</div>
+            <div class="cr-brand__text">
+              <strong>David</strong>
+              <span>ADMINISTRATOR</span>
+            </div>
+          </div>
+          <nav class="cr-nav">
+            <a href="#" data-active="true"><img src="../assets/icons/office.svg" alt="">Office</a>
+            <a href="#"><img src="../assets/icons/bank.svg" alt="">Banque</a>
+            <a href="#"><img src="../assets/icons/distribution.svg" alt="">Distribution</a>
+            <a href="#"><img src="../assets/icons/analytics.svg" alt="">P&amp;L</a>
+            <a href="#"><img src="../assets/icons/command-center.svg" alt="">Command Center</a>
+          </nav>
+        </aside>
+
+        <section class="cr-main">
+          <header class="cr-topbar">
+            <div class="cr-title">
+              <h2>Result by division</h2>
+              <p>Income, expenses et marge par division avec type de transaction préservé.</p>
+            </div>
+            <div class="cr-actions">
+              <button class="cr-button">Exporter</button>
+              <button class="cr-button cr-button--primary">Créer entrée</button>
+            </div>
+          </header>
+
+          <div class="cr-grid">
+            <article class="cr-card cr-card--span-4">
+              <div class="cr-stat__label">Income</div>
+              <div class="cr-stat__value">Rs 8.9M</div>
+              <div class="cr-stat__meta">évents + the storë actifs</div>
+            </article>
+            <article class="cr-card cr-card--span-4">
+              <div class="cr-stat__label">Expense</div>
+              <div class="cr-stat__value">Rs 3.1M</div>
+              <div class="cr-stat__meta">allocation complète</div>
+            </article>
+            <article class="cr-card cr-card--span-4">
+              <div class="cr-stat__label">Net</div>
+              <div class="cr-stat__value">Rs 5.8M</div>
+              <div class="cr-stat__meta">projections validées</div>
+            </article>
+            <article class="cr-panel cr-card--span-12">
+              <div class="cr-panel__head">
+                <h3>Divisions</h3>
+                <span class="cr-chip cr-chip--success">projections validées</span>
+              </div>
+              <table class="cr-table">
+                <thead>
+                  <tr>
+                    <th>Division</th>
+                    <th>Income</th>
+                    <th>Expense</th>
+                    <th class="amount">Result</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>evënts</td>
+                    <td>Rs 3,840,000</td>
+                    <td>Rs 1,120,000</td>
+                    <td class="amount">Rs 2,720,000</td>
+                  </tr>
+                  <tr>
+                    <td>the storë</td>
+                    <td>Rs 2,450,000</td>
+                    <td>Rs 740,000</td>
+                    <td class="amount">Rs 1,710,000</td>
+                  </tr>
+                  <tr>
+                    <td>distribution</td>
+                    <td>Rs 2,610,000</td>
+                    <td>Rs 1,240,000</td>
+                    <td class="amount">Rs 1,370,000</td>
+                  </tr>
+                </tbody>
+              </table>
+            </article>
+          </div>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>

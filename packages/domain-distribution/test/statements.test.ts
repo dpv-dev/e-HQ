@@ -10,6 +10,11 @@ import {
   computeStatementBalance,
   computeStatementGroupTotals
 } from "../src/statements.ts";
+import { createDistributionStatementDraft } from "../src/index.ts";
+import {
+  createCurrencyCode,
+  parseDecimalToMicroUnits
+} from "@ehq/domain-finance";
 
 const period = {
   start: "2026-01-01",
@@ -19,6 +24,21 @@ const period = {
 const payee = {
   id: "payee_a"
 };
+
+test("distribution statement draft is a stable domain value", () => {
+  const draft = createDistributionStatementDraft({
+    payeeId: "payee_a",
+    periodStart: period.start,
+    periodEnd: period.end,
+    currencyTotal: parseDecimalToMicroUnits("125.000000", createCurrencyCode("USD")),
+    allocationLines: [],
+    openExpenses: []
+  });
+
+  assert.equal(draft.payeeId, "payee_a");
+  assert.equal(draft.allocationLines.length, 0);
+  assert.equal(draft.openExpenses.length, 0);
+});
 
 const allocations: readonly StatementAllocationInput[] = [
   {

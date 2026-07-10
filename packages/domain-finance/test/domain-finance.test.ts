@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { allocateLargestRemainder } from "../src/allocations.ts";
+import { convertMoney } from "../src/fx.ts";
+import { summarizeLedger } from "../src/ledger.ts";
 import {
   convertDistributionDecimal24_10ToMoney,
   convertOfficeDecimal15_2ToMoney
@@ -18,7 +20,10 @@ import {
   splitLargestRemainder,
   splitRemainderLast
 } from "../src/money.ts";
-import type { BasisPointShare, CurrencyCode, MoneyAmount } from "../src/types.ts";
+import { reconcileTransaction } from "../src/reconciliation.ts";
+import { ledgerTransactionSchema, moneyAmountSchema } from "../src/schemas.ts";
+import type { BasisPointShare, CurrencyCode, LedgerTransaction, MoneyAmount } from "../src/types.ts";
+import { calculateVat } from "../src/vat.ts";
 
 const eur = createCurrencyCode("EUR");
 const usd = createCurrencyCode("USD");
@@ -285,6 +290,80 @@ test("largest-remainder allocation preserves exact sums across generated cases",
   }
 });
 
+test("ledger summary computes income, expenses, and profit for a period", () => {
+  const transactions: readonly LedgerTransaction[] = [
+    ledgerTransaction("tx-1", "2026-01-01", "income", "100.000000", eur),
+    ledgerTransaction("tx-2", "2026-01-15", "expense", "40.000000", eur),
+    ledgerTransaction("tx-3", "2026-02-01", "income", "10.000000", eur)
+  ];
+
+  const summary = summarizeLedger(transactions, { startsOn: "2026-01-01", endsOn: "2026-01-31" });
+
+  assert.equal(formatMoneyAmount(summary.income), "100.000000");
+  assert.equal(formatMoneyAmount(summary.expense), "40.000000");
+  assert.equal(formatMoneyAmount(summary.profit), "60.000000");
+});
+
+test("reconciliation requires exact same-currency total", () => {
+  const expectedAmount = parseDecimalToMicroUnits("100.000000", eur);
+  const result = reconcileTransaction({
+    transactionId: "tx-1",
+    expectedAmount,
+    candidates: [
+      { id: "bank-1", amount: parseDecimalToMicroUnits("60.000000", eur), transactionDate: "2026-01-01" },
+      { id: "bank-2", amount: parseDecimalToMicroUnits("40.000000", eur), transactionDate: "2026-01-02" }
+    ]
+  });
+
+  assert.deepEqual(result.linkedBankTransactionIds, ["bank-1", "bank-2"]);
+  assert.equal(formatMoneyAmount(result.reconciledAmount), "100.000000");
+  assert.throws(() =>
+    reconcileTransaction({
+      transactionId: "tx-1",
+      expectedAmount,
+      candidates: [{ id: "bank-3", amount: parseDecimalToMicroUnits("99.000000", eur), transactionDate: "2026-01-03" }]
+    }),
+  /Reconciled amount must equal/);
+});
+
+test("VAT calculation splits a gross inclusive amount exactly", () => {
+  const breakdown = calculateVat(parseDecimalToMicroUnits("115.000000", eur), createBasisPoints(1500));
+
+  assert.equal(formatMoneyAmount(breakdown.netAmount), "100.000000");
+  assert.equal(formatMoneyAmount(breakdown.vatAmount), "15.000000");
+  assert.equal(formatMoneyAmount(breakdown.grossAmount), "115.000000");
+});
+
+test("FX conversion applies decimal factors without floating point arithmetic", () => {
+  const converted = convertMoney(parseDecimalToMicroUnits("100.000000", eur), usd, {
+    fromCurrency: eur,
+    toCurrency: usd,
+    rateDecimal: "1.25",
+    effectiveDate: "2026-01-01",
+    source: "test"
+  });
+
+  assert.equal(formatMoneyAmount(converted), "125.000000");
+});
+
+test("finance schemas validate branded domain values", () => {
+  const amount = moneyAmountSchema.parse({ amountMicro: 123_456_000n, currency: "EUR" });
+  assert.equal(formatMoneyAmount(amount), "123.456000");
+
+  const transaction = ledgerTransactionSchema.parse({
+    id: "tx-schema",
+    transactionDate: "2026-01-10",
+    direction: "income",
+    amount: { amountMicro: 123_456_000n, currency: "EUR" },
+    categoryId: null,
+    departmentId: null,
+    divisionId: null,
+    sourceSystem: "office"
+  });
+  assert.equal(transaction.id, "tx-schema");
+  assert.throws(() => moneyAmountSchema.parse({ amountMicro: 1n, currency: "EURO" }), /Invalid/);
+});
+
 test("legacy Office DECIMAL(15,2) conversion is lossless and string-only", () => {
   assert.equal(formatMoneyAmount(convertOfficeDecimal15_2ToMoney({ source: "office:test:1", decimalValue: "123.45", currency: eur })), "123.450000");
   assert.equal(formatMoneyAmount(convertOfficeDecimal15_2ToMoney({ source: "office:test:2", decimalValue: "123", currency: eur })), "123.000000");
@@ -346,4 +425,23 @@ function makeShares(values: readonly number[]): readonly BasisPointShare[] {
 
 function formatLines(amounts: readonly MoneyAmount[]): readonly string[] {
   return amounts.map((amount: MoneyAmount) => formatMoneyAmount(amount));
+}
+
+function ledgerTransaction(
+  id: string,
+  transactionDate: string,
+  direction: "income" | "expense",
+  amount: string,
+  currency: CurrencyCode
+): LedgerTransaction {
+  return {
+    id,
+    transactionDate,
+    direction,
+    amount: parseDecimalToMicroUnits(amount, currency),
+    categoryId: null,
+    departmentId: null,
+    divisionId: null,
+    sourceSystem: "office"
+  };
 }

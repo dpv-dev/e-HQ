@@ -10,6 +10,7 @@ import {
   createReplaceAllocationsPlan,
   transactionCanBeValidated
 } from "../src/allocations.ts";
+import { createOfficeWorkbenchSnapshot } from "../src/index.ts";
 
 const departments = [
   { id: "dept_music", isActive: true },
@@ -75,6 +76,13 @@ const baseDataset: OfficeAllocationReplaceDataset = {
   ],
   projectDepartments: []
 };
+
+test("Office workbench snapshot has a stable empty default", () => {
+  assert.deepEqual(createOfficeWorkbenchSnapshot(), {
+    transactions: [],
+    reconciliations: []
+  });
+});
 
 test("allocation completeness accepts the EOF one-unit tolerance and rejects bad totals", () => {
   assert.equal(allocationsAreComplete(10_000n, threeWayAllocations), true);

@@ -1,0 +1,82 @@
+<svg width="1600" height="1100" viewBox="0 0 1600 1100" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1600" height="1100" fill="#03070A"/>
+  <rect width="1600" height="1100" fill="url(#room)"/>
+  <g opacity=".58">
+    <path d="M62 312L344 132L620 342" stroke="url(#lineA)" stroke-width="4"/>
+    <path d="M1538 302L1216 122L968 328" stroke="url(#lineA)" stroke-width="4"/>
+    <path d="M120 724H584L800 650L1016 724H1480" stroke="url(#lineB)" stroke-width="3"/>
+    <path d="M800 68V278" stroke="url(#lineA)" stroke-width="5"/>
+  </g>
+  <g filter="url(#softGlow)">
+    <ellipse cx="800" cy="876" rx="348" ry="68" fill="url(#floorGlow)" opacity=".9"/>
+    <ellipse cx="800" cy="850" rx="430" ry="116" stroke="#B8F7FF" stroke-width="6" opacity=".76"/>
+    <ellipse cx="800" cy="844" rx="312" ry="64" stroke="#FFB800" stroke-width="3" opacity=".42"/>
+  </g>
+  <g filter="url(#orbGlow)">
+    <circle cx="800" cy="560" r="148" fill="url(#orbFill)"/>
+    <circle cx="800" cy="560" r="148" stroke="#B8F7FF" stroke-opacity=".68" stroke-width="2"/>
+    <path d="M654 570C740 592 866 592 946 568" stroke="#E6FBFF" stroke-width="4" stroke-linecap="round" opacity=".42"/>
+  </g>
+  <g filter="url(#ringGlow)">
+    <ellipse cx="800" cy="268" rx="308" ry="72" stroke="#DDFBFF" stroke-width="9"/>
+    <ellipse cx="800" cy="284" rx="246" ry="48" stroke="#7CECFF" stroke-width="5" opacity=".76"/>
+    <path d="M676 336C754 380 902 362 972 322" stroke="#EFFFFF" stroke-width="12" stroke-linecap="round" opacity=".78"/>
+  </g>
+  <g opacity=".46" stroke="#7CECFF" stroke-width="2">
+    <path d="M690 342V480"/>
+    <path d="M910 342V480"/>
+    <path d="M800 354V438"/>
+  </g>
+  <g opacity=".34">
+    <rect x="112" y="442" width="264" height="124" rx="12" fill="#0D2028" stroke="#B8F7FF"/>
+    <rect x="1194" y="430" width="286" height="148" rx="12" fill="#0D2028" stroke="#B8F7FF"/>
+    <rect x="490" y="710" width="226" height="50" rx="8" fill="#0D2028" stroke="#B8F7FF"/>
+    <rect x="940" y="710" width="210" height="50" rx="8" fill="#0D2028" stroke="#B8F7FF"/>
+  </g>
+  <defs>
+    <radialGradient id="room" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(800 520) rotate(90) scale(620 840)">
+      <stop stop-color="#12313B"/>
+      <stop offset=".45" stop-color="#071319"/>
+      <stop offset="1" stop-color="#010305"/>
+    </radialGradient>
+    <linearGradient id="lineA" x1="0" y1="0" x2="1600" y2="400" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7CECFF" stop-opacity="0"/>
+      <stop offset=".52" stop-color="#B8F7FF"/>
+      <stop offset="1" stop-color="#7CECFF" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="lineB" x1="120" y1="724" x2="1480" y2="724" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7CECFF" stop-opacity="0"/>
+      <stop offset=".5" stop-color="#B8F7FF"/>
+      <stop offset="1" stop-color="#7CECFF" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="floorGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(800 876) scale(348 68)">
+      <stop stop-color="#F8FFFF"/>
+      <stop offset=".34" stop-color="#7CECFF"/>
+      <stop offset="1" stop-color="#7CECFF" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="orbFill" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(752 468) rotate(66) scale(266)">
+      <stop stop-color="#EFFFFF"/>
+      <stop offset=".36" stop-color="#80EEFF"/>
+      <stop offset=".72" stop-color="#0B1B23"/>
+      <stop offset="1" stop-color="#010305"/>
+    </radialGradient>
+    <filter id="softGlow" x="280" y="640" width="1040" height="360" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="12"/>
+    </filter>
+    <filter id="orbGlow" x="582" y="342" width="436" height="436" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="20" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="ringGlow" x="430" y="166" width="740" height="246" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+</svg>
+

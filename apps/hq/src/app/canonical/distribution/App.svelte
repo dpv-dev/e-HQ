@@ -441,7 +441,7 @@
     createIdleState<DistributionSettingsResponse>()
   );
   let importSourceFilter = $state<ImportSourceFilter>(allValue);
-  let mappingStatusFilter = $state<MappingStatusFilter>("suggested");
+  let mappingStatusFilter = $state<MappingStatusFilter>("unmapped");
   let suspenseStatusFilter = $state<SuspenseStatusFilter>("open");
   let paymentStatusFilter = $state<PaymentStatusFilter>(allValue);
   let revenueGroupBy = $state<RevenueGroupBy>("store");
@@ -594,7 +594,9 @@
   const canConfirmImport = $derived(importState.preview !== null && importState.status !== "loading");
   const statementPreview = $derived(statements[0] ?? null);
   const selectedPayment = $derived(payments.find((payment: PaymentSummary): boolean => payment.id === selectedPaymentId) ?? null);
-  const openStatements = $derived(statements.filter((statement: StatementSummary): boolean => statement.status !== "paid"));
+  const openStatements = $derived(
+    statements.filter((statement: StatementSummary): boolean => statement.status === "draft" || statement.status === "posted")
+  );
   const recordStatement = $derived(openStatements.find((statement: StatementSummary): boolean => statement.id === recordStatementId) ?? null);
   const selectedSuspenseItem = $derived(suspenseItems.find((item: SuspenseItem): boolean => item.id === selectedSuspenseId) ?? null);
   const selectedSuspenseResolution = $derived(selectedSuspenseItem === null ? null : suspenseResolutionFor(selectedSuspenseItem));
@@ -1215,9 +1217,12 @@
     payeesState = beginReload<PageResult<PayeeSummary>>(payeesState);
 
     try {
-      payeesState = createSuccessState<PageResult<PayeeSummary>>(
-        await client.distribution.listPayees({ workspaceId: distributionWorkspaceId, status: null, cursor: null, limit: TABLE_PAGE_SIZE })
-      );
+      let page = await client.distribution.listPayees({ workspaceId: distributionWorkspaceId, status: null, cursor: null, limit: TABLE_PAGE_SIZE });
+      while (page.nextCursor !== null) {
+        const nextPage = await client.distribution.listPayees({ workspaceId: distributionWorkspaceId, status: null, cursor: page.nextCursor, limit: TABLE_PAGE_SIZE });
+        page = appendPageResult(page, nextPage);
+      }
+      payeesState = createSuccessState<PageResult<PayeeSummary>>(page);
       setTablePaginationError("payees", null);
     } catch (error: unknown) {
       payeesState = createErrorState<PageResult<PayeeSummary>>(error);

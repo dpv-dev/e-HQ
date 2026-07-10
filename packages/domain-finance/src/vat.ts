@@ -1,6 +1,5 @@
 import type { BasisPoints, MoneyAmount } from "./types.js";
-
-const todoMessage = "TODO(domain-finance): implement VAT calculations after approval.";
+import { BASIS_POINTS_PER_WHOLE, createMoneyAmount, createMoneyMicroUnits, roundRatioHalfUp, subtractMoney } from "./money.js";
 
 export interface VatBreakdown {
   readonly netAmount: MoneyAmount;
@@ -9,5 +8,16 @@ export interface VatBreakdown {
 }
 
 export function calculateVat(grossAmount: MoneyAmount, vatRateBasisPoints: BasisPoints): VatBreakdown {
-  throw new Error(todoMessage);
+  const denominator = BigInt(BASIS_POINTS_PER_WHOLE + vatRateBasisPoints);
+  const vatAmount = createMoneyAmount(
+    createMoneyMicroUnits(roundRatioHalfUp(grossAmount.amountMicro * BigInt(vatRateBasisPoints), denominator)),
+    grossAmount.currency
+  );
+  const netAmount = subtractMoney(grossAmount, vatAmount);
+
+  return {
+    netAmount,
+    vatAmount,
+    grossAmount
+  };
 }

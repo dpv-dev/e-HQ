@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Template Banque — Command Room Kit</title>
+    <link rel="icon" href="../assets/icons/command-center.svg">
+    <link rel="stylesheet" href="../styles/tokens.css">
+    <link rel="stylesheet" href="../styles/components.css">
+  </head>
+  <body>
+    <main class="cr-page">
+      <section class="cr-shell">
+        <aside class="cr-sidebar">
+          <div class="cr-brand">
+            <div class="cr-brand__mark">ë</div>
+            <div class="cr-brand__text">
+              <strong>Office</strong>
+              <span>BANK WORKBENCH</span>
+            </div>
+          </div>
+          <nav class="cr-nav">
+            <a href="#" data-active="true"><img src="../assets/icons/bank.svg" alt="">Imports bancaires</a>
+            <a href="#"><img src="../assets/icons/transactions.svg" alt="">Transactions</a>
+            <a href="#"><img src="../assets/icons/analytics.svg" alt="">P&amp;L</a>
+            <a href="#"><img src="../assets/icons/lock.svg" alt="">Audit</a>
+          </nav>
+        </aside>
+
+        <section class="cr-main">
+          <header class="cr-topbar">
+            <div class="cr-title">
+              <h2>Rapprochement bancaire</h2>
+              <p>Importer, assigner un compte, rapprocher et supprimer un batch si nécessaire.</p>
+            </div>
+            <div class="cr-actions">
+              <button class="cr-button"><img class="cr-icon" src="../assets/icons/upload.svg" alt="">Importer CSV</button>
+              <button class="cr-button cr-button--primary">Rapprocher</button>
+            </div>
+          </header>
+
+          <div class="cr-grid">
+            <article class="cr-card cr-card--span-3">
+              <div class="cr-stat__label">Batches</div>
+              <div class="cr-stat__value">0</div>
+              <div class="cr-stat__meta">base bancaire propre</div>
+            </article>
+            <article class="cr-card cr-card--span-3">
+              <div class="cr-stat__label">Lignes</div>
+              <div class="cr-stat__value">0</div>
+              <div class="cr-stat__meta">aucun import actif</div>
+            </article>
+            <article class="cr-card cr-card--span-3">
+              <div class="cr-stat__label">Matches</div>
+              <div class="cr-stat__value">0</div>
+              <div class="cr-stat__meta">atomicité préservée</div>
+            </article>
+            <article class="cr-card cr-card--span-3">
+              <div class="cr-stat__label">Route</div>
+              <div class="cr-stat__value">401</div>
+              <div class="cr-stat__meta">auth requise, route live</div>
+            </article>
+
+            <article class="cr-panel cr-card--span-8">
+              <div class="cr-panel__head">
+                <h3>Lignes brutes</h3>
+                <span class="cr-chip">POST /bank/raw/reassign-account</span>
+              </div>
+              <table class="cr-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Description</th>
+                    <th>Compte</th>
+                    <th class="amount">Montant</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>2026-05-22</td>
+                    <td>MCB Current Account</td>
+                    <td>SBI Main</td>
+                    <td class="amount">Rs 120,000</td>
+                  </tr>
+                  <tr>
+                    <td>2026-05-23</td>
+                    <td>EUR settlement</td>
+                    <td>MCB EUR</td>
+                    <td class="amount">EUR 8,400</td>
+                  </tr>
+                  <tr>
+                    <td>2026-05-24</td>
+                    <td>Bank fees</td>
+                    <td>MCB Current</td>
+                    <td class="amount">Rs -1,200</td>
+                  </tr>
+                </tbody>
+              </table>
+            </article>
+
+            <article class="cr-modal cr-card--span-4">
+              <span class="cr-chip cr-chip--danger">admin only</span>
+              <h3 style="margin-top: 18px;">Hard-delete batch</h3>
+              <p>
+                Supprime définitivement les lignes bancaires et rapprochements du
+                batch. Les transactions validées restent visibles.
+              </p>
+              <div class="cr-actions">
+                <button class="cr-button">Annuler</button>
+                <button class="cr-button cr-button--danger"><img class="cr-icon" src="../assets/icons/delete.svg" alt="">Supprimer</button>
+              </div>
+            </article>
+          </div>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>

@@ -240,9 +240,6 @@ const exactConsoleTargets: Readonly<Record<string, ConsoleTarget>> = {
   "/console/office/settings": {
     workspaceId: "office"
   },
-  "/console/office/wave-invoices": {
-    workspaceId: "office"
-  },
   "/console/office-dashboard": {
     workspaceId: "office",
     pageId: "of_dash"
@@ -316,9 +313,6 @@ const exactConsoleTargets: Readonly<Record<string, ConsoleTarget>> = {
     workspaceId: "office"
   },
   "/console/bank": {
-    workspaceId: "office"
-  },
-  "/console/wave-invoices": {
     workspaceId: "office"
   },
   "/console/ceo": {

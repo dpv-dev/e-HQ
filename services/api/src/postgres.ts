@@ -163,7 +163,7 @@ async function readOfficeDataset(pool: Pool): Promise<OfficeAnalyticsDataset> {
   const projectBudgetLines = await queryRows(pool, "select id::text, project_id::text, category_id::text, type, planned_amount_minor::text from project_budget_lines order by legacy_id nulls last, id", []);
   const transactions = await queryRows(
     pool,
-    "select id::text, workspace_id, transaction_date, type, status, is_active, description, category_id::text, partner_id::text, project_id::text, account_id::text, amount_minor::text, original_currency, exchange_rate_e10::text from transactions order by transaction_date, id",
+    "select id::text, workspace_id, transaction_date, type, status, is_active, description, category_id::text, partner_id::text, project_id::text, account_id::text, amount_minor::text, original_currency, exchange_rate_e10::text, vat_applicable, vat_rate_bp::text, vat_amount_minor::text from transactions order by transaction_date, id",
     []
   );
   const financialAllocations = await queryRows(pool, "select id::text, transaction_id::text, department_id::text, amount_minor::text from financial_allocations order by legacy_id nulls last, id", []);
@@ -537,7 +537,10 @@ function toOfficeTransaction(row: PgRow): OfficeTransactionRow {
     accountId: nullableStringCell(row, "account_id"),
     amountMinor: bigintCell(row, "amount_minor"),
     originalCurrency: nullableStringCell(row, "original_currency"),
-    exchangeRateE10: nullableBigintCell(row, "exchange_rate_e10")
+    exchangeRateE10: nullableBigintCell(row, "exchange_rate_e10"),
+    vatApplicable: booleanCell(row, "vat_applicable"),
+    vatRateBp: nullableIntegerCell(row, "vat_rate_bp"),
+    vatAmountMinor: bigintCell(row, "vat_amount_minor")
   };
 }
 
@@ -900,6 +903,11 @@ function bigintCell(row: PgRow, columnName: string): bigint {
 function nullableBigintCell(row: PgRow, columnName: string): bigint | null {
   const value = nullableStringCell(row, columnName);
   return value === null ? null : BigInt(value);
+}
+
+function nullableIntegerCell(row: PgRow, columnName: string): number | null {
+  const value = nullableStringCell(row, columnName);
+  return value === null ? null : numberFromText(value, columnName);
 }
 
 function numberCell(row: PgRow, columnName: string): number {

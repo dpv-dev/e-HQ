@@ -51,7 +51,11 @@ export type OfficeTransactionRow = Pick<
   | "amountMinor"
   | "originalCurrency"
   | "exchangeRateE10"
->;
+> & {
+  readonly vatApplicable?: boolean;
+  readonly vatRateBp?: number | null;
+  readonly vatAmountMinor?: bigint | null;
+};
 export type OfficeFinancialAllocationRow = Pick<FinancialAllocation, "id" | "transactionId" | "departmentId" | "amountMinor">;
 
 export interface OfficePnlTotals {

@@ -2269,12 +2269,12 @@ test("reconciliation manual match, unmatch, and reject flip the bank line status
   assertReceipt(await jsonWrite(app, "/eof/v1/reconciliations/match", "POST", "recon-match-1", {
     workspaceId: "workspace_1",
     statementLineId: "bank_line_unmatched",
-    transactionId: "tx_mcb_fee",
+    transactionId: "tx_uncategorized",
     matchedAt: "2026-02-20T10:00:00.000Z"
   }));
   const matched = await reconciliationLineStatus(app, "bank_line_unmatched");
   assert.equal(matched?.status, "matched");
-  assert.equal(matched?.transactionId, "tx_mcb_fee");
+  assert.equal(matched?.transactionId, "tx_uncategorized");
 
   assertReceipt(await jsonWrite(app, "/eof/v1/reconciliations/unmatch", "POST", "recon-unmatch-1", {
     workspaceId: "workspace_1",
@@ -2287,6 +2287,24 @@ test("reconciliation manual match, unmatch, and reject flip the bank line status
     statementLineId: "bank_line_unmatched"
   }));
   assert.equal((await reconciliationLineStatus(app, "bank_line_unmatched"))?.status, "rejected");
+});
+
+test("reconciliation manual match rejects amount mismatches", async () => {
+  const app = createWriteEnabledFixtureApiService();
+  const response = await app.request("/eof/v1/reconciliations/match", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "recon-mismatch-1" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      statementLineId: "bank_line_unmatched",
+      transactionId: "tx_mcb_fee",
+      matchedAt: "2026-02-20T10:00:00.000Z"
+    })
+  });
+
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).error.code, "office_reconciliation_amount_mismatch");
+  assert.equal((await reconciliationLineStatus(app, "bank_line_unmatched"))?.status, "unmatched");
 });
 
 test("reconciliation ignore marks a bank line ignored and distinct from rejected", async () => {
@@ -2348,6 +2366,90 @@ test("reconciliation create-transaction builds a ledger line from a bank line an
   const candidate = await reconciliationLineStatus(app, "bank_line_unmatched");
   assert.equal(candidate?.status, "matched");
   assert.equal(candidate?.transactionId, receipt.id);
+});
+
+test("VAT report is empty when no VAT source metadata exists", async () => {
+  const app = createFixtureApiService();
+  const response = await app.request("/eof/v1/vat?workspaceId=workspace_1&period=2026-02", {
+    headers: authHeaders()
+  });
+
+  assert.equal(response.status, 200);
+  const vat = (await response.json()) as {
+    readonly hasVatSource: boolean;
+    readonly outputVatMicro: string;
+    readonly inputVatMicro: string;
+    readonly netVatMicro: string;
+    readonly rows: readonly unknown[];
+  };
+  assert.equal(vat.hasVatSource, false);
+  assert.equal(vat.outputVatMicro, "0.00");
+  assert.equal(vat.inputVatMicro, "0.00");
+  assert.equal(vat.netVatMicro, "0.00");
+  assert.equal(vat.rows.length, 0);
+});
+
+test("VAT report computes totals from transaction VAT metadata", async () => {
+  const fixtures = createFixtureStore();
+  const app = createApiService({
+    fixtures: {
+      ...fixtures,
+      office: {
+        ...fixtures.office,
+        transactions: [
+          {
+            ...fixtures.office.transactions[0],
+            id: "tx_vat_income",
+            transactionDate: "2026-02-10T10:00:00.000Z",
+            type: "income",
+            status: "validated",
+            isActive: true,
+            amountMinor: 11_500n,
+            vatApplicable: true,
+            vatRateBp: 1500,
+            vatAmountMinor: 1_500n
+          },
+          {
+            ...fixtures.office.transactions[1],
+            id: "tx_vat_expense",
+            transactionDate: "2026-02-11T10:00:00.000Z",
+            type: "expense",
+            status: "validated",
+            isActive: true,
+            amountMinor: 23_000n,
+            vatApplicable: true,
+            vatRateBp: 1500,
+            vatAmountMinor: 3_000n
+          }
+        ]
+      }
+    },
+    persistence: createMemoryPersistenceRuntime({ WRITES_ENABLED: "true" }),
+    health: null,
+    nowIso: (): string => "2026-06-21T00:00:00.000Z",
+    auth: createTestAuthVerifier()
+  });
+
+  const response = await app.request("/eof/v1/vat?workspaceId=workspace_1&period=2026-02", {
+    headers: authHeaders()
+  });
+
+  assert.equal(response.status, 200);
+  const vat = (await response.json()) as {
+    readonly hasVatSource: boolean;
+    readonly outputVatMicro: string;
+    readonly inputVatMicro: string;
+    readonly netVatMicro: string;
+    readonly rows: readonly { readonly id: string; readonly rateBp: number; readonly vatMicro: string }[];
+  };
+  assert.equal(vat.hasVatSource, true);
+  assert.equal(vat.outputVatMicro, "15.00");
+  assert.equal(vat.inputVatMicro, "30.00");
+  assert.equal(vat.netVatMicro, "-15.00");
+  assert.equal(vat.rows.length, 2);
+  assert.ok(vat.rows.every((row) => row.rateBp === 1500));
+  assert.ok(vat.rows.some((row) => row.id === "tx_vat_income" && row.vatMicro === "15.00"));
+  assert.ok(vat.rows.some((row) => row.id === "tx_vat_expense" && row.vatMicro === "30.00"));
 });
 
 test("ledger bulk preview resolves classified rows by name and reports unresolved ones", async () => {
@@ -2542,6 +2644,44 @@ test("distribution import confirm persists raw rows and does not fabricate norma
   assert.equal(batches.status, 200);
   const batchPage = (await batches.json()) as { readonly items: readonly { readonly id: string; readonly status: string }[] };
   assert.ok(batchPage.items.some((item) => item.id === receipt.id && item.status === "failed"));
+});
+
+test("distribution import preview keeps currencies from file rows and never emits RS fallback", async () => {
+  const app = createWriteEnabledFixtureApiService();
+
+  const explicitCurrenciesPreview = await app.request("/erh/v1/imports/preview", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      source: "routenote",
+      fileName: "routenote-mixed.csv",
+      checksum: "checksum-distribution-currency-mixed",
+      rows: [
+        { title: "Song A", currency: "eur", amount: "11.00" },
+        { title: "Song B", Currency: "USD", amount: "9.50" },
+        { title: "Song C", currency: "Rs", amount: "1.00" }
+      ]
+    })
+  });
+  assert.equal(explicitCurrenciesPreview.status, 200);
+  const explicitCurrenciesJson = (await explicitCurrenciesPreview.json()) as { readonly currencyCodes: readonly string[] };
+  assert.deepEqual(explicitCurrenciesJson.currencyCodes, ["EUR", "USD"]);
+
+  const noCurrencyColumnPreview = await app.request("/erh/v1/imports/preview", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      source: "kontor",
+      fileName: "kontor-no-currency.csv",
+      checksum: "checksum-distribution-currency-none",
+      rows: [{ title: "Song D", amount: "7.00" }]
+    })
+  });
+  assert.equal(noCurrencyColumnPreview.status, 200);
+  const noCurrencyColumnJson = (await noCurrencyColumnPreview.json()) as { readonly currencyCodes: readonly string[] };
+  assert.deepEqual(noCurrencyColumnJson.currencyCodes, []);
 });
 
 test("office bank import confirm writes idempotency, audit, batch, and lines in PGlite", async () => {

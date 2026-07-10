@@ -255,8 +255,8 @@
       connector: "SBI statements",
       kind: "Bank connector",
       scope: "Office imports",
-      status: "idle",
-      action: "Connect"
+      status: "connected",
+      action: "Manage"
     }
   ];
   const settingRows: readonly SettingRow[] = [

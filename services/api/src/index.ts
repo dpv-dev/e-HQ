@@ -5,7 +5,21 @@ import { cors } from "hono/cors";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { getAuthRoleProfile, type WorkspaceAppId } from "@ehq/auth";
-import { eofMoney, erhMoney, format as formatScaledUnits, parse as parseScaledUnits } from "@ehq/domain-finance";
+import {
+  calculateVat,
+  convertMoney,
+  createBasisPoints,
+  createCurrencyCode,
+  createMoneyAmount,
+  createMoneyMicroUnits,
+  eofMoney,
+  erhMoney,
+  format as formatScaledUnits,
+  parse as parseScaledUnits,
+  reconcileTransaction,
+  summarizeLedger,
+  type LedgerTransaction
+} from "@ehq/domain-finance";
 import {
   buildAllocationPlan,
   computeStatementBalance,
@@ -57,7 +71,6 @@ import {
   readPnlByCategory,
   readPnlByDepartment,
   readProjectPnl,
-  convertMinorToMur,
   type OfficeBankAccountRow,
   type OfficeWriteExchangeRateRow,
   type OfficeAnalyticsDataset,
@@ -2222,10 +2235,97 @@ function bankLineAmountText(line: OfficeBankStatementLineRow): string {
   return eofMoney.format(line.amountMurMinor ?? line.amountMinor);
 }
 
+function assertOfficeReconciliationKernelMatch(
+  context: ApiContext,
+  line: OfficeBankStatementLineRow,
+  transaction: OfficeTransactionRow
+): void {
+  const candidateAmount = officeReconciliationLineMoney(line);
+  const expectedAmount = officeReconciliationTransactionMoney(transaction);
+
+  try {
+    void reconcileTransaction({
+      transactionId: transaction.id,
+      expectedAmount,
+      candidates: [
+        {
+          id: line.id,
+          amount: candidateAmount,
+          transactionDate: line.occurredOn
+        }
+      ]
+    });
+  } catch (error: unknown) {
+    throw new ApiRouteError(409, "office_reconciliation_amount_mismatch", "Bank line amount does not match the selected transaction.", [
+      `path=${context.req.path}`,
+      `statementLineId=${line.id}`,
+      `transactionId=${transaction.id}`,
+      `error=${error instanceof Error ? error.message : "unknown"}`
+    ]);
+  }
+}
+
+function assertOfficeReconciliationKernelCreate(
+  context: ApiContext,
+  line: OfficeBankStatementLineRow,
+  transactionId: string,
+  amountMinor: bigint,
+  currency: string
+): void {
+  const candidateAmount = officeReconciliationLineMoney(line);
+  const expectedAmount = createFinanceMoneyAmount(context, amountMinor, currency);
+
+  try {
+    void reconcileTransaction({
+      transactionId,
+      expectedAmount,
+      candidates: [
+        {
+          id: line.id,
+          amount: candidateAmount,
+          transactionDate: line.occurredOn
+        }
+      ]
+    });
+  } catch (error: unknown) {
+    throw new ApiRouteError(409, "office_reconciliation_amount_mismatch", "Created transaction amount does not match the selected bank line.", [
+      `path=${context.req.path}`,
+      `statementLineId=${line.id}`,
+      `transactionId=${transactionId}`,
+      `error=${error instanceof Error ? error.message : "unknown"}`
+    ]);
+  }
+}
+
+function officeReconciliationLineMoney(line: OfficeBankStatementLineRow) {
+  const currency = line.amountMurMinor === null ? line.currency : "MUR";
+  const amountMinor = line.amountMurMinor ?? line.amountMinor;
+  return createMoneyAmount(createMoneyMicroUnits(absBigInt(amountMinor)), createCurrencyCode(currency));
+}
+
+function officeReconciliationTransactionMoney(transaction: OfficeTransactionRow) {
+  const originalCurrency = transaction.originalCurrency?.trim().toUpperCase() ?? null;
+  const currency = originalCurrency === null || originalCurrency.length === 0 || originalCurrency === "MUR" || transaction.exchangeRateE10 !== null ? "MUR" : originalCurrency;
+  return createMoneyAmount(createMoneyMicroUnits(absBigInt(transaction.amountMinor)), createCurrencyCode(currency));
+}
+
+function createFinanceMoneyAmount(context: ApiContext, amountMinor: bigint, currency: string) {
+  try {
+    return createMoneyAmount(createMoneyMicroUnits(absBigInt(amountMinor)), createCurrencyCode(currency));
+  } catch (error: unknown) {
+    throw new ApiRouteError(400, "currency_invalid", "Currency must be a valid ISO-4217 code.", [
+      `path=${context.req.path}`,
+      `currency=${currency}`,
+      `error=${error instanceof Error ? error.message : "unknown"}`
+    ]);
+  }
+}
+
 async function officeReconciliationMatchResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
   const request = await readZodBody<OfficeReconciliationMatchRequest>(context, officeReconciliationMatchSchema);
-  requireOfficeBankLine(dependencies.fixtures.office, request.statementLineId);
-  requireOfficeTransaction(dependencies.fixtures.office, request.transactionId);
+  const line = requireOfficeBankLine(dependencies.fixtures.office, request.statementLineId);
+  const transaction = requireOfficeTransaction(dependencies.fixtures.office, request.transactionId);
+  assertOfficeReconciliationKernelMatch(context, line, transaction);
   const idempotencyKey = requireIdempotencyKey(context);
   const actor = context.get("authUser");
   const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
@@ -2412,6 +2512,7 @@ async function officeReconciliationCreateTransactionResponse(context: ApiContext
   // rewrites the type.
   const transactionType: OfficeTransactionRow["type"] = line.direction === "credit" ? "income" : "expense";
   const transactionStatus: OfficeTransactionRow["status"] = request.categoryId === null ? "draft" : "validated";
+  assertOfficeReconciliationKernelCreate(context, line, transactionId, amountMinor, line.amountMurMinor === null ? line.currency : "MUR");
   const idempotencyKey = requireIdempotencyKey(context);
   const actor = context.get("authUser");
   const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
@@ -5884,7 +5985,9 @@ async function distributionImportPreviewResponse(context: ApiContext, dependenci
     createdAtIso: dependencies.nowIso()
   };
   await dependencies.persistence.storeDistributionImportPreview(preview);
-  const currencyCodes = currencyCodesFromRows(request.rows, request.source === "kontor" ? "EUR" : "USD");
+  // Keep only currencies explicitly present in the imported file rows.
+  // Do not infer a source-based fallback (Kontor=EUR / RouteNote=USD).
+  const currencyCodes = currencyCodesFromRows(request.rows, null);
   const response: DistributionImportPreviewResponse = {
     previewId,
     source: request.source,
@@ -7126,13 +7229,17 @@ function previewIdFor(scope: string, fingerprint: string): string {
   return `preview_${scope}_${hashRequestBody({ fingerprint }).slice(0, 16)}`;
 }
 
-function currencyCodesFromRows(rows: readonly Readonly<Record<string, string>>[], fallback: string): readonly CurrencyCode[] {
+function currencyCodesFromRows(rows: readonly Readonly<Record<string, string>>[], fallback: string | null): readonly CurrencyCode[] {
   const codes = uniqueStrings(
     rows
       .map((row: Readonly<Record<string, string>>): string | null => normalizedCurrency(rowValue(row, ["currency", "currency_code", "Currency", "CURRENCY"])))
       .filter((currency: string | null): currency is string => currency !== null)
   );
-  return codes.length === 0 ? [fallback] : codes;
+  if (codes.length > 0) {
+    return codes;
+  }
+
+  return fallback === null ? [] : [fallback];
 }
 
 function normalizedCurrency(value: string | null): string | null {
@@ -7215,7 +7322,7 @@ function parseOfficeBankPreviewRow(
       : amount.amountMurMinor !== null
         ? amount.amountMurMinor
         : occurredOn !== null
-          ? convertMinorToMur(amount.amountMinor, amount.currency, occurredOn, exchangeRates)
+          ? convertMinorToMurViaFinanceKernel(amount.amountMinor, amount.currency, occurredOn, exchangeRates)
           : null;
   const issues = [
     ...(account === null ? ["account_not_found"] : []),
@@ -7323,6 +7430,69 @@ function amountForBankRow(row: Readonly<Record<string, string>>): {
     currency,
     direction
   };
+}
+
+function convertMinorToMurViaFinanceKernel(
+  amountMinor: bigint,
+  fromCurrency: string,
+  occurredOn: string,
+  exchangeRates: readonly OfficeWriteExchangeRateRow[]
+): bigint | null {
+  if (fromCurrency === "MUR") {
+    return amountMinor;
+  }
+
+  const rate = pickMurExchangeRateForPreview(fromCurrency, occurredOn, exchangeRates);
+  if (rate === null) {
+    return null;
+  }
+
+  try {
+    const converted = convertMoney(
+      createMoneyAmount(createMoneyMicroUnits(absBigInt(amountMinor)), createCurrencyCode(fromCurrency)),
+      createCurrencyCode("MUR"),
+      {
+        fromCurrency: createCurrencyCode(rate.fromCurrency),
+        toCurrency: createCurrencyCode(rate.toCurrency),
+        rateDecimal: decimalFromE10(rate.rateE10),
+        effectiveDate: rate.effectiveDate,
+        source: "office.exchange_rates"
+      }
+    );
+
+    return converted.amountMicro;
+  } catch (_error: unknown) {
+    return null;
+  }
+}
+
+function pickMurExchangeRateForPreview(
+  fromCurrency: string,
+  occurredOn: string,
+  exchangeRates: readonly OfficeWriteExchangeRateRow[]
+): OfficeWriteExchangeRateRow | null {
+  const candidates = exchangeRates.filter(
+    (rate: OfficeWriteExchangeRateRow): boolean => rate.fromCurrency === fromCurrency && rate.toCurrency === "MUR"
+  );
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const onOrBefore = candidates.filter((rate: OfficeWriteExchangeRateRow): boolean => rate.effectiveDate <= occurredOn);
+  const pool = onOrBefore.length > 0 ? onOrBefore : candidates;
+  return pool.reduce(
+    (best: OfficeWriteExchangeRateRow | null, rate: OfficeWriteExchangeRateRow): OfficeWriteExchangeRateRow =>
+      best === null || rate.effectiveDate > best.effectiveDate ? rate : best,
+    null as OfficeWriteExchangeRateRow | null
+  );
+}
+
+function decimalFromE10(rateE10: bigint): string {
+  const sign = rateE10 < 0n ? "-" : "";
+  const digits = absBigInt(rateE10).toString().padStart(11, "0");
+  const integer = digits.slice(0, -10);
+  const fraction = digits.slice(-10);
+  return `${sign}${integer}.${fraction}`;
 }
 
 function directionValue(row: Readonly<Record<string, string>>): "credit" | "debit" | null {
@@ -8412,7 +8582,7 @@ function toApiDivisionPnl(row: OfficePnlDivisionRow): { readonly id: string; rea
 }
 
 function toOfficeVatReport(
-  _dataset: OfficeAnalyticsDataset,
+  dataset: OfficeAnalyticsDataset,
   period: string
 ): {
   readonly period: string;
@@ -8428,17 +8598,100 @@ function toOfficeVatReport(
     readonly vatMicro: string;
   }[];
 } {
-  // The Office data layer carries no VAT/tax-rate source. Per the read-only
-  // contract we never fabricate money: return a typed empty report with
-  // zeroed totals so the UI can render a clearly-labelled empty state.
-  const zeroMicro = eofMoney.format(0n);
+  const scopedTransactions = dataset.transactions.filter(
+    (transaction: OfficeTransactionRow): boolean =>
+      transaction.transactionDate.slice(0, 7) === period && transaction.status === "validated" && transaction.isActive
+  );
+
+  let outputVatMinor = 0n;
+  let inputVatMinor = 0n;
+  let hasVatSource = false;
+  const rows: {
+    readonly id: string;
+    readonly label: string;
+    readonly baseMicro: string;
+    readonly rateBp: number;
+    readonly vatMicro: string;
+  }[] = [];
+
+  for (const transaction of scopedTransactions) {
+    const vatMeta = readOfficeTransactionVatMeta(transaction);
+    if (!vatMeta.hasSource) {
+      continue;
+    }
+
+    hasVatSource = true;
+    if (!vatMeta.isApplicable) {
+      continue;
+    }
+
+    const grossMinor = absBigInt(transaction.amountMinor);
+    const rateBp = vatMeta.rateBp;
+    const breakdown =
+      rateBp > 0
+        ? calculateVat(
+            createMoneyAmount(createMoneyMicroUnits(grossMinor), createCurrencyCode("MUR")),
+            createBasisPoints(rateBp)
+          )
+        : null;
+    const vatMinor = vatMeta.vatAmountMinor ?? breakdown?.vatAmount.amountMicro ?? 0n;
+    const baseMinor = breakdown?.netAmount.amountMicro ?? (grossMinor > vatMinor ? grossMinor - vatMinor : 0n);
+
+    if (transaction.type === "income") {
+      outputVatMinor += vatMinor;
+    } else {
+      inputVatMinor += vatMinor;
+    }
+
+    rows.push({
+      id: transaction.id,
+      label: transaction.description?.trim() || `Transaction ${transaction.id}`,
+      baseMicro: eofMoney.format(baseMinor),
+      rateBp,
+      vatMicro: eofMoney.format(vatMinor)
+    });
+  }
+
   return {
     period,
-    hasVatSource: false,
-    outputVatMicro: zeroMicro,
-    inputVatMicro: zeroMicro,
-    netVatMicro: zeroMicro,
-    rows: []
+    hasVatSource,
+    outputVatMicro: eofMoney.format(outputVatMinor),
+    inputVatMicro: eofMoney.format(inputVatMinor),
+    netVatMicro: eofMoney.format(outputVatMinor - inputVatMinor),
+    rows
+  };
+}
+
+function readOfficeTransactionVatMeta(transaction: OfficeTransactionRow): {
+  readonly hasSource: boolean;
+  readonly isApplicable: boolean;
+  readonly rateBp: number;
+  readonly vatAmountMinor: bigint | null;
+} {
+  const value = transaction as OfficeTransactionRow & {
+    readonly vatApplicable?: boolean;
+    readonly vatRateBp?: number | null;
+    readonly vatAmountMinor?: bigint | null;
+  };
+
+  const hasVatApplicable = typeof value.vatApplicable === "boolean";
+  const hasVatRate = typeof value.vatRateBp === "number" || value.vatRateBp === null;
+  const hasVatAmount = typeof value.vatAmountMinor === "bigint" || value.vatAmountMinor === null;
+  const hasSource = hasVatApplicable || hasVatRate || hasVatAmount;
+
+  const normalizedRate =
+    typeof value.vatRateBp === "number" && Number.isInteger(value.vatRateBp) && value.vatRateBp >= 0 && value.vatRateBp <= 10000
+      ? value.vatRateBp
+      : 0;
+  const normalizedVatAmount = typeof value.vatAmountMinor === "bigint" ? absBigInt(value.vatAmountMinor) : null;
+  const isApplicable =
+    value.vatApplicable === true || (typeof value.vatAmountMinor === "bigint" && absBigInt(value.vatAmountMinor) > 0n) || normalizedRate > 0;
+
+  return {
+    hasSource,
+    isApplicable,
+    rateBp: normalizedRate,
+    vatAmountMinor: normalizedVatAmount
   };
 }
 
@@ -8655,14 +8908,27 @@ function isoDayFromMs(epochMs: number): string {
 }
 
 function toOfficeGlobalPnl(dataset: OfficeAnalyticsDataset, period: string, filters: OfficePnlFilters): OfficeGlobalPnl {
-  const pnl = readGlobalPnl(dataset, filters);
+  const fallbackPnl = readGlobalPnl(dataset, filters);
+  const ledgerTransactions = toOfficeLedgerTransactions(dataset, filters);
+  const ledgerSummary =
+    ledgerTransactions.length === 0
+      ? null
+      : summarizeLedger(ledgerTransactions, {
+          startsOn: filters.dateFrom ?? `${period}-01`,
+          endsOn: filters.dateTo ?? lastDayOfMonth(period)
+        });
+
+  const incomeMicro = ledgerSummary === null ? fallbackPnl.income : eofMoney.format(ledgerSummary.income.amountMicro);
+  const expenseMicro = ledgerSummary === null ? fallbackPnl.expense : eofMoney.format(ledgerSummary.expense.amountMicro);
+  const netMicro = ledgerSummary === null ? fallbackPnl.profit : eofMoney.format(ledgerSummary.profit.amountMicro);
+
   return {
     scope: "global",
     completeness: "complete",
     period,
-    incomeMicro: pnl.income,
-    expenseMicro: pnl.expense,
-    netMicro: pnl.profit,
+    incomeMicro,
+    expenseMicro,
+    netMicro,
     validatedProjectionId: `projection_global_${period}`,
     projectionRows: toProjectionRows(readPnlByDepartment(dataset, filters), period),
     lines: readPnlByCategory(dataset, filters).map((row) => ({
@@ -8673,6 +8939,53 @@ function toOfficeGlobalPnl(dataset: OfficeAnalyticsDataset, period: string, filt
       netMicro: row.profit
     }))
   };
+}
+
+function toOfficeLedgerTransactions(dataset: OfficeAnalyticsDataset, filters: OfficePnlFilters): readonly LedgerTransaction[] {
+  const categoriesById = new Map<string, OfficeCategoryRow>(dataset.categories.map((category) => [category.id, category]));
+  const divisionsById = new Map<string, OfficeDivisionRow>(dataset.divisions.map((division) => [division.id, division]));
+
+  return dataset.transactions
+    .filter(
+      (transaction: OfficeTransactionRow): boolean =>
+        transaction.status === "validated" &&
+        transaction.isActive &&
+        isOfficeFxValidForLedger(transaction) &&
+        isOfficeTransactionInRange(transaction, filters)
+    )
+    .map((transaction: OfficeTransactionRow): LedgerTransaction => {
+      const category = transaction.categoryId === null ? undefined : categoriesById.get(transaction.categoryId);
+      const divisionId = category?.divisionId ?? null;
+      const departmentId = divisionId === null ? null : divisionsById.get(divisionId)?.departmentId ?? null;
+
+      return {
+        id: transaction.id,
+        transactionDate: transaction.transactionDate.slice(0, 10),
+        direction: transaction.type,
+        amount: createMoneyAmount(createMoneyMicroUnits(absBigInt(transaction.amountMinor)), createCurrencyCode("MUR")),
+        categoryId: transaction.categoryId,
+        departmentId,
+        divisionId,
+        sourceSystem: "office"
+      };
+    });
+}
+
+function isOfficeFxValidForLedger(transaction: OfficeTransactionRow): boolean {
+  if (transaction.originalCurrency === null || transaction.originalCurrency === "" || transaction.originalCurrency === "MUR") {
+    return true;
+  }
+
+  return transaction.exchangeRateE10 !== null;
+}
+
+function isOfficeTransactionInRange(transaction: OfficeTransactionRow, filters: OfficePnlFilters): boolean {
+  const date = transaction.transactionDate.slice(0, 10);
+  if (filters.dateFrom !== null && date < filters.dateFrom) {
+    return false;
+  }
+
+  return !(filters.dateTo !== null && date > filters.dateTo);
 }
 
 function toOfficeDepartmentPnl(dataset: OfficeAnalyticsDataset, departmentId: string, period: string, filters: OfficePnlFilters): OfficeDepartmentPnl {

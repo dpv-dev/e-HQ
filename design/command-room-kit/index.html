@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Command Room Kit</title>
+    <link rel="icon" href="assets/icons/command-center.svg">
+    <link rel="stylesheet" href="styles/tokens.css">
+    <link rel="stylesheet" href="styles/components.css">
+  </head>
+  <body>
+    <main class="cr-page">
+      <section class="cr-hero">
+        <div class="cr-hero__copy">
+          <h1>Kit graphique Command Room</h1>
+          <p>
+            Un langage visuel sombre, holographique et très lisible pour les
+            surfaces internes Office, Distribution et Command Center. La landing
+            page live reste inchangée; ce dossier ne livre que les assets, tokens,
+            composants, icônes, fonds et templates à adapter.
+          </p>
+          <div class="cr-actions" style="margin-top: 32px;">
+            <a class="cr-button cr-button--primary" href="templates/dashboard.html">Voir dashboard</a>
+            <a class="cr-button" href="templates/bank-workbench.html">Voir banque</a>
+            <a class="cr-button" href="templates/kpi-graph-variants.html">Variantes KPI</a>
+            <a class="cr-button" href="templates/distribution.html">Distribution</a>
+            <a class="cr-button" href="templates/command-center.html">Command Center</a>
+          </div>
+        </div>
+        <div class="cr-orb-stage" aria-label="Fond orb holographique"></div>
+      </section>
+
+      <section class="cr-shell" style="margin-top: 48px;">
+        <aside class="cr-sidebar">
+          <div class="cr-brand">
+            <div class="cr-brand__mark">ë</div>
+            <div class="cr-brand__text">
+              <strong>ë • HQ</strong>
+              <span>ADMINISTRATOR</span>
+            </div>
+          </div>
+          <nav class="cr-nav" aria-label="Navigation demo">
+            <a href="#" data-active="true"><img src="assets/icons/command-center.svg" alt="">Command Center</a>
+            <a href="#"><img src="assets/icons/office.svg" alt="">Office</a>
+            <a href="#"><img src="assets/icons/bank.svg" alt="">Banque</a>
+            <a href="#"><img src="assets/icons/distribution.svg" alt="">Distribution</a>
+            <a href="#"><img src="assets/icons/analytics.svg" alt="">Analytics</a>
+          </nav>
+        </aside>
+
+        <section class="cr-main">
+          <header class="cr-topbar">
+            <div class="cr-title">
+              <h2>Finance cockpit</h2>
+              <p>Vue d'ensemble consolidée, reconciliation et alertes opérationnelles.</p>
+            </div>
+            <div class="cr-actions">
+              <button class="cr-button"><img class="cr-icon" src="assets/icons/upload.svg" alt="">Importer</button>
+              <button class="cr-button cr-button--primary">Valider</button>
+            </div>
+          </header>
+
+          <div class="cr-grid">
+            <article class="cr-card cr-card--span-3">
+              <div class="cr-stat__label">Encaissements</div>
+              <div class="cr-stat__value">Rs 4.2M</div>
+              <div class="cr-stat__meta">+18% vs période précédente</div>
+            </article>
+            <article class="cr-card cr-card--span-3">
+              <div class="cr-stat__label">Dépenses</div>
+              <div class="cr-stat__value">Rs 1.1M</div>
+              <div class="cr-stat__meta">Catégories verrouillées</div>
+            </article>
+            <article class="cr-card cr-card--span-3">
+              <div class="cr-stat__label">Batches bancaires</div>
+              <div class="cr-stat__value">0</div>
+              <div class="cr-stat__meta">App bancaire remise à propre</div>
+            </article>
+            <article class="cr-card cr-card--span-3">
+              <div class="cr-stat__label">Statut</div>
+              <div class="cr-stat__value">OK</div>
+              <div class="cr-stat__meta">Locks et audit actifs</div>
+            </article>
+
+            <article class="cr-panel cr-card--span-8">
+              <div class="cr-panel__head">
+                <h3>Transactions récentes</h3>
+                <span class="cr-chip cr-chip--success">type préservé</span>
+              </div>
+              <table class="cr-table">
+                <thead>
+                  <tr>
+                    <th>Description</th>
+                    <th>Direction</th>
+                    <th>Catégorie</th>
+                    <th class="amount">Montant</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Encaissement évënts</td>
+                    <td><span class="cr-chip cr-chip--success">income</span></td>
+                    <td>Production expense</td>
+                    <td class="amount">EUR 12,400</td>
+                  </tr>
+                  <tr>
+                    <td>Facture studio</td>
+                    <td><span class="cr-chip cr-chip--warning">expense</span></td>
+                    <td>Recording</td>
+                    <td class="amount">Rs 42,000</td>
+                  </tr>
+                  <tr>
+                    <td>Distribution payout</td>
+                    <td><span class="cr-chip cr-chip--success">income</span></td>
+                    <td>Royalties</td>
+                    <td class="amount">USD 8,950</td>
+                  </tr>
+                </tbody>
+              </table>
+            </article>
+
+            <article class="cr-modal cr-card--span-4">
+              <span class="cr-chip cr-chip--danger">action sensible</span>
+              <h3 style="margin-top: 18px;">Suppression permanente</h3>
+              <p>
+                Les batches bancaires peuvent être supprimés par un administrateur,
+                avec double confirmation et audit explicite.
+              </p>
+              <button class="cr-button cr-button--danger"><img class="cr-icon" src="assets/icons/delete.svg" alt="">Supprimer</button>
+            </article>
+          </div>
+        </section>
+      </section>
+
+      <section class="cr-panel" style="margin-top: 48px;">
+        <div class="cr-panel__head">
+          <h3>Surfaces internes</h3>
+          <span class="cr-chip">Landing inchangée</span>
+        </div>
+        <div class="cr-surface-grid">
+          <a class="cr-surface-card" href="templates/dashboard.html">
+            <div class="cr-surface-preview cr-surface-preview--office"></div>
+            <strong>Office</strong>
+            <span>Ledger, banque, P&amp;L, cashflow et rapprochements.</span>
+          </a>
+          <a class="cr-surface-card" href="templates/distribution.html">
+            <div class="cr-surface-preview cr-surface-preview--distribution"></div>
+            <strong>Distribution</strong>
+            <span>Contrats, statements, royalties, suspense items et allocations.</span>
+          </a>
+          <a class="cr-surface-card" href="templates/command-center.html">
+            <div class="cr-surface-preview cr-surface-preview--command"></div>
+            <strong>Command Center</strong>
+            <span>Diagnostics, audit, santé API, permissions et jobs.</span>
+          </a>
+          <a class="cr-surface-card" href="templates/kpi-graph-variants.html">
+            <div class="cr-surface-preview" style="background-image: url('assets/backgrounds/holo-panel.svg');"></div>
+            <strong>KPI &amp; Graphs</strong>
+            <span>Variantes compactes, orbit, ledger, bar, donut, gauge et funnel.</span>
+          </a>
+        </div>
+      </section>
+
+      <section class="cr-panel" style="margin-top: 24px;">
+        <div class="cr-panel__head">
+          <h3>Composants Svelte</h3>
+          <span class="cr-chip">prototypes typés</span>
+        </div>
+        <div class="cr-grid">
+          <article class="cr-card cr-card--span-3">
+            <div class="cr-stat__label">CommandRoomKpi</div>
+            <div class="cr-stat__meta">compact, ledger, orbit, risk</div>
+          </article>
+          <article class="cr-card cr-card--span-3">
+            <div class="cr-stat__label">CommandRoomGraph</div>
+            <div class="cr-stat__meta">line, area, bars, gauge, funnel, donut</div>
+          </article>
+          <article class="cr-card cr-card--span-3">
+            <div class="cr-stat__label">CommandRoomPanel</div>
+            <div class="cr-stat__meta">panel glass avec action slot</div>
+          </article>
+          <article class="cr-card cr-card--span-3">
+            <div class="cr-stat__label">CommandRoomShell</div>
+            <div class="cr-stat__meta">office, distribution, command</div>
+          </article>
+        </div>
+        <p class="cr-component-note" style="margin-top: 18px;">
+          Source: <code>design/command-room-kit/svelte/</code>. Non importé dans l'app tant que le visuel n'est pas validé.
+        </p>
+      </section>
+
+      <section class="cr-panel" style="margin-top: 24px;">
+        <div class="cr-panel__head">
+          <h3>Tokens couleur</h3>
+          <span class="cr-chip">Figma ready</span>
+        </div>
+        <div class="cr-grid">
+          <div class="cr-swatch cr-card--span-3" style="--swatch: #020508;"><span>ink #020508</span></div>
+          <div class="cr-swatch cr-card--span-3" style="--swatch: #081219;"><span>surface #081219</span></div>
+          <div class="cr-swatch cr-card--span-3" style="--swatch: #7CECFF;"><span>cyan #7CECFF</span></div>
+          <div class="cr-swatch cr-card--span-3" style="--swatch: #FFB800;"><span>accent #FFB800</span></div>
+        </div>
+      </section>
+
+      <section class="cr-panel" style="margin-top: 24px;">
+        <div class="cr-panel__head">
+          <h3>Icônes</h3>
+          <span class="cr-chip">currentColor SVG</span>
+        </div>
+        <div class="cr-icon-grid">
+          <div class="cr-icon-tile"><img src="assets/icons/office.svg" alt=""><span>office</span></div>
+          <div class="cr-icon-tile"><img src="assets/icons/bank.svg" alt=""><span>bank</span></div>
+          <div class="cr-icon-tile"><img src="assets/icons/distribution.svg" alt=""><span>distribution</span></div>
+          <div class="cr-icon-tile"><img src="assets/icons/command-center.svg" alt=""><span>command</span></div>
+          <div class="cr-icon-tile"><img src="assets/icons/transactions.svg" alt=""><span>transactions</span></div>
+          <div class="cr-icon-tile"><img src="assets/icons/lock.svg" alt=""><span>lock</span></div>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Template Distribution — Command Room Kit</title>
+    <link rel="icon" href="../assets/icons/command-center.svg">
+    <link rel="stylesheet" href="../styles/tokens.css">
+    <link rel="stylesheet" href="../styles/components.css">
+  </head>
+  <body>
+    <main class="cr-page">
+      <section class="cr-template-stage cr-template-stage--distribution" style="padding: 24px;">
+        <section class="cr-shell" style="min-height: 712px;">
+          <aside class="cr-sidebar">
+            <div class="cr-brand">
+              <div class="cr-brand__mark">ë</div>
+              <div class="cr-brand__text">
+                <strong>Distribution</strong>
+                <span>ROYALTIES</span>
+              </div>
+            </div>
+            <nav class="cr-nav">
+              <a href="#" data-active="true"><img src="../assets/icons/distribution.svg" alt="">Vue royalties</a>
+              <a href="#"><img src="../assets/icons/contracts.svg" alt="">Contrats</a>
+              <a href="#"><img src="../assets/icons/statements.svg" alt="">Statements</a>
+              <a href="#"><img src="../assets/icons/analytics.svg" alt="">Allocations</a>
+              <a href="#"><img src="../assets/icons/audit.svg" alt="">Audit</a>
+            </nav>
+          </aside>
+
+          <section class="cr-main">
+            <header class="cr-topbar">
+              <div class="cr-title">
+                <h2>Royalties et suspense</h2>
+                <p>Contrats, coûts ouverts et statements restent calculés par le domaine partagé.</p>
+              </div>
+              <div class="cr-actions">
+                <button class="cr-button">Importer</button>
+                <button class="cr-button cr-button--primary">Calculer run</button>
+              </div>
+            </header>
+
+            <div class="cr-grid">
+              <article class="cr-card cr-card--span-3">
+                <div class="cr-stat__label">Revenus normalisés</div>
+                <div class="cr-stat__value">EUR 2.4M</div>
+                <div class="cr-stat__meta">multi-devise consolidé</div>
+              </article>
+              <article class="cr-card cr-card--span-3">
+                <div class="cr-stat__label">Open recoupments</div>
+                <div class="cr-stat__value">EUR 410K</div>
+                <div class="cr-stat__meta">source domaine</div>
+              </article>
+              <article class="cr-card cr-card--span-3">
+                <div class="cr-stat__label">Statements prêts</div>
+                <div class="cr-stat__value">18</div>
+                <div class="cr-stat__meta">PDF à valider</div>
+              </article>
+              <article class="cr-card cr-card--span-3">
+                <div class="cr-stat__label">Suspense</div>
+                <div class="cr-stat__value">4</div>
+                <div class="cr-stat__meta">matching requis</div>
+              </article>
+
+              <article class="cr-panel cr-card--span-8">
+                <div class="cr-panel__head">
+                  <h3>Contrats actifs</h3>
+                  <span class="cr-chip cr-chip--warning">4 à revoir</span>
+                </div>
+                <table class="cr-table">
+                  <thead>
+                    <tr>
+                      <th>Contrat</th>
+                      <th>Payee</th>
+                      <th>Statut</th>
+                      <th class="amount">Open expense</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>CTR-UMA-024</td>
+                      <td>Universal Music GmbH</td>
+                      <td><span class="cr-chip cr-chip--success">open</span></td>
+                      <td class="amount">EUR 124,500</td>
+                    </tr>
+                    <tr>
+                      <td>CTR-IND-018</td>
+                      <td>Independent Partner</td>
+                      <td><span class="cr-chip">draft</span></td>
+                      <td class="amount">EUR 0</td>
+                    </tr>
+                    <tr>
+                      <td>CTR-PUB-011</td>
+                      <td>Publishing Partner</td>
+                      <td><span class="cr-chip cr-chip--warning">review</span></td>
+                      <td class="amount">USD 18,900</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </article>
+
+              <article class="cr-modal cr-card--span-4">
+                <span class="cr-chip cr-chip--warning">suspense item</span>
+                <h3 style="margin-top: 18px;">Résoudre le matching</h3>
+                <p>Assigner le payee et la release sans modifier les données importées.</p>
+                <div class="cr-field" style="margin: 18px 0;">
+                  <label for="payee">Payee</label>
+                  <select id="payee" class="cr-select">
+                    <option>Universal Music GmbH</option>
+                    <option>Publishing Partner</option>
+                  </select>
+                </div>
+                <button class="cr-button cr-button--primary">Résoudre</button>
+              </article>
+            </div>
+          </section>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>

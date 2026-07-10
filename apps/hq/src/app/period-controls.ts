@@ -17,7 +17,7 @@ export interface DateRange {
   readonly to: string;
 }
 
-const latestDataPeriod = "2026-05";
+const latestDataPeriod = "2026-07";
 
 const allRangeFrom = "2015-01-01";
 const allRangeTo = "2030-12-31";

@@ -13,6 +13,13 @@ export interface DistributionStatementDraft {
   readonly openExpenses: readonly Expense[];
 }
 
-export function createDistributionStatementDraft(): never {
-  throw new Error("TODO(domain-distribution): build on domain-finance after kernel approval.");
+export function createDistributionStatementDraft(input: DistributionStatementDraft): DistributionStatementDraft {
+  return {
+    payeeId: input.payeeId,
+    periodStart: input.periodStart,
+    periodEnd: input.periodEnd,
+    currencyTotal: input.currencyTotal,
+    allocationLines: input.allocationLines,
+    openExpenses: input.openExpenses
+  };
 }

@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Template KPI & Graphs — Command Room Kit</title>
+    <link rel="icon" href="../assets/icons/command-center.svg">
+    <link rel="stylesheet" href="../styles/tokens.css">
+    <link rel="stylesheet" href="../styles/components.css">
+  </head>
+  <body>
+    <main class="cr-page">
+      <section class="cr-shell">
+        <aside class="cr-sidebar">
+          <div class="cr-brand">
+            <div class="cr-brand__mark">ë</div>
+            <div class="cr-brand__text">
+              <strong>Finance cockpit</strong>
+              <span>KPI WALL</span>
+            </div>
+          </div>
+          <nav class="cr-nav">
+            <a href="#" data-active="true"><img src="../assets/icons/analytics.svg" alt="">KPI & Graphs</a>
+            <a href="#"><img src="../assets/icons/office.svg" alt="">P&amp;L</a>
+            <a href="#"><img src="../assets/icons/bank.svg" alt="">Bank health</a>
+            <a href="#"><img src="../assets/icons/distribution.svg" alt="">Royalties</a>
+            <a href="#"><img src="../assets/icons/lock.svg" alt="">Audit</a>
+          </nav>
+        </aside>
+
+        <section class="cr-main">
+          <header class="cr-topbar">
+            <div class="cr-title">
+              <h2>KPI command wall</h2>
+              <p>Lecture rapide du cash, du P&amp;L, des imports, des royalties et des écarts à corriger.</p>
+            </div>
+            <div class="cr-actions">
+              <button class="cr-button">Période</button>
+              <button class="cr-button cr-button--primary">Exporter board</button>
+            </div>
+          </header>
+
+          <section class="cr-kpi-wall" aria-label="KPI financiers">
+            <article class="cr-kpi cr-kpi--span-3">
+              <div class="cr-kpi__topline">
+                <span>Net result</span>
+                <span>YTD</span>
+              </div>
+              <div class="cr-kpi__number">Rs 5.8M</div>
+              <div class="cr-kpi__footer">
+                <span class="cr-delta">+18.4%</span>
+                <svg class="cr-sparkline" viewBox="0 0 118 38" aria-hidden="true">
+                  <path d="M2 30L18 24L31 27L45 16L61 20L78 9L95 13L116 4" fill="none" stroke="var(--cr-chart-income)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
+            </article>
+
+            <article class="cr-kpi cr-kpi--span-3">
+              <div class="cr-kpi__topline">
+                <span>Runway</span>
+                <span>cash</span>
+              </div>
+              <div class="cr-kpi__number">11.2m</div>
+              <div class="cr-kpi__footer">
+                <span class="cr-delta">+2.1m</span>
+                <svg class="cr-sparkline" viewBox="0 0 118 38" aria-hidden="true">
+                  <path d="M2 28L18 25L34 21L49 18L63 14L82 12L99 8L116 7" fill="none" stroke="var(--cr-chart-net)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
+            </article>
+
+            <article class="cr-kpi cr-kpi--span-3">
+              <div class="cr-kpi__topline">
+                <span>Unmatched</span>
+                <span>bank</span>
+              </div>
+              <div class="cr-kpi__number">0</div>
+              <div class="cr-kpi__footer">
+                <span class="cr-delta">clean</span>
+                <svg class="cr-sparkline" viewBox="0 0 118 38" aria-hidden="true">
+                  <path d="M2 28L22 28L42 28L62 28L82 28L116 28" fill="none" stroke="var(--cr-chart-net)" stroke-width="3" stroke-linecap="round"/>
+                </svg>
+              </div>
+            </article>
+
+            <article class="cr-kpi cr-kpi--span-3">
+              <div class="cr-kpi__topline">
+                <span>Suspense</span>
+                <span>royalty</span>
+              </div>
+              <div class="cr-kpi__number">4</div>
+              <div class="cr-kpi__footer">
+                <span class="cr-delta cr-delta--down">needs FX</span>
+                <svg class="cr-sparkline" viewBox="0 0 118 38" aria-hidden="true">
+                  <path d="M2 10L20 14L36 12L53 20L70 18L88 24L116 30" fill="none" stroke="var(--cr-chart-expense)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
+            </article>
+          </section>
+
+          <section class="cr-kpi-wall" aria-label="Graphes financiers">
+            <article class="cr-chart-card cr-chart-card--wide">
+              <div class="cr-chart-head">
+                <div>
+                  <h3>P&amp;L trend</h3>
+                  <p>Income, expense et net par période. Les lignes restent code-native, donc faciles à brancher à un vrai dataset.</p>
+                </div>
+                <div class="cr-chart-legend">
+                  <span class="cr-legend-item"><i class="cr-legend-dot" style="--legend-color: var(--cr-chart-income);"></i>Income</span>
+                  <span class="cr-legend-item"><i class="cr-legend-dot" style="--legend-color: var(--cr-chart-expense);"></i>Expense</span>
+                  <span class="cr-legend-item"><i class="cr-legend-dot" style="--legend-color: var(--cr-chart-net);"></i>Net</span>
+                </div>
+              </div>
+              <svg class="cr-chart" viewBox="0 0 820 310" role="img" aria-label="P and L trend chart">
+                <defs>
+                  <linearGradient id="crIncomeArea" x1="0" y1="40" x2="0" y2="280" gradientUnits="userSpaceOnUse">
+                    <stop stop-color="#22C55E" stop-opacity=".18"/>
+                    <stop offset="1" stop-color="#22C55E" stop-opacity="0"/>
+                  </linearGradient>
+                  <linearGradient id="crNetArea" x1="0" y1="60" x2="0" y2="280" gradientUnits="userSpaceOnUse">
+                    <stop stop-color="#FFB800" stop-opacity=".14"/>
+                    <stop offset="1" stop-color="#FFB800" stop-opacity="0"/>
+                  </linearGradient>
+                </defs>
+                <path class="cr-chart-grid-line" fill="none" d="M48 52H790M48 108H790M48 164H790M48 220H790M48 276H790"/>
+                <path class="cr-chart-axis" fill="none" d="M48 36V276H790"/>
+                <path class="cr-chart-area-income" d="M64 224C116 202 136 136 190 142C250 149 260 98 316 104C372 110 392 86 446 82C514 77 536 122 596 98C656 74 688 58 774 46V276H64Z"/>
+                <path class="cr-chart-area-net" d="M64 246C116 230 138 206 190 210C250 215 266 170 318 176C380 184 394 150 450 148C516 146 540 172 598 154C666 133 706 122 774 106V276H64Z"/>
+                <path class="cr-chart-line-income" d="M64 224C116 202 136 136 190 142C250 149 260 98 316 104C372 110 392 86 446 82C514 77 536 122 596 98C656 74 688 58 774 46"/>
+                <path class="cr-chart-line-expense" d="M64 256C116 240 138 226 190 228C248 230 266 194 316 198C370 202 394 180 448 178C514 176 538 194 596 186C660 178 704 164 774 156"/>
+                <path class="cr-chart-line-net" d="M64 246C116 230 138 206 190 210C250 215 266 170 318 176C380 184 394 150 450 148C516 146 540 172 598 154C666 133 706 122 774 106"/>
+              </svg>
+            </article>
+
+            <article class="cr-chart-card cr-chart-card--compact">
+              <div class="cr-chart-head">
+                <div>
+                  <h3>Cash runway</h3>
+                  <p>Seuil de confort de trésorerie.</p>
+                </div>
+              </div>
+              <div class="cr-gauge">
+                <svg class="cr-gauge__dial" viewBox="0 0 180 180" role="img" aria-label="Runway gauge">
+                  <circle cx="90" cy="90" r="70" fill="none" stroke="rgba(255, 255, 255, .1)" stroke-width="16"/>
+                  <circle cx="90" cy="90" r="70" fill="none" stroke="var(--cr-chart-net)" stroke-width="16" stroke-linecap="round" stroke-dasharray="330 440" transform="rotate(-90 90 90)"/>
+                  <circle cx="90" cy="90" r="44" fill="rgba(255, 184, 0, .045)" stroke="rgba(255, 184, 0, .24)"/>
+                </svg>
+                <div>
+                  <div class="cr-gauge__value">76%</div>
+                  <p class="cr-gauge__copy">Runway confortable. Les sorties restent sous le seuil prévu.</p>
+                </div>
+              </div>
+            </article>
+
+            <article class="cr-chart-card cr-chart-card--compact">
+              <div class="cr-chart-head">
+                <div>
+                  <h3>Division mix</h3>
+                  <p>Répartition du résultat par division.</p>
+                </div>
+              </div>
+              <div class="cr-bars">
+                <div class="cr-bar">
+                  <span class="cr-bar__label">evënts</span>
+                  <div class="cr-bar__track"><div class="cr-bar__fill" style="--bar-value: 82%; --bar-color: var(--cr-chart-income);"></div></div>
+                  <span class="cr-bar__value">Rs 2.7M</span>
+                </div>
+                <div class="cr-bar">
+                  <span class="cr-bar__label">the storë</span>
+                  <div class="cr-bar__track"><div class="cr-bar__fill" style="--bar-value: 64%; --bar-color: var(--cr-chart-net);"></div></div>
+                  <span class="cr-bar__value">Rs 1.7M</span>
+                </div>
+                <div class="cr-bar">
+                  <span class="cr-bar__label">distribution</span>
+                  <div class="cr-bar__track"><div class="cr-bar__fill" style="--bar-value: 52%; --bar-color: var(--cr-chart-forecast);"></div></div>
+                  <span class="cr-bar__value">Rs 1.3M</span>
+                </div>
+                <div class="cr-bar">
+                  <span class="cr-bar__label">hq</span>
+                  <div class="cr-bar__track"><div class="cr-bar__fill" style="--bar-value: 28%; --bar-color: var(--cr-chart-expense);"></div></div>
+                  <span class="cr-bar__value">Rs 0.6M</span>
+                </div>
+              </div>
+            </article>
+
+            <article class="cr-chart-card cr-chart-card--wide">
+              <div class="cr-chart-head">
+                <div>
+                  <h3>Forecast corridor</h3>
+                  <p>Projection cashflow avec corridor de risque et ligne forecast en pointillés.</p>
+                </div>
+                <div class="cr-chart-legend">
+                  <span class="cr-legend-item"><i class="cr-legend-dot" style="--legend-color: var(--cr-chart-net);"></i>Actual</span>
+                  <span class="cr-legend-item"><i class="cr-legend-dot" style="--legend-color: var(--cr-chart-forecast);"></i>Forecast</span>
+                </div>
+              </div>
+              <svg class="cr-chart" viewBox="0 0 820 310" role="img" aria-label="Forecast corridor chart">
+                <path class="cr-chart-grid-line" fill="none" d="M48 52H790M48 108H790M48 164H790M48 220H790M48 276H790"/>
+                <path class="cr-chart-axis" fill="none" d="M48 36V276H790"/>
+                <path d="M64 210C132 196 172 152 238 160C320 170 356 126 426 132C492 138 542 118 610 96C682 72 726 76 774 54V168C716 184 674 184 612 202C548 220 494 226 426 214C358 202 318 226 240 218C170 210 128 232 64 244Z" fill="#FFB800" opacity=".08"/>
+                <path class="cr-chart-line-net" d="M64 226C132 212 170 176 238 182C320 190 356 152 426 156C492 160 542 144 610 124"/>
+                <path class="cr-chart-line-forecast" d="M610 124C684 98 724 104 774 82"/>
+                <path d="M610 124L610 276" stroke="rgba(255,255,255,.2)" stroke-dasharray="4 7"/>
+              </svg>
+            </article>
+
+            <article class="cr-chart-card cr-chart-card--compact">
+              <div class="cr-chart-head">
+                <div>
+                  <h3>Import funnel</h3>
+                  <p>État d'un batch bancaire du CSV à la validation.</p>
+                </div>
+              </div>
+              <div class="cr-funnel">
+                <div class="cr-funnel__step" style="--step-alpha: .2;"><strong>CSV lu</strong><span>3,102</span></div>
+                <div class="cr-funnel__step" style="--step-alpha: .16;"><strong>Compte reconnu</strong><span>3,102</span></div>
+                <div class="cr-funnel__step" style="--step-alpha: .12;"><strong>Matches proposés</strong><span>2,435</span></div>
+                <div class="cr-funnel__step" style="--step-alpha: .08;"><strong>À revoir</strong><span>667</span></div>
+                <div class="cr-funnel__step" style="--step-alpha: .04;"><strong>Rejets</strong><span>0</span></div>
+              </div>
+            </article>
+          </section>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>

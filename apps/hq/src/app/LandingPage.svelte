@@ -28,6 +28,7 @@
     readonly onLogout: () => void;
     readonly onNavigate: (route: AppRoute) => void;
     readonly onOpenWorkspace: (workspaceId: WorkspaceAppId) => void;
+    readonly loginMode?: boolean;
   }
 
   interface WorkspaceCard {
@@ -40,7 +41,7 @@
 
   type MessageTone = "info" | "error";
 
-  const { session, onLogin, onLogout, onNavigate, onOpenWorkspace }: Props = $props();
+  const { session, onLogin, onLogout, onNavigate, onOpenWorkspace, loginMode = false }: Props = $props();
   const client = createShellApiClient();
 
   let loginOpen = $state(false);
@@ -134,6 +135,11 @@
   };
 
   const closeLogin = (): void => {
+    if (loginMode) {
+      onNavigate("/");
+      return;
+    }
+
     loginOpen = false;
     loginTarget = null;
     loginMessage = "";
@@ -265,6 +271,14 @@
       onOpenWorkspace(card.workspaceId);
     }
   };
+
+  $effect((): void => {
+    if (!loginMode || session !== null || loginOpen) {
+      return;
+    }
+
+    openLogin(null);
+  });
 </script>
 
 <svelte:head>

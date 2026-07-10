@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Variantes KPI & Graphes — Command Room Kit</title>
+    <link rel="icon" href="../assets/icons/command-center.svg">
+    <link rel="stylesheet" href="../styles/tokens.css">
+    <link rel="stylesheet" href="../styles/components.css">
+  </head>
+  <body>
+    <main class="cr-page">
+      <section class="cr-panel">
+        <div class="cr-panel__head">
+          <div>
+            <h3>Variantes KPI & Graphes</h3>
+            <p class="cr-component-note">Catalogue graphique pour Office, Distribution et Command Center. La landing page reste inchangée.</p>
+          </div>
+          <a class="cr-button" href="../index.html">Retour kit</a>
+        </div>
+
+        <section class="cr-variant-section" aria-label="Variantes KPI">
+          <div class="cr-kpi-wall">
+            <article class="cr-kpi cr-kpi--compact cr-kpi--span-3">
+              <div class="cr-kpi__topline"><span>Total revenue</span><span>Office</span></div>
+              <div class="cr-kpi__number">Rs 8.9M</div>
+              <div class="cr-kpi__footer">
+                <span class="cr-delta">+12.8%</span>
+                <svg class="cr-sparkline" viewBox="0 0 118 38" aria-hidden="true">
+                  <path d="M2 30L18 24L31 27L45 16L61 20L78 9L95 13L116 4" fill="none" stroke="var(--cr-chart-net)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
+            </article>
+
+            <article class="cr-kpi cr-kpi--ledger cr-kpi--span-3">
+              <div class="cr-kpi__topline"><span>Marge nette</span><span>P&amp;L</span></div>
+              <div class="cr-kpi__number">42%</div>
+              <div class="cr-kpi__footer">
+                <span class="cr-delta">margin</span>
+                <span class="cr-chip cr-chip--success">validé</span>
+              </div>
+            </article>
+
+            <article class="cr-kpi cr-kpi--status cr-kpi--span-3">
+              <div class="cr-kpi__ring" style="--ring-value: 72%; --ring-color: var(--cr-accent);"><span>72</span></div>
+              <div class="cr-kpi__topline"><span>Audit locks</span><span>Command</span></div>
+              <div class="cr-kpi__number">OK</div>
+              <div class="cr-kpi__footer">
+                <span class="cr-delta">locks actifs</span>
+                <span class="cr-chip">audit</span>
+              </div>
+            </article>
+
+            <article class="cr-kpi cr-kpi--span-3">
+              <div class="cr-kpi__topline"><span>Suspense</span><span>Distribution</span></div>
+              <div class="cr-kpi__number">4</div>
+              <div class="cr-kpi__footer">
+                <span class="cr-delta cr-delta--down">suspense</span>
+                <svg class="cr-sparkline" viewBox="0 0 118 38" aria-hidden="true">
+                  <path d="M2 10L20 14L36 12L53 20L70 18L88 24L116 30" fill="none" stroke="var(--cr-chart-expense)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="cr-variant-section" aria-label="Variantes graphes">
+          <div class="cr-kpi-wall">
+            <article class="cr-chart-card cr-chart-card--wide">
+              <div class="cr-chart-head">
+                <div>
+                  <h3>Line / Area</h3>
+                  <p>Tendance financière haute lisibilité pour P&amp;L, cashflow ou royalties.</p>
+                </div>
+                <div class="cr-chart-legend">
+                  <span class="cr-legend-item"><i class="cr-legend-dot" style="--legend-color: var(--cr-chart-net);"></i>Actual</span>
+                  <span class="cr-legend-item"><i class="cr-legend-dot" style="--legend-color: var(--cr-chart-forecast);"></i>Forecast</span>
+                </div>
+              </div>
+              <svg class="cr-chart" viewBox="0 0 820 310" role="img" aria-label="Line and area variant">
+                <path class="cr-chart-grid-line" fill="none" d="M48 52H790M48 108H790M48 164H790M48 220H790M48 276H790"/>
+                <path class="cr-chart-axis" fill="none" d="M48 36V276H790"/>
+                <path d="M64 232C132 212 170 176 238 182C320 190 356 152 426 156C492 160 542 144 610 124C684 98 724 104 774 82V276H64Z" fill="#FFB800" opacity=".1"/>
+                <path class="cr-chart-line-net" d="M64 232C132 212 170 176 238 182C320 190 356 152 426 156C492 160 542 144 610 124"/>
+                <path class="cr-chart-line-forecast" d="M610 124C684 98 724 104 774 82"/>
+              </svg>
+            </article>
+
+            <article class="cr-chart-card cr-chart-card--compact">
+              <div class="cr-chart-head">
+                <div>
+                  <h3>Gauge</h3>
+                  <p>État opérationnel ou progression de validation.</p>
+                </div>
+              </div>
+              <div class="cr-gauge">
+                <svg class="cr-gauge__dial" viewBox="0 0 180 180" role="img" aria-label="Gauge variant">
+                  <circle cx="90" cy="90" r="70" fill="none" stroke="rgba(255, 255, 255, .1)" stroke-width="16"/>
+                  <circle cx="90" cy="90" r="70" fill="none" stroke="var(--cr-chart-forecast)" stroke-width="16" stroke-linecap="round" stroke-dasharray="282 440" transform="rotate(-90 90 90)"/>
+                  <circle cx="90" cy="90" r="44" fill="rgba(255, 184, 0, .06)" stroke="rgba(255, 184, 0, .28)"/>
+                </svg>
+                <div>
+                  <div class="cr-gauge__value">64%</div>
+                  <p class="cr-gauge__copy">Progression batch, validation ou import.</p>
+                </div>
+              </div>
+            </article>
+          </div>
+
+          <div class="cr-graph-mini">
+            <article class="cr-graph-tile">
+              <h4>Bars</h4>
+              <p>Comparaison de divisions, labels courts, scan rapide.</p>
+              <div class="cr-mini-bars">
+                <i style="--bar-value: 54%; --bar-color: var(--cr-chart-income);"></i>
+                <i style="--bar-value: 72%; --bar-color: var(--cr-chart-net);"></i>
+                <i style="--bar-value: 38%; --bar-color: var(--cr-chart-forecast);"></i>
+                <i style="--bar-value: 86%; --bar-color: var(--cr-chart-income);"></i>
+                <i style="--bar-value: 62%; --bar-color: var(--cr-chart-net);"></i>
+              </div>
+              <span class="cr-graph-value">Rs 5.8M</span>
+            </article>
+
+            <article class="cr-graph-tile">
+              <h4>Donut</h4>
+              <p>Mix par espace ou catégorie; éviter pour les totaux critiques.</p>
+              <div class="cr-donut" aria-hidden="true"></div>
+              <span class="cr-graph-value">4 segments</span>
+            </article>
+
+            <article class="cr-graph-tile">
+              <h4>Funnel</h4>
+              <p>Import, rapprochement, allocation ou statement pipeline.</p>
+              <div class="cr-funnel" style="margin-top: 18px;">
+                <div class="cr-funnel__step" style="--step-alpha: .2;"><strong>Importé</strong><span>3,102</span></div>
+                <div class="cr-funnel__step" style="--step-alpha: .13;"><strong>Matché</strong><span>2,435</span></div>
+                <div class="cr-funnel__step" style="--step-alpha: .06;"><strong>À revoir</strong><span>667</span></div>
+              </div>
+            </article>
+          </div>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>

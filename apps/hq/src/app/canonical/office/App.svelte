@@ -92,8 +92,7 @@
     | "bank"
     | "audit"
     | "vat"
-    | "settings"
-    | "wave-invoices";
+    | "settings";
   type SelectFilterValue = string;
   type ImportSource = "mcb" | "sbi" | "csv" | "cashflow" | "pdf";
   type RequestStatus = "idle" | "loading" | "success" | "error";
@@ -293,12 +292,6 @@
           label: "Settings",
           title: "Settings",
           subtitle: "Read-only Office configuration: reference currency and maintenance."
-        },
-        {
-          id: "wave-invoices",
-          label: "Wave invoices — coming",
-          title: "Wave invoices",
-          subtitle: "Wave invoice integration is not yet available in this console."
         }
       ]
     }
@@ -374,8 +367,7 @@
     bank: "bank",
     audit: "calendar",
     vat: "file-text",
-    settings: "settings",
-    "wave-invoices": "download"
+    settings: "settings"
   };
   const shellNavGroups = $derived<readonly WorkspaceNavGroup[]>(
     officeNavGroups.map((group: OfficeNavGroup): WorkspaceNavGroup => ({
@@ -1610,10 +1602,6 @@
       return "bank";
     }
 
-    if (normalizedPath.endsWith("/console/wave-invoices")) {
-      return "wave-invoices";
-    }
-
     if (normalizedPath.endsWith("/console/office/bank")) {
       return "bank";
     }
@@ -1636,10 +1624,6 @@
 
     if (normalizedPath.endsWith("/console/office/settings")) {
       return "settings";
-    }
-
-    if (normalizedPath.endsWith("/console/office/wave-invoices")) {
-      return "wave-invoices";
     }
 
     if (normalizedPath.endsWith("/console/office/clients")) {
@@ -1721,10 +1705,6 @@
 
     if (pageId === "settings") {
       return "/console/office/settings";
-    }
-
-    if (pageId === "wave-invoices") {
-      return "/console/office/wave-invoices";
     }
 
     if (pageId === "clients") {
@@ -3714,11 +3694,6 @@
         <VatView client={client.office} workspaceId={officeWorkspaceId} {period} dateFrom={activeRange.from} dateTo={activeRange.to} />
       {:else if activePageId === "settings"}
         <SettingsView client={client.office} workspaceId={officeWorkspaceId} {period} />
-      {:else if activePageId === "wave-invoices"}
-        <section class="coming-panel ehq-edge-surface" aria-label="Wave invoices">
-          <strong class="ehq-type-heading">Wave invoices — coming</strong>
-          <span class="ehq-type-body">Wave invoice integration is not yet available in this console. There is no Wave data or actions here yet.</span>
-        </section>
       {/if}
     </div>
 </WorkspaceShell>
@@ -4224,24 +4199,6 @@
 
   .pending-list strong {
     font-size: var(--ehq-type-ui-size);
-  }
-
-  .coming-panel {
-    min-width: 0;
-    min-height: 180px;
-    padding: var(--ehq-space-5);
-    border-radius: var(--ehq-radius-sm);
-    display: grid;
-    place-items: center;
-    gap: var(--ehq-space-2);
-    text-align: center;
-  }
-
-  .coming-panel span {
-    max-width: 520px;
-    color: var(--ehq-text-soft);
-    font-size: var(--ehq-type-ui-size);
-    line-height: var(--ehq-type-ui-line);
   }
 
   .pending-list span {

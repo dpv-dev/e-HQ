@@ -10,6 +10,9 @@ export interface OfficeWorkbenchSnapshot {
   readonly reconciliations: readonly ReconciliationResult[];
 }
 
-export function createOfficeWorkbenchSnapshot(): never {
-  throw new Error("TODO(domain-office): build on domain-finance after kernel approval.");
+export function createOfficeWorkbenchSnapshot(input: Partial<OfficeWorkbenchSnapshot> = {}): OfficeWorkbenchSnapshot {
+  return {
+    transactions: input.transactions ?? [],
+    reconciliations: input.reconciliations ?? []
+  };
 }
