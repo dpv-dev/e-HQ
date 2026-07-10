@@ -20,12 +20,12 @@
     <h3 class="ehq-type-heading">{props.title}</h3>
   </div>
   <div class="bars-frame">
-    {#each props.points as point (point.label)}
+    {#each props.points as point, index (`${point.label}-${String(index)}`)}
       <span style={barStyle(point)} aria-label={`${point.label}: ${String(point.value)}`}></span>
     {/each}
   </div>
   <div class="labels">
-    {#each props.points as point (point.label)}
+    {#each props.points as point, index (`${point.label}-${String(index)}`)}
       <small>{point.label}</small>
     {/each}
   </div>
