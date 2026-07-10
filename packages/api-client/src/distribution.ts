@@ -1,5 +1,8 @@
 import { createRestTransport, encodePathSegment } from "./transport.js";
 import type {
+  DistributionAllocationQuery,
+  DistributionAllocationRow,
+  DistributionAllocationTotal,
   AllocationRunPreviewRequest,
   AllocationRunQuery,
   AllocationRunStartRequest,
@@ -19,6 +22,9 @@ import type {
   DistributionContractUpsertRequest,
   DistributionDashboardQuery,
   DistributionDashboardResponse,
+  DistributionFxRate,
+  DistributionFxRatesQuery,
+  DistributionFxRatesSaveRequest,
   DistributionImportBatchesQuery,
   DistributionImportBatch,
   DistributionImportConfirmRequest,
@@ -35,6 +41,10 @@ import type {
   DistributionRevenueQuery,
   DistributionRevenueRow,
   DistributionSettingsResponse,
+  DistributionPayeePartnerLink,
+  DistributionPayeePartnerLinkQuery,
+  DistributionPayeePartnerLinkRequest,
+  DistributionPayeeUpsertRequest,
   DistributionTrackUpsertRequest,
   DistributionWorkspacePageQuery,
   DistributionWorkspaceQuery,
@@ -99,6 +109,20 @@ export interface DistributionApiClient {
     options: WriteRequestOptions
   ) => Promise<ApiMutationReceipt>;
   readonly listPayees: (query: PayeesQuery) => Promise<PageResult<PayeeSummary>>;
+  readonly getPayee: (payeeId: EntityId, query: DistributionWorkspaceQuery) => Promise<PayeeSummary>;
+  readonly createPayee: (
+    request: DistributionPayeeUpsertRequest,
+    options: WriteRequestOptions
+  ) => Promise<ApiMutationReceipt>;
+  readonly getPayeePartnerLink: (
+    payeeId: EntityId,
+    query: DistributionPayeePartnerLinkQuery
+  ) => Promise<DistributionPayeePartnerLink>;
+  readonly linkPayeePartner: (
+    payeeId: EntityId,
+    request: DistributionPayeePartnerLinkRequest,
+    options: WriteRequestOptions
+  ) => Promise<ApiMutationReceipt>;
   readonly listReleases: (query: ReleasesQuery) => Promise<PageResult<ReleaseSummary>>;
   readonly createRelease: (
     request: DistributionReleaseUpsertRequest,
@@ -123,6 +147,10 @@ export interface DistributionApiClient {
     request: AllocationRunUnpostRequest,
     options: WriteRequestOptions
   ) => Promise<ApiRunReceipt>;
+  readonly listAllocations: (query: DistributionAllocationQuery) => Promise<PageResult<DistributionAllocationRow>>;
+  readonly listAllocationsByCurrency: (
+    query: DistributionAllocationQuery
+  ) => Promise<PageResult<DistributionAllocationTotal>>;
   readonly listSuspense: (query: SuspenseQuery) => Promise<PageResult<SuspenseItem>>;
   readonly resolveSuspense: (
     request: SuspenseResolveRequest,
@@ -154,6 +182,11 @@ export interface DistributionApiClient {
   readonly voidPayment: (
     paymentId: EntityId,
     request: PaymentVoidRequest,
+    options: WriteRequestOptions
+  ) => Promise<ApiMutationReceipt>;
+  readonly listFxRates: (query: DistributionFxRatesQuery) => Promise<PageResult<DistributionFxRate>>;
+  readonly saveFxRates: (
+    request: DistributionFxRatesSaveRequest,
     options: WriteRequestOptions
   ) => Promise<ApiMutationReceipt>;
   readonly getRevenue: (query: DistributionRevenueQuery) => Promise<PageResult<DistributionRevenueRow>>;
@@ -261,6 +294,32 @@ export function createDistributionApiClient(config: ApiClientConfig): Distributi
         cursor: query.cursor,
         limit: query.limit
       }),
+    getPayee: (payeeId: EntityId, query: DistributionWorkspaceQuery): Promise<PayeeSummary> =>
+      transport.get<PayeeSummary>(`payees/${encodePathSegment(payeeId)}`, {
+        workspaceId: query.workspaceId
+      }),
+    createPayee: (
+      request: DistributionPayeeUpsertRequest,
+      options: WriteRequestOptions
+    ): Promise<ApiMutationReceipt> =>
+      transport.post<ApiMutationReceipt>("payees", request, options.idempotencyKey),
+    getPayeePartnerLink: (
+      payeeId: EntityId,
+      query: DistributionPayeePartnerLinkQuery
+    ): Promise<DistributionPayeePartnerLink> =>
+      transport.get<DistributionPayeePartnerLink>(`payees/${encodePathSegment(payeeId)}/partner-link`, {
+        workspaceId: query.workspaceId
+      }),
+    linkPayeePartner: (
+      payeeId: EntityId,
+      request: DistributionPayeePartnerLinkRequest,
+      options: WriteRequestOptions
+    ): Promise<ApiMutationReceipt> =>
+      transport.post<ApiMutationReceipt>(
+        `payees/${encodePathSegment(payeeId)}/partner-link`,
+        request,
+        options.idempotencyKey
+      ),
     listReleases: (query: ReleasesQuery): Promise<PageResult<ReleaseSummary>> =>
       transport.get<PageResult<ReleaseSummary>>("releases", {
         workspaceId: query.workspaceId,
@@ -314,6 +373,26 @@ export function createDistributionApiClient(config: ApiClientConfig): Distributi
         request,
         options.idempotencyKey
       ),
+    listAllocations: (query: DistributionAllocationQuery): Promise<PageResult<DistributionAllocationRow>> =>
+      transport.get<PageResult<DistributionAllocationRow>>("allocations", {
+        workspaceId: query.workspaceId,
+        runId: query.runId,
+        payeeId: query.payeeId,
+        status: query.status,
+        cursor: query.cursor,
+        limit: query.limit
+      }),
+    listAllocationsByCurrency: (
+      query: DistributionAllocationQuery
+    ): Promise<PageResult<DistributionAllocationTotal>> =>
+      transport.get<PageResult<DistributionAllocationTotal>>("allocations-by-currency", {
+        workspaceId: query.workspaceId,
+        runId: query.runId,
+        payeeId: query.payeeId,
+        status: query.status,
+        cursor: query.cursor,
+        limit: query.limit
+      }),
     listSuspense: (query: SuspenseQuery): Promise<PageResult<SuspenseItem>> =>
       transport.get<PageResult<SuspenseItem>>("suspense", {
         workspaceId: query.workspaceId,
@@ -398,6 +477,20 @@ export function createDistributionApiClient(config: ApiClientConfig): Distributi
         request,
         options.idempotencyKey
       ),
+    listFxRates: (query: DistributionFxRatesQuery): Promise<PageResult<DistributionFxRate>> =>
+      transport.get<PageResult<DistributionFxRate>>("fx-rates", {
+        workspaceId: query.workspaceId,
+        fromCurrency: query.fromCurrency ?? null,
+        toCurrency: query.toCurrency ?? null,
+        effectiveDate: query.effectiveDate ?? null,
+        cursor: query.cursor,
+        limit: query.limit
+      }),
+    saveFxRates: (
+      request: DistributionFxRatesSaveRequest,
+      options: WriteRequestOptions
+    ): Promise<ApiMutationReceipt> =>
+      transport.post<ApiMutationReceipt>("fx-rates", request, options.idempotencyKey),
     getRevenue: (query: DistributionRevenueQuery): Promise<PageResult<DistributionRevenueRow>> =>
       transport.get<PageResult<DistributionRevenueRow>>("revenue", {
         workspaceId: query.workspaceId,

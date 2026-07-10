@@ -58,7 +58,7 @@ Trié par sévérité puis page. `#` = numéro de ligne dans `AUDIT-INCOHERENCES
 | 33 | Haute | Office · Projects | Écritures silencieuses (aucun feedback) | Corrigé — `projectSubmitStatus`/`projectSubmitMessage` (succès + erreur inline) | ab357ef |
 | 34 | Haute | Office · Projects | Échec d'écriture qui écrase la liste chargée | Corrigé — l'erreur reste sur le formulaire, `projectsState` préservé | ab357ef |
 | 35 | Haute | Office · Projects | Double-clic possible, idempotencyKey inefficace | Corrigé — garde `loading` + une clé d'idempotence par tentative (réutilisée aux retries) | ab357ef |
-| 36 | Haute | Office · Projects | Édition qui écrase description/active silencieusement | Différé (mitigé) — avertissement explicite affiché à l'édition ; l'API n'expose ni description ni active en lecture | ab357ef |
+| 36 | Haute | Office · Projects | Édition qui écrase description/active silencieusement | Corrigé — la liste projets expose désormais `writeStatus`/`description`/`active` et le formulaire d'édition recharge ces valeurs avant sauvegarde | en cours |
 | 37 | Haute | Shell / routing | Route protégée sans session → landing au lieu de /login | Corrigé — `redirectToLogin` + `buildLoginRouteWithNext`, garde unifiée `isProtectedRoute` | 52065b7 |
 | 38 | Haute | Shell / routing | Machinerie next-route morte (next= jamais écrit) | Corrigé — `/login?next=<route>` produit au renvoi, consommé au login | 52065b7 |
 
@@ -71,12 +71,12 @@ Trié par sévérité puis page. `#` = numéro de ligne dans `AUDIT-INCOHERENCES
 | 74 | Moyenne | Command-Center · App | « Action list » entièrement codée en dur | Corrigé — dérivée de `permissionUsers`/connecteurs/settings réels (`createActionRows`) | 286f1d4 |
 | 75 | Moyenne | Command-Center · App | Écritures des Panels non gardées par commandBusy | Corrigé — `commandBusy` propagé (state disabled + loading) | 286f1d4 |
 | 76 | Moyenne | Command-Center · App | Dashboard sans état loading/erreur | Corrigé — `dashboardSurfaceState` dérivé des états API pilote KPI/chart/table | 286f1d4 |
-| 80 | Moyenne | Design System | CTA « View components » sans onclick | Différé (non traité) — le bouton reste sans action ; correctif trivial restant | — |
+| 80 | Moyenne | Design System | CTA « View components » sans onclick | Corrigé — le CTA scroll vers la section `#components` (action visible et testable) | en cours |
 | 44 | Moyenne | Distribution workspace | 22 boutons bruts + panneaux maison | Corrigé — 0 occurrence `distribution-action`, Button/Card/Drawer du DS | bc14e61 |
-| 59 | Moyenne | Distribution · FX rates | GET/POST /fx-rates sans méthode client | Différé — endpoints sans transport client ; à exposer ou supprimer | — |
-| 60 | Moyenne | Distribution · Allocations | /allocations(-by-currency) sans méthode client | Différé — vues détaillées non chargées ; à exposer ou supprimer | — |
-| 61 | Moyenne | Distribution · Payees | POST /payees et GET /payees/:id non câblés | Différé — création/détail payee impossibles depuis l'UI | — |
-| 62 | Moyenne | Distribution · Payees | partner-link géré uniquement côté Office | Différé — asymétrie conservée ; documenter ou exposer côté Distribution | — |
+| 59 | Moyenne | Distribution · FX rates | GET/POST /fx-rates sans méthode client | Corrigé — `listFxRates` et `saveFxRates` exposés dans `@ehq/api-client` | en cours |
+| 60 | Moyenne | Distribution · Allocations | /allocations(-by-currency) sans méthode client | Corrigé — `listAllocations` et `listAllocationsByCurrency` exposés dans `@ehq/api-client` | en cours |
+| 61 | Moyenne | Distribution · Payees | POST /payees et GET /payees/:id non câblés | Corrigé — `createPayee` et `getPayee` exposés dans `@ehq/api-client` | en cours |
+| 62 | Moyenne | Distribution · Payees | partner-link géré uniquement côté Office | Corrigé — `getPayeePartnerLink` et `linkPayeePartner` exposés côté Distribution | en cours |
 | 63 | Moyenne | Distribution · App | Aucun reload après mutation réussie | Corrigé — reload systématique de la liste concernée (payments, statements, contracts, suspense, catalog…) | 5b0800b |
 | 64 | Moyenne | Distribution · App | Erreur d'écriture qui bascule la table en 'error' | Corrigé — `reportActionError` → `actionError` dédié, listes préservées | bc14e61 |
 | 65 | Moyenne | Distribution · App | recordExpense 100 % codé en dur | Corrigé — panneau de saisie (contrat/label/montant/date) → `recordContractExpense` | bc14e61 |
@@ -86,8 +86,8 @@ Trié par sévérité puis page. `#` = numéro de ligne dans `AUDIT-INCOHERENCES
 | 84 | Moyenne | Login | 4 boutons bruts submit/sso/plain-link | Corrigé — Button du DS (SSO retiré, cf. #39) | 0d37b32 |
 | 43 | Moyenne | Office workspace | 27 boutons `office-action` + panneaux maison | Corrigé — 0 occurrence `office-action`, Button/Select/Input/Drawer du DS | fe2af8f |
 | 53 | Moyenne | Office · Réconciliation | Drawer maison `reconcile-drawer` | Corrigé — 0 occurrence, Drawer du DS | fe2af8f |
-| 57 | Moyenne | Office · Ledger | previewLedgerBulkUpsert/confirm jamais appelés | Différé — méthodes client conservées sans UI ; décision produit requise | — |
-| 58 | Moyenne | Office · Ledger | Routes bulk-preview/confirm redondantes | Différé — les 2 paires aliasent déjà une implémentation unique (aucune logique dupliquée) ; à trancher avec #57 | — |
+| 57 | Moyenne | Office · Ledger | previewLedgerBulkUpsert/confirm jamais appelés | Corrigé — méthodes client mortes retirées de `@ehq/api-client` (surface inutile supprimée) | en cours |
+| 58 | Moyenne | Office · Ledger | Routes bulk-preview/confirm redondantes | Corrigé — alias conservés explicitement pour compatibilité ascendante, commentaire d'intention ajouté côté API | en cours |
 | 66 | Moyenne | Office · Réconciliation | Option « Rejected » = no-op silencieux | Corrigé — option retirée avec commentaire expliquant la contrainte API | fe2af8f |
 | 67 | Moyenne | Office · Ledger | Titre figé « Ledger · May 2026 » | Corrigé — titre dynamique `Ledger · ${rangeLabel(activeRange)}` | fe2af8f |
 | 68 | Moyenne | Office · App | Succès optimistes (approve/createPlanNode) | Corrigé — reload de `loadReconciliations()`/`loadPlanComptable()` après receipt | fe2af8f |
@@ -115,8 +115,8 @@ Trié par sévérité puis page. `#` = numéro de ligne dans `AUDIT-INCOHERENCES
 |---|---|---|---|---|---|
 | 93 | Basse | Command-Center | font-size 20px hors échelle (mini-grille) | Corrigé — plus aucun `font-size: 20px` en dur | 286f1d4 |
 | 112 | Basse | Command-Center | Même 20px (doublon du #93) | Corrigé — idem | 286f1d4 |
-| 87 | Basse | Design System | Pastille de marque en 24px dur | Différé (non traité) — `font-size: 24px` toujours présent (l.396) | — |
-| 88 | Basse | Design System | Paragraphe hero en 16px dur | Différé (non traité) — `font-size: 16px` toujours présent (l.483) | — |
+| 87 | Basse | Design System | Pastille de marque en 24px dur | Corrigé — `font-size` tokenisé via `var(--ehq-h2)` | en cours |
+| 88 | Basse | Design System | Paragraphe hero en 16px dur | Corrigé — `font-size` tokenisé via `var(--ehq-body)` | en cours |
 | 111 | Basse | Distribution · Dashboard | « Action list » figée à state="default" | Corrigé — `tableStateFor(dashboardActionListStatus, …)` | 39b0915 |
 | 85 | Basse | Landing | Accent Office #E6E8EC en dur | Corrigé — `var(--ehq-workspace-office)` | bc14e61 |
 | 86 | Basse | Landing | Accent Distribution #FF7A1A en dur | Corrigé — `var(--ehq-workspace-distribution)` | bc14e61 |

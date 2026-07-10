@@ -81,8 +81,8 @@ function createOfficeFixture(): OfficeAnalyticsDataset {
       { id: "partner_mcb", name: "MCB", type: "supplier", isActive: true }
     ],
     projects: [
-      { id: "project_kaya", name: "Kaya Estate", status: "active", state: "active", isActive: true },
-      { id: "project_null_reference", name: "General Office", status: "active", state: "active", isActive: true }
+      { id: "project_kaya", name: "Kaya Estate", description: null, status: "active", state: "active", isActive: true },
+      { id: "project_null_reference", name: "General Office", description: null, status: "active", state: "active", isActive: true }
     ],
     projectBudgetLines: [
       { id: "budget_kaya_income", projectId: "project_kaya", categoryId: "cat_live_income", type: "income", plannedAmountMinor: 800_000n },

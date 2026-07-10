@@ -31,9 +31,6 @@ import type {
   OfficeGlobalPnlQuery,
   OfficeIntegrityCheckAllResponse,
   OfficeIntegrityCheckQuery,
-  OfficeLedgerBulkConfirmResponse,
-  OfficeLedgerBulkPreviewResponse,
-  OfficeLedgerBulkRequest,
   OfficePartnerClassificationSuggestion,
   OfficePartnerDetailQuery,
   OfficePartnerListItem,
@@ -117,14 +114,6 @@ export interface OfficeApiClient {
     request: BankImportConfirmRequest,
     options: WriteRequestOptions
   ) => Promise<BankImportConfirmResponse>;
-  readonly previewLedgerBulkUpsert: (
-    request: OfficeLedgerBulkRequest,
-    options: WriteRequestOptions
-  ) => Promise<OfficeLedgerBulkPreviewResponse>;
-  readonly confirmLedgerBulkUpsert: (
-    request: OfficeLedgerBulkRequest,
-    options: WriteRequestOptions
-  ) => Promise<OfficeLedgerBulkConfirmResponse>;
   readonly reverseBankImportBatch: (
     batchId: EntityId,
     request: { readonly workspaceId: EntityId },
@@ -343,16 +332,6 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
       options: WriteRequestOptions
     ): Promise<BankImportConfirmResponse> =>
       transport.post<BankImportConfirmResponse>("bank-import/confirm", request, options.idempotencyKey),
-    previewLedgerBulkUpsert: (
-      request: OfficeLedgerBulkRequest,
-      options: WriteRequestOptions
-    ): Promise<OfficeLedgerBulkPreviewResponse> =>
-      transport.post<OfficeLedgerBulkPreviewResponse>("transactions/bulk-upsert/preview", request, options.idempotencyKey),
-    confirmLedgerBulkUpsert: (
-      request: OfficeLedgerBulkRequest,
-      options: WriteRequestOptions
-    ): Promise<OfficeLedgerBulkConfirmResponse> =>
-      transport.post<OfficeLedgerBulkConfirmResponse>("transactions/bulk-upsert/confirm", request, options.idempotencyKey),
     reverseBankImportBatch: (
       batchId: EntityId,
       request: { readonly workspaceId: EntityId },

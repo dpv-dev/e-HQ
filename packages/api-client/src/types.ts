@@ -712,6 +712,9 @@ export interface OfficeProjectSummary {
   readonly code: string;
   readonly label: string;
   readonly status: "active" | "archived";
+  readonly writeStatus: OfficeProjectWriteStatus;
+  readonly description: string | null;
+  readonly active: boolean;
   readonly ownerLabel: string;
   readonly periodIncomeMicro: MoneyMicroString;
   readonly periodExpenseMicro: MoneyMicroString;
@@ -1068,6 +1071,34 @@ export interface PayeeSummary {
   readonly defaultCurrency: CurrencyCode;
 }
 
+export interface DistributionPayeeUpsertRequest {
+  readonly workspaceId: EntityId;
+  readonly id: EntityId | null;
+  readonly displayName: string;
+  readonly email: string | null;
+  readonly status: "active" | "inactive";
+  readonly defaultCurrency: CurrencyCode;
+}
+
+export interface DistributionPayeePartnerLink {
+  readonly payeeId: EntityId;
+  readonly payeeName: string;
+  readonly officePartnerId: EntityId | null;
+  readonly officePartnerName: string | null;
+  readonly linked: boolean;
+  readonly confidence: DecimalString | null;
+  readonly status: "active" | "inactive" | null;
+}
+
+export interface DistributionPayeePartnerLinkRequest {
+  readonly workspaceId: EntityId;
+  readonly officePartnerId: EntityId;
+}
+
+export interface DistributionPayeePartnerLinkQuery {
+  readonly workspaceId: EntityId;
+}
+
 export interface ReleasesQuery extends PageQuery {
   readonly workspaceId: EntityId;
   readonly status: "draft" | "released" | "archived" | null;
@@ -1124,6 +1155,40 @@ export interface AllocationRunQuery extends PageQuery {
   readonly workspaceId: EntityId;
   readonly period: IsoMonthString | null;
   readonly status: "queued" | "running" | "completed" | "failed" | null;
+}
+
+export type DistributionAllocationStatus = "preview" | "calculated" | "statemented" | "posted" | "void" | "error";
+
+export interface DistributionAllocationQuery extends PageQuery {
+  readonly workspaceId: EntityId;
+  readonly runId: EntityId | null;
+  readonly payeeId: EntityId | null;
+  readonly status: DistributionAllocationStatus | null;
+}
+
+export interface DistributionAllocationRow {
+  readonly id: EntityId;
+  readonly earningId: EntityId;
+  readonly calculationRunId: EntityId;
+  readonly payeeId: EntityId;
+  readonly payeeName: string;
+  readonly contractId: EntityId | null;
+  readonly trackId: EntityId | null;
+  readonly trackTitle: string | null;
+  readonly grossAmount: MoneyMicroString;
+  readonly grossShare: MoneyMicroString;
+  readonly recoupmentApplied: MoneyMicroString;
+  readonly netPayable: MoneyMicroString;
+  readonly splitPercentage: DecimalString;
+  readonly currency: CurrencyCode;
+  readonly status: DistributionAllocationStatus;
+}
+
+export interface DistributionAllocationTotal {
+  readonly currency: CurrencyCode;
+  readonly grossShare: MoneyMicroString;
+  readonly recoupmentApplied: MoneyMicroString;
+  readonly netPayable: MoneyMicroString;
 }
 
 export interface AllocationRunSummary {
@@ -1302,6 +1367,25 @@ export interface PaymentReconcileRequest {
 export interface PaymentVoidRequest {
   readonly workspaceId: EntityId;
   readonly reason: string;
+}
+
+export interface DistributionFxRatesQuery extends PageQuery {
+  readonly workspaceId: EntityId;
+  readonly fromCurrency?: CurrencyCode | null;
+  readonly toCurrency?: CurrencyCode | null;
+  readonly effectiveDate?: IsoDateString | null;
+}
+
+export interface DistributionFxRate {
+  readonly fromCurrency: CurrencyCode;
+  readonly toCurrency: CurrencyCode;
+  readonly effectiveDate: IsoDateString;
+  readonly rate: DecimalString;
+}
+
+export interface DistributionFxRatesSaveRequest {
+  readonly workspaceId: EntityId;
+  readonly rates: readonly DistributionFxRate[];
 }
 
 export interface DistributionRevenueQuery extends PageQuery {

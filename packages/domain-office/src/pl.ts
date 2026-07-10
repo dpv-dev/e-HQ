@@ -33,7 +33,7 @@ export type OfficeCategoryRow = Pick<Category, "id" | "divisionId" | "name" | "t
   readonly accountLabel?: string | null;
 };
 export type OfficePartnerRow = Pick<Partner, "id" | "name" | "type" | "isActive">;
-export type OfficeProjectRow = Pick<Project, "id" | "name" | "status" | "state" | "isActive">;
+export type OfficeProjectRow = Pick<Project, "id" | "name" | "description" | "status" | "state" | "isActive">;
 export type OfficeProjectBudgetLineRow = Pick<ProjectBudgetLine, "id" | "projectId" | "categoryId" | "type" | "plannedAmountMinor">;
 export type OfficeTransactionRow = Pick<
   Transaction,

@@ -1118,6 +1118,8 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
     return officeLedgerBulkConfirmResponse(context, dependencies);
   });
 
+  // Backward-compatible aliases: keep both route families pointing to the same
+  // handlers so existing callers can migrate without behavior drift.
   app.post("/eof/v1/transactions/bulk-upsert/preview", async (context) => {
     return officeLedgerBulkPreviewResponse(context, dependencies);
   });
@@ -3218,6 +3220,7 @@ function upsertOfficeProjectFixture(fixtures: ApiFixtureStore, projectId: string
   const project: OfficeProjectRow = {
     id: projectId,
     name: request.name.trim(),
+    description: request.description,
     status: request.status,
     state: request.status,
     isActive: request.active
@@ -9498,6 +9501,9 @@ function toProjectSummary(dataset: OfficeAnalyticsDataset, project: OfficeProjec
     code: project.id,
     label: project.name,
     status: project.status === "archived" ? "archived" : "active",
+    writeStatus: project.status,
+    description: project.description,
+    active: project.isActive,
     ownerLabel: "Office",
     periodIncomeMicro: pnl.income,
     periodExpenseMicro: pnl.expense,

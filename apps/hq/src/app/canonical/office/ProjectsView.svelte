@@ -119,13 +119,9 @@
     }
     editingProjectId = project.id;
     projectFormName = project.label;
-    projectFormStatus = project.status;
-    // OfficeProjectSummary exposes neither description nor active, and no read
-    // in the client returns them, while OfficeProjectWriteRequest requires both.
-    // The form therefore shows both fields at their defaults with an explicit
-    // warning that saving overwrites the stored values.
-    projectFormDescription = "";
-    projectFormActive = true;
+    projectFormStatus = project.writeStatus;
+    projectFormDescription = project.description ?? "";
+    projectFormActive = project.active;
     projectSubmitStatus = "idle";
     projectSubmitMessage = null;
   }
@@ -565,14 +561,6 @@
           disabled={false}
           onchange={(checked: boolean): void => { projectFormActive = checked; }}
         />
-        {#if editingProjectId !== null}
-          <Alert
-            tone="warning"
-            title="Heads up"
-            message="The description and active flag are not read back from the API: the values above will overwrite the stored ones."
-            dismissible={false}
-          />
-        {/if}
         <div class="project-form-actions">
           <Button
             label={projectSubmitStatus === "loading" ? "Saving…" : editingProjectId === null ? "Create project" : "Save"}

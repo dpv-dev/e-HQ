@@ -113,6 +113,10 @@
     { label: "Rights", negative: 14, positive: 52 },
     { label: "Ops", negative: 38, positive: 30 }
   ];
+
+  const scrollToComponents = (): void => {
+    document.getElementById("components")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 </script>
 
 <svelte:head>
@@ -157,6 +161,7 @@
           locked={false}
           focus={false}
           ariaLabel="View components"
+          onclick={scrollToComponents}
         />
         <Button
           label="Back to shell"
@@ -473,7 +478,7 @@
     color: var(--ehq-text-on-yellow);
     display: grid;
     place-items: center;
-    font-size: 24px;
+    font-size: var(--ehq-h2);
     font-weight: var(--ehq-type-display-weight);
   }
 
@@ -560,7 +565,7 @@
   .hero > p:not(.eyebrow) {
     max-width: 760px;
     color: var(--ehq-text-soft);
-    font-size: 16px;
+    font-size: var(--ehq-body);
     line-height: 1.7;
   }
 

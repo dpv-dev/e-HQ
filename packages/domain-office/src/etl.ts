@@ -361,6 +361,7 @@ function transformProjects(rows: readonly LegacyOfficeProjectRow[]): readonly Of
   return rows.map((row) => ({
     id: row.id,
     name: row.name,
+    description: null,
     status: normalizeProjectStatus(row.status),
     state: row.state ?? row.status ?? "active",
     isActive: toBoolean(row.isActive)
