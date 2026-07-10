@@ -170,6 +170,84 @@ test("Bank quality analytics follow explicit date range filters", async () => {
   assert.equal(narrowRange.missingReferenceCount, 0);
 });
 
+test("P&L category lines support cursor pagination with a common token", async () => {
+  const app = createFixtureApiService();
+
+  const firstResponse = await app.request(
+    "/eof/v1/pl/category?workspaceId=workspace_1&period=2026-02&limit=1",
+    { headers: authHeaders() }
+  );
+  assert.equal(firstResponse.status, 200);
+  const firstPage = await firstResponse.json() as {
+    readonly items: readonly { readonly id: string; readonly label: string }[];
+    readonly nextCursor: string | null;
+  };
+  assert.equal(firstPage.items.length, 1);
+  assert.equal(firstPage.nextCursor, "1");
+
+  const secondResponse = await app.request(
+    "/eof/v1/pl/category?workspaceId=workspace_1&period=2026-02&limit=1&cursor=1",
+    { headers: authHeaders() }
+  );
+  assert.equal(secondResponse.status, 200);
+  const secondPage = await secondResponse.json() as {
+    readonly items: readonly { readonly id: string; readonly label: string }[];
+    readonly nextCursor: string | null;
+  };
+  assert.equal(secondPage.items.length, 1);
+  assert.notEqual(secondPage.items[0]?.id, firstPage.items[0]?.id);
+});
+
+test("Dashboard analytics returns the 5 KPI datasets for Office dashboard", async () => {
+  const app = createFixtureApiService();
+
+  const response = await app.request(
+    "/eof/v1/analytics/dashboard?workspaceId=workspace_1&period=2026-02&dateFrom=2026-02-01&dateTo=2026-02-28",
+    { headers: authHeaders() }
+  );
+  assert.equal(response.status, 200);
+
+  const payload = await response.json() as {
+    readonly period: string;
+    readonly dateFrom: string;
+    readonly dateTo: string;
+    readonly runway: {
+      readonly period: string;
+      readonly cashBalanceMicro: string;
+      readonly runwayMonths: string | null;
+      readonly monthsUsed: readonly string[];
+      readonly excludedForeignAccounts: readonly {
+        readonly accountId: string;
+        readonly currency: string;
+        readonly accountLabel: string;
+        readonly balanceMicro: string;
+      }[];
+    };
+    readonly topExpenseCategories: readonly { readonly categoryId: string; readonly expenseMicro: string }[];
+    readonly projectProfitability: readonly { readonly projectId: string; readonly netMicro: string }[];
+    readonly reconciliationByAccount: readonly { readonly accountId: string; readonly unmatchedLineCount: number }[];
+    readonly expenseTrendMonths: readonly string[];
+    readonly expenseTrendByDepartment: readonly { readonly departmentId: string; readonly latestMonthExpenseMicro: string }[];
+  };
+
+  assert.equal(payload.period, "2026-02");
+  assert.equal(payload.dateFrom, "2026-02-01");
+  assert.equal(payload.dateTo, "2026-02-28");
+  assert.equal(payload.runway.period, "2026-02");
+  assert.equal(payload.runway.cashBalanceMicro, "2500.00");
+  assert.ok(Array.isArray(payload.runway.monthsUsed));
+  assert.equal(payload.runway.excludedForeignAccounts.length, 1);
+  assert.equal(payload.runway.excludedForeignAccounts[0]?.accountId, "bank_eur");
+  assert.equal(payload.runway.excludedForeignAccounts[0]?.currency, "EUR");
+  assert.equal(payload.runway.excludedForeignAccounts[0]?.accountLabel, "MCB EUR");
+  assert.equal(payload.runway.excludedForeignAccounts[0]?.balanceMicro, "10.00");
+  assert.ok(payload.topExpenseCategories.length > 0);
+  assert.ok(payload.projectProfitability.length > 0);
+  assert.ok(payload.reconciliationByAccount.length > 0);
+  assert.equal(payload.expenseTrendMonths.length, 6);
+  assert.ok(payload.expenseTrendByDepartment.length > 0);
+});
+
 test("Business routes require Supabase bearer auth and auth/me returns the verified identity", async () => {
   const app = createFixtureApiService();
 
@@ -2934,6 +3012,76 @@ test("office bank import confirm persists lines once and replays idempotent resp
   assert.equal(raw.status, 200);
   const rawPage = (await raw.json()) as { readonly items: readonly { readonly reference: string }[] };
   assert.equal(rawPage.items.filter((item) => item.reference === "IMP-1").length, 1);
+});
+
+test("office bank import confirm creates suggested reconciliation propositions instead of auto-matching", async () => {
+  const app = createWriteEnabledFixtureApiService();
+  const preview = await app.request("/eof/v1/bank-import/preview", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      source: "csv",
+      fileName: "bank-suggested.csv",
+      checksum: "checksum-bank-suggested",
+      rows: [
+        {
+          date: "2026-02-15",
+          description: "Awaiting category",
+          signedAmount: "-85.00",
+          currency: "MUR",
+          accountId: "bank_mur",
+          reference: "SUG-1"
+        }
+      ]
+    })
+  });
+  assert.equal(preview.status, 200);
+  const previewJson = (await preview.json()) as { readonly previewId: string };
+
+  const confirm = await app.request("/eof/v1/bank-import/confirm", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "bank-confirm-suggested-1" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      previewId: previewJson.previewId,
+      acceptedRowIds: ["row_1"],
+      rejectedRowIds: []
+    })
+  });
+  assert.equal(confirm.status, 200);
+
+  const suggested = await app.request("/eof/v1/reconciliations?workspaceId=workspace_1&status=suggested&limit=100", {
+    headers: authHeaders()
+  });
+  assert.equal(suggested.status, 200);
+  const suggestedPage = (await suggested.json()) as {
+    readonly items: readonly {
+      readonly bankDescription: string;
+      readonly status: "unmatched" | "suggested" | "matched" | "rejected" | "ignored";
+      readonly transactionId: string;
+    }[];
+  };
+  const row = suggestedPage.items.find((item) => item.bankDescription.includes("Awaiting category"));
+  assert.ok(row !== undefined);
+  assert.equal(row?.status, "suggested");
+  assert.equal(row?.transactionId, "tx_uncategorized");
+
+  const raw = await app.request("/eof/v1/bank/raw?workspaceId=workspace_1&period=2026-02&limit=100", {
+    headers: authHeaders()
+  });
+  assert.equal(raw.status, 200);
+  const rawPage = (await raw.json()) as {
+    readonly items: readonly {
+      readonly reference: string;
+      readonly reconciliationStatus: "unmatched" | "suggested" | "matched" | "rejected" | "ignored";
+      readonly matchedTransactionId: string | null;
+    }[];
+  };
+  const rawRow = rawPage.items.find((item) => item.reference === "SUG-1");
+  assert.ok(rawRow !== undefined);
+  assert.equal(rawRow?.reconciliationStatus, "suggested");
+  assert.equal(rawRow?.matchedTransactionId, null);
 });
 
 test("distribution import confirm persists raw rows and does not fabricate normalized earnings", async () => {

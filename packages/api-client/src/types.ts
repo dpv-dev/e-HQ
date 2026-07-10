@@ -169,6 +169,73 @@ export interface AuditLogQuery extends PageQuery {
 
 export interface OfficeDashboardQuery extends PeriodQuery {}
 
+export interface OfficeDashboardAnalyticsQuery extends PeriodQuery {}
+
+export interface OfficeDashboardAnalyticsRunway {
+  readonly period: IsoMonthString;
+  readonly cashBalanceMicro: MoneyMicroString;
+  readonly averageMonthlyBurnMicro: MoneyMicroString;
+  readonly runwayMonths: DecimalString | null;
+  readonly monthsUsed: readonly IsoMonthString[];
+  readonly excludedForeignAccounts: readonly OfficeDashboardRunwayExcludedAccount[];
+}
+
+export interface OfficeDashboardRunwayExcludedAccount {
+  readonly accountId: EntityId;
+  readonly bankName: string;
+  readonly accountLabel: string;
+  readonly currency: CurrencyCode;
+  readonly balanceMicro: MoneyMicroString;
+}
+
+export interface OfficeDashboardExpenseCategoryKpi {
+  readonly categoryId: EntityId;
+  readonly label: string;
+  readonly expenseMicro: MoneyMicroString;
+  readonly shareBp: BasisPoints;
+}
+
+export interface OfficeDashboardProjectProfitabilityKpi {
+  readonly projectId: EntityId;
+  readonly projectLabel: string;
+  readonly incomeMicro: MoneyMicroString;
+  readonly expenseMicro: MoneyMicroString;
+  readonly netMicro: MoneyMicroString;
+  readonly marginBp: BasisPoints | null;
+}
+
+export interface OfficeDashboardReconciliationAccountKpi {
+  readonly accountId: EntityId;
+  readonly accountLabel: string;
+  readonly bankName: string;
+  readonly currency: CurrencyCode;
+  readonly lineCount: number;
+  readonly unmatchedLineCount: number;
+  readonly matchedRateBp: BasisPoints;
+  readonly oldestUnmatchedDays: number | null;
+}
+
+export interface OfficeDashboardDepartmentExpenseTrendKpi {
+  readonly departmentId: EntityId;
+  readonly departmentLabel: string;
+  readonly monthlyExpenseMicro: readonly MoneyMicroString[];
+  readonly latestMonthExpenseMicro: MoneyMicroString;
+}
+
+export interface OfficeDashboardAnalyticsResponse {
+  readonly period: IsoMonthString;
+  readonly dateFrom: IsoDateString;
+  readonly dateTo: IsoDateString;
+  readonly generatedAt: IsoDateTimeString;
+  readonly runway: OfficeDashboardAnalyticsRunway;
+  readonly topExpenseCategories: readonly OfficeDashboardExpenseCategoryKpi[];
+  readonly projectProfitability: readonly OfficeDashboardProjectProfitabilityKpi[];
+  readonly reconciliationByAccount: readonly OfficeDashboardReconciliationAccountKpi[];
+  readonly oldestUnmatchedDays: number | null;
+  readonly expenseTrendMonths: readonly IsoMonthString[];
+  readonly expenseTrendByDepartment: readonly OfficeDashboardDepartmentExpenseTrendKpi[];
+}
+
 export interface OfficeRecentImport {
   readonly id: EntityId;
   readonly source: "sbi" | "mcb" | "csv" | "cashflow" | "pdf";
@@ -260,6 +327,10 @@ export interface OfficePnlLine {
 }
 
 export interface OfficeGlobalPnlQuery extends PeriodQuery {}
+
+export interface OfficeCategoryPnlQuery extends PeriodQuery, PageQuery {
+  readonly departmentId: EntityId | null;
+}
 
 export interface OfficeGlobalPnl {
   readonly scope: "global";
@@ -533,7 +604,7 @@ export interface OfficeReconciliationsQuery extends PageQuery {
   readonly period: IsoMonthString | null;
   readonly dateFrom?: IsoDateString | null;
   readonly dateTo?: IsoDateString | null;
-  readonly status: "unmatched" | "suggested" | "matched" | null;
+  readonly status: "unmatched" | "suggested" | "matched" | "rejected" | "ignored" | null;
 }
 
 export interface OfficeReconciliationCandidate {

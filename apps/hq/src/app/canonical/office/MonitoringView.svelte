@@ -85,6 +85,7 @@
     dashboardState.status === "loading"
   );
   const bankQualityPoints = $derived(createBankQualityPoints(bankQualityState));
+  const importActivityPoints = $derived(createImportActivityPoints(recentImports));
   const integrityTableRows = $derived(createIntegrityTableRows(integrityRows));
   const pendingTableRows = $derived(createPendingTableRows(pendingRows));
   const auditTableRows = $derived(createAuditTableRows(auditRows));
@@ -387,6 +388,27 @@
     }));
   }
 
+  function createImportActivityPoints(rows: readonly OfficeRecentImport[]): readonly ChartPoint[] {
+    const recentRows = rows.slice(0, 6);
+    let maxAccepted = 0;
+    for (const row of recentRows) {
+      if (row.acceptedRowCount > maxAccepted) {
+        maxAccepted = row.acceptedRowCount;
+      }
+    }
+
+    const points = recentRows.map((row): ChartPoint => ({
+      label: `${row.source.toUpperCase()} ${row.periodLabel.slice(0, 7)}`,
+      value: maxAccepted === 0 ? 0 : Math.trunc((row.acceptedRowCount * 100) / maxAccepted)
+    }));
+
+    while (points.length < 6) {
+      points.push({ label: "-", value: 0 });
+    }
+
+    return points;
+  }
+
   function createPendingTableRows(rows: readonly OfficeTransaction[]): readonly TableRow[] {
     return rows.map((transaction: OfficeTransaction): TableRow => ({
       id: transaction.id,
@@ -537,9 +559,13 @@
     </section>
   </section>
 
+  <section class="monitoring-layout" aria-label="Import activity">
+    <BarsChart title="Import activity" points={importActivityPoints} tone="info" />
+    <Table title="Recent imports" columns={importColumns} rows={importTableRows} state={dashboardState.status === "loading" ? "loading" : dashboardState.status === "error" ? "error" : importTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
+  </section>
+
   <Table title="Integrity checks" columns={integrityColumns} rows={integrityTableRows} state={integrityState.status === "loading" ? "loading" : integrityState.status === "error" ? "error" : integrityTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
   <Table title="Pending transactions" columns={pendingColumns} rows={pendingTableRows} state={pendingState.status === "loading" ? "loading" : pendingState.status === "error" ? "error" : pendingTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={pendingPagination} />
-  <Table title="Recent imports" columns={importColumns} rows={importTableRows} state={dashboardState.status === "loading" ? "loading" : dashboardState.status === "error" ? "error" : importTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
   <Table title="Audit log" columns={auditColumns} rows={auditTableRows} state={auditState.status === "loading" ? "loading" : auditState.status === "error" ? "error" : auditTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={auditPagination} />
 </section>
 

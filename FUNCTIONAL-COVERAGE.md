@@ -41,9 +41,9 @@ flowchart TD
 | CEO view | `CeoView.svelte` | Dashboard/P&L aggregate calls through Office client | `domain-office` analytics/P&L | Partial | Confirm all KPI cards trace to API values, not UI recompute. |
 | P&L | `App.svelte` | `GET /eof/v1/pl/global`, `/pl/department/:id`, `/pl/division` | `domain-office/src/pl.ts` | OK | Add explicit category endpoint or document category derivation. |
 | Chart of accounts | `App.svelte` | `GET/POST/PATCH /eof/v1/plan-comptable` | Office categories/departments/divisions | OK | Confirm writes persist to Postgres and audit event. |
-| Transactions / Ledger | `App.svelte` | `GET/POST/PATCH /eof/v1/transactions`, validate/cancel | Office transactions + `domain-finance/src/ledger.ts` | Partial | Route Office transaction summaries through the finance ledger primitive. |
+| Transactions / Ledger | `App.svelte` | `GET/POST/PATCH /eof/v1/transactions`, validate/cancel | Office transactions + `domain-finance/src/ledger.ts` | Partial | Ledger totals are centralized for P&L; finish replacing any remaining local transaction summary duplication. |
 | Imports | `App.svelte` | `POST /eof/v1/bank-import/preview`, `/confirm`, reverse/delete | Office bank import persistence | Partial | API only accepts structured rows; raw PDF parsing remains browser-side. Confirm production upload/parse flow. |
-| Reconciliation | `App.svelte`, `BankView.svelte` | `GET/POST /eof/v1/reconciliations/*` | Office bank matching + `domain-finance/src/reconciliation.ts` | Partial | Make API matching use the finance reconciliation primitive atomically. |
+| Reconciliation | `App.svelte`, `BankView.svelte` | `GET/POST /eof/v1/reconciliations/*` | Office bank matching + `domain-finance/src/reconciliation.ts` | Partial | API matching uses the finance primitive; next check is production transaction atomicity and audit coverage. |
 | Pending | `App.svelte` | `GET /transactions?status=pending`, transaction update/validate | Office transactions | Partial | Add a dedicated pending endpoint or document this as filtered transactions. |
 | Cashflow | `App.svelte` | `GET /eof/v1/cashflow`, preview/confirm | `domain-office/src/analytics.ts` | OK | Confirm imported CSV rows are audited and reversible. |
 | Bank | `BankView.svelte` | `GET/POST/PATCH/DELETE /eof/v1/bank/accounts`, `GET /bank/raw` | Office bank accounts/raw lines | OK | Verify delete safety and dependency counts on production data. |
@@ -52,7 +52,7 @@ flowchart TD
 | Projects | `ProjectsView.svelte` | `/eof/v1/projects`, `/pl/project/:id`, coherence violations | Office projects/P&L | OK | Verify project P&L differs from legacy BUG-M1 intentionally. |
 | Monitoring | `MonitoringView.svelte` | `/integrity/check-all`, `/analytics/bank-quality`, audit/dashboard | Office integrity analytics | OK | Add pass/fail severity mapping if missing in live UI. |
 | Audit | `App.svelte` | `GET /eof/v1/audit-log` | Office audit events | OK | Verify every write path emits an audit event. |
-| VAT | `VatView.svelte` | `GET /eof/v1/vat` | Office VAT report + `domain-finance/src/vat.ts` | Partial | Route VAT report through the finance VAT primitive. |
+| VAT | `VatView.svelte` | `GET /eof/v1/vat` | Office VAT report + `domain-finance/src/vat.ts` | Partial | API report uses the finance VAT primitive; next check is rate/source configuration and live report parity. |
 | Settings | `SettingsView.svelte` | Office status/config calls | API status/config | Partial | Confirm settings are not only read-only diagnostics. |
 | Wave invoices | Removed from visible menu | none | none | Hidden | Add only when API, data model, and UI workflow exist. |
 
@@ -83,10 +83,10 @@ visible product is fully backed by the shared engine:
 
 | File | Current issue | Product impact |
 | --- | --- | --- |
-| `packages/domain-finance/src/ledger.ts` | Implemented primitive, not yet used broadly by Office API | Ledger calculations can still be duplicated outside the kernel. |
-| `packages/domain-finance/src/reconciliation.ts` | Implemented primitive, not yet used by Office API writes | Bank-to-ledger matching still needs API-level atomic integration. |
-| `packages/domain-finance/src/vat.ts` | Implemented primitive, not yet used by VAT API report | VAT reports can still diverge from the shared kernel. |
-| `packages/domain-finance/src/fx.ts` | Implemented primitive, not yet wired into all FX paths | FX conversion can still be duplicated outside the kernel. |
+| `packages/domain-finance/src/ledger.ts` | Implemented and now used by Office global P&L/domain paths | Remaining risk is duplicated local summaries outside P&L. |
+| `packages/domain-finance/src/reconciliation.ts` | Implemented and used by Office reconciliation write paths | Remaining risk is production-level transaction/audit atomicity. |
+| `packages/domain-finance/src/vat.ts` | Implemented and used by the Office VAT API report | Remaining risk is live rate/source configuration parity. |
+| `packages/domain-finance/src/fx.ts` | Implemented primitive, adoption incomplete across all FX paths | FX conversion can still be duplicated outside the kernel. |
 | `packages/domain-finance/src/schemas.ts` | Implemented schemas, adoption incomplete | API validation still needs to consume shared finance schemas. |
 | `packages/domain-office/src/index.ts` | Stable snapshot primitive exists, broader API adoption incomplete | Office still needs a real workbench snapshot wired to live data. |
 | `packages/domain-distribution/src/index.ts` | Stable statement draft primitive exists, broader API adoption incomplete | Distribution statement drafting should be wired into statement generation paths where useful. |
@@ -97,6 +97,6 @@ visible product is fully backed by the shared engine:
 2. Make every visible Office page pass: UI loads, API route responds, write path
    persists, audit event exists, and live route is verified.
 3. Make every visible Distribution page pass the same gate.
-4. Replace finance TODOs with domain functions used by the API, starting with
-   ledger, reconciliation, VAT, and FX.
+4. Continue adopting the finance kernel in remaining local calculation paths,
+   starting with FX and shared validation schemas.
 5. Add tests at the domain layer first, then API tests, then browser smoke.

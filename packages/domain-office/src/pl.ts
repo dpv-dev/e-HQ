@@ -1,5 +1,13 @@
 import type { Category, Department, Division, FinancialAllocation, Partner, Project, ProjectBudgetLine, Transaction } from "@ehq/db";
-import { eofMoney } from "@ehq/domain-finance";
+import {
+  createCurrencyCode,
+  createMoneyAmount,
+  createMoneyMicroUnits,
+  eofMoney,
+  summarizeLedger,
+  type LedgerSummary,
+  type LedgerTransaction
+} from "@ehq/domain-finance";
 
 export type OfficePnlView =
   | "global_ledger"
@@ -178,6 +186,21 @@ interface TransactionAmountInput {
 
 export function readGlobalPnl(dataset: OfficePnlDataset, filters: OfficePnlFilters): OfficeGlobalPnlResponse {
   const transactions = filterLedgerTransactions(dataset.transactions, filters);
+  const ledgerTransactions = transactions.map(toFinanceLedgerTransaction);
+  if (ledgerTransactions.length > 0) {
+    return {
+      ...formatLedgerSummary(
+        summarizeLedger(ledgerTransactions, {
+          startsOn: firstLedgerDate(ledgerTransactions),
+          endsOn: lastLedgerDate(ledgerTransactions)
+        }),
+        ledgerTransactions.length,
+        "global_ledger"
+      ),
+      view: "global_ledger"
+    };
+  }
+
   return {
     ...formatAccumulator(sumTransactions(transactions), "global_ledger"),
     view: "global_ledger"
@@ -526,8 +549,52 @@ function formatAccumulator(accumulator: Accumulator, view: OfficePnlView): Offic
   };
 }
 
+function formatLedgerSummary(summary: LedgerSummary, transactionCount: number, view: OfficePnlView): OfficePnlTotals {
+  return {
+    income: eofMoney.format(summary.income.amountMicro),
+    expense: eofMoney.format(summary.expense.amountMicro),
+    profit: eofMoney.format(summary.profit.amountMicro),
+    tx_count: transactionCount,
+    currency: "MUR",
+    view
+  };
+}
+
+function toFinanceLedgerTransaction(transaction: OfficeTransactionRow): LedgerTransaction {
+  return {
+    id: transaction.id,
+    transactionDate: transaction.transactionDate.slice(0, 10),
+    direction: transaction.type,
+    amount: createMoneyAmount(createMoneyMicroUnits(absBigInt(transaction.amountMinor)), createCurrencyCode("MUR")),
+    categoryId: transaction.categoryId,
+    departmentId: null,
+    divisionId: null,
+    sourceSystem: "office"
+  };
+}
+
+function firstLedgerDate(transactions: readonly LedgerTransaction[]): string {
+  return transactions.reduce(
+    (first: string, transaction: LedgerTransaction) =>
+      transaction.transactionDate < first ? transaction.transactionDate : first,
+    transactions[0]?.transactionDate ?? "1970-01-01"
+  );
+}
+
+function lastLedgerDate(transactions: readonly LedgerTransaction[]): string {
+  return transactions.reduce(
+    (last: string, transaction: LedgerTransaction) =>
+      transaction.transactionDate > last ? transaction.transactionDate : last,
+    transactions[0]?.transactionDate ?? "1970-01-01"
+  );
+}
+
 function formatMinor(value: bigint): string {
   return eofMoney.format(value);
+}
+
+function absBigInt(value: bigint): bigint {
+  return value < 0n ? -value : value;
 }
 
 function resolveDataset(dataset: OfficePnlDataset): ResolvedDataset {

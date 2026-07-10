@@ -16,6 +16,7 @@ import {
   erhMoney,
   format as formatScaledUnits,
   parse as parseScaledUnits,
+  roundRatioHalfUp,
   reconcileTransaction,
   summarizeLedger,
   type LedgerTransaction
@@ -30,13 +31,11 @@ import {
   countOpenSuspense,
   readAllocationList,
   readAllocationTotals,
-  readEarningsPreview,
   readStatementSummaries,
   readSuspense,
   type CostTermStatusUpdate,
   type DistributionAllocationReadRow,
   type DistributionAllocationOutcome,
-  type DistributionAllocationPlan,
   type DistributionCalculationRunRow,
   type DistributionCostTermInput,
   type DistributionCostState,
@@ -54,8 +53,6 @@ import {
   type PayeeBalanceLedgerInput,
   type StatementAllocationInput,
   type StatementBalanceResult,
-  type StatementInsertPlan,
-  type StatementLineInsertPlan,
   type StatementGroupTotal,
   type StatementPaymentLinkInput
 } from "@ehq/domain-distribution";
@@ -129,9 +126,14 @@ import type {
   DistributionReconciliationStatementGap,
   DistributionRevenueRow,
   DistributionSettingsResponse,
-  EntityId,
   OfficeBankQualityResponse,
+  OfficeDashboardAnalyticsResponse,
+  OfficeDashboardDepartmentExpenseTrendKpi,
+  OfficeDashboardExpenseCategoryKpi,
   OfficeDashboardPreviousPeriod,
+  OfficeDashboardProjectProfitabilityKpi,
+  OfficeDashboardReconciliationAccountKpi,
+  OfficeDashboardRunwayExcludedAccount,
   OfficeDashboardResponse,
   OfficeDepartmentPnl,
   OfficeGlobalPnl,
@@ -149,8 +151,8 @@ import type {
   OfficePlanComptableWriteRequest,
   OfficePartnerSideActivity,
   OfficePlanComptableNode,
+  OfficePnlLine,
   OfficePnlProjectionRow,
-  OfficeProjectCoherenceViolation,
   OfficeProjectPnl,
   OfficeBankRawLineReassignRequest,
   OfficeProjectPnlLine,
@@ -210,7 +212,6 @@ import {
   persistIdentityLink,
   persistOfficeBankImportConfirmation,
   isBotApiUser,
-  requirePermission,
   requirePermissionForWorkspace,
   runIdempotentMutation,
   type ApiImportPreviewRow,
@@ -458,6 +459,12 @@ interface ParsedOfficeBankPreviewRow {
   readonly row: ApiImportPreviewRow;
   readonly line: OfficeBankStatementLineInsert | null;
   readonly issues: readonly string[];
+}
+
+interface OfficeReconciliationSuggestion {
+  readonly statementLineId: string;
+  readonly transactionId: string;
+  readonly confidenceBp: number;
 }
 
 interface OfficeDateRange {
@@ -998,6 +1005,13 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
     return context.json(response);
   });
 
+  app.get("/eof/v1/analytics/dashboard", (context) => {
+    const period = requireCompatQuery(context, ["period", "month"], "period");
+    const workspaceId = resolveWorkspaceId(context);
+    const filters = rangeFiltersFromContext(context, period, null);
+    return context.json(readOfficeDashboardAnalytics(dependencies, workspaceId, period, filters));
+  });
+
   app.get("/eof/v1/pl/global", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
     resolveWorkspaceId(context);
@@ -1018,6 +1032,14 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
     resolveWorkspaceId(context);
     const divisions = readPnlByDivision(dependencies.fixtures.office, rangeFiltersFromContext(context, period, null)).map(toApiDivisionPnl);
     return context.json(pageItems(context, divisions));
+  });
+
+  app.get("/eof/v1/pl/category", (context) => {
+    const period = requireCompatQuery(context, ["period", "month"], "period");
+    resolveWorkspaceId(context);
+    const departmentId = nullableQuery(context, "departmentId");
+    const filters = rangeFiltersFromContext(context, period, departmentId);
+    return context.json(pageItems(context, toOfficeCategoryPnlLines(dependencies.fixtures.office, filters)));
   });
 
   app.get("/eof/v1/transactions", (context) => {
@@ -1128,7 +1150,7 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
   });
 
   app.post("/eof/v1/cashflow/preview", async (context) => {
-    return officeCashflowPreviewResponse(context, dependencies);
+    return officeCashflowPreviewResponse(context);
   });
 
   app.post("/eof/v1/cashflow/confirm", async (context) => {
@@ -1273,7 +1295,6 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
 
   app.get("/eof/v1/bank/accounts", (context) => {
     const workspaceId = resolveWorkspaceId(context);
-    const limit = requirePositiveInteger(context, optionalCompatQuery(context, ["limit"]), "limit");
     const latestLineByAccount = latestBankLineByAccount(dependencies.fixtures.office.bankStatementLines);
     const derivedSnapshotByAccount = derivedBankSnapshotByAccount(dependencies.fixtures.office.bankStatementLines);
     const accounts = dependencies.fixtures.office.bankAccounts
@@ -2026,17 +2047,6 @@ function resolveWorkspaceId(context: ApiContext): string {
   }
 
   return workspaceId;
-}
-
-function requirePositiveInteger(context: ApiContext, value: string | null, key: string): number {
-  if (value === null) {
-    throw new ApiRouteError(400, "query_integer_invalid", "Query integer parameter is required.", [
-      `path=${context.req.path}`,
-      `key=${key}`
-    ]);
-  }
-
-  return parsePositiveInteger(value, key);
 }
 
 function requireIdempotencyKey(context: ApiContext): string {
@@ -2809,6 +2819,59 @@ async function persistOfficeReconciliationIgnore(tx: ApiWriteTransaction, statem
   `);
 }
 
+async function persistOfficeReconciliationSuggestions(
+  tx: ApiWriteTransaction,
+  suggestions: readonly OfficeReconciliationSuggestion[]
+): Promise<void> {
+  if (tx.kind === "memory" || suggestions.length === 0) {
+    return;
+  }
+
+  for (const suggestion of suggestions) {
+    await tx.executor.execute(sql`
+      update office_bank_reconciliation_matches
+      set status = 'rejected', updated_at = now()
+      where bank_statement_line_id = ${suggestion.statementLineId}
+        and transaction_id <> ${suggestion.transactionId}
+        and status = 'suggested'
+    `);
+
+    await tx.executor.execute(sql`
+      insert into office_bank_reconciliation_matches (
+        id,
+        bank_statement_line_id,
+        transaction_id,
+        confidence_bp,
+        status,
+        approved_by_user_id,
+        approved_at
+      )
+      values (
+        ${randomUUID()},
+        ${suggestion.statementLineId},
+        ${suggestion.transactionId},
+        ${suggestion.confidenceBp},
+        'suggested',
+        null,
+        null
+      )
+      on conflict (bank_statement_line_id, transaction_id) do update
+      set
+        confidence_bp = excluded.confidence_bp,
+        status = 'suggested',
+        approved_by_user_id = null,
+        approved_at = null,
+        updated_at = now()
+    `);
+
+    await tx.executor.execute(sql`
+      update office_bank_statement_lines
+      set reconciliation_status = 'suggested', matched_transaction_id = null
+      where id = ${suggestion.statementLineId} and reconciliation_status = 'unmatched'
+    `);
+  }
+}
+
 async function persistOfficeBankRawLineReassign(tx: ApiWriteTransaction, statementLineId: string, accountId: string): Promise<void> {
   if (tx.kind === "memory") {
     return;
@@ -3440,7 +3503,7 @@ function parseCashflowImportRow(record: Readonly<Record<string, string>>): { rea
   };
 }
 
-async function officeCashflowPreviewResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+async function officeCashflowPreviewResponse(context: ApiContext): Promise<Response> {
   const request = await readZodBody<OfficeCashflowImportRequest>(context, officeCashflowImportSchema);
   resolveWorkspaceId(context);
   const rows = request.rows.map((record: Readonly<Record<string, string>>, index: number) => {
@@ -6782,6 +6845,7 @@ async function officeBankImportConfirmResponse(context: ApiContext, dependencies
       const lines = parsedRows
         .map((row: ParsedOfficeBankPreviewRow): OfficeBankStatementLineInsert | null => row.line)
         .filter((line: OfficeBankStatementLineInsert | null): line is OfficeBankStatementLineInsert => line !== null);
+      const suggestions = buildOfficeReconciliationSuggestions(dependencies.fixtures.office, request.workspaceId, lines);
       const batchId = randomUUID();
       const importedAtIso = dependencies.nowIso();
       const dateRange = officeDateRange(lines.map((line) => line.occurredOn));
@@ -6811,6 +6875,7 @@ async function officeBankImportConfirmResponse(context: ApiContext, dependencies
         },
         lines
       });
+      await persistOfficeReconciliationSuggestions(tx, suggestions);
       const auditEventId = await appendAuditEvent(tx, {
         actor,
         action: "office_bank_import_confirm",
@@ -6821,6 +6886,7 @@ async function officeBankImportConfirmResponse(context: ApiContext, dependencies
           previewId: request.previewId,
           importedStatementLineCount: lines.length,
           rejectedRowCount: preview.rows.length - lines.length,
+          suggestedMatchCount: suggestions.length,
           status: batchStatus
         },
         idempotencyKey: resolvedIdempotencyKey
@@ -6848,6 +6914,7 @@ async function officeBankImportConfirmResponse(context: ApiContext, dependencies
         },
         lines
       });
+      applyOfficeReconciliationSuggestionsFixture(dependencies.fixtures, suggestions);
       appendOfficeAuditFixture(dependencies.fixtures, {
         id: auditEventId,
         actorId: actor.userId,
@@ -7898,6 +7965,135 @@ function parseOfficeBankPreviewRow(
     },
     issues: []
   };
+}
+
+function buildOfficeReconciliationSuggestions(
+  dataset: OfficeAnalyticsDataset,
+  workspaceId: string,
+  lines: readonly OfficeBankStatementLineInsert[]
+): readonly OfficeReconciliationSuggestion[] {
+  if (lines.length === 0) {
+    return [];
+  }
+
+  const transactionPool = dataset.transactions.filter(
+    (transaction) => transaction.workspaceId === workspaceId && transaction.isActive && transaction.status !== "cancelled"
+  );
+  const alreadyMatchedTransactionIds = new Set<string>([
+    ...dataset.bankStatementLines
+      .filter((line) => line.reconciliationStatus === "matched" && line.matchedTransactionId !== null)
+      .map((line) => line.matchedTransactionId as string),
+    ...dataset.bankReconciliationMatches
+      .filter((match) => match.status === "matched")
+      .map((match) => match.transactionId)
+  ]);
+
+  const usedTransactionIds = new Set<string>();
+  const suggestions: OfficeReconciliationSuggestion[] = [];
+
+  for (const line of lines) {
+    if (line.isDuplicateCandidate) {
+      continue;
+    }
+
+    const expectedType: OfficeTransactionRow["type"] = line.direction === "debit" ? "expense" : "income";
+    const rankedCandidates = transactionPool
+      .filter(
+        (transaction) =>
+          transaction.type === expectedType &&
+          absBigInt(transaction.amountMinor) === line.amountMurMinor &&
+          !alreadyMatchedTransactionIds.has(transaction.id) &&
+          !usedTransactionIds.has(transaction.id)
+      )
+      .map((transaction) => ({
+        transaction,
+        confidenceBp: reconciliationSuggestionConfidence(line, transaction)
+      }))
+      .filter((candidate) => candidate.confidenceBp >= 7800)
+      .sort((left, right) => right.confidenceBp - left.confidenceBp);
+
+    const best = rankedCandidates[0];
+    if (best === undefined) {
+      continue;
+    }
+
+    usedTransactionIds.add(best.transaction.id);
+    suggestions.push({
+      statementLineId: line.id,
+      transactionId: best.transaction.id,
+      confidenceBp: best.confidenceBp
+    });
+  }
+
+  return suggestions;
+}
+
+function reconciliationSuggestionConfidence(line: OfficeBankStatementLineInsert, transaction: OfficeTransactionRow): number {
+  const lineDate = line.occurredOn;
+  const transactionDate = transaction.transactionDate.slice(0, 10);
+  const dayDistance = absoluteIsoDayDistance(lineDate, transactionDate);
+  if (dayDistance > 7) {
+    return 0;
+  }
+
+  let confidence = 7000;
+  if (dayDistance === 0) {
+    confidence += 2500;
+  } else if (dayDistance <= 1) {
+    confidence += 2000;
+  } else if (dayDistance <= 3) {
+    confidence += 1400;
+  } else if (dayDistance <= 5) {
+    confidence += 900;
+  } else {
+    confidence += 400;
+  }
+
+  const lineText = normalizedSuggestionText(`${line.description} ${line.reference ?? ""}`);
+  const transactionText = normalizedSuggestionText(transaction.description ?? "");
+  if (lineText.length > 0 && transactionText.length > 0) {
+    const sharedTokenCount = sharedSuggestionTokenCount(lineText, transactionText);
+    confidence += Math.min(1200, sharedTokenCount * 200);
+
+    if (
+      (transactionText.length >= 6 && lineText.includes(transactionText)) ||
+      (lineText.length >= 6 && transactionText.includes(lineText))
+    ) {
+      confidence += 600;
+    }
+  }
+
+  return Math.min(9999, confidence);
+}
+
+function normalizedSuggestionText(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, " ")
+    .replace(/\s+/gu, " ");
+}
+
+function sharedSuggestionTokenCount(left: string, right: string): number {
+  const leftTokens = new Set(left.split(" ").filter((token) => token.length >= 3));
+  const rightTokens = new Set(right.split(" ").filter((token) => token.length >= 3));
+  let count = 0;
+  for (const token of leftTokens) {
+    if (rightTokens.has(token)) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+function absoluteIsoDayDistance(leftDate: string, rightDate: string): number {
+  const left = Date.parse(`${leftDate}T00:00:00Z`);
+  const right = Date.parse(`${rightDate}T00:00:00Z`);
+  if (Number.isNaN(left) || Number.isNaN(right)) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  return Math.floor(Math.abs(left - right) / 86_400_000);
 }
 
 function accountForRow(
@@ -8985,6 +9181,49 @@ function appendOfficeBankImportFixture(fixtures: ApiFixtureStore, patch: OfficeB
   ];
 }
 
+function applyOfficeReconciliationSuggestionsFixture(
+  fixtures: ApiFixtureStore,
+  suggestions: readonly OfficeReconciliationSuggestion[]
+): void {
+  if (suggestions.length === 0) {
+    return;
+  }
+
+  const mutableOffice = fixtures.office as Mutable<OfficeAnalyticsDataset>;
+  const suggestionsByLineId = new Map<string, OfficeReconciliationSuggestion>(
+    suggestions.map((suggestion) => [suggestion.statementLineId, suggestion])
+  );
+
+  mutableOffice.bankStatementLines = fixtures.office.bankStatementLines.map((line) => {
+    const suggestion = suggestionsByLineId.get(line.id);
+    if (suggestion === undefined || line.reconciliationStatus !== "unmatched") {
+      return line;
+    }
+
+    return {
+      ...line,
+      reconciliationStatus: "suggested",
+      matchedTransactionId: null
+    };
+  });
+
+  const suggestionKeys = new Set(suggestions.map((suggestion) => `${suggestion.statementLineId}:${suggestion.transactionId}`));
+  mutableOffice.bankReconciliationMatches = [
+    ...fixtures.office.bankReconciliationMatches.filter(
+      (match) => !suggestionKeys.has(`${match.bankStatementLineId}:${match.transactionId}`)
+    ),
+    ...suggestions.map((suggestion) => ({
+      id: randomUUID(),
+      bankStatementLineId: suggestion.statementLineId,
+      transactionId: suggestion.transactionId,
+      confidenceBp: suggestion.confidenceBp,
+      status: "suggested" as const,
+      approvedByUserId: null,
+      approvedAt: null
+    }))
+  ];
+}
+
 function markOfficeBankImportFixtureVoid(fixtures: ApiFixtureStore, batchId: string): void {
   const mutableOffice = fixtures.office as Mutable<OfficeAnalyticsDataset>;
   mutableOffice.bankImportBatches = fixtures.office.bankImportBatches.map((batch) => batch.id === batchId ? { ...batch, status: "void" } : batch);
@@ -9233,17 +9472,6 @@ function readOfficeTransactionVatMeta(transaction: OfficeTransactionRow): {
   };
 }
 
-function buildBatchWorkspaceLookup(
-  batches: readonly OfficeBankImportBatchRow[]
-): ReadonlyMap<string, string> {
-  const lookup = new Map<string, string>();
-  for (const batch of batches) {
-    lookup.set(batch.id, batch.workspaceId);
-  }
-
-  return lookup;
-}
-
 function toApiBankAccountSummary(account: OfficeBankAccountRow): {
   readonly id: string;
   readonly workspaceId: string;
@@ -9438,12 +9666,6 @@ function toAllocationStatusFilter(status: string | null): DistributionEarningAll
   ]);
 }
 
-function equalNames(left: string, right: string): boolean {
-  const normalizedLeft = left.trim().toLowerCase();
-  const normalizedRight = right.trim().toLowerCase();
-  return normalizedLeft === normalizedRight;
-}
-
 function filtersForPeriod(period: string, departmentId: string | null): OfficePnlFilters {
   return {
     dateFrom: `${period}-01`,
@@ -9541,6 +9763,336 @@ function readOfficeDashboardPrevious(
   };
 }
 
+function readOfficeDashboardAnalytics(
+  dependencies: ApiServiceDependencies,
+  workspaceId: string,
+  period: string,
+  filters: OfficePnlFilters
+): OfficeDashboardAnalyticsResponse {
+  const dataset = dependencies.fixtures.office;
+  const monthlyRows = readMonthlyPnl(dataset, filters);
+  const runwayWindowMonths = selectRunwayWindowMonths(monthlyRows);
+  const runway = readDashboardRunwayV1(dataset, period, monthlyRows, runwayWindowMonths);
+  const topExpenseCategories = topExpenseCategoriesKpis(dataset, filters);
+  const projectProfitability = projectProfitabilityKpis(dataset, filters);
+  const reconciliationByAccount = reconciliationByAccountKpis(dataset, workspaceId, filters, dependencies.nowIso());
+  const expenseTrendMonths = rollingMonthsEndingAt((filters.dateTo ?? `${period}-31`).slice(0, 7), 6);
+  const expenseTrendByDepartment = departmentExpenseTrendKpis(dataset, filters, expenseTrendMonths);
+
+  return {
+    period,
+    dateFrom: filters.dateFrom ?? `${period}-01`,
+    dateTo: filters.dateTo ?? `${period}-31`,
+    generatedAt: dependencies.nowIso(),
+    runway,
+    topExpenseCategories,
+    projectProfitability,
+    reconciliationByAccount,
+    oldestUnmatchedDays: oldestUnmatchedDayInAccounts(reconciliationByAccount),
+    expenseTrendMonths,
+    expenseTrendByDepartment
+  };
+}
+
+function readDashboardRunwayV1(
+  dataset: OfficeAnalyticsDataset,
+  period: string,
+  monthlyRows: readonly OfficePnlMonthlyRow[],
+  runwayWindowMonths: readonly string[]
+): OfficeDashboardAnalyticsResponse["runway"] {
+  const selectedRows = runwayWindowMonths.map((month) => requireRunwayMonthlyRow(monthlyRows, month));
+  const totalBurnUnits = selectedRows
+    .map((row) => runwayMonthlyBurnUnits(row))
+    .reduce((sum: bigint, value: bigint) => eofMoney.add(sum, value), 0n);
+  const averageBurnUnits = selectedRows.length === 0 ? 0n : roundRatioHalfUp(totalBurnUnits, BigInt(selectedRows.length));
+
+  let cashBalanceUnits = 0n;
+  const excludedForeignAccounts: OfficeDashboardRunwayExcludedAccount[] = [];
+  for (const account of dataset.bankAccounts) {
+    if (!account.isActive) {
+      continue;
+    }
+
+    if (account.currency === "MUR") {
+      cashBalanceUnits = eofMoney.add(cashBalanceUnits, account.currentBalanceMinor);
+      continue;
+    }
+
+    excludedForeignAccounts.push({
+      accountId: account.id,
+      bankName: account.bankName,
+      accountLabel: account.accountLabel,
+      currency: account.currency,
+      balanceMicro: eofMoney.format(account.currentBalanceMinor)
+    });
+  }
+
+  excludedForeignAccounts.sort((left, right) => {
+    const bankOrder = left.bankName.localeCompare(right.bankName);
+    if (bankOrder !== 0) {
+      return bankOrder;
+    }
+    return left.accountLabel.localeCompare(right.accountLabel);
+  });
+
+  return {
+    period,
+    cashBalanceMicro: eofMoney.format(cashBalanceUnits),
+    averageMonthlyBurnMicro: eofMoney.format(averageBurnUnits),
+    runwayMonths: averageBurnUnits === 0n ? null : formatScaledUnits(roundRatioHalfUp(cashBalanceUnits * 100n, averageBurnUnits), 2),
+    monthsUsed: selectedRows.map((row) => row.month),
+    excludedForeignAccounts
+  };
+}
+
+function requireRunwayMonthlyRow(rows: readonly OfficePnlMonthlyRow[], month: string): OfficePnlMonthlyRow {
+  const row = rows.find((candidate) => candidate.month === month);
+  if (row === undefined) {
+    throw new Error(`Office monthly P&L row not found for runway month ${month}.`);
+  }
+
+  return row;
+}
+
+function runwayMonthlyBurnUnits(row: OfficePnlMonthlyRow): bigint {
+  const incomeUnits = eofMoney.parse(row.income);
+  const expenseUnits = eofMoney.parse(row.expense);
+  const netBurnUnits = eofMoney.sub(expenseUnits, incomeUnits);
+  return netBurnUnits > 0n ? netBurnUnits : 0n;
+}
+
+function selectRunwayWindowMonths(monthlyRows: readonly OfficePnlMonthlyRow[]): readonly string[] {
+  const months = [...new Set<string>(monthlyRows.map((row) => row.month))].sort((left, right) => left.localeCompare(right));
+  if (months.length <= 3) {
+    return months;
+  }
+
+  return months.slice(months.length - 3);
+}
+
+function topExpenseCategoriesKpis(
+  dataset: OfficeAnalyticsDataset,
+  filters: OfficePnlFilters
+): readonly OfficeDashboardExpenseCategoryKpi[] {
+  const rows = readPnlByCategory(dataset, filters)
+    .map((row) => ({
+      categoryId: row.category_id,
+      label: `${row.department_name} · ${row.division_name} · ${row.category_name}`,
+      expenseUnits: eofMoney.parse(row.expense)
+    }))
+    .filter((row) => row.expenseUnits > 0n)
+    .sort((left, right) => (right.expenseUnits === left.expenseUnits ? 0 : right.expenseUnits > left.expenseUnits ? 1 : -1));
+
+  let totalExpenseUnits = 0n;
+  for (const row of rows) {
+    totalExpenseUnits = eofMoney.add(totalExpenseUnits, row.expenseUnits);
+  }
+
+  return rows.slice(0, 6).map((row): OfficeDashboardExpenseCategoryKpi => ({
+    categoryId: row.categoryId,
+    label: row.label,
+    expenseMicro: eofMoney.format(row.expenseUnits),
+    shareBp: totalExpenseUnits === 0n ? 0 : roundRatioBp(row.expenseUnits, totalExpenseUnits)
+  }));
+}
+
+function projectProfitabilityKpis(
+  dataset: OfficeAnalyticsDataset,
+  filters: OfficePnlFilters
+): readonly OfficeDashboardProjectProfitabilityKpi[] {
+  return dataset.projects
+    .map((project) => toProjectSummary(dataset, project, filters))
+    .sort((left, right) => {
+      const leftNet = eofMoney.parse(left.netMicro);
+      const rightNet = eofMoney.parse(right.netMicro);
+      if (rightNet === leftNet) {
+        return 0;
+      }
+      return rightNet > leftNet ? 1 : -1;
+    })
+    .slice(0, 6)
+    .map((project): OfficeDashboardProjectProfitabilityKpi => {
+      const incomeUnits = eofMoney.parse(project.periodIncomeMicro);
+      const netUnits = eofMoney.parse(project.netMicro);
+      return {
+        projectId: project.id,
+        projectLabel: project.label,
+        incomeMicro: project.periodIncomeMicro,
+        expenseMicro: project.periodExpenseMicro,
+        netMicro: project.netMicro,
+        marginBp: incomeUnits === 0n ? null : roundSignedRatioBp(netUnits, incomeUnits)
+      };
+    });
+}
+
+function reconciliationByAccountKpis(
+  dataset: OfficeAnalyticsDataset,
+  workspaceId: string,
+  filters: OfficePnlFilters,
+  nowIsoText: string
+): readonly OfficeDashboardReconciliationAccountKpi[] {
+  const matchedLineIds = new Set<string>(
+    dataset.bankReconciliationMatches.filter((match) => match.status === "matched").map((match) => match.bankStatementLineId)
+  );
+  const today = nowIsoText.slice(0, 10);
+
+  return dataset.bankAccounts
+    .filter((account) => account.workspaceId === workspaceId)
+    .map((account): OfficeDashboardReconciliationAccountKpi => {
+      const lines = dataset.bankStatementLines.filter((line) => line.accountId === account.id && dateInFilters(line.occurredOn, filters));
+      const matchedCount = lines.filter((line) => line.reconciliationStatus === "matched" || matchedLineIds.has(line.id)).length;
+      const unmatchedLines = lines.filter((line) => line.reconciliationStatus === "unmatched" && !matchedLineIds.has(line.id));
+      const oldestUnmatched = unmatchedLines
+        .map((line) => line.occurredOn.slice(0, 10))
+        .sort((left, right) => left.localeCompare(right))[0] ?? null;
+
+      return {
+        accountId: account.id,
+        accountLabel: account.accountLabel,
+        bankName: account.bankName,
+        currency: account.currency,
+        lineCount: lines.length,
+        unmatchedLineCount: unmatchedLines.length,
+        matchedRateBp: lines.length === 0 ? 0 : roundRatioBp(BigInt(matchedCount), BigInt(lines.length)),
+        oldestUnmatchedDays: oldestUnmatched === null ? null : daysSinceIsoDate(oldestUnmatched, today)
+      };
+    })
+    .sort((left, right) => {
+      if (right.unmatchedLineCount !== left.unmatchedLineCount) {
+        return right.unmatchedLineCount - left.unmatchedLineCount;
+      }
+      const rightOldest = right.oldestUnmatchedDays ?? -1;
+      const leftOldest = left.oldestUnmatchedDays ?? -1;
+      return rightOldest - leftOldest;
+    });
+}
+
+function oldestUnmatchedDayInAccounts(rows: readonly OfficeDashboardReconciliationAccountKpi[]): number | null {
+  let oldest: number | null = null;
+  for (const row of rows) {
+    if (row.oldestUnmatchedDays === null) {
+      continue;
+    }
+    if (oldest === null || row.oldestUnmatchedDays > oldest) {
+      oldest = row.oldestUnmatchedDays;
+    }
+  }
+  return oldest;
+}
+
+function rollingMonthsEndingAt(anchorMonth: string, count: number): readonly string[] {
+  if (count <= 0) {
+    return [];
+  }
+
+  const months: string[] = [anchorMonth];
+  while (months.length < count) {
+    months.unshift(previousMonth(months[0] ?? anchorMonth));
+  }
+  return months;
+}
+
+function departmentExpenseTrendKpis(
+  dataset: OfficeAnalyticsDataset,
+  filters: OfficePnlFilters,
+  months: readonly string[]
+): readonly OfficeDashboardDepartmentExpenseTrendKpi[] {
+  if (months.length === 0) {
+    return [];
+  }
+
+  const monthIndexes = new Map<string, number>(months.map((month, index) => [month, index]));
+  const trends = new Map<string, { readonly departmentLabel: string; readonly series: bigint[] }>();
+
+  for (const transaction of dataset.transactions) {
+    if (
+      !transaction.isActive ||
+      transaction.status !== "validated" ||
+      transaction.type !== "expense" ||
+      transaction.categoryId === null ||
+      !isOfficeFxValidForLedger(transaction) ||
+      !isOfficeTransactionInRange(transaction, filters)
+    ) {
+      continue;
+    }
+
+    const month = transaction.transactionDate.slice(0, 7);
+    const monthIndex = monthIndexes.get(month);
+    if (monthIndex === undefined) {
+      continue;
+    }
+
+    const path = resolveCategoryPath(dataset, transaction.categoryId);
+    if (path.department === null) {
+      continue;
+    }
+
+    const existing = trends.get(path.department.id);
+    const series = existing?.series ?? months.map(() => 0n);
+    series[monthIndex] = eofMoney.add(series[monthIndex] ?? 0n, absBigInt(transaction.amountMinor));
+    trends.set(path.department.id, {
+      departmentLabel: path.department.name,
+      series
+    });
+  }
+
+  return [...trends.entries()]
+    .map(([departmentId, row]) => ({
+      departmentId,
+      departmentLabel: row.departmentLabel,
+      monthlyExpenseMicro: row.series.map((value) => eofMoney.format(value)),
+      latestMonthExpenseMicro: eofMoney.format(row.series[row.series.length - 1] ?? 0n),
+      latestMonthUnits: row.series[row.series.length - 1] ?? 0n,
+      totalUnits: row.series.reduce((sum, value) => eofMoney.add(sum, value), 0n)
+    }))
+    .sort((left, right) => {
+      if (right.latestMonthUnits !== left.latestMonthUnits) {
+        return right.latestMonthUnits > left.latestMonthUnits ? 1 : -1;
+      }
+      if (right.totalUnits !== left.totalUnits) {
+        return right.totalUnits > left.totalUnits ? 1 : -1;
+      }
+      return left.departmentLabel.localeCompare(right.departmentLabel);
+    })
+    .slice(0, 4)
+    .map((row): OfficeDashboardDepartmentExpenseTrendKpi => ({
+      departmentId: row.departmentId,
+      departmentLabel: row.departmentLabel,
+      monthlyExpenseMicro: row.monthlyExpenseMicro,
+      latestMonthExpenseMicro: row.latestMonthExpenseMicro
+    }));
+}
+
+function daysSinceIsoDate(fromDay: string, toDay: string): number {
+  const from = Date.parse(`${fromDay}T00:00:00Z`);
+  const to = Date.parse(`${toDay}T00:00:00Z`);
+  if (Number.isNaN(from) || Number.isNaN(to) || to < from) {
+    return 0;
+  }
+
+  return Math.floor((to - from) / 86_400_000);
+}
+
+function roundRatioBp(numerator: bigint, denominator: bigint): number {
+  if (denominator === 0n) {
+    return 0;
+  }
+
+  return Number((numerator * 10_000n + denominator / 2n) / denominator);
+}
+
+function roundSignedRatioBp(numerator: bigint, denominator: bigint): number {
+  if (denominator === 0n) {
+    return 0;
+  }
+
+  const negative = (numerator < 0n) !== (denominator < 0n);
+  const absoluteNumerator = absBigInt(numerator);
+  const absoluteDenominator = absBigInt(denominator);
+  const magnitude = Number((absoluteNumerator * 10_000n + absoluteDenominator / 2n) / absoluteDenominator);
+  return negative ? -magnitude : magnitude;
+}
+
 function previousMonth(month: string): string {
   const year = Number(month.slice(0, 4));
   const monthIndex = Number(month.slice(5, 7));
@@ -9586,13 +10138,7 @@ function toOfficeGlobalPnl(dataset: OfficeAnalyticsDataset, period: string, filt
     netMicro,
     validatedProjectionId: `projection_global_${period}`,
     projectionRows: toProjectionRows(projectionRows, period),
-    lines: readPnlByCategory(dataset, filters).map((row) => ({
-      id: row.category_id,
-      label: `${row.department_name} · ${row.division_name} · ${row.category_name}`,
-      incomeMicro: row.income,
-      expenseMicro: row.expense,
-      netMicro: row.profit
-    }))
+    lines: toOfficeCategoryPnlLines(dataset, filters)
   };
 }
 
@@ -9689,7 +10235,6 @@ function isOfficeTransactionInRange(transaction: OfficeTransactionRow, filters: 
 
 function toOfficeDepartmentPnl(dataset: OfficeAnalyticsDataset, departmentId: string, period: string, filters: OfficePnlFilters): OfficeDepartmentPnl {
   const pnl = readDepartmentPnl(dataset, departmentId, filters);
-  const categoryRows = readPnlByCategory(dataset, filters).filter((row) => row.department_id === departmentId);
   return {
     scope: "department",
     completeness: "complete",
@@ -9714,14 +10259,21 @@ function toOfficeDepartmentPnl(dataset: OfficeAnalyticsDataset, departmentId: st
       ],
       period
     ),
-    lines: categoryRows.map((row) => ({
-      id: row.category_id,
-      label: `${row.division_name} · ${row.category_name}`,
-      incomeMicro: row.income,
-      expenseMicro: row.expense,
-      netMicro: row.profit
-    }))
+    lines: toOfficeCategoryPnlLines(dataset, filters)
   };
+}
+
+function toOfficeCategoryPnlLines(dataset: OfficeAnalyticsDataset, filters: OfficePnlFilters): readonly OfficePnlLine[] {
+  const includeDepartmentInLabel = filters.departmentId === null;
+  return readPnlByCategory(dataset, filters).map((row): OfficePnlLine => ({
+    id: row.category_id,
+    label: includeDepartmentInLabel
+      ? `${row.department_name} · ${row.division_name} · ${row.category_name}`
+      : `${row.division_name} · ${row.category_name}`,
+    incomeMicro: row.income,
+    expenseMicro: row.expense,
+    netMicro: row.profit
+  }));
 }
 
 function toProjectionRows(rows: readonly OfficePnlDepartmentRow[], period: string): readonly OfficePnlProjectionRow[] {
@@ -9991,12 +10543,19 @@ function toReconciliationCandidates(dataset: OfficeAnalyticsDataset): readonly O
       // so clients render outflows with the right sign and tone.
       amountMicro: eofMoney.format(line.direction === "debit" ? -line.amountMurMinor : line.amountMurMinor),
       confidenceBp: match?.confidenceBp ?? (line.reconciliationStatus === "matched" ? 10000 : 0),
-      status: toApiReconciliationStatus(line)
+      status: toApiReconciliationStatus(line, match)
     };
   });
 }
 
-function toApiReconciliationStatus(line: OfficeBankStatementLineRow): OfficeReconciliationCandidate["status"] {
+function toApiReconciliationStatus(
+  line: OfficeBankStatementLineRow,
+  match:
+    | {
+      readonly status: "unmatched" | "suggested" | "matched" | "rejected" | "ignored";
+    }
+    | undefined
+): OfficeReconciliationCandidate["status"] {
   if (line.reconciliationStatus === "matched") {
     return "matched";
   }
@@ -10010,6 +10569,22 @@ function toApiReconciliationStatus(line: OfficeBankStatementLineRow): OfficeReco
   }
 
   if (line.reconciliationStatus === "ignored") {
+    return "ignored";
+  }
+
+  if (match?.status === "suggested") {
+    return "suggested";
+  }
+
+  if (match?.status === "matched") {
+    return "matched";
+  }
+
+  if (match?.status === "rejected") {
+    return "rejected";
+  }
+
+  if (match?.status === "ignored") {
     return "ignored";
   }
 
@@ -10945,29 +11520,6 @@ function balanceReference(payeeId: string, currency: string, balanceId: string |
   }
 
   return `${currency} balance row`;
-}
-
-function createMutationReceipt(entityId: string, idempotencyKey: string): ApiMutationReceipt {
-  const sanitized = sanitizeId(idempotencyKey);
-  return {
-    id: entityId,
-    status: "accepted",
-    auditEventId: `audit_${sanitized}`
-  };
-}
-
-function createRunReceipt(runId: string, status: ApiRunReceipt["status"], lockKey: string, idempotencyKey: string): ApiRunReceipt {
-  return {
-    runId,
-    status,
-    lockKey,
-    auditEventId: `audit_${sanitizeId(idempotencyKey)}`
-  };
-}
-
-function sanitizeId(value: string): string {
-  const sanitized = value.replace(/[^A-Za-z0-9_:-]/g, "_");
-  return sanitized.length === 0 ? "empty" : sanitized;
 }
 
 function formatPeriodLabel(start: string | null, end: string | null): string {

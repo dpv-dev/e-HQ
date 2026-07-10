@@ -1,6 +1,5 @@
 import { Pool } from "pg";
 import type {
-  AuditLogEntry,
   CurrencyCode,
   DistributionContract,
   DistributionContractExpense,

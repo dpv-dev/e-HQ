@@ -12,7 +12,6 @@ import {
   type OfficeDivisionRow,
   type OfficeFinancialAllocationRow,
   type OfficePartnerRow,
-  type OfficeProjectBudgetLineRow,
   type OfficeProjectRow,
   type OfficeTransactionRow,
   readGlobalPnl

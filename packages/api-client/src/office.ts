@@ -21,12 +21,15 @@ import type {
   OfficeBankQualityResponse,
   OfficeBankRawLine,
   OfficeBankRawLinesQuery,
+  OfficeDashboardAnalyticsQuery,
+  OfficeDashboardAnalyticsResponse,
   OfficeDashboardQuery,
   OfficeDashboardResponse,
   OfficeDepartmentPnl,
   OfficeDepartmentPnlQuery,
   OfficeDivisionPnl,
   OfficeDivisionPnlQuery,
+  OfficeCategoryPnlQuery,
   OfficeGlobalPnl,
   OfficeGlobalPnlQuery,
   OfficeIntegrityCheckAllResponse,
@@ -46,6 +49,7 @@ import type {
   OfficePlanComptableNodesQuery,
   OfficePlanComptableQuery,
   OfficePlanComptableWriteRequest,
+  OfficePnlLine,
   OfficeProjectCoherenceViolation,
   OfficeProjectCoherenceViolationsQuery,
   OfficeProjectPnl,
@@ -75,9 +79,11 @@ export interface OfficeApiClient {
   readonly getStatus: (query: { readonly workspaceId: EntityId }) => Promise<{ readonly writesEnabled: boolean }>;
   readonly getScreen: (query: OfficeScreenQuery) => Promise<OfficeScreenResponse>;
   readonly getDashboard: (query: OfficeDashboardQuery) => Promise<OfficeDashboardResponse>;
+  readonly getDashboardAnalytics: (query: OfficeDashboardAnalyticsQuery) => Promise<OfficeDashboardAnalyticsResponse>;
   readonly getGlobalPnl: (query: OfficeGlobalPnlQuery) => Promise<OfficeGlobalPnl>;
   readonly getDepartmentPnl: (departmentId: EntityId, query: OfficeDepartmentPnlQuery) => Promise<OfficeDepartmentPnl>;
   readonly getDivisionPnl: (query: OfficeDivisionPnlQuery) => Promise<PageResult<OfficeDivisionPnl>>;
+  readonly getCategoryPnl: (query: OfficeCategoryPnlQuery) => Promise<PageResult<OfficePnlLine>>;
   readonly listTransactions: (query: OfficeTransactionsQuery) => Promise<PageResult<OfficeTransaction>>;
   readonly createTransaction: (
     request: OfficeTransactionWriteRequest,
@@ -236,6 +242,13 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
         dateFrom: query.dateFrom ?? null,
         dateTo: query.dateTo ?? null
       }),
+    getDashboardAnalytics: (query: OfficeDashboardAnalyticsQuery): Promise<OfficeDashboardAnalyticsResponse> =>
+      transport.get<OfficeDashboardAnalyticsResponse>("analytics/dashboard", {
+        workspaceId: query.workspaceId,
+        period: query.period,
+        dateFrom: query.dateFrom ?? null,
+        dateTo: query.dateTo ?? null
+      }),
     getGlobalPnl: (query: OfficeGlobalPnlQuery): Promise<OfficeGlobalPnl> =>
       transport.get<OfficeGlobalPnl>("pl/global", {
         workspaceId: query.workspaceId,
@@ -256,6 +269,16 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
         period: query.period,
         dateFrom: query.dateFrom ?? null,
         dateTo: query.dateTo ?? null,
+        cursor: query.cursor,
+        limit: query.limit
+      }),
+    getCategoryPnl: (query: OfficeCategoryPnlQuery): Promise<PageResult<OfficePnlLine>> =>
+      transport.get<PageResult<OfficePnlLine>>("pl/category", {
+        workspaceId: query.workspaceId,
+        period: query.period,
+        dateFrom: query.dateFrom ?? null,
+        dateTo: query.dateTo ?? null,
+        departmentId: query.departmentId,
         cursor: query.cursor,
         limit: query.limit
       }),

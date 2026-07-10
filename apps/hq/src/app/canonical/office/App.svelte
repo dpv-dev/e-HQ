@@ -9,6 +9,7 @@
     Drawer,
     Input,
     KPI,
+    LineChart,
     Loader,
     PageHeader,
     SectionTemplate,
@@ -39,6 +40,7 @@
     type BankImportPreviewResponse,
     type CashflowBucket,
     type OfficeDashboardResponse,
+    type OfficeDashboardAnalyticsResponse,
     type OfficeDepartmentPnl,
     type OfficeDivisionPnl,
     type OfficeGlobalPnl,
@@ -96,7 +98,7 @@
   type SelectFilterValue = string;
   type ImportSource = "mcb" | "sbi" | "csv" | "cashflow" | "pdf";
   type RequestStatus = "idle" | "loading" | "success" | "error";
-  type OfficePagedTableId = "divisionPnl" | "planComptable" | "transactions" | "pending" | "reconciliation" | "audit";
+  type OfficePagedTableId = "divisionPnl" | "pnlCategory" | "planComptable" | "transactions" | "pending" | "reconciliation" | "audit";
 
   interface Props {
     readonly session: AuthSession;
@@ -163,6 +165,16 @@
     readonly trendDetail: string;
   }
 
+  interface DashboardRunwayPanel {
+    readonly value: string;
+    readonly detail: string;
+    readonly tone: Tone;
+    readonly cash: string;
+    readonly burn: string;
+    readonly monthsUsed: string;
+    readonly excludedForeignAccounts: readonly string[];
+  }
+
   const { session, onLogout }: Props = $props();
   const client = createShellApiClient();
   const officeWorkspaceId = "eeee-mu";
@@ -192,8 +204,20 @@
           subtitle: "Validated projections · departments, divisions, and categories."
         },
         {
+          id: "cashflow",
+          label: "Cash Flow",
+          title: "Cash-flow",
+          subtitle: "Inflows, outflows, and closing balances by period."
+        },
+        {
+          id: "vat",
+          label: "VAT",
+          title: "VAT report",
+          subtitle: "VAT by period, derived from existing typed data."
+        },
+        {
           id: "coa",
-          label: "Chart of accounts",
+          label: "Charts of Account",
           title: "Chart of accounts",
           subtitle: "Department → Division → Category."
         }
@@ -204,22 +228,22 @@
       label: "Operations",
       items: [
         {
-          id: "transactions",
-          label: "Transactions",
-          title: "Transactions",
-          subtitle: "Ledger filtered by every Office dimension."
-        },
-        {
           id: "imports",
           label: "Imports",
           title: "Imports",
           subtitle: "Monthly bank statements with automatic analysis then confirmed import."
         },
         {
-          id: "reconciliation",
-          label: "Reconciliation",
-          title: "Reconciliation",
-          subtitle: "Bank ↔ ledger matching and batch approval."
+          id: "bank",
+          label: "Bank",
+          title: "Bank",
+          subtitle: "Bank accounts, raw bank lines, and bank quality."
+        },
+        {
+          id: "transactions",
+          label: "Transactions",
+          title: "Transactions",
+          subtitle: "Ledger filtered by every Office dimension."
         },
         {
           id: "pending",
@@ -228,16 +252,10 @@
           subtitle: "Classification and batch validation."
         },
         {
-          id: "cashflow",
-          label: "Cash-flow",
-          title: "Cash-flow",
-          subtitle: "Inflows, outflows, and closing balances by period."
-        },
-        {
-          id: "bank",
-          label: "Bank",
-          title: "Bank",
-          subtitle: "Bank accounts, raw bank lines, and bank quality."
+          id: "reconciliation",
+          label: "Reconciliation",
+          title: "Reconciliation",
+          subtitle: "Bank ↔ ledger matching and batch approval."
         }
       ]
     },
@@ -262,12 +280,6 @@
           label: "Projects",
           title: "Projects",
           subtitle: "Project P&L and coherence checks from Office projections."
-        },
-        {
-          id: "monitoring",
-          label: "Monitoring",
-          title: "Monitoring",
-          subtitle: "Integrity checks, bank quality, pending rows, imports, and audit trail."
         }
       ]
     },
@@ -282,10 +294,10 @@
           subtitle: "Read-only trail of Office audit events."
         },
         {
-          id: "vat",
-          label: "VAT",
-          title: "VAT report",
-          subtitle: "VAT by period, derived from existing typed data."
+          id: "monitoring",
+          label: "Monitoring",
+          title: "Monitoring",
+          subtitle: "Integrity checks, bank quality, pending rows, imports, and audit trail."
         },
         {
           id: "settings",
@@ -311,8 +323,8 @@
     { label: "Reconciled", value: "reconciled" },
     { label: "Voided", value: "voided" }
   ];
-  // "rejected" is intentionally absent: the eof/v1 reconciliations list query only
-  // accepts unmatched/suggested/matched, so offering it would be a silent no-op filter.
+  // Keep all lifecycle statuses visible in the filter so reconciliation reviewers
+  // can audit both accepted and declined propositions.
   const reconciliationStatusOptions: readonly SelectOption[] = [
     { label: "All", value: allValue },
     { label: "Unmatched", value: "unmatched" },
@@ -391,9 +403,13 @@
   const today = todayIso();
   let customRange = $state<DateRange | null>(null);
   let dashboardState = $state<ApiRequestState<OfficeDashboardResponse>>(createIdleState<OfficeDashboardResponse>());
+  let dashboardAnalyticsState = $state<ApiRequestState<OfficeDashboardAnalyticsResponse>>(createIdleState<OfficeDashboardAnalyticsResponse>());
   let pnlState = $state<ApiRequestState<OfficeGlobalPnl | OfficeDepartmentPnl>>(createIdleState<OfficeGlobalPnl | OfficeDepartmentPnl>());
   let divisionPnlState = $state<ApiRequestState<PageResult<OfficeDivisionPnl>>>(
     createIdleState<PageResult<OfficeDivisionPnl>>()
+  );
+  let pnlCategoryState = $state<ApiRequestState<PageResult<OfficePnlLine>>>(
+    createIdleState<PageResult<OfficePnlLine>>()
   );
   let planTableState = $state<ApiRequestState<PageResult<OfficePlanComptableNode>>>(
     createIdleState<PageResult<OfficePlanComptableNode>>()
@@ -499,6 +515,7 @@
   const pnlResult = $derived(readPnlResult(pnlState));
   const pnlRows = $derived(pnlResult?.projectionRows ?? []);
   const pnlLineRows = $derived(pnlResult?.lines ?? []);
+  const pnlCategoryRows = $derived(readPageItems(pnlCategoryState));
   const divisionPnlRows = $derived(readPageItems(divisionPnlState));
   const departmentOptions = $derived(createPlanOptions(planNodes, "department", "All departments"));
   const divisionOptions = $derived(createPlanOptions(planNodes, "division", "All divisions"));
@@ -610,7 +627,7 @@
   const pnlChartPoints = $derived(createPnlChartPoints(pnlRows));
   const pnlTableRows = $derived(createPnlTableRows(pnlRows));
   const dashboardPnlRows = $derived(pnlTableRows.slice(0, 6));
-  const pnlLineTableRows = $derived(createPnlLineTableRows(pnlLineRows));
+  const pnlLineTableRows = $derived(createPnlLineTableRows(pnlCategoryRows));
   const pnlCategoryImpactPoints = $derived(createPnlCategoryImpactPoints(pnlLineRows));
   const divisionPnlTableRows = $derived(createDivisionPnlTableRows(divisionPnlRows));
   const planTableRows = $derived(createPlanTableRows(planTableNodes));
@@ -619,6 +636,9 @@
   const reconciliationTableRows = $derived(createReconciliationTableRows(reconciliationRows));
   const divisionPnlPagination = $derived<TablePagination | null>(
     createTablePagination(divisionPnlState, tablePaginationLoading === "divisionPnl", tablePaginationError("divisionPnl"), loadMoreDivisionPnl, loadAllDivisionPnl)
+  );
+  const pnlCategoryPagination = $derived<TablePagination | null>(
+    createTablePagination(pnlCategoryState, tablePaginationLoading === "pnlCategory", tablePaginationError("pnlCategory"), loadMorePnlCategory, loadAllPnlCategory)
   );
   const planPagination = $derived<TablePagination | null>(
     createTablePagination(planTableState, tablePaginationLoading === "planComptable", tablePaginationError("planComptable"), loadMorePlanComptableNodes, loadAllPlanComptableNodes)
@@ -655,6 +675,16 @@
   const recentImportRows = $derived(createRecentImportRows(dashboardState));
   const dashboardImportPoints = $derived(createDashboardImportPoints(dashboardState));
   const dashboardImportRows = $derived(recentImportRows.slice(0, 6));
+  const dashboardAnalyticsKpis = $derived(createDashboardAnalyticsKpis(dashboardAnalyticsState));
+  const dashboardRunwayPanel = $derived(createDashboardRunwayPanel(dashboardAnalyticsState));
+  const dashboardExpenseCategoryPoints = $derived(createDashboardExpenseCategoryPoints(dashboardAnalyticsState));
+  const dashboardExpenseCategoryRows = $derived(createDashboardExpenseCategoryRows(dashboardAnalyticsState));
+  const dashboardProjectProfitabilityPoints = $derived(createDashboardProjectProfitabilityPoints(dashboardAnalyticsState));
+  const dashboardProjectProfitabilityRows = $derived(createDashboardProjectProfitabilityRows(dashboardAnalyticsState));
+  const dashboardReconciliationPoints = $derived(createDashboardReconciliationPoints(dashboardAnalyticsState));
+  const dashboardReconciliationRows = $derived(createDashboardReconciliationRows(dashboardAnalyticsState));
+  const dashboardExpenseTrendPoints = $derived(createDashboardExpenseTrendPoints(dashboardAnalyticsState));
+  const dashboardExpenseTrendRows = $derived(createDashboardExpenseTrendRows(dashboardAnalyticsState));
   const coaStructurePoints = $derived(createCoaStructurePoints(planTableNodes));
   const transactionTypePoints = $derived(createTransactionTypePoints(transactionRows));
   const transactionStatusPoints = $derived(createTransactionStatusPoints(transactionRows));
@@ -678,11 +708,13 @@
     // path (older API without /screen/office, or a transient bundle failure).
     const seeded = await loadOfficeScreen();
     if (seeded) {
+      await loadDashboardAnalytics();
       return;
     }
     await Promise.all([
       loadWriteGate(),
       loadDashboard(),
+      loadDashboardAnalytics(),
       loadPnlProjection(),
       loadPlanComptable(),
       loadTransactions(),
@@ -747,6 +779,35 @@
           period,
           dateFrom: activeRange.from,
           dateTo: activeRange.to,
+          cursor,
+          limit: TABLE_PAGE_SIZE
+        }),
+      mode
+    );
+  }
+
+  async function loadMorePnlCategory(): Promise<void> {
+    await loadPnlCategoryPage("one");
+  }
+
+  async function loadAllPnlCategory(): Promise<void> {
+    await loadPnlCategoryPage("all");
+  }
+
+  async function loadPnlCategoryPage(mode: PageLoadMode): Promise<void> {
+    await loadOfficePageResult(
+      "pnlCategory",
+      pnlCategoryState,
+      (state: ApiRequestState<PageResult<OfficePnlLine>>): void => {
+        pnlCategoryState = state;
+      },
+      (cursor: string): Promise<PageResult<OfficePnlLine>> =>
+        client.office.getCategoryPnl({
+          workspaceId: officeWorkspaceId,
+          period,
+          dateFrom: activeRange.from,
+          dateTo: activeRange.to,
+          departmentId: toNullableFilter(departmentFilter),
           cursor,
           limit: TABLE_PAGE_SIZE
         }),
@@ -994,13 +1055,30 @@
     }
   }
 
+  async function loadDashboardAnalytics(): Promise<void> {
+    dashboardAnalyticsState = beginReload<OfficeDashboardAnalyticsResponse>(dashboardAnalyticsState);
+
+    try {
+      const analytics = await client.office.getDashboardAnalytics({
+        workspaceId: officeWorkspaceId,
+        period,
+        dateFrom: activeRange.from,
+        dateTo: activeRange.to
+      });
+      dashboardAnalyticsState = createSuccessState<OfficeDashboardAnalyticsResponse>(analytics);
+    } catch (error: unknown) {
+      dashboardAnalyticsState = createErrorState<OfficeDashboardAnalyticsResponse>(error);
+    }
+  }
+
   async function loadPnlProjection(): Promise<void> {
     pnlState = beginReload<OfficeGlobalPnl | OfficeDepartmentPnl>(pnlState);
     divisionPnlState = beginReload<PageResult<OfficeDivisionPnl>>(divisionPnlState);
+    pnlCategoryState = beginReload<PageResult<OfficePnlLine>>(pnlCategoryState);
 
     try {
       const departmentId = toNullableFilter(departmentFilter);
-      const [pnl, divisions] = await Promise.all([
+      const [pnl, divisions, categoryRows] = await Promise.all([
         departmentId === null
           ? client.office.getGlobalPnl({
               workspaceId: officeWorkspaceId,
@@ -1021,14 +1099,26 @@
           dateTo: activeRange.to,
           cursor: null,
           limit: TABLE_PAGE_SIZE
+          }),
+        client.office.getCategoryPnl({
+          workspaceId: officeWorkspaceId,
+          period,
+          dateFrom: activeRange.from,
+          dateTo: activeRange.to,
+          departmentId,
+          cursor: null,
+          limit: TABLE_PAGE_SIZE
         })
       ]);
       pnlState = createSuccessState<OfficeGlobalPnl | OfficeDepartmentPnl>(pnl);
       divisionPnlState = createSuccessState<PageResult<OfficeDivisionPnl>>(divisions);
+      pnlCategoryState = createSuccessState<PageResult<OfficePnlLine>>(categoryRows);
       setTablePaginationError("divisionPnl", null);
+      setTablePaginationError("pnlCategory", null);
     } catch (error: unknown) {
       pnlState = createErrorState<OfficeGlobalPnl | OfficeDepartmentPnl>(error);
       divisionPnlState = createErrorState<PageResult<OfficeDivisionPnl>>(error);
+      pnlCategoryState = createErrorState<PageResult<OfficePnlLine>>(error);
     }
   }
 
@@ -1387,7 +1477,7 @@
         { idempotencyKey: createIdempotencyKey("import-reverse") }
       );
       actionReceipt = receipt;
-      await Promise.all([loadDashboard(), loadTransactions()]);
+      await Promise.all([loadDashboard(), loadDashboardAnalytics(), loadTransactions()]);
     } catch (error: unknown) {
       dashboardState = createErrorState<OfficeDashboardResponse>(error);
     }
@@ -1412,7 +1502,7 @@
         { idempotencyKey: createIdempotencyKey("import-delete") }
       );
       actionReceipt = receipt;
-      await Promise.all([loadDashboard(), loadTransactions()]);
+      await Promise.all([loadDashboard(), loadDashboardAnalytics(), loadTransactions()]);
     } catch (error: unknown) {
       dashboardState = createErrorState<OfficeDashboardResponse>(error);
     }
@@ -1980,7 +2070,12 @@
       dashboardState = createSuccessState<OfficeDashboardResponse>(screen.dashboard);
       pnlState = createSuccessState<OfficeGlobalPnl | OfficeDepartmentPnl>(screen.globalPnl);
       divisionPnlState = createSuccessState<PageResult<OfficeDivisionPnl>>(screen.divisionPnl);
+      pnlCategoryState = createSuccessState<PageResult<OfficePnlLine>>({
+        items: screen.globalPnl.lines.slice(0, TABLE_PAGE_SIZE),
+        nextCursor: screen.globalPnl.lines.length > TABLE_PAGE_SIZE ? String(TABLE_PAGE_SIZE) : null
+      });
       setTablePaginationError("divisionPnl", null);
+      setTablePaginationError("pnlCategory", null);
       planState = createSuccessState<readonly OfficePlanComptableNode[]>(screen.planComptable);
       planTableState = createSuccessState<PageResult<OfficePlanComptableNode>>({
         items: screen.planComptable.slice(0, TABLE_PAGE_SIZE),
@@ -2023,6 +2118,7 @@
     if (!seeded) {
       await Promise.all([
         loadDashboard(),
+        loadDashboardAnalytics(),
         loadPnlProjection(),
         loadTransactions(),
         loadPendingTransactions(),
@@ -2033,7 +2129,7 @@
     }
 
     // The bundle used default filters — refetch only the sections whose active filter differs.
-    const followUps: Promise<void>[] = [];
+    const followUps: Promise<void>[] = [loadDashboardAnalytics()];
     if (departmentFilter !== allValue) {
       followUps.push(loadPnlProjection());
     }
@@ -2385,6 +2481,7 @@
         };
         await Promise.all([
           loadDashboard(),
+          loadDashboardAnalytics(),
           loadTransactions(),
           loadPendingTransactions(),
           loadReconciliations()
@@ -2739,6 +2836,269 @@
     }
 
     return points;
+  }
+
+  function createDashboardAnalyticsKpis(state: ApiRequestState<OfficeDashboardAnalyticsResponse>): readonly OfficeKpi[] {
+    if (state.status !== "success") {
+      return [
+        { label: "Runway", value: "—", detail: stateLabel(state), tone: "muted", accent: true },
+        { label: "Top expense", value: "—", detail: "category", tone: "muted", accent: false },
+        { label: "Top project", value: "—", detail: "net contribution", tone: "muted", accent: false },
+        { label: "Reconciliation", value: "—", detail: "health by account", tone: "muted", accent: false },
+        { label: "Oldest unmatched", value: "—", detail: "ageing", tone: "muted", accent: false }
+      ];
+    }
+
+    const topExpense = state.data.topExpenseCategories[0] ?? null;
+    const topProject = state.data.projectProfitability[0] ?? null;
+    const totalLines = state.data.reconciliationByAccount.reduce(
+      (sum: number, row: { readonly lineCount: number }): number => sum + row.lineCount,
+      0
+    );
+    const totalUnmatched = state.data.reconciliationByAccount.reduce(
+      (sum: number, row: { readonly unmatchedLineCount: number }): number => sum + row.unmatchedLineCount,
+      0
+    );
+    const matchedBp = totalLines === 0 ? 0 : Math.round(((totalLines - totalUnmatched) * 10_000) / totalLines);
+    const runwayMonths = state.data.runway.runwayMonths === null ? null : Number(state.data.runway.runwayMonths);
+
+    return [
+      {
+        label: "Runway",
+        value: state.data.runway.runwayMonths === null ? "No burn" : `${state.data.runway.runwayMonths} months`,
+        detail: `cash ${formatMicro(state.data.runway.cashBalanceMicro)} · burn ${formatMicro(state.data.runway.averageMonthlyBurnMicro)}`,
+        tone: runwayMonths === null ? "info" : runwayMonths < 3 ? "warning" : "success",
+        accent: true
+      },
+      {
+        label: "Top expense",
+        value: topExpense === null ? "—" : formatMicro(topExpense.expenseMicro),
+        detail: topExpense === null ? "no expense" : `${compactChartLabel(topExpense.label)} · ${formatBasisPoints(topExpense.shareBp)}`,
+        tone: topExpense === null ? "muted" : "warning",
+        accent: false
+      },
+      {
+        label: "Top project",
+        value: topProject === null ? "—" : formatSignedMicro(topProject.netMicro, "MUR"),
+        detail: topProject === null ? "no project activity" : topProject.projectLabel,
+        tone: topProject === null ? "muted" : moneyTone(topProject.netMicro),
+        accent: false
+      },
+      {
+        label: "Reconciliation",
+        value: formatBasisPoints(matchedBp),
+        detail: `${String(totalUnmatched)} unmatched line(s)`,
+        tone: matchedBp >= 9000 ? "success" : matchedBp >= 7500 ? "info" : "warning",
+        accent: false
+      },
+      {
+        label: "Oldest unmatched",
+        value: state.data.oldestUnmatchedDays === null ? "0 day" : `${String(state.data.oldestUnmatchedDays)} day(s)`,
+        detail: "bank ageing",
+        tone: state.data.oldestUnmatchedDays === null ? "success" : state.data.oldestUnmatchedDays > 30 ? "error" : "warning",
+        accent: false
+      }
+    ];
+  }
+
+  function createDashboardRunwayPanel(state: ApiRequestState<OfficeDashboardAnalyticsResponse>): DashboardRunwayPanel {
+    if (state.status !== "success") {
+      return {
+        value: "—",
+        detail: stateLabel(state),
+        tone: "muted",
+        cash: "—",
+        burn: "—",
+        monthsUsed: "—",
+        excludedForeignAccounts: []
+      };
+    }
+
+    const monthsValue = state.data.runway.runwayMonths;
+    const numericMonths = monthsValue === null ? null : Number(monthsValue);
+    const excludedForeignAccounts = state.data.runway.excludedForeignAccounts.map(
+      (account) => `${account.bankName} · ${account.accountLabel} · ${formatMoney(account.balanceMicro, account.currency)}`
+    );
+    return {
+      value: monthsValue === null ? "No burn" : `${monthsValue} months`,
+      detail: numericMonths === null ? "runway not constrained" : numericMonths < 3 ? "critical · below 3 months" : "runway stable",
+      tone: numericMonths === null ? "info" : numericMonths < 3 ? "error" : "success",
+      cash: formatMicro(state.data.runway.cashBalanceMicro),
+      burn: formatMicro(state.data.runway.averageMonthlyBurnMicro),
+      monthsUsed: state.data.runway.monthsUsed.join(" · "),
+      excludedForeignAccounts
+    };
+  }
+
+  function createDashboardExpenseCategoryPoints(state: ApiRequestState<OfficeDashboardAnalyticsResponse>): readonly ChartPoint[] {
+    if (state.status !== "success") {
+      return createNormalizedCountChartPoints([], 6);
+    }
+
+    const topRows = state.data.topExpenseCategories.slice(0, 6);
+    let maxUnits = 0n;
+    for (const row of topRows) {
+      const units = absBigInt(apiMoneyToMicroUnits(row.expenseMicro));
+      if (units > maxUnits) {
+        maxUnits = units;
+      }
+    }
+
+    const points = topRows.map((row): ChartPoint => {
+      const units = absBigInt(apiMoneyToMicroUnits(row.expenseMicro));
+      return {
+        label: compactChartLabel(row.label),
+        value: maxUnits === 0n ? 0 : Number((units * 100n) / maxUnits)
+      };
+    });
+
+    while (points.length < 6) {
+      points.push({ label: "-", value: 0 });
+    }
+
+    return points;
+  }
+
+  function createDashboardExpenseCategoryRows(state: ApiRequestState<OfficeDashboardAnalyticsResponse>): readonly TableRow[] {
+    if (state.status !== "success") {
+      return [];
+    }
+
+    return state.data.topExpenseCategories.map((row): TableRow => ({
+      id: row.categoryId,
+      cells: [
+        { kind: "text", value: row.label, strong: true },
+        { kind: "money", value: formatMicro(row.expenseMicro), tone: "error" },
+        { kind: "badge", value: formatBasisPoints(row.shareBp), tone: "warning" }
+      ]
+    }));
+  }
+
+  function createDashboardProjectProfitabilityPoints(state: ApiRequestState<OfficeDashboardAnalyticsResponse>): readonly ChartPoint[] {
+    if (state.status !== "success") {
+      return createNormalizedCountChartPoints([], 6);
+    }
+
+    const topRows = state.data.projectProfitability.slice(0, 6);
+    let maxUnits = 0n;
+    for (const row of topRows) {
+      const units = absBigInt(apiMoneyToMicroUnits(row.netMicro));
+      if (units > maxUnits) {
+        maxUnits = units;
+      }
+    }
+
+    const points = topRows.map((row): ChartPoint => ({
+      label: compactChartLabel(row.projectLabel),
+      value: maxUnits === 0n ? 0 : Number((absBigInt(apiMoneyToMicroUnits(row.netMicro)) * 100n) / maxUnits)
+    }));
+
+    while (points.length < 6) {
+      points.push({ label: "-", value: 0 });
+    }
+
+    return points;
+  }
+
+  function createDashboardProjectProfitabilityRows(state: ApiRequestState<OfficeDashboardAnalyticsResponse>): readonly TableRow[] {
+    if (state.status !== "success") {
+      return [];
+    }
+
+    return state.data.projectProfitability.map((row): TableRow => ({
+      id: row.projectId,
+      cells: [
+        { kind: "text", value: row.projectLabel, strong: true },
+        { kind: "money", value: formatMicro(row.incomeMicro), tone: "success" },
+        { kind: "money", value: formatMicro(row.expenseMicro), tone: "error" },
+        { kind: "money", value: formatSignedMicro(row.netMicro, "MUR"), tone: moneyTone(row.netMicro) },
+        { kind: "badge", value: row.marginBp === null ? "—" : formatSignedBasisPoints(row.marginBp), tone: row.marginBp === null ? "muted" : row.marginBp >= 0 ? "success" : "warning" }
+      ]
+    }));
+  }
+
+  function createDashboardReconciliationPoints(state: ApiRequestState<OfficeDashboardAnalyticsResponse>): readonly ChartPoint[] {
+    if (state.status !== "success") {
+      return createNormalizedCountChartPoints([], 6);
+    }
+
+    return createNormalizedCountChartPoints(
+      state.data.reconciliationByAccount.slice(0, 6).map((row) => ({
+        label: compactChartLabel(`${row.bankName} ${row.accountLabel}`),
+        count: row.unmatchedLineCount
+      })),
+      6
+    );
+  }
+
+  function createDashboardReconciliationRows(state: ApiRequestState<OfficeDashboardAnalyticsResponse>): readonly TableRow[] {
+    if (state.status !== "success") {
+      return [];
+    }
+
+    return state.data.reconciliationByAccount.map((row): TableRow => ({
+      id: row.accountId,
+      cells: [
+        { kind: "text", value: `${row.bankName} · ${row.accountLabel}`, strong: true },
+        { kind: "text", value: String(row.unmatchedLineCount), strong: false },
+        { kind: "badge", value: formatBasisPoints(row.matchedRateBp), tone: row.matchedRateBp >= 9000 ? "success" : row.matchedRateBp >= 7500 ? "info" : "warning" },
+        { kind: "text", value: row.oldestUnmatchedDays === null ? "—" : `${String(row.oldestUnmatchedDays)} day(s)`, strong: false }
+      ]
+    }));
+  }
+
+  function createDashboardExpenseTrendPoints(state: ApiRequestState<OfficeDashboardAnalyticsResponse>): readonly ChartPoint[] {
+    if (state.status !== "success") {
+      return [
+        { label: "m1", value: 0 },
+        { label: "m2", value: 0 }
+      ];
+    }
+
+    const series = state.data.expenseTrendByDepartment[0] ?? null;
+    if (series === null || state.data.expenseTrendMonths.length === 0) {
+      return [
+        { label: "m1", value: 0 },
+        { label: "m2", value: 0 }
+      ];
+    }
+
+    const values = series.monthlyExpenseMicro.map((value) => absBigInt(apiMoneyToMicroUnits(value)));
+    const maxValue = values.reduce((current, value) => (value > current ? value : current), 0n);
+    return state.data.expenseTrendMonths.map((month, index): ChartPoint => ({
+      label: month.slice(5),
+      value: maxValue === 0n ? 0 : Number(((values[index] ?? 0n) * 100n) / maxValue)
+    }));
+  }
+
+  function createDashboardExpenseTrendRows(state: ApiRequestState<OfficeDashboardAnalyticsResponse>): readonly TableRow[] {
+    if (state.status !== "success") {
+      return [];
+    }
+
+    return state.data.expenseTrendByDepartment.map((row): TableRow => {
+      const first = apiMoneyToMicroUnits(row.monthlyExpenseMicro[0] ?? "0");
+      const last = apiMoneyToMicroUnits(row.latestMonthExpenseMicro);
+      const delta = last - first;
+      return {
+        id: row.departmentId,
+        cells: [
+          { kind: "text", value: row.departmentLabel, strong: true },
+          { kind: "money", value: formatMicro(row.latestMonthExpenseMicro), tone: "error" },
+          { kind: "money", value: formatSignedMicro(delta.toString(), "MUR"), tone: delta <= 0n ? "success" : "warning" },
+          { kind: "text", value: state.data.expenseTrendMonths.join(" · "), strong: false }
+        ]
+      };
+    });
+  }
+
+  function formatBasisPoints(value: number): string {
+    return `${(value / 100).toFixed(2)}%`;
+  }
+
+  function formatSignedBasisPoints(value: number): string {
+    const prefix = value > 0 ? "+" : "";
+    return `${prefix}${(value / 100).toFixed(2)}%`;
   }
 
   function createCoaStructurePoints(nodes: readonly OfficePlanComptableNode[]): readonly ChartPoint[] {
@@ -3097,6 +3457,10 @@
     }
   }
 
+  function absBigInt(value: bigint): bigint {
+    return value < 0n ? -value : value;
+  }
+
   function compactChartLabel(label: string): string {
     const normalized = label.trim();
     if (normalized.length <= 10) {
@@ -3357,8 +3721,8 @@
     return null;
   }
 
-  function toNullableReconciliationStatus(value: SelectFilterValue): "unmatched" | "suggested" | "matched" | null {
-    if (value === "unmatched" || value === "suggested" || value === "matched") {
+  function toNullableReconciliationStatus(value: SelectFilterValue): "unmatched" | "suggested" | "matched" | "rejected" | "ignored" | null {
+    if (value === "unmatched" || value === "suggested" || value === "matched" || value === "rejected" || value === "ignored") {
       return value;
     }
 
@@ -3632,6 +3996,11 @@
       {/if}
 
       {#if activePageId === "dashboard"}
+        <section class="dashboard-board-intro ehq-edge-surface" aria-label="5 KPI board intro">
+          <h2>Office — 5 nouveaux KPI</h2>
+          <p>Spec board · champs reels eof/v1 · Rs = MUR · chiffres de validation du doc</p>
+        </section>
+
         <section class="kpi-grid" aria-label="Office indicators">
           {#each dashboardStats as stat (stat.label)}
             <StatCard
@@ -3644,18 +4013,66 @@
           {/each}
         </section>
 
+        <section class="kpi-grid" aria-label="Dashboard analytics indicators">
+          {#each dashboardAnalyticsKpis as kpi (kpi.label)}
+            <KPI
+              label={kpi.label}
+              value={kpi.value}
+              detail={kpi.detail}
+              tone={kpi.tone}
+              state={dashboardAnalyticsState.status === "loading" ? "loading" : "default"}
+              accent={kpi.accent}
+            />
+          {/each}
+        </section>
+
         <section class="dashboard-grid">
           <div class="panel-card ehq-edge-surface">
-            <SectionTemplate eyebrow="p&l" title="P&L snapshot" detail="Revenue vs expenses by department for the selected period." state={pnlState.status === "loading" ? "loading" : pnlState.status === "error" ? "error" : "ready"}>
-              <DivergeChart title="Revenue and expenses by department" points={pnlChartPoints} />
-              <Table title="Top departments by net result" columns={pnlColumns} rows={dashboardPnlRows} state={pnlState.status === "loading" ? "loading" : pnlState.status === "error" ? "error" : dashboardPnlRows.length === 0 ? "empty" : "default"} actionLabel="" />
+            <SectionTemplate eyebrow="PROMPT 1 · runway — months of cash left" title="Runway" detail="Cash left and average burn based on selected period." state={dashboardAnalyticsState.status === "loading" ? "loading" : dashboardAnalyticsState.status === "error" ? "error" : "ready"}>
+              <KPI label="Runway" value={dashboardRunwayPanel.value} detail={dashboardRunwayPanel.detail} tone={dashboardRunwayPanel.tone} state={dashboardAnalyticsState.status === "loading" ? "loading" : "default"} accent={true} />
+              <div class="runway-meta">
+                <span>Cash {dashboardRunwayPanel.cash}</span>
+                <span>Avg burn {dashboardRunwayPanel.burn} / month</span>
+                <span>Window {dashboardRunwayPanel.monthsUsed}</span>
+                {#if dashboardRunwayPanel.excludedForeignAccounts.length > 0}
+                  <span class="runway-meta-note">Comptes devises exclus (V1, pas de source EUR->MUR):</span>
+                  {#each dashboardRunwayPanel.excludedForeignAccounts as accountLabel (accountLabel)}
+                    <span class="runway-meta-note">{accountLabel}</span>
+                  {/each}
+                {/if}
+              </div>
             </SectionTemplate>
           </div>
 
           <div class="panel-card ehq-edge-surface">
-            <SectionTemplate eyebrow="imports" title="Import activity" detail="Recent import batches and accepted rows." state={dashboardState.status === "loading" ? "loading" : dashboardState.status === "error" ? "error" : "ready"}>
-              <BarsChart title="Accepted rows by recent batch" points={dashboardImportPoints} tone="info" />
-              <Table title="Recent import batches" columns={importColumns} rows={dashboardImportRows} state={dashboardState.status === "loading" ? "loading" : dashboardState.status === "error" ? "error" : dashboardImportRows.length === 0 ? "empty" : "default"} actionLabel="" />
+            <SectionTemplate eyebrow="PROMPT 4 · reconciliation health — by account" title="Reconciliation health" detail="Matched rate, unmatched pressure, and ageing by bank account." state={dashboardAnalyticsState.status === "loading" ? "loading" : dashboardAnalyticsState.status === "error" ? "error" : "ready"}>
+              <BarsChart title="Unmatched lines by account" points={dashboardReconciliationPoints} tone="info" />
+              <Table title="Account reconciliation health" columns={dashboardReconciliationColumns} rows={dashboardReconciliationRows} state={dashboardAnalyticsState.status === "loading" ? "loading" : dashboardAnalyticsState.status === "error" ? "error" : dashboardReconciliationRows.length === 0 ? "empty" : "default"} actionLabel="" />
+            </SectionTemplate>
+          </div>
+        </section>
+
+        <section class="dashboard-grid">
+          <div class="panel-card ehq-edge-surface">
+            <SectionTemplate eyebrow="PROMPT 2 · top categories by expense" title="Top categories by expense" detail="Fiable par categorie. Classement fournisseur: champ contrepartie structure requis." state={dashboardAnalyticsState.status === "loading" ? "loading" : dashboardAnalyticsState.status === "error" ? "error" : "ready"}>
+              <BarsChart title="Expense concentration" points={dashboardExpenseCategoryPoints} tone="warning" />
+              <Table title="Top expense categories" columns={dashboardExpenseCategoryColumns} rows={dashboardExpenseCategoryRows} state={dashboardAnalyticsState.status === "loading" ? "loading" : dashboardAnalyticsState.status === "error" ? "error" : dashboardExpenseCategoryRows.length === 0 ? "empty" : "default"} actionLabel="" />
+            </SectionTemplate>
+          </div>
+
+          <div class="panel-card ehq-edge-surface">
+            <SectionTemplate eyebrow="PROMPT 3 · project profitability — worst first" title="Project profitability" detail="Net contribution ranking over the selected period." state={dashboardAnalyticsState.status === "loading" ? "loading" : dashboardAnalyticsState.status === "error" ? "error" : "ready"}>
+              <BarsChart title="Top project net contribution" points={dashboardProjectProfitabilityPoints} tone="success" />
+              <Table title="Project profitability" columns={dashboardProjectProfitabilityColumns} rows={dashboardProjectProfitabilityRows} state={dashboardAnalyticsState.status === "loading" ? "loading" : dashboardAnalyticsState.status === "error" ? "error" : dashboardProjectProfitabilityRows.length === 0 ? "empty" : "default"} actionLabel="" />
+            </SectionTemplate>
+          </div>
+        </section>
+
+        <section class="dashboard-grid">
+          <div class="panel-card ehq-edge-surface dashboard-wide-panel">
+            <SectionTemplate eyebrow="PROMPT 5 · expense trend by department — monthly" title="Expense trend by department" detail="Monthly rolling trend by department." state={dashboardAnalyticsState.status === "loading" ? "loading" : dashboardAnalyticsState.status === "error" ? "error" : "ready"}>
+              <LineChart title="Rolling expense trend (top department)" points={dashboardExpenseTrendPoints} tone="active" />
+              <Table title="Department trend snapshot" columns={dashboardExpenseTrendColumns} rows={dashboardExpenseTrendRows} state={dashboardAnalyticsState.status === "loading" ? "loading" : dashboardAnalyticsState.status === "error" ? "error" : dashboardExpenseTrendRows.length === 0 ? "empty" : "default"} actionLabel="" />
             </SectionTemplate>
           </div>
         </section>
@@ -3690,7 +4107,7 @@
             <BarsChart title="Top category impact (absolute net)" points={pnlCategoryImpactPoints} tone="active" />
             <Table title="Result by division" columns={divisionPnlColumns} rows={divisionPnlTableRows} state={divisionPnlState.status === "loading" ? "loading" : divisionPnlState.status === "error" ? "error" : divisionPnlTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={divisionPnlPagination} />
           </section>
-          <Table title="Result by category" columns={pnlLineColumns} rows={pnlLineTableRows} state={pnlLineTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
+          <Table title="Result by category" columns={pnlLineColumns} rows={pnlLineTableRows} state={pnlCategoryState.status === "loading" ? "loading" : pnlCategoryState.status === "error" ? "error" : pnlLineTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={pnlCategoryPagination} />
         {/if}
       {:else if activePageId === "coa"}
         <section class="form-panel ehq-edge-surface" aria-label="Chart of accounts editor">
@@ -4167,6 +4584,30 @@
     { label: "Period", align: "left", sortable: true },
     { label: "Status", align: "left", sortable: true }
   ];
+  const dashboardExpenseCategoryColumns: readonly TableColumn[] = [
+    { label: "Category", align: "left", sortable: true },
+    { label: "Expense", align: "right", sortable: true },
+    { label: "Share", align: "left", sortable: true }
+  ];
+  const dashboardProjectProfitabilityColumns: readonly TableColumn[] = [
+    { label: "Project", align: "left", sortable: true },
+    { label: "Income", align: "right", sortable: true },
+    { label: "Expense", align: "right", sortable: true },
+    { label: "Net", align: "right", sortable: true },
+    { label: "Margin", align: "left", sortable: true }
+  ];
+  const dashboardReconciliationColumns: readonly TableColumn[] = [
+    { label: "Account", align: "left", sortable: true },
+    { label: "Unmatched", align: "right", sortable: true },
+    { label: "Matched", align: "left", sortable: true },
+    { label: "Oldest", align: "left", sortable: true }
+  ];
+  const dashboardExpenseTrendColumns: readonly TableColumn[] = [
+    { label: "Department", align: "left", sortable: true },
+    { label: "Latest month", align: "right", sortable: true },
+    { label: "Delta", align: "right", sortable: true },
+    { label: "Window", align: "left", sortable: true }
+  ];
   const reconciliationColumns: readonly TableColumn[] = [
     { label: "Description", align: "left", sortable: true },
     { label: "Date", align: "left", sortable: true },
@@ -4211,6 +4652,40 @@
     gap: var(--ehq-space-4);
     overflow-y: auto;
     overflow-x: auto;
+  }
+
+  .dashboard-board-intro {
+    display: grid;
+    gap: var(--ehq-space-1);
+    padding: var(--ehq-space-3) var(--ehq-space-4);
+  }
+
+  .dashboard-board-intro h2 {
+    margin: 0;
+    font-size: var(--ehq-type-page-title-size);
+  }
+
+  .dashboard-board-intro p {
+    margin: 0;
+    color: var(--ehq-text-muted);
+    font-size: var(--ehq-type-caption-size);
+    font-family: var(--ehq-mono);
+  }
+
+  .runway-meta {
+    display: grid;
+    gap: var(--ehq-space-1);
+    color: var(--ehq-text-muted);
+    font-size: var(--ehq-type-caption-size);
+    font-family: var(--ehq-mono);
+  }
+
+  .runway-meta-note {
+    color: var(--ehq-warning);
+  }
+
+  .dashboard-wide-panel {
+    grid-column: 1 / -1;
   }
 
   .import-result {

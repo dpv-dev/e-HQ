@@ -21,6 +21,9 @@
   const hasRowActions = $derived((props.rowActions?.length ?? 0) > 0);
   const pagination = $derived(props.pagination ?? null);
   const showPagination = $derived(pagination !== null && props.state === "default");
+  const AUTO_ROWS_PER_PAGE = 15;
+  let localPage = $state(1);
+
   const paginationDetail = $derived(pagination === null
     ? ""
     : pagination.hasMore
@@ -45,6 +48,36 @@
   let sortDirection = $state<"asc" | "desc">("asc");
 
   const sortedRows = $derived(sortRows(props.rows, sortColumnIndex, sortDirection));
+  const showNumberedPagination = $derived(props.state === "default" && sortedRows.length > AUTO_ROWS_PER_PAGE);
+  const totalLocalPages = $derived(Math.max(1, Math.ceil(sortedRows.length / AUTO_ROWS_PER_PAGE)));
+  const localPageRows = $derived(
+    showNumberedPagination
+      ? sortedRows.slice((localPage - 1) * AUTO_ROWS_PER_PAGE, localPage * AUTO_ROWS_PER_PAGE)
+      : sortedRows
+  );
+  const localPageNumbers = $derived(Array.from({ length: totalLocalPages }, (_, index: number): number => index + 1));
+  const showFooter = $derived(props.state === "default" && (showPagination || showNumberedPagination));
+  const localPaginationDetail = $derived(
+    showNumberedPagination
+      ? `${String((localPage - 1) * AUTO_ROWS_PER_PAGE + 1)}-${String(Math.min(localPage * AUTO_ROWS_PER_PAGE, sortedRows.length))} of ${String(sortedRows.length)} rows.`
+      : `${String(sortedRows.length)} rows.`
+  );
+
+  $effect((): void => {
+    if (!showNumberedPagination) {
+      localPage = 1;
+      return;
+    }
+
+    if (localPage > totalLocalPages) {
+      localPage = totalLocalPages;
+      return;
+    }
+
+    if (localPage < 1) {
+      localPage = 1;
+    }
+  });
 
   function toggleSort(columnIndex: number): void {
     if (props.columns[columnIndex]?.sortable !== true) {
@@ -56,6 +89,14 @@
     }
     sortColumnIndex = columnIndex;
     sortDirection = "asc";
+  }
+
+  function goToLocalPage(page: number): void {
+    if (!Number.isInteger(page) || page < 1 || page > totalLocalPages) {
+      return;
+    }
+
+    localPage = page;
   }
 
   function sortRows(rows: readonly TableRow[], columnIndex: number | null, direction: "asc" | "desc"): readonly TableRow[] {
@@ -163,7 +204,7 @@
           </tr>
         </thead>
         <tbody>
-          {#each sortedRows as row, index (rowKey(row, index))}
+          {#each localPageRows as row, index (rowKey(row, index))}
             <tr>
               {#each row.cells as cell}
                 <td class:right={cell.kind === "money"}>
@@ -194,11 +235,34 @@
         </tbody>
       </table>
     </div>
-    {#if showPagination && pagination !== null}
+    {#if showFooter}
       <footer class="table-pagination" aria-label="Table pagination">
-        <span>{paginationDetail}</span>
-        {#if pagination.hasMore}
-          <div class="pagination-actions">
+        <div class="pagination-info">
+          <span>{localPaginationDetail}</span>
+          {#if showPagination && pagination !== null}
+            <span>{paginationDetail}</span>
+          {/if}
+          {#if showPagination && pagination !== null && pagination.error !== null}
+            <small>{pagination.error}</small>
+          {/if}
+        </div>
+        <div class="pagination-actions">
+          {#if showNumberedPagination}
+            <div class="pagination-numbers" aria-label="Local table pages">
+              <button type="button" class="page-button" disabled={localPage <= 1} onclick={() => goToLocalPage(localPage - 1)} aria-label="Previous page">
+                Prev
+              </button>
+              {#each localPageNumbers as pageNumber (pageNumber)}
+                <button type="button" class="page-button" class:active={pageNumber === localPage} onclick={() => goToLocalPage(pageNumber)} aria-label={`Page ${String(pageNumber)}`}>
+                  {pageNumber}
+                </button>
+              {/each}
+              <button type="button" class="page-button" disabled={localPage >= totalLocalPages} onclick={() => goToLocalPage(localPage + 1)} aria-label="Next page">
+                Next
+              </button>
+            </div>
+          {/if}
+          {#if showPagination && pagination !== null && pagination.hasMore}
             <Button
               label={pagination.loading ? "Loading..." : "Load more"}
               variant="secondary"
@@ -223,11 +287,8 @@
               ariaLabel="Load all rows"
               onclick={pagination.onLoadAll}
             />
-          </div>
-        {/if}
-        {#if pagination.error !== null}
-          <small>{pagination.error}</small>
-        {/if}
+          {/if}
+        </div>
       </footer>
     {/if}
   {/if}
@@ -301,6 +362,46 @@
     gap: var(--ehq-space-2);
     flex-wrap: wrap;
     justify-content: flex-end;
+  }
+
+  .pagination-info {
+    display: grid;
+    gap: var(--ehq-space-1);
+  }
+
+  .pagination-numbers {
+    display: flex;
+    align-items: center;
+    gap: var(--ehq-space-1);
+    flex-wrap: wrap;
+  }
+
+  .page-button {
+    appearance: none;
+    border: 1px solid var(--ehq-border-soft);
+    border-radius: var(--ehq-radius-xs);
+    background: transparent;
+    color: var(--ehq-text-soft);
+    font-family: var(--ehq-mono);
+    font-size: var(--ehq-type-label-size);
+    line-height: 1;
+    padding: calc(var(--ehq-space-1) - 1px) var(--ehq-space-2);
+    cursor: pointer;
+  }
+
+  .page-button:hover:not(:disabled) {
+    color: var(--ehq-text);
+    border-color: var(--ehq-border);
+  }
+
+  .page-button.active {
+    color: var(--ehq-text);
+    border-color: var(--ehq-yellow);
+  }
+
+  .page-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
   }
 
   table {
