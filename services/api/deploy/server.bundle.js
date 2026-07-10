@@ -41688,6 +41688,7 @@ function upsertOfficeProjectFixture(fixtures, projectId, request) {
   const project = {
     id: projectId,
     name: request.name.trim(),
+    description: request.description,
     status: request.status,
     state: request.status,
     isActive: request.active
@@ -46868,6 +46869,9 @@ function toProjectSummary(dataset, project, period) {
     code: project.id,
     label: project.name,
     status: project.status === "archived" ? "archived" : "active",
+    writeStatus: project.status,
+    description: project.description,
+    active: project.isActive,
     ownerLabel: "Office",
     periodIncomeMicro: pnl.income,
     periodExpenseMicro: pnl.expense,
@@ -47567,7 +47571,7 @@ async function readOfficeDataset(pool) {
   const divisions = await queryRows(pool, "select id::text, department_id::text, name, is_active from divisions order by legacy_id nulls last, id", []);
   const categories = await queryRows(pool, "select id::text, division_id::text, name, type, account_code, account_label, is_active from categories order by legacy_id nulls last, id", []);
   const partners = await queryRows(pool, "select id::text, name, type, is_active from partners order by legacy_id nulls last, id", []);
-  const projects = await queryRows(pool, "select id::text, name, status, state, is_active from projects order by legacy_id nulls last, id", []);
+  const projects = await queryRows(pool, "select id::text, name, description, status, state, is_active from projects order by legacy_id nulls last, id", []);
   const projectBudgetLines = await queryRows(pool, "select id::text, project_id::text, category_id::text, type, planned_amount_minor::text from project_budget_lines order by legacy_id nulls last, id", []);
   const transactions = await queryRows(
     pool,
@@ -47896,6 +47900,7 @@ function toOfficeProject(row) {
   return {
     id: stringCell(row, "id"),
     name: stringCell(row, "name"),
+    description: nullableStringCell(row, "description"),
     status: enumCell(row, "status", ["draft", "active", "paused", "completed", "cancelled", "archived"]),
     state: stringCell(row, "state"),
     isActive: booleanCell(row, "is_active")
