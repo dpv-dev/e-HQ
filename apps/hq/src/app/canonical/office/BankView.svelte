@@ -1,7 +1,9 @@
 <script lang="ts">
   import {
     Alert,
+    BarsChart,
     Button,
+    type ChartPoint,
     Input,
     KPI,
     Loader,
@@ -396,6 +398,8 @@
     createTablePagination(rawState, rawLoadingMore, rawLoadMoreError, loadMoreRawLines, loadAllRawLines)
   );
   const reconciliationTableRows = $derived(createReconciliationTableRows(reconciliationRows));
+  const rawDirectionPoints = $derived(createRawDirectionPoints(rawRows));
+  const reconciliationStatusPoints = $derived(createReconciliationStatusPoints(reconciliationRows));
   const reconciliationPagination = $derived<TablePagination | null>(
     createTablePagination(
       reconciliationState,
@@ -695,6 +699,96 @@
     }));
   }
 
+  function createRawDirectionPoints(rows: readonly OfficeBankRawLine[]): readonly ChartPoint[] {
+    let creditCount = 0;
+    let debitCount = 0;
+
+    for (const row of rows) {
+      if (row.direction === "credit") {
+        creditCount += 1;
+      } else {
+        debitCount += 1;
+      }
+    }
+
+    return createNormalizedCountChartPoints(
+      [
+        { label: "Credit", count: creditCount },
+        { label: "Debit", count: debitCount }
+      ],
+      6
+    );
+  }
+
+  function createReconciliationStatusPoints(rows: readonly OfficeReconciliationCandidate[]): readonly ChartPoint[] {
+    let unmatchedCount = 0;
+    let suggestedCount = 0;
+    let matchedCount = 0;
+    let rejectedCount = 0;
+
+    for (const row of rows) {
+      if (row.status === "unmatched") {
+        unmatchedCount += 1;
+        continue;
+      }
+      if (row.status === "suggested") {
+        suggestedCount += 1;
+        continue;
+      }
+      if (row.status === "matched") {
+        matchedCount += 1;
+        continue;
+      }
+      rejectedCount += 1;
+    }
+
+    return createNormalizedCountChartPoints(
+      [
+        { label: "Unmatched", count: unmatchedCount },
+        { label: "Suggested", count: suggestedCount },
+        { label: "Matched", count: matchedCount },
+        { label: "Rejected", count: rejectedCount }
+      ],
+      6
+    );
+  }
+
+  function createNormalizedCountChartPoints(
+    entries: readonly { readonly label: string; readonly count: number }[],
+    targetSize: number
+  ): readonly ChartPoint[] {
+    const points: ChartPoint[] = [];
+    let maxCount = 0;
+
+    for (const entry of entries) {
+      if (entry.count > maxCount) {
+        maxCount = entry.count;
+      }
+    }
+
+    for (const entry of entries) {
+      points.push({
+        label: compactChartLabel(entry.label),
+        value: maxCount === 0 ? 0 : Math.round((entry.count * 100) / maxCount)
+      });
+    }
+
+    while (points.length < targetSize) {
+      points.push({ label: "-", value: 0 });
+    }
+
+    return points.slice(0, targetSize);
+  }
+
+  function compactChartLabel(label: string): string {
+    const normalized = label.trim();
+    if (normalized.length <= 10) {
+      return normalized;
+    }
+
+    return normalized.slice(0, 10);
+  }
+
   function stateLabel(state: ApiRequestState<unknown>): string {
     if (state.status === "idle") {
       return "idle";
@@ -774,6 +868,11 @@
       <span class="ehq-type-body">{getErrorMessage(accountsState.error)}</span>
     </div>
   {:else}
+    <section class="dashboard-grid">
+      <BarsChart title="Raw line direction mix" points={rawDirectionPoints} tone="active" />
+      <BarsChart title="Reconciliation status mix" points={reconciliationStatusPoints} tone="info" />
+    </section>
+
     <section class="bank-account-form ehq-edge-surface" aria-label={editingAccountId === null ? "Add a bank account" : "Edit bank account"}>
       <Input
         id="bank-account-name"
@@ -945,6 +1044,13 @@
     color: var(--ehq-error);
   }
 
+  .dashboard-grid {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--ehq-space-3);
+  }
+
   @media (max-width: 1100px) {
     .kpi-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -952,6 +1058,10 @@
   }
 
   @media (max-width: 760px) {
+    .dashboard-grid {
+      grid-template-columns: 1fr;
+    }
+
     .kpi-grid {
       grid-template-columns: 1fr;
     }

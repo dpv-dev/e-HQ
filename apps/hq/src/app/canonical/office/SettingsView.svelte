@@ -1,9 +1,11 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import {
+    BarsChart,
     Card,
     Loader,
     Table,
+    type ChartPoint,
     type TablePagination,
     type TableRow
   } from "@ehq/ui";
@@ -37,6 +39,7 @@
 
   const accountRows = $derived(readPageItems(accountsState));
   const currencyTableRows = $derived(createCurrencyTableRows(accountRows));
+  const currencyBalancePoints = $derived(createCurrencyBalancePoints(accountRows));
   const accountPagination = $derived<TablePagination | null>(
     createTablePagination(accountsState, accountsLoadingMore, accountsLoadMoreError, loadMoreAccounts, loadAllAccounts)
   );
@@ -145,6 +148,45 @@
     }));
   }
 
+  function createCurrencyBalancePoints(rows: readonly OfficeBankAccountSummary[]): readonly ChartPoint[] {
+    const balances = new Map<string, bigint>();
+
+    for (const account of rows) {
+      const balance = account.currentBalanceMurMicro === null ? 0n : apiMoneyToMicroUnits(account.currentBalanceMurMicro);
+      const previous = balances.get(account.currency) ?? 0n;
+      const absoluteBalance = balance < 0n ? -balance : balance;
+      balances.set(account.currency, previous + absoluteBalance);
+    }
+
+    let maxValue = 0n;
+    const rawPoints: { label: string; value: bigint }[] = [];
+    for (const entry of balances.entries()) {
+      rawPoints.push({ label: entry[0], value: entry[1] });
+      if (entry[1] > maxValue) {
+        maxValue = entry[1];
+      }
+    }
+
+    const points: ChartPoint[] = rawPoints
+      .sort((left: { label: string; value: bigint }, right: { label: string; value: bigint }): number => {
+        if (left.value === right.value) {
+          return 0;
+        }
+        return right.value > left.value ? 1 : -1;
+      })
+      .slice(0, 6)
+      .map((entry: { label: string; value: bigint }): ChartPoint => ({
+        label: entry.label,
+        value: maxValue === 0n ? 0 : Number((entry.value * 100n) / maxValue)
+      }));
+
+    while (points.length < 6) {
+      points.push({ label: "-", value: 0 });
+    }
+
+    return points;
+  }
+
   function getErrorMessage(error: unknown): string {
     if (error instanceof Error) {
       return error.message;
@@ -188,6 +230,10 @@
     />
   </section>
 
+  <section class="dashboard-grid">
+    <BarsChart title="Currency balance distribution (MUR)" points={currencyBalancePoints} tone="info" />
+  </section>
+
   {#if accountsState.status === "loading"}
     <Loader label="Loading settings" detail="Reading currency configuration from accounts." size="medium" />
   {:else if accountsState.status === "error"}
@@ -224,6 +270,13 @@
     min-width: 0;
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--ehq-space-3);
+  }
+
+  .dashboard-grid {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--ehq-space-3);
   }
 

@@ -174,6 +174,10 @@ const exactConsoleTargets: Readonly<Record<string, ConsoleTarget>> = {
     workspaceId: "office",
     pageId: "of_pnl"
   },
+  "/console/office/pnl": {
+    workspaceId: "office",
+    pageId: "of_pnl"
+  },
   "/console/office/coa": {
     workspaceId: "office",
     pageId: "of_coa"
@@ -262,6 +266,10 @@ const exactConsoleTargets: Readonly<Record<string, ConsoleTarget>> = {
     workspaceId: "office",
     pageId: "of_pnl"
   },
+  "/console/pnl": {
+    workspaceId: "office",
+    pageId: "of_pnl"
+  },
   "/console/coa": {
     workspaceId: "office",
     pageId: "of_coa"
@@ -326,7 +334,7 @@ const pageRoutes: Readonly<Record<PlatformPageId, string>> = {
   cc_integ: "/console/command-center/integrations",
   cc_settings: "/console/command-center/settings",
   of_dash: "/console/office/dashboard",
-  of_pnl: "/console/office/pl",
+  of_pnl: "/console/office/pnl",
   of_coa: "/console/office/coa",
   of_tx: "/console/office/transactions",
   of_imports: "/console/office/imports",

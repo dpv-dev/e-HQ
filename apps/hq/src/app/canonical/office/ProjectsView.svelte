@@ -1,6 +1,7 @@
 <script lang="ts">
   import {
     Alert,
+    BarsChart,
     Badge,
     Button,
     Input,
@@ -9,6 +10,7 @@
     Select,
     Table,
     Toggle,
+    type ChartPoint,
     type SelectOption,
     type TablePagination,
     type TableRow,
@@ -193,6 +195,7 @@
   const projectKpis = $derived(createProjectKpis(projectPnlState));
   const projectRows = $derived(createProjectRows(projects, selectedProjectId));
   const pnlRows = $derived(createPnlRows(projectPnl));
+  const projectLineImpactPoints = $derived(createProjectLineImpactPoints(projectPnl));
   const violationRows = $derived(createViolationRows(violations));
   const projectsPagination = $derived<TablePagination | null>(
     createTablePagination(projectsState, projectsLoadingMore, projectsLoadMoreError, loadMoreProjects, loadAllProjects)
@@ -457,6 +460,83 @@
     }));
   }
 
+  function createProjectLineImpactPoints(project: OfficeProjectPnl | null): readonly ChartPoint[] {
+    if (project === null) {
+      return createNormalizedCountChartPoints([], 6);
+    }
+
+    const topLines = [...project.lines]
+      .sort((left: OfficeProjectPnlLine, right: OfficeProjectPnlLine): number => {
+        const leftAmount = absoluteMicro(left.amountMicro);
+        const rightAmount = absoluteMicro(right.amountMicro);
+        if (leftAmount === rightAmount) {
+          return 0;
+        }
+        return rightAmount > leftAmount ? 1 : -1;
+      })
+      .slice(0, 6)
+      .map((line: OfficeProjectPnlLine): { readonly label: string; readonly count: number } => ({
+        label: line.label,
+        count: microToCountMagnitude(line.amountMicro)
+      }));
+
+    return createNormalizedCountChartPoints(topLines, 6);
+  }
+
+  function createNormalizedCountChartPoints(
+    entries: readonly { readonly label: string; readonly count: number }[],
+    targetSize: number
+  ): readonly ChartPoint[] {
+    const points: ChartPoint[] = [];
+    let maxCount = 0;
+
+    for (const entry of entries) {
+      if (entry.count > maxCount) {
+        maxCount = entry.count;
+      }
+    }
+
+    for (const entry of entries) {
+      points.push({
+        label: compactChartLabel(entry.label),
+        value: maxCount === 0 ? 0 : Math.round((entry.count * 100) / maxCount)
+      });
+    }
+
+    while (points.length < targetSize) {
+      points.push({ label: "-", value: 0 });
+    }
+
+    return points.slice(0, targetSize);
+  }
+
+  function microToCountMagnitude(amountMicro: string): number {
+    const magnitude = absoluteMicro(amountMicro);
+    const normalized = magnitude / 1000000n;
+    if (normalized > BigInt(Number.MAX_SAFE_INTEGER)) {
+      return Number.MAX_SAFE_INTEGER;
+    }
+    return Number(normalized);
+  }
+
+  function absoluteMicro(value: string): bigint {
+    try {
+      const parsed = BigInt(value);
+      return parsed < 0n ? -parsed : parsed;
+    } catch {
+      return 0n;
+    }
+  }
+
+  function compactChartLabel(label: string): string {
+    const normalized = label.trim();
+    if (normalized.length <= 10) {
+      return normalized;
+    }
+
+    return normalized.slice(0, 10);
+  }
+
   function createViolationRows(rows: readonly OfficeProjectCoherenceViolation[]): readonly TableRow[] {
     return rows.map((violation: OfficeProjectCoherenceViolation): TableRow => ({
       id: violation.id,
@@ -665,6 +745,10 @@
           <span>{getErrorMessage(projectPnlState.error)}</span>
         </div>
       {:else}
+        <section class="dashboard-grid">
+          <BarsChart title="Top project line impact" points={projectLineImpactPoints} tone="active" />
+        </section>
+
         <Table title="Project P&L lines" columns={pnlColumns} rows={pnlRows} state={pnlRows.length === 0 ? "empty" : "default"} actionLabel="" />
       {/if}
     </section>
@@ -734,6 +818,13 @@
     grid-template-columns: minmax(260px, 0.36fr) minmax(0, 1fr);
     gap: var(--ehq-space-4);
     align-items: start;
+  }
+
+  .dashboard-grid {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--ehq-space-3);
   }
 
   .project-list,

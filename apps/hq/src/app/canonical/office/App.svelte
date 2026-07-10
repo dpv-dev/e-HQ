@@ -609,7 +609,9 @@
   const pnlKpis = $derived(createPnlKpis(pnlState));
   const pnlChartPoints = $derived(createPnlChartPoints(pnlRows));
   const pnlTableRows = $derived(createPnlTableRows(pnlRows));
+  const dashboardPnlRows = $derived(pnlTableRows.slice(0, 6));
   const pnlLineTableRows = $derived(createPnlLineTableRows(pnlLineRows));
+  const pnlCategoryImpactPoints = $derived(createPnlCategoryImpactPoints(pnlLineRows));
   const divisionPnlTableRows = $derived(createDivisionPnlTableRows(divisionPnlRows));
   const planTableRows = $derived(createPlanTableRows(planTableNodes));
   const transactionTableRows = $derived(createTransactionTableRows(transactionRows));
@@ -651,6 +653,15 @@
   );
   const canConfirmImport = $derived(selectedImportRowIds.length > 0 && importState.status !== "loading");
   const recentImportRows = $derived(createRecentImportRows(dashboardState));
+  const dashboardImportPoints = $derived(createDashboardImportPoints(dashboardState));
+  const dashboardImportRows = $derived(recentImportRows.slice(0, 6));
+  const coaStructurePoints = $derived(createCoaStructurePoints(planTableNodes));
+  const transactionTypePoints = $derived(createTransactionTypePoints(transactionRows));
+  const transactionStatusPoints = $derived(createTransactionStatusPoints(transactionRows));
+  const importQualityPoints = $derived(createImportQualityPoints(importState));
+  const reconciliationStatusPoints = $derived(createReconciliationStatusPoints(reconciliationRows));
+  const pendingStatusPoints = $derived(createPendingStatusPoints(pendingRows));
+  const auditActionPoints = $derived(createAuditActionPoints(auditRows));
 
   onMount((): (() => void) => {
     syncPageFromLocation();
@@ -1591,6 +1602,10 @@
       return "pnl";
     }
 
+    if (normalizedPath.endsWith("/console/pnl")) {
+      return "pnl";
+    }
+
     if (normalizedPath.endsWith("/console/office-audit")) {
       return "audit";
     }
@@ -1723,6 +1738,10 @@
       return "pnl";
     }
 
+    if (normalizedPath.endsWith("/console/office/pnl")) {
+      return "pnl";
+    }
+
     if (normalizedPath.endsWith("/console/office/imports")) {
       return "imports";
     }
@@ -1816,7 +1835,7 @@
       return "/console/office/coa";
     }
 
-    return "/console/office/pl";
+    return "/console/office/pnl";
   }
 
   function receivePartnerReceipt(receipt: ApiMutationReceipt): void {
@@ -2697,6 +2716,240 @@
     ];
   }
 
+  function createDashboardImportPoints(state: ApiRequestState<OfficeDashboardResponse>): readonly ChartPoint[] {
+    const points: ChartPoint[] = [];
+    const imports = state.status === "success" ? (state.data.recentImports ?? []).slice(0, 6) : [];
+    let maxAccepted = 0;
+
+    for (const item of imports) {
+      if (item.acceptedRowCount > maxAccepted) {
+        maxAccepted = item.acceptedRowCount;
+      }
+    }
+
+    for (const item of imports) {
+      const labelSource = item.periodLabel.trim().length > 0 ? item.periodLabel : item.source.toUpperCase();
+      const label = labelSource.length > 9 ? labelSource.slice(0, 9) : labelSource;
+      const value = maxAccepted === 0 ? 0 : Math.round((item.acceptedRowCount / maxAccepted) * 100);
+      points.push({ label, value });
+    }
+
+    while (points.length < 6) {
+      points.push({ label: "-", value: 0 });
+    }
+
+    return points;
+  }
+
+  function createCoaStructurePoints(nodes: readonly OfficePlanComptableNode[]): readonly ChartPoint[] {
+    const departmentCount = nodes.filter((node: OfficePlanComptableNode): boolean => node.kind === "department").length;
+    const divisionCount = nodes.filter((node: OfficePlanComptableNode): boolean => node.kind === "division").length;
+    const categoryCount = nodes.filter((node: OfficePlanComptableNode): boolean => node.kind === "category").length;
+
+    return createNormalizedCountChartPoints(
+      [
+        { label: "Departments", count: departmentCount },
+        { label: "Divisions", count: divisionCount },
+        { label: "Categories", count: categoryCount }
+      ],
+      6
+    );
+  }
+
+  function createTransactionTypePoints(rows: readonly OfficeTransaction[]): readonly ChartPoint[] {
+    let incomeCount = 0;
+    let expenseCount = 0;
+    let unvalidatedCount = 0;
+
+    for (const row of rows) {
+      if (row.type === "income") {
+        incomeCount += 1;
+        continue;
+      }
+      if (row.type === "expense") {
+        expenseCount += 1;
+        continue;
+      }
+      unvalidatedCount += 1;
+    }
+
+    return createNormalizedCountChartPoints(
+      [
+        { label: "Income", count: incomeCount },
+        { label: "Expense", count: expenseCount },
+        { label: "Unvalidated", count: unvalidatedCount }
+      ],
+      6
+    );
+  }
+
+  function createTransactionStatusPoints(rows: readonly OfficeTransaction[]): readonly ChartPoint[] {
+    let pendingCount = 0;
+    let draftCount = 0;
+    let postedCount = 0;
+    let reconciledCount = 0;
+    let voidedCount = 0;
+
+    for (const row of rows) {
+      if (row.status === "pending") {
+        pendingCount += 1;
+        continue;
+      }
+      if (row.status === "draft") {
+        draftCount += 1;
+        continue;
+      }
+      if (row.status === "posted") {
+        postedCount += 1;
+        continue;
+      }
+      if (row.status === "reconciled") {
+        reconciledCount += 1;
+        continue;
+      }
+      voidedCount += 1;
+    }
+
+    return createNormalizedCountChartPoints(
+      [
+        { label: "Pending", count: pendingCount },
+        { label: "Draft", count: draftCount },
+        { label: "Posted", count: postedCount },
+        { label: "Reconciled", count: reconciledCount },
+        { label: "Voided", count: voidedCount }
+      ],
+      6
+    );
+  }
+
+  function createImportQualityPoints(state: ImportUiState): readonly ChartPoint[] {
+    const preview = state.preview;
+    if (preview === null) {
+      return createNormalizedCountChartPoints([], 6);
+    }
+
+    return createNormalizedCountChartPoints(
+      [
+        { label: "Accepted", count: preview.acceptedRowCount },
+        { label: "Rejected", count: preview.rejectedRowCount },
+        { label: "Duplicates", count: preview.duplicateRowCount }
+      ],
+      6
+    );
+  }
+
+  function createReconciliationStatusPoints(rows: readonly OfficeReconciliationCandidate[]): readonly ChartPoint[] {
+    let unmatchedCount = 0;
+    let suggestedCount = 0;
+    let matchedCount = 0;
+    let rejectedCount = 0;
+
+    for (const row of rows) {
+      if (row.status === "unmatched") {
+        unmatchedCount += 1;
+        continue;
+      }
+      if (row.status === "suggested") {
+        suggestedCount += 1;
+        continue;
+      }
+      if (row.status === "matched") {
+        matchedCount += 1;
+        continue;
+      }
+      rejectedCount += 1;
+    }
+
+    return createNormalizedCountChartPoints(
+      [
+        { label: "Unmatched", count: unmatchedCount },
+        { label: "Suggested", count: suggestedCount },
+        { label: "Matched", count: matchedCount },
+        { label: "Rejected", count: rejectedCount }
+      ],
+      6
+    );
+  }
+
+  function createPendingStatusPoints(rows: readonly OfficeTransaction[]): readonly ChartPoint[] {
+    let pendingCount = 0;
+    let draftCount = 0;
+    let postedCount = 0;
+    let otherCount = 0;
+
+    for (const row of rows) {
+      if (row.status === "pending") {
+        pendingCount += 1;
+        continue;
+      }
+      if (row.status === "draft") {
+        draftCount += 1;
+        continue;
+      }
+      if (row.status === "posted") {
+        postedCount += 1;
+        continue;
+      }
+      otherCount += 1;
+    }
+
+    return createNormalizedCountChartPoints(
+      [
+        { label: "Pending", count: pendingCount },
+        { label: "Draft", count: draftCount },
+        { label: "Posted", count: postedCount },
+        { label: "Other", count: otherCount }
+      ],
+      6
+    );
+  }
+
+  function createAuditActionPoints(rows: readonly AuditLogEntry[]): readonly ChartPoint[] {
+    const actionCounts = new Map<string, number>();
+
+    for (const row of rows) {
+      const label = compactChartLabel(row.action);
+      actionCounts.set(label, (actionCounts.get(label) ?? 0) + 1);
+    }
+
+    const ranked = [...actionCounts.entries()]
+      .sort((left: readonly [string, number], right: readonly [string, number]): number => right[1] - left[1])
+      .slice(0, 6)
+      .map((entry: readonly [string, number]): { readonly label: string; readonly count: number } => ({
+        label: entry[0],
+        count: entry[1]
+      }));
+
+    return createNormalizedCountChartPoints(ranked, 6);
+  }
+
+  function createNormalizedCountChartPoints(
+    entries: readonly { readonly label: string; readonly count: number }[],
+    targetSize: number
+  ): readonly ChartPoint[] {
+    const points: ChartPoint[] = [];
+    let maxCount = 0;
+
+    for (const entry of entries) {
+      if (entry.count > maxCount) {
+        maxCount = entry.count;
+      }
+    }
+
+    for (const entry of entries) {
+      points.push({
+        label: compactChartLabel(entry.label),
+        value: maxCount === 0 ? 0 : Math.round((entry.count * 100) / maxCount)
+      });
+    }
+
+    while (points.length < targetSize) {
+      points.push({ label: "-", value: 0 });
+    }
+
+    return points.slice(0, targetSize);
+  }
+
   function createPnlChartPoints(rows: readonly OfficePnlProjectionRow[]): readonly DivergePoint[] {
     return rows.map((row: OfficePnlProjectionRow): DivergePoint => ({
       label: row.departmentLabel,
@@ -2784,6 +3037,73 @@
         { kind: "money", value: formatSignedMicro(row.netMicro, "MUR"), tone: moneyTone(row.netMicro) }
       ]
     }));
+  }
+
+  function createPnlCategoryImpactPoints(rows: readonly OfficePnlLine[]): readonly ChartPoint[] {
+    if (rows.length === 0) {
+      return [
+        { label: "-", value: 0 },
+        { label: "-", value: 0 },
+        { label: "-", value: 0 },
+        { label: "-", value: 0 },
+        { label: "-", value: 0 },
+        { label: "-", value: 0 }
+      ];
+    }
+
+    const sortedRows = [...rows].sort((left: OfficePnlLine, right: OfficePnlLine): number => {
+      const leftMagnitude = absoluteMicro(left.netMicro);
+      const rightMagnitude = absoluteMicro(right.netMicro);
+      if (leftMagnitude === rightMagnitude) {
+        return 0;
+      }
+      return rightMagnitude > leftMagnitude ? 1 : -1;
+    });
+    const topRows = sortedRows.slice(0, 6);
+    let maxMagnitude = 0n;
+
+    for (const row of topRows) {
+      const magnitude = absoluteMicro(row.netMicro);
+      if (magnitude > maxMagnitude) {
+        maxMagnitude = magnitude;
+      }
+    }
+
+    const points = topRows.map((row: OfficePnlLine): ChartPoint => {
+      const magnitude = absoluteMicro(row.netMicro);
+      const value =
+        maxMagnitude === 0n
+          ? 0
+          : Number((magnitude * 100n) / maxMagnitude);
+      return {
+        label: compactChartLabel(row.label),
+        value
+      };
+    });
+
+    while (points.length < 6) {
+      points.push({ label: "-", value: 0 });
+    }
+
+    return points;
+  }
+
+  function absoluteMicro(value: string): bigint {
+    try {
+      const parsed = BigInt(value);
+      return parsed < 0n ? -parsed : parsed;
+    } catch {
+      return 0n;
+    }
+  }
+
+  function compactChartLabel(label: string): string {
+    const normalized = label.trim();
+    if (normalized.length <= 10) {
+      return normalized;
+    }
+
+    return normalized.slice(0, 10);
   }
 
   function createPlanTableRows(nodes: readonly OfficePlanComptableNode[]): readonly TableRow[] {
@@ -3326,15 +3646,16 @@
 
         <section class="dashboard-grid">
           <div class="panel-card ehq-edge-surface">
-            <SectionTemplate eyebrow="reconciliation" title="Recent reconciliation" detail="Bank and ledger candidates for the selected period." state={reconciliationState.status === "loading" ? "loading" : reconciliationState.status === "error" ? "error" : "ready"}>
-              <Table title="Reconciliation" columns={reconciliationColumns} rows={reconciliationTableRows} state={reconciliationState.status === "loading" ? "loading" : reconciliationState.status === "error" ? "error" : reconciliationTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={reconciliationPagination} />
+            <SectionTemplate eyebrow="p&l" title="P&L snapshot" detail="Revenue vs expenses by department for the selected period." state={pnlState.status === "loading" ? "loading" : pnlState.status === "error" ? "error" : "ready"}>
+              <DivergeChart title="Revenue and expenses by department" points={pnlChartPoints} />
+              <Table title="Top departments by net result" columns={pnlColumns} rows={dashboardPnlRows} state={pnlState.status === "loading" ? "loading" : pnlState.status === "error" ? "error" : dashboardPnlRows.length === 0 ? "empty" : "default"} actionLabel="" />
             </SectionTemplate>
           </div>
 
           <div class="panel-card ehq-edge-surface">
-            <SectionTemplate eyebrow="cash-flow" title="Cash flow" detail="Inflows, outflows, and closing balances." state={cashflowState.status === "loading" ? "loading" : cashflowState.status === "error" ? "error" : "ready"}>
-              <BarsChart title="Inflows" points={cashflowInflowPoints} tone="success" />
-              <Table title="Cash-flow by month" columns={cashflowColumns} rows={cashflowTableRows} state={cashflowState.status === "loading" ? "loading" : cashflowState.status === "error" ? "error" : cashflowTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
+            <SectionTemplate eyebrow="imports" title="Import activity" detail="Recent import batches and accepted rows." state={dashboardState.status === "loading" ? "loading" : dashboardState.status === "error" ? "error" : "ready"}>
+              <BarsChart title="Accepted rows by recent batch" points={dashboardImportPoints} tone="info" />
+              <Table title="Recent import batches" columns={importColumns} rows={dashboardImportRows} state={dashboardState.status === "loading" ? "loading" : dashboardState.status === "error" ? "error" : dashboardImportRows.length === 0 ? "empty" : "default"} actionLabel="" />
             </SectionTemplate>
           </div>
         </section>
@@ -3365,7 +3686,10 @@
             <DivergeChart title="Revenue and expenses by department" points={pnlChartPoints} />
             <Table title="Result by department" columns={pnlColumns} rows={pnlTableRows} state={pnlState.status === "error" ? "error" : pnlTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
           </section>
-          <Table title="Result by division" columns={divisionPnlColumns} rows={divisionPnlTableRows} state={divisionPnlState.status === "loading" ? "loading" : divisionPnlState.status === "error" ? "error" : divisionPnlTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={divisionPnlPagination} />
+          <section class="dashboard-grid">
+            <BarsChart title="Top category impact (absolute net)" points={pnlCategoryImpactPoints} tone="active" />
+            <Table title="Result by division" columns={divisionPnlColumns} rows={divisionPnlTableRows} state={divisionPnlState.status === "loading" ? "loading" : divisionPnlState.status === "error" ? "error" : divisionPnlTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={divisionPnlPagination} />
+          </section>
           <Table title="Result by category" columns={pnlLineColumns} rows={pnlLineTableRows} state={pnlLineTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
         {/if}
       {:else if activePageId === "coa"}
@@ -3379,6 +3703,10 @@
           {/if}
           <Button label="Create" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Create plan node" title={writeDisabledTitle()} onclick={createPlanNode} />
           <Button label="Deactivate a category" variant="secondary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Deactivate a category" title={writeDisabledTitle()} onclick={deactivateFirstCategory} />
+        </section>
+
+        <section class="dashboard-grid">
+          <BarsChart title="Chart of accounts node mix" points={coaStructurePoints} tone="info" />
         </section>
 
         <Table title="Department → Division → Category" columns={planColumns} rows={planTableRows} state={planTableState.status === "loading" ? "loading" : planTableState.status === "error" ? "error" : planTableRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={planRowActions} pagination={planPagination} />
@@ -3396,6 +3724,11 @@
             <Button label="New entry" variant="secondary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="New ledger entry" title={writeDisabledTitle()} onclick={openTransactionCreate} />
             <Button label="Export CSV" variant="secondary" size="medium" type="button" disabled={transactionRows.length === 0} loading={false} locked={false} focus={false} ariaLabel="Export transactions as CSV" onclick={exportTransactionsCsv} />
           </div>
+        </section>
+
+        <section class="dashboard-grid">
+          <BarsChart title="Transaction mix by type" points={transactionTypePoints} tone="active" />
+          <BarsChart title="Transaction mix by status" points={transactionStatusPoints} tone="info" />
         </section>
 
         {#if creatingTransaction}
@@ -3549,6 +3882,10 @@
             />
           </details>
 
+          <section class="dashboard-grid">
+            <BarsChart title="Import quality" points={importQualityPoints} tone="warning" />
+          </section>
+
           <section class="import-result ehq-type-label-mono" class:error={importState.status === "error"} aria-live="polite">
             <strong>{importState.message}</strong>
             {#if importState.preview !== null}
@@ -3640,6 +3977,10 @@
           <Button label="Approve batch" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Approve suggested reconciliations" title={writeDisabledTitle()} onclick={approveSuggestedReconciliations} />
         </section>
 
+        <section class="dashboard-grid">
+          <BarsChart title="Reconciliation status mix" points={reconciliationStatusPoints} tone="info" />
+        </section>
+
         <Table title="Bank ↔ ledger matching" columns={reconciliationColumns} rows={reconciliationTableRows} state={reconciliationState.status === "loading" ? "loading" : reconciliationState.status === "error" ? "error" : reconciliationRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={reconciliationRowActions} pagination={reconciliationPagination} />
 
         {#if reconcileDrawerLineId !== null}
@@ -3716,6 +4057,10 @@
           <span class="ehq-type-label-mono">{selectedPendingIds.length} selected</span>
         </section>
 
+        <section class="dashboard-grid">
+          <BarsChart title="Pending queue status mix" points={pendingStatusPoints} tone="warning" />
+        </section>
+
         <div class="pending-list">
           {#each pendingRows as transaction (transaction.id)}
             <button
@@ -3761,6 +4106,10 @@
       {:else if activePageId === "bank"}
         <BankView client={client.office} workspaceId={officeWorkspaceId} {period} dateFrom={activeRange.from} dateTo={activeRange.to} writesEnabled={writesEnabled} />
       {:else if activePageId === "audit"}
+        <section class="dashboard-grid">
+          <BarsChart title="Top audit actions" points={auditActionPoints} tone="muted" />
+        </section>
+
         <Table title="Audit log" columns={auditColumns} rows={auditTableRows} state={auditState.status === "loading" ? "loading" : auditState.status === "error" ? "error" : auditTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={auditPagination} />
       {:else if activePageId === "vat"}
         <VatView client={client.office} workspaceId={officeWorkspaceId} {period} dateFrom={activeRange.from} dateTo={activeRange.to} />

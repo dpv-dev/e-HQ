@@ -1,6 +1,7 @@
 <script lang="ts">
   import {
     Alert,
+    BarsChart,
     Badge,
     Button,
     Drawer,
@@ -10,6 +11,7 @@
     Loader,
     Table,
     Toggle,
+    type ChartPoint,
     type TableColumn,
     type TablePagination,
     type TableRow,
@@ -111,6 +113,7 @@
   const partners = $derived(readPageItems(partnersState));
   const selectedPartner = $derived(readPartnerDetail(detailState));
   const partnerTableRows = $derived(createPartnerTableRows(partners, copy));
+  const partnerActivityPoints = $derived(createPartnerActivityPoints(partners));
   const partnerRowActions = $derived<readonly TableRowAction[]>([
     { label: "Open", onAction: openPartner }
   ]);
@@ -512,6 +515,79 @@
     }));
   }
 
+  function createPartnerActivityPoints(rows: readonly OfficePartnerListItem[]): readonly ChartPoint[] {
+    const ranked = [...rows]
+      .sort((left: OfficePartnerListItem, right: OfficePartnerListItem): number => {
+        const leftAmount = absoluteMicro(facetActivity(left).periodTotalMicro);
+        const rightAmount = absoluteMicro(facetActivity(right).periodTotalMicro);
+        if (leftAmount === rightAmount) {
+          return 0;
+        }
+        return rightAmount > leftAmount ? 1 : -1;
+      })
+      .slice(0, 6)
+      .map((partner: OfficePartnerListItem): { readonly label: string; readonly count: number } => ({
+        label: partner.name,
+        count: microToCountMagnitude(facetActivity(partner).periodTotalMicro)
+      }));
+
+    return createNormalizedCountChartPoints(ranked, 6);
+  }
+
+  function createNormalizedCountChartPoints(
+    entries: readonly { readonly label: string; readonly count: number }[],
+    targetSize: number
+  ): readonly ChartPoint[] {
+    const points: ChartPoint[] = [];
+    let maxCount = 0;
+
+    for (const entry of entries) {
+      if (entry.count > maxCount) {
+        maxCount = entry.count;
+      }
+    }
+
+    for (const entry of entries) {
+      points.push({
+        label: compactChartLabel(entry.label),
+        value: maxCount === 0 ? 0 : Math.round((entry.count * 100) / maxCount)
+      });
+    }
+
+    while (points.length < targetSize) {
+      points.push({ label: "-", value: 0 });
+    }
+
+    return points.slice(0, targetSize);
+  }
+
+  function microToCountMagnitude(amountMicro: string): number {
+    const magnitude = absoluteMicro(amountMicro);
+    const normalized = magnitude / 1000000n;
+    if (normalized > BigInt(Number.MAX_SAFE_INTEGER)) {
+      return Number.MAX_SAFE_INTEGER;
+    }
+    return Number(normalized);
+  }
+
+  function absoluteMicro(value: string): bigint {
+    try {
+      const parsed = BigInt(value);
+      return parsed < 0n ? -parsed : parsed;
+    } catch {
+      return 0n;
+    }
+  }
+
+  function compactChartLabel(label: string): string {
+    const normalized = label.trim();
+    if (normalized.length <= 10) {
+      return normalized;
+    }
+
+    return normalized.slice(0, 10);
+  }
+
   function partnerColumns(facetCopy: FacetCopy): readonly TableColumn[] {
     return [
       { label: "Name", align: "left", sortable: true },
@@ -699,6 +775,10 @@
           onclick={loadPartners}
         />
       </header>
+
+      <section class="dashboard-grid">
+        <BarsChart title="Top partner activity" points={partnerActivityPoints} tone="info" />
+      </section>
 
       <Table
         title={copy.tableTitle}
@@ -953,6 +1033,14 @@
     grid-template-columns: minmax(0, 1fr) minmax(320px, 0.42fr);
     gap: var(--ehq-space-4);
     align-items: start;
+  }
+
+  .dashboard-grid {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--ehq-space-3);
+    margin-bottom: var(--ehq-space-3);
   }
 
   .partners-list,

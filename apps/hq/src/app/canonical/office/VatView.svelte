@@ -1,9 +1,11 @@
 <script lang="ts">
   import {
+    BarsChart,
     EmptyState,
     KPI,
     Loader,
     Table,
+    type ChartPoint,
     type TableRow,
     type Tone
   } from "@ehq/ui";
@@ -42,6 +44,7 @@
 
   const vatRows = $derived(readVatRows(vatState));
   const vatKpis = $derived(createVatKpis(vatState, props.period));
+  const vatAmountPoints = $derived(createVatAmountPoints(vatRows));
   const vatTableRows = $derived(createVatTableRows(vatRows));
   const hasVatSource = $derived(vatState.status === "success" && vatState.data.hasVatSource);
 
@@ -128,6 +131,56 @@
     }));
   }
 
+  function createVatAmountPoints(rows: readonly OfficeVatRow[]): readonly ChartPoint[] {
+    const sortedRows = [...rows]
+      .sort((left: OfficeVatRow, right: OfficeVatRow): number => {
+        const leftMagnitude = absoluteMicro(left.vatMicro);
+        const rightMagnitude = absoluteMicro(right.vatMicro);
+        if (leftMagnitude === rightMagnitude) {
+          return 0;
+        }
+        return rightMagnitude > leftMagnitude ? 1 : -1;
+      })
+      .slice(0, 6);
+
+    let maxMagnitude = 0n;
+    for (const row of sortedRows) {
+      const magnitude = absoluteMicro(row.vatMicro);
+      if (magnitude > maxMagnitude) {
+        maxMagnitude = magnitude;
+      }
+    }
+
+    const points: ChartPoint[] = sortedRows.map((row: OfficeVatRow): ChartPoint => ({
+      label: compactChartLabel(row.label),
+      value: maxMagnitude === 0n ? 0 : Number((absoluteMicro(row.vatMicro) * 100n) / maxMagnitude)
+    }));
+
+    while (points.length < 6) {
+      points.push({ label: "-", value: 0 });
+    }
+
+    return points;
+  }
+
+  function absoluteMicro(value: string): bigint {
+    try {
+      const parsed = BigInt(value);
+      return parsed < 0n ? -parsed : parsed;
+    } catch {
+      return 0n;
+    }
+  }
+
+  function compactChartLabel(label: string): string {
+    const normalized = label.trim();
+    if (normalized.length <= 10) {
+      return normalized;
+    }
+
+    return normalized.slice(0, 10);
+  }
+
   function stateLabel(state: ApiRequestState<unknown>): string {
     if (state.status === "idle") {
       return "idle";
@@ -193,6 +246,10 @@
       disabledReason=""
     />
   {:else}
+    <section class="dashboard-grid">
+      <BarsChart title="Top VAT lines by amount" points={vatAmountPoints} tone="info" />
+    </section>
+
     <Table title="VAT by rate" columns={vatColumns} rows={vatTableRows} state={vatTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
   {/if}
 </section>
@@ -219,6 +276,13 @@
     min-width: 0;
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--ehq-space-3);
+  }
+
+  .dashboard-grid {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--ehq-space-3);
   }
 
