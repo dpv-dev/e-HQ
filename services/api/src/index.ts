@@ -984,7 +984,7 @@ export function createApiService(dependencies: ApiServiceDependencies): Hono<Api
         "http://127.0.0.1:5173"
       ],
       allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-      allowHeaders: ["Content-Type", "Authorization", "Idempotency-Key"]
+      allowHeaders: ["Content-Type", "Authorization", "Idempotency-Key", "Cache-Control"]
     })
   );
 
