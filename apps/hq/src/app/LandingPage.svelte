@@ -162,11 +162,20 @@
     loginMessage = "";
 
     try {
+      const selectedWorkspace = !loginMode ? loginTarget?.workspaceId ?? null : null;
       const nextSession = await signInWithSupabasePassword({
         email,
         password: loginPassword
       });
       onLogin(nextSession);
+
+      if (
+        selectedWorkspace !== null &&
+        getWorkspaceAccess(nextSession, selectedWorkspace).status === "allowed"
+      ) {
+        onOpenWorkspace(selectedWorkspace);
+      }
+
       loginOpen = false;
       loginTarget = null;
       loginMessage = "";

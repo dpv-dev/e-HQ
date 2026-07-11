@@ -183,9 +183,15 @@ async function buildHeaders(config: ApiClientConfig, input: RequestInput): Promi
 }
 
 function buildRequestInit(input: RequestInput, headers: Headers): RequestInit {
+  if (input.method === "GET") {
+    headers.set("Cache-Control", "no-cache, no-store, max-age=0");
+    headers.set("Pragma", "no-cache");
+  }
+
   const init: RequestInit = {
     method: input.method,
-    headers
+    headers,
+    cache: input.method === "GET" ? "no-store" : "default"
   };
 
   if (input.body !== null) {

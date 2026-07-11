@@ -60,17 +60,9 @@ export function createErrorState<TData>(error: unknown): ApiRequestState<TData> 
   };
 }
 
-// Stale-while-revalidate: when re-fetching data that is already loaded (e.g. after a
-// write), keep the current rows on screen instead of flashing a blank loading state.
-// Only the very first load (idle/error/still-loading) shows the spinner. The success
-// data is replaced atomically when the fresh response arrives.
-//
-// SVELTE 5 HAZARD — only call from IMPERATIVE loaders (onMount + explicit handler calls).
-// This READS `current.status`. If a loader that does `X = beginReload(X)` is invoked from a
-// reactive `$effect(() => void loadX())`, the effect tracks that read, and the write on the
-// next line re-triggers the effect → infinite reload loop (a real bug this once shipped:
-// ~640 requests hammering one endpoint). Effect-driven loaders must use createLoadingState()
-// (which reads nothing), or wrap the read in svelte's untrack().
+// Strict fresh reload: every reload clears previous data immediately so stale
+// rows are never shown while a new request is in flight.
 export function beginReload<TData>(current: ApiRequestState<TData>): ApiRequestState<TData> {
-  return current.status === "success" ? current : createLoadingState<TData>();
+  void current;
+  return createLoadingState<TData>();
 }
