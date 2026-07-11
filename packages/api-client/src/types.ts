@@ -538,6 +538,21 @@ export interface BankImportPreviewRequest {
   readonly rows: readonly Readonly<Record<string, string>>[];
 }
 
+export interface BankImportParsePreviewRequest {
+  readonly workspaceId: EntityId;
+  readonly fileName: string;
+  readonly sourceHint: "sbi" | "mcb" | "csv" | "pdf" | null;
+  readonly contentText: string;
+}
+
+export interface BankImportParsePreviewResponse {
+  readonly source: "sbi" | "mcb" | "csv";
+  readonly currency: CurrencyCode;
+  readonly parsedRowCount: number;
+  readonly rows: readonly Readonly<Record<string, string>>[];
+  readonly parsingNotes: readonly string[];
+}
+
 export interface BankImportPreviewResponse {
   readonly previewId: EntityId;
   readonly source: "sbi" | "mcb" | "csv" | "cashflow" | "pdf";

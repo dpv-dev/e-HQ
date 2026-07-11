@@ -56,6 +56,7 @@
     type OfficeBankPreviewRowResult,
     type OfficeTransaction,
     type BankImportConfirmResponse,
+    type BankImportParsePreviewResponse,
     type BankImportPreviewRequest,
     type OfficeTransactionWriteRequest,
     type PageResult,
@@ -364,6 +365,7 @@
   const bankStatementSourceOptions: readonly SelectOption[] = importSourceOptions.filter(
     (option: SelectOption): boolean => option.value === "mcb" || option.value === "sbi"
   );
+  const officeUseBackendParser = parseBooleanEnvValue(import.meta.env.VITE_OFFICE_BACKEND_PARSER);
   const planKindOptions: readonly SelectOption[] = [
     { label: "Department", value: "department" },
     { label: "Division", value: "division" },
@@ -2359,6 +2361,14 @@
     editingImportRowNumber = null;
   }
 
+  function parseBooleanEnvValue(value: unknown): boolean {
+    if (typeof value !== "string") {
+      return false;
+    }
+    const normalized = value.trim().toLowerCase();
+    return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+  }
+
   // Apply a manual fix to one rejected row, then re-run the preview so the API re-validates it.
   async function applyImportRowEdit(): Promise<void> {
     const rowNumber = editingImportRowNumber;
@@ -2405,6 +2415,22 @@
 
     try {
       const isCsv = file.name.toLowerCase().endsWith(".csv") || file.type === "text/csv" || file.type === "application/vnd.ms-excel";
+
+      if (officeUseBackendParser) {
+        const text = isCsv ? await file.text() : await extractPdfText(file);
+        const parsed = await client.office.parseBankImportPreview({
+          workspaceId: officeWorkspaceId,
+          fileName: file.name,
+          sourceHint: isCsv ? "csv" : null,
+          contentText: text
+        }, {
+          idempotencyKey: createIdempotencyKey("import-parse-preview")
+        });
+
+        await applyBackendParsedImportRows(file.name, parsed);
+        return;
+      }
+
       let parsed: readonly ParsedBankRow[];
       let currency: string;
       let source: ImportSource;
@@ -2448,6 +2474,39 @@
     } catch (error: unknown) {
       importState = { ...importState, status: "error", rows: [], message: getErrorMessage(error) };
     }
+  }
+
+  async function applyBackendParsedImportRows(fileName: string, parsed: BankImportParsePreviewResponse): Promise<void> {
+    const source = parsed.source;
+    const currency = parsed.currency;
+    const rows = parsed.rows;
+
+    if (importAccounts.length === 0) {
+      await loadImportAccounts();
+    }
+    if (selectedImportAccountId.length === 0) {
+      selectedImportAccountId = defaultImportAccountId(importAccounts, currency);
+    }
+
+    if (rows.length === 0) {
+      importState = {
+        ...importState,
+        status: "error",
+        source,
+        rows: [],
+        message: "No readable transaction in this file."
+      };
+      return;
+    }
+
+    importState = {
+      ...importState,
+      status: "loading",
+      source,
+      rows,
+      message: `${rows.length} rows detected (${sourceLabel(source)}, ${currency}). Running API analysis.`
+    };
+    await previewImportRows(rows, source, fileName);
   }
 
   async function previewImport(): Promise<void> {

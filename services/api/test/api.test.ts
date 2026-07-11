@@ -2670,6 +2670,52 @@ test("import previews are permission-checked but not gated by WRITES_ENABLED", a
   assert.equal(disabled.action, "office_bank_import_confirm");
 });
 
+test("bank import parse-preview parses CSV rows server-side and enforces preview permissions", async () => {
+  const app = createDisabledFixtureApiService();
+  const csv = [
+    "Date,Description,Debit,Credit,Currency,Reference",
+    "05/27/2026,CHARGES FOR BILL I,40.00,,MUR,REF-1",
+    "05/28/2026,PAYMENT RECEIVED,,125.00,MUR,REF-2"
+  ].join("\n");
+
+  const viewerParse = await app.request("/eof/v1/bank-import/parse-preview", {
+    method: "POST",
+    headers: { ...authHeadersForToken("fixture-viewer-token"), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      fileName: "bank.csv",
+      sourceHint: "csv",
+      contentText: csv
+    })
+  });
+  assert.equal(viewerParse.status, 403);
+
+  const officeParse = await app.request("/eof/v1/bank-import/parse-preview", {
+    method: "POST",
+    headers: { ...authHeadersForToken("fixture-office-token"), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      fileName: "bank.csv",
+      sourceHint: "csv",
+      contentText: csv
+    })
+  });
+  assert.equal(officeParse.status, 200);
+  const json = (await officeParse.json()) as {
+    readonly source: string;
+    readonly currency: string;
+    readonly parsedRowCount: number;
+    readonly rows: readonly Readonly<Record<string, string>>[];
+  };
+  assert.equal(json.source, "csv");
+  assert.equal(json.currency, "MUR");
+  assert.equal(json.parsedRowCount, 2);
+  assert.equal(json.rows.length, 2);
+  assert.equal(json.rows[0]?.transactionDate, "2026-05-27");
+  assert.equal(json.rows[0]?.debit, "40.00");
+  assert.equal(json.rows[1]?.credit, "125.00");
+});
+
 // Regression for the SBI MUR import that rejected all 2652 rows with no visible reason: when
 // no target account resolves (here a currency with no matching account, mirroring rows sent
 // without an accountId), every row is rejected and the cause must be surfaced — not swallowed.

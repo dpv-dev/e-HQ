@@ -94,6 +94,8 @@ import type {
   ApiMutationReceipt,
   ApiRunReceipt,
   AuditLogEntry,
+  BankImportParsePreviewRequest,
+  BankImportParsePreviewResponse,
   BankImportConfirmRequest,
   BankImportConfirmResponse,
   BankImportPreviewRequest,
@@ -190,6 +192,7 @@ import {
   type AuthenticatedApiUser,
   type SupabaseJwtVerifier
 } from "./auth.js";
+import { parseOfficeBankImportText } from "./office-bank-parser.js";
 import { createSupabaseRouter } from "./supabase-server.js";
 import { createFixtureStore, type ApiDistributionRoyaltyRuleInput, type ApiFixtureStore } from "./fixtures.js";
 import {
@@ -1139,6 +1142,10 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
 
   app.post("/eof/v1/bank-import/preview", async (context) => {
     return officeBankImportPreviewResponse(context, dependencies);
+  });
+
+  app.post("/eof/v1/bank-import/parse-preview", async (context) => {
+    return officeBankImportParsePreviewResponse(context, dependencies);
   });
 
   app.post("/eof/v1/bank-import/confirm", async (context) => {
@@ -6786,6 +6793,36 @@ async function distributionImportReverseResponse(context: ApiContext, dependenci
   return context.json(result.body, result.status);
 }
 
+async function officeBankImportParsePreviewResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const request = await readJsonBody<BankImportParsePreviewRequest>(context);
+  assertOfficeBankImportParsePreviewRequest(context, request);
+  requirePermissionForWorkspace(context.get("authUser"), "office_bank_import_preview", request.workspaceId);
+
+  const parsed = parseOfficeBankImportText({
+    text: request.contentText,
+    fileName: request.fileName,
+    sourceHint: request.sourceHint
+  });
+
+  if (parsed.rows.length === 0) {
+    throw new ApiRouteError(
+      422,
+      "bank_import_parse_empty",
+      "No readable transaction row was detected in this file.",
+      [`path=${context.req.path}`, `fileName=${request.fileName}`]
+    );
+  }
+
+  const response: BankImportParsePreviewResponse = {
+    source: parsed.source,
+    currency: parsed.currency,
+    parsedRowCount: parsed.parsedRowCount,
+    rows: parsed.rows,
+    parsingNotes: parsed.parsingNotes
+  };
+  return context.json(response);
+}
+
 async function officeBankImportPreviewResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
   const request = await readJsonBody<BankImportPreviewRequest>(context);
   assertOfficeBankImportPreviewRequest(context, request);
@@ -7614,6 +7651,26 @@ function assertNullableStringField(context: ApiContext, value: unknown, field: s
   }
 
   assertStringField(context, value, field);
+}
+
+function assertOfficeBankImportParsePreviewRequest(context: ApiContext, request: BankImportParsePreviewRequest): void {
+  assertStringField(context, request.workspaceId, "workspaceId");
+  assertStringField(context, request.fileName, "fileName");
+  assertStringField(context, request.contentText, "contentText");
+  if (
+    request.sourceHint !== null &&
+    request.sourceHint !== "sbi" &&
+    request.sourceHint !== "mcb" &&
+    request.sourceHint !== "csv" &&
+    request.sourceHint !== "pdf"
+  ) {
+    throw new ApiRouteError(
+      400,
+      "body_value_invalid",
+      "Office bank parse-preview source hint is invalid.",
+      [`path=${context.req.path}`, `sourceHint=${String(request.sourceHint)}`]
+    );
+  }
 }
 
 function assertOfficeBankImportPreviewRequest(context: ApiContext, request: BankImportPreviewRequest): void {

@@ -4,6 +4,8 @@ import type {
   ApiMutationReceipt,
   AuditLogEntry,
   AuditLogQuery,
+  BankImportParsePreviewRequest,
+  BankImportParsePreviewResponse,
   BankImportConfirmRequest,
   BankImportConfirmResponse,
   BankImportPreviewRequest,
@@ -128,6 +130,10 @@ export interface OfficeApiClient {
     request: BankImportPreviewRequest,
     options: WriteRequestOptions
   ) => Promise<BankImportPreviewResponse>;
+  readonly parseBankImportPreview: (
+    request: BankImportParsePreviewRequest,
+    options: WriteRequestOptions
+  ) => Promise<BankImportParsePreviewResponse>;
   readonly confirmBankImport: (
     request: BankImportConfirmRequest,
     options: WriteRequestOptions
@@ -386,6 +392,11 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
       options: WriteRequestOptions
     ): Promise<BankImportPreviewResponse> =>
       transport.post<BankImportPreviewResponse>("bank-import/preview", request, options.idempotencyKey),
+    parseBankImportPreview: (
+      request: BankImportParsePreviewRequest,
+      options: WriteRequestOptions
+    ): Promise<BankImportParsePreviewResponse> =>
+      transport.post<BankImportParsePreviewResponse>("bank-import/parse-preview", request, options.idempotencyKey),
     confirmBankImport: (
       request: BankImportConfirmRequest,
       options: WriteRequestOptions

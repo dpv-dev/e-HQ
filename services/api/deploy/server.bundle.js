@@ -25130,6 +25130,548 @@ function toBasisPointValue(value) {
   return parseInt(value.toString(), 10);
 }
 
+// src/office-bank-parser.ts
+var MONTHS = {
+  jan: 1,
+  feb: 2,
+  mar: 3,
+  apr: 4,
+  may: 5,
+  jun: 6,
+  jul: 7,
+  aug: 8,
+  sep: 9,
+  oct: 10,
+  nov: 11,
+  dec: 12
+};
+var SBI_DATE_LINE = /^\s*(\d{1,2},[A-Za-z]{3,9},\d{4})\s+(.+?)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s*$/u;
+var MCB_LINE = /^\s*(\d{2}\/\d{2}\/\d{4})\s+\d{2}\/\d{2}\/\d{4}\s+(.+?)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s*$/u;
+function parseOfficeBankImportText(input) {
+  const parseAsCsv = input.sourceHint === "csv" || input.fileName.trim().toLowerCase().endsWith(".csv");
+  if (parseAsCsv) {
+    const rows2 = parseBankCsv(input.text);
+    const currency2 = detectCsvCurrency(input.text) ?? "MUR";
+    return {
+      source: "csv",
+      currency: currency2,
+      parsedRowCount: rows2.length,
+      rows: rows2.map(
+        (row) => bankRowToRecord(row, currency2)
+      ),
+      parsingNotes: [
+        "Parsed on API from CSV content and normalized before import preview."
+      ]
+    };
+  }
+  const source = input.sourceHint === "mcb" || input.sourceHint === "sbi" ? input.sourceHint : detectBankFormat(input.text) === "mcb" ? "mcb" : "sbi";
+  const rows = source === "mcb" ? parseMcbStatementText(input.text) : parseSbiStatementText(input.text);
+  const currency = detectStatementCurrency(input.text);
+  return {
+    source,
+    currency,
+    parsedRowCount: rows.length,
+    rows: rows.map(
+      (row) => bankRowToRecord(row, currency)
+    ),
+    parsingNotes: [
+      "Parsed on API from extracted statement text and normalized before import preview."
+    ]
+  };
+}
+function bankRowToRecord(row, currency) {
+  const record = {
+    transactionDate: row.date,
+    description: row.description,
+    currency
+  };
+  record[row.direction] = eofMoney.format(absBigInt2(row.amountMinor));
+  if (row.balanceMinor !== null) {
+    record.balance = eofMoney.format(row.balanceMinor);
+  }
+  if (row.reference !== null) {
+    record.reference = row.reference;
+  }
+  return record;
+}
+function parseAmountUnits(input) {
+  const cleaned = cleanMoneyText(input);
+  if (cleaned.length === 0 || cleaned === "-" || cleaned === "+") {
+    return null;
+  }
+  try {
+    return eofMoney.parse(cleaned);
+  } catch {
+    return null;
+  }
+}
+function parseDate(input) {
+  const value = input.trim();
+  if (value.length === 0) {
+    return null;
+  }
+  const sbi = value.match(/^([0-9]{1,2})\s*,\s*([A-Za-z]{3,})\s*,\s*([0-9]{4})$/u);
+  if (sbi !== null && sbi[1] !== void 0 && sbi[2] !== void 0 && sbi[3] !== void 0) {
+    const month = MONTHS[sbi[2].slice(0, 3).toLowerCase()];
+    if (month === void 0) {
+      return null;
+    }
+    return `${sbi[3]}-${pad2(month)}-${pad2(Number.parseInt(sbi[1], 10))}`;
+  }
+  if (/^\d{4}-\d{2}-\d{2}/u.test(value)) {
+    return value.slice(0, 10);
+  }
+  const dmy = value.match(/^(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})$/u);
+  if (dmy !== null && dmy[1] !== void 0 && dmy[2] !== void 0 && dmy[3] !== void 0) {
+    return `${dmy[3]}-${pad2(Number.parseInt(dmy[2], 10))}-${pad2(Number.parseInt(dmy[1], 10))}`;
+  }
+  const dmyShort = value.match(/^(\d{1,2})[/\-](\d{1,2})[/\-](\d{2})$/u);
+  if (dmyShort !== null && dmyShort[1] !== void 0 && dmyShort[2] !== void 0 && dmyShort[3] !== void 0) {
+    const year2 = 2e3 + Number.parseInt(dmyShort[3], 10);
+    return `${year2}-${pad2(Number.parseInt(dmyShort[2], 10))}-${pad2(Number.parseInt(dmyShort[1], 10))}`;
+  }
+  return null;
+}
+function parseSbiStatementText(text) {
+  const drafts = [];
+  for (const block of splitIntoBlocks(text)) {
+    const draft = sbiDraftFromBlock(block);
+    if (draft !== null) {
+      drafts.push(draft);
+    }
+  }
+  return assignDirectionsByNeighbors(drafts);
+}
+function splitIntoBlocks(text) {
+  const blocks = [];
+  let current = [];
+  for (const rawLine of text.split(/\r\n|\r|\n/u)) {
+    if (rawLine.trim().length === 0) {
+      if (current.length > 0) {
+        blocks.push(current);
+        current = [];
+      }
+      continue;
+    }
+    current.push(rawLine);
+  }
+  if (current.length > 0) {
+    blocks.push(current);
+  }
+  return blocks;
+}
+function sbiDraftFromBlock(block) {
+  let dateLineIndex = -1;
+  let match2 = null;
+  for (let index = 0; index < block.length; index += 1) {
+    const candidate = (block[index] ?? "").match(SBI_DATE_LINE);
+    if (candidate !== null) {
+      match2 = candidate;
+      dateLineIndex = index;
+      break;
+    }
+  }
+  if (match2 === null) {
+    return null;
+  }
+  const dateStr = match2[1];
+  const middleText = match2[2];
+  const amountStr = match2[3];
+  const balanceStr = match2[4];
+  if (dateStr === void 0 || amountStr === void 0) {
+    return null;
+  }
+  const date = parseDate(dateStr);
+  const amountMinor = parseAmountUnits(amountStr);
+  if (date === null || amountMinor === null) {
+    return null;
+  }
+  const parts = [];
+  let reference = null;
+  for (let index = 0; index < block.length; index += 1) {
+    const lineText = index === dateLineIndex ? (middleText ?? "").trim() : (block[index] ?? "").trim();
+    if (lineText.length === 0) {
+      continue;
+    }
+    const idMatch = lineText.match(/^ID:\s*(\S+)/iu);
+    if (idMatch !== null && idMatch[1] !== void 0) {
+      if (reference === null) {
+        reference = idMatch[1];
+      }
+      continue;
+    }
+    parts.push(lineText);
+  }
+  return {
+    date,
+    amountMinor: absBigInt2(amountMinor),
+    balanceMinor: balanceStr !== void 0 ? parseAmountUnits(balanceStr) : null,
+    description: parts.join(" ").replace(/\s+/gu, " ").trim(),
+    reference
+  };
+}
+function assignDirectionsByNeighbors(drafts) {
+  return drafts.map((row, index) => {
+    if (row.balanceMinor === null) {
+      return toRow(row, "debit");
+    }
+    const candidates = [];
+    const prev = drafts[index - 1];
+    const next = drafts[index + 1];
+    if (prev !== void 0 && prev.balanceMinor !== null) {
+      candidates.push(row.balanceMinor - prev.balanceMinor);
+    }
+    if (next !== void 0 && next.balanceMinor !== null) {
+      candidates.push(row.balanceMinor - next.balanceMinor);
+    }
+    const matched = candidates.find(
+      (delta) => absBigInt2(absBigInt2(delta) - row.amountMinor) <= 1n
+    );
+    if (matched !== void 0) {
+      return toRow(row, matched < 0n ? "debit" : "credit");
+    }
+    const firstDelta = candidates[0];
+    if (firstDelta !== void 0) {
+      return toRow(row, firstDelta > 0n ? "credit" : "debit");
+    }
+    return toRow(row, "debit");
+  });
+}
+function parseMcbStatementText(text) {
+  const lines = text.split(/\r\n|\r|\n/u);
+  const drafts = [];
+  let current = null;
+  let openingBalanceMinor = null;
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (line.length === 0) {
+      continue;
+    }
+    const opening = line.match(/^Opening Balance\s+([\d,]+\.\d{2})$/iu);
+    if (opening !== null && opening[1] !== void 0) {
+      openingBalanceMinor = parseAmountUnits(opening[1]);
+      continue;
+    }
+    if (/^Closing Balance/iu.test(line)) {
+      if (current !== null) {
+        drafts.push(current);
+        current = null;
+      }
+      continue;
+    }
+    const match2 = line.match(MCB_LINE);
+    if (match2 !== null && match2[1] !== void 0 && match2[3] !== void 0 && match2[4] !== void 0) {
+      if (current !== null) {
+        drafts.push(current);
+      }
+      const date = parseDate(match2[1]);
+      const amountMinor = parseAmountUnits(match2[3]);
+      if (date === null || amountMinor === null) {
+        current = null;
+        continue;
+      }
+      current = {
+        date,
+        amountMinor: absBigInt2(amountMinor),
+        balanceMinor: parseAmountUnits(match2[4]),
+        description: (match2[2] ?? "").trim(),
+        reference: null
+      };
+      continue;
+    }
+    if (current !== null) {
+      current = {
+        ...current,
+        description: `${current.description} ${line}`.replace(/\s+/gu, " ").trim()
+      };
+    }
+  }
+  if (current !== null) {
+    drafts.push(current);
+  }
+  return assignDirectionsSequential(drafts, openingBalanceMinor);
+}
+function assignDirectionsSequential(drafts, openingBalanceMinor) {
+  let previousBalanceMinor = openingBalanceMinor;
+  return drafts.map((row) => {
+    const balanceMinor = row.balanceMinor;
+    if (balanceMinor === null || previousBalanceMinor === null) {
+      previousBalanceMinor = balanceMinor ?? previousBalanceMinor;
+      return toRow(row, "debit");
+    }
+    const delta = balanceMinor - previousBalanceMinor;
+    previousBalanceMinor = balanceMinor;
+    return toRow(row, delta < 0n ? "debit" : "credit");
+  });
+}
+function toRow(row, direction) {
+  return {
+    date: row.date,
+    description: row.description,
+    amountMinor: row.amountMinor,
+    direction,
+    balanceMinor: row.balanceMinor,
+    reference: row.reference
+  };
+}
+function detectBankFormat(text) {
+  const lower = text.toLowerCase();
+  if (lower.includes("transactions list") || lower.includes("particulars") || lower.includes("instrument id") || lower.includes("txn date") || lower.includes("narration") || lower.includes("state bank") || lower.includes("sbm")) {
+    return "sbi";
+  }
+  if (lower.includes("current account statement") || /mcbl09\d/u.test(lower)) {
+    return "mcb";
+  }
+  return "unknown";
+}
+function detectStatementCurrency(text) {
+  const labelled = text.match(/Currency\s*:?\s*([A-Za-z]{3})/u);
+  if (labelled !== null && labelled[1] !== void 0) {
+    return labelled[1].toUpperCase();
+  }
+  if (/\bEUR\b/u.test(text)) {
+    return "EUR";
+  }
+  return "MUR";
+}
+function splitCsvLine(line) {
+  const cells = [];
+  let cell = "";
+  let inQuotes = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    if (inQuotes) {
+      if (char === '"') {
+        if (line[index + 1] === '"') {
+          cell += '"';
+          index += 1;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        cell += char ?? "";
+      }
+    } else if (char === '"') {
+      inQuotes = true;
+    } else if (char === ",") {
+      cells.push(cell);
+      cell = "";
+    } else {
+      cell += char ?? "";
+    }
+  }
+  cells.push(cell);
+  return cells.map((value) => value.trim());
+}
+function headerIndex(header, names) {
+  for (const name of names) {
+    const index = header.indexOf(name);
+    if (index >= 0) {
+      return index;
+    }
+  }
+  return -1;
+}
+function cellAt(cells, index) {
+  if (index < 0) {
+    return "";
+  }
+  const value = cells[index];
+  return value !== void 0 ? value : "";
+}
+function parseCsvDate(input, dayFirst) {
+  const value = input.trim();
+  if (value.length === 0) {
+    return null;
+  }
+  if (/^\d{4}-\d{2}-\d{2}/u.test(value)) {
+    return value.slice(0, 10);
+  }
+  const match2 = value.match(/^(\d{1,2})[/\-](\d{1,2})[/\-](\d{2}|\d{4})$/u);
+  if (match2 === null || match2[1] === void 0 || match2[2] === void 0 || match2[3] === void 0) {
+    return null;
+  }
+  const first = Number.parseInt(match2[1], 10);
+  const second = Number.parseInt(match2[2], 10);
+  const day2 = dayFirst ? first : second;
+  const month = dayFirst ? second : first;
+  const yearRaw = Number.parseInt(match2[3], 10);
+  const year2 = match2[3].length === 2 ? 2e3 + yearRaw : yearRaw;
+  if (month < 1 || month > 12 || day2 < 1 || day2 > 31) {
+    return null;
+  }
+  return `${year2}-${pad2(month)}-${pad2(day2)}`;
+}
+function detectDayFirstDates(rows, dateIndex) {
+  for (const cells of rows) {
+    const match2 = cellAt(cells, dateIndex).match(/^([0-9]{1,2})[/\-]([0-9]{1,2})[/\-][0-9]{2,4}$/u);
+    if (match2 !== null && match2[1] !== void 0 && match2[2] !== void 0) {
+      if (Number.parseInt(match2[1], 10) > 12) {
+        return true;
+      }
+      if (Number.parseInt(match2[2], 10) > 12) {
+        return false;
+      }
+    }
+  }
+  return false;
+}
+function parseBankCsv(text) {
+  const lines = text.split(/\r\n|\r|\n/u).filter((line) => line.trim().length > 0);
+  const firstLine = lines[0];
+  if (lines.length < 2 || firstLine === void 0) {
+    return [];
+  }
+  const header = splitCsvLine(firstLine).map(
+    (value) => value.toLowerCase()
+  );
+  const dateIndex = headerIndex(header, [
+    "date",
+    "transaction date",
+    "trans date",
+    "value date",
+    "posting date"
+  ]);
+  const descriptionIndex = headerIndex(header, [
+    "description",
+    "details",
+    "narration",
+    "particulars",
+    "memo",
+    "transaction details"
+  ]);
+  const debitIndex = headerIndex(header, ["debit", "withdrawal", "dr", "debit amount"]);
+  const creditIndex = headerIndex(header, [
+    "credit",
+    "deposit",
+    "cr",
+    "credit amount"
+  ]);
+  const amountIndex = headerIndex(header, ["amount"]);
+  const balanceIndex = headerIndex(header, ["balance", "running balance", "closing balance"]);
+  const referenceIndex = headerIndex(header, [
+    "reference",
+    "ref",
+    "transaction id",
+    "cheque",
+    "cheque no"
+  ]);
+  if (dateIndex < 0 || debitIndex < 0 && creditIndex < 0 && amountIndex < 0) {
+    return [];
+  }
+  const dataRows = lines.slice(1).map(splitCsvLine);
+  const dayFirst = detectDayFirstDates(dataRows, dateIndex);
+  const rows = [];
+  for (const cells of dataRows) {
+    const date = parseCsvDate(cellAt(cells, dateIndex), dayFirst);
+    if (date === null) {
+      continue;
+    }
+    const debit = debitIndex >= 0 ? parseAmountUnits(cellAt(cells, debitIndex)) : null;
+    const credit = creditIndex >= 0 ? parseAmountUnits(cellAt(cells, creditIndex)) : null;
+    let amountMinor = null;
+    let direction = "debit";
+    if (credit !== null && credit !== 0n && (debit === null || debit === 0n)) {
+      amountMinor = absBigInt2(credit);
+      direction = "credit";
+    } else if (debit !== null && debit !== 0n) {
+      amountMinor = absBigInt2(debit);
+      direction = "debit";
+    } else if (amountIndex >= 0) {
+      const signed = parseAmountUnits(cellAt(cells, amountIndex));
+      if (signed !== null && signed !== 0n) {
+        amountMinor = absBigInt2(signed);
+        direction = signed < 0n ? "debit" : "credit";
+      }
+    }
+    if (amountMinor === null || amountMinor === 0n) {
+      continue;
+    }
+    const reference = referenceIndex >= 0 ? cellAt(cells, referenceIndex) : "";
+    rows.push({
+      date,
+      description: cellAt(cells, descriptionIndex),
+      amountMinor,
+      direction,
+      balanceMinor: balanceIndex >= 0 ? parseAmountUnits(cellAt(cells, balanceIndex)) : null,
+      reference: reference.length > 0 ? reference : null
+    });
+  }
+  return rows;
+}
+function detectCsvCurrency(text) {
+  const lines = text.split(/\r\n|\r|\n/u).filter((line) => line.trim().length > 0);
+  const firstLine = lines[0];
+  if (lines.length < 2 || firstLine === void 0) {
+    return null;
+  }
+  const header = splitCsvLine(firstLine).map(
+    (value) => value.toLowerCase()
+  );
+  const currencyIndex = headerIndex(header, ["currency", "ccy", "currency code"]);
+  if (currencyIndex < 0) {
+    return null;
+  }
+  for (const line of lines.slice(1)) {
+    const value = cellAt(splitCsvLine(line), currencyIndex).toUpperCase();
+    if (/^[A-Z]{3}$/u.test(value)) {
+      return value;
+    }
+  }
+  return null;
+}
+function cleanMoneyText(value) {
+  const original = value.trim();
+  if (original.length === 0) {
+    return "";
+  }
+  let sign = "";
+  let trimmed = original;
+  if (trimmed.startsWith("(") && trimmed.endsWith(")")) {
+    sign = "-";
+    trimmed = trimmed.slice(1, -1).trim();
+  }
+  if (trimmed.startsWith("+")) {
+    trimmed = trimmed.slice(1).trim();
+  } else if (trimmed.startsWith("-")) {
+    sign = "-";
+    trimmed = trimmed.slice(1).trim();
+  }
+  const compacted = trimmed.replaceAll(/\u00a0/g, "").replaceAll(" ", "").replace(/[^0-9.,]/gu, "");
+  if (compacted.length === 0) {
+    return "";
+  }
+  const lastComma = compacted.lastIndexOf(",");
+  const lastDot = compacted.lastIndexOf(".");
+  if (lastComma === -1 && lastDot === -1) {
+    return `${sign}${compacted}`;
+  }
+  if (lastComma === -1) {
+    return `${sign}${compacted.replace(/,/gu, "")}`;
+  }
+  if (lastDot === -1) {
+    const decimalPart = compacted.slice(lastComma + 1);
+    const integerWithGroup = compacted.slice(0, lastComma);
+    const integerGroups = integerWithGroup.split(",");
+    if (decimalPart.length > 0 && decimalPart.length <= 2 && integerGroups.every(
+      (group, groupIndex) => groupIndex === 0 ? group.length >= 1 && group.length <= 3 : group.length === 3
+    )) {
+      return `${sign}${integerWithGroup.replace(/,/gu, "")}.${decimalPart}`;
+    }
+    return `${sign}${compacted.replace(/,/gu, "")}`;
+  }
+  if (lastComma > lastDot) {
+    return `${sign}${compacted.slice(0, lastComma).replace(/,/gu, "")}.${compacted.slice(lastComma + 1)}`;
+  }
+  return `${sign}${compacted.replace(/,/gu, "")}`;
+}
+function absBigInt2(value) {
+  return value < 0n ? -value : value;
+}
+function pad2(value) {
+  return String(value).padStart(2, "0");
+}
+
 // ../../node_modules/.pnpm/@supabase+supabase-js@2.108.2/node_modules/@supabase/supabase-js/dist/index.mjs
 var dist_exports = {};
 __export(dist_exports, {
@@ -39900,6 +40442,9 @@ function registerOfficeRoutes(app, dependencies) {
   app.post("/eof/v1/bank-import/preview", async (context) => {
     return officeBankImportPreviewResponse(context, dependencies);
   });
+  app.post("/eof/v1/bank-import/parse-preview", async (context) => {
+    return officeBankImportParsePreviewResponse(context, dependencies);
+  });
   app.post("/eof/v1/bank-import/confirm", async (context) => {
     return officeBankImportConfirmResponse(context, dependencies);
   });
@@ -41176,16 +41721,16 @@ function assertOfficeReconciliationKernelCreate(context, line, transactionId, am
 function officeReconciliationLineMoney(line) {
   const currency = line.amountMurMinor === null ? line.currency : "MUR";
   const amountMinor = line.amountMurMinor ?? line.amountMinor;
-  return createMoneyAmount(createMoneyMicroUnits(absBigInt2(amountMinor)), createCurrencyCode(currency));
+  return createMoneyAmount(createMoneyMicroUnits(absBigInt3(amountMinor)), createCurrencyCode(currency));
 }
 function officeReconciliationTransactionMoney(transaction) {
   const originalCurrency = transaction.originalCurrency?.trim().toUpperCase() ?? null;
   const currency = originalCurrency === null || originalCurrency.length === 0 || originalCurrency === "MUR" || transaction.exchangeRateE10 !== null ? "MUR" : originalCurrency;
-  return createMoneyAmount(createMoneyMicroUnits(absBigInt2(transaction.amountMinor)), createCurrencyCode(currency));
+  return createMoneyAmount(createMoneyMicroUnits(absBigInt3(transaction.amountMinor)), createCurrencyCode(currency));
 }
 function createFinanceMoneyAmount(context, amountMinor, currency) {
   try {
-    return createMoneyAmount(createMoneyMicroUnits(absBigInt2(amountMinor)), createCurrencyCode(currency));
+    return createMoneyAmount(createMoneyMicroUnits(absBigInt3(amountMinor)), createCurrencyCode(currency));
   } catch (error) {
     throw new ApiRouteError(400, "currency_invalid", "Currency must be a valid ISO-4217 code.", [
       `path=${context.req.path}`,
@@ -44796,6 +45341,32 @@ async function distributionImportReverseResponse(context, dependencies) {
   });
   return context.json(result.body, result.status);
 }
+async function officeBankImportParsePreviewResponse(context, dependencies) {
+  const request = await readJsonBody(context);
+  assertOfficeBankImportParsePreviewRequest(context, request);
+  requirePermissionForWorkspace(context.get("authUser"), "office_bank_import_preview", request.workspaceId);
+  const parsed = parseOfficeBankImportText({
+    text: request.contentText,
+    fileName: request.fileName,
+    sourceHint: request.sourceHint
+  });
+  if (parsed.rows.length === 0) {
+    throw new ApiRouteError(
+      422,
+      "bank_import_parse_empty",
+      "No readable transaction row was detected in this file.",
+      [`path=${context.req.path}`, `fileName=${request.fileName}`]
+    );
+  }
+  const response = {
+    source: parsed.source,
+    currency: parsed.currency,
+    parsedRowCount: parsed.parsedRowCount,
+    rows: parsed.rows,
+    parsingNotes: parsed.parsingNotes
+  };
+  return context.json(response);
+}
 async function officeBankImportPreviewResponse(context, dependencies) {
   const request = await readJsonBody(context);
   assertOfficeBankImportPreviewRequest(context, request);
@@ -45515,6 +46086,19 @@ function assertNullableStringField(context, value, field) {
   }
   assertStringField(context, value, field);
 }
+function assertOfficeBankImportParsePreviewRequest(context, request) {
+  assertStringField(context, request.workspaceId, "workspaceId");
+  assertStringField(context, request.fileName, "fileName");
+  assertStringField(context, request.contentText, "contentText");
+  if (request.sourceHint !== null && request.sourceHint !== "sbi" && request.sourceHint !== "mcb" && request.sourceHint !== "csv" && request.sourceHint !== "pdf") {
+    throw new ApiRouteError(
+      400,
+      "body_value_invalid",
+      "Office bank parse-preview source hint is invalid.",
+      [`path=${context.req.path}`, `sourceHint=${String(request.sourceHint)}`]
+    );
+  }
+}
 function assertOfficeBankImportPreviewRequest(context, request) {
   assertStringField(context, request.workspaceId, "workspaceId");
   assertStringField(context, request.fileName, "fileName");
@@ -45917,7 +46501,7 @@ function buildOfficeReconciliationSuggestions(dataset, workspaceId, lines) {
     }
     const expectedType = line.direction === "debit" ? "expense" : "income";
     const rankedCandidates = transactionPool.filter(
-      (transaction) => transaction.type === expectedType && absBigInt2(transaction.amountMinor) === line.amountMurMinor && !alreadyMatchedTransactionIds.has(transaction.id) && !usedTransactionIds.has(transaction.id)
+      (transaction) => transaction.type === expectedType && absBigInt3(transaction.amountMinor) === line.amountMurMinor && !alreadyMatchedTransactionIds.has(transaction.id) && !usedTransactionIds.has(transaction.id)
     ).map((transaction) => {
       const score = reconciliationSuggestionScore(line, transaction);
       return {
@@ -46097,24 +46681,24 @@ function amountForBankRow(row) {
   const signedAmount = signedMoneyValue(row, ["signedAmount", "signed_amount", "net", "Net"]);
   if (credit !== null) {
     return {
-      amountMinor: absBigInt2(credit),
-      amountMurMinor: currency === "MUR" ? absBigInt2(credit) : moneyValue(row, ["amountMur", "amount_mur", "amountMurMinor", "amount_mur_minor"]),
+      amountMinor: absBigInt3(credit),
+      amountMurMinor: currency === "MUR" ? absBigInt3(credit) : moneyValue(row, ["amountMur", "amount_mur", "amountMurMinor", "amount_mur_minor"]),
       currency,
       direction: "credit"
     };
   }
   if (debit !== null) {
     return {
-      amountMinor: absBigInt2(debit),
-      amountMurMinor: currency === "MUR" ? absBigInt2(debit) : moneyValue(row, ["amountMur", "amount_mur", "amountMurMinor", "amount_mur_minor"]),
+      amountMinor: absBigInt3(debit),
+      amountMurMinor: currency === "MUR" ? absBigInt3(debit) : moneyValue(row, ["amountMur", "amount_mur", "amountMurMinor", "amount_mur_minor"]),
       currency,
       direction: "debit"
     };
   }
   if (signedAmount !== null) {
     return {
-      amountMinor: absBigInt2(signedAmount),
-      amountMurMinor: currency === "MUR" ? absBigInt2(signedAmount) : moneyValue(row, ["amountMur", "amount_mur", "amountMurMinor", "amount_mur_minor"]),
+      amountMinor: absBigInt3(signedAmount),
+      amountMurMinor: currency === "MUR" ? absBigInt3(signedAmount) : moneyValue(row, ["amountMur", "amount_mur", "amountMurMinor", "amount_mur_minor"]),
       currency,
       direction: signedAmount < 0n ? "debit" : "credit"
     };
@@ -46124,8 +46708,8 @@ function amountForBankRow(row) {
   }
   const direction = directionValue(row) ?? "credit";
   return {
-    amountMinor: absBigInt2(amount),
-    amountMurMinor: currency === "MUR" ? absBigInt2(amount) : moneyValue(row, ["amountMur", "amount_mur", "amountMurMinor", "amount_mur_minor"]),
+    amountMinor: absBigInt3(amount),
+    amountMurMinor: currency === "MUR" ? absBigInt3(amount) : moneyValue(row, ["amountMur", "amount_mur", "amountMurMinor", "amount_mur_minor"]),
     currency,
     direction
   };
@@ -46140,7 +46724,7 @@ function convertMinorToMurViaFinanceKernel(amountMinor, fromCurrency, occurredOn
   }
   try {
     const converted = convertMoney(
-      createMoneyAmount(createMoneyMicroUnits(absBigInt2(amountMinor)), createCurrencyCode(fromCurrency)),
+      createMoneyAmount(createMoneyMicroUnits(absBigInt3(amountMinor)), createCurrencyCode(fromCurrency)),
       createCurrencyCode("MUR"),
       {
         fromCurrency: createCurrencyCode(rate.fromCurrency),
@@ -46171,7 +46755,7 @@ function pickMurExchangeRateForPreview(fromCurrency, occurredOn, exchangeRates) 
 }
 function decimalFromE10(rateE10) {
   const sign = rateE10 < 0n ? "-" : "";
-  const digits = absBigInt2(rateE10).toString().padStart(11, "0");
+  const digits = absBigInt3(rateE10).toString().padStart(11, "0");
   const integer = digits.slice(0, -10);
   const fraction = digits.slice(-10);
   return `${sign}${integer}.${fraction}`;
@@ -46196,7 +46780,7 @@ function moneyValue(row, aliases) {
     return null;
   }
   try {
-    return eofMoney.parse(cleanMoneyText(value));
+    return eofMoney.parse(cleanMoneyText2(value));
   } catch (_error) {
     return null;
   }
@@ -46204,7 +46788,7 @@ function moneyValue(row, aliases) {
 function signedMoneyValue(row, aliases) {
   return moneyValue(row, aliases);
 }
-function cleanMoneyText(value) {
+function cleanMoneyText2(value) {
   const original = value.trim();
   if (original.length === 0) {
     return "";
@@ -46285,7 +46869,7 @@ function normalizeColumnKey(key) {
 function uniqueStrings(values) {
   return [...new Set(values)];
 }
-function absBigInt2(value) {
+function absBigInt3(value) {
   return value < 0n ? -value : value;
 }
 function officeDateRange(dates) {
@@ -47071,7 +47655,7 @@ function toOfficeVatReport(dataset, period) {
     if (!vatMeta.isApplicable) {
       continue;
     }
-    const grossMinor = absBigInt2(transaction.amountMinor);
+    const grossMinor = absBigInt3(transaction.amountMinor);
     const rateBp = vatMeta.rateBp;
     const breakdown = rateBp > 0 ? calculateVat(
       createMoneyAmount(createMoneyMicroUnits(grossMinor), createCurrencyCode("MUR")),
@@ -47108,8 +47692,8 @@ function readOfficeTransactionVatMeta(transaction) {
   const hasVatAmount = typeof value.vatAmountMinor === "bigint" || value.vatAmountMinor === null;
   const hasSource = hasVatApplicable || hasVatRate || hasVatAmount;
   const normalizedRate = typeof value.vatRateBp === "number" && Number.isInteger(value.vatRateBp) && value.vatRateBp >= 0 && value.vatRateBp <= 1e4 ? value.vatRateBp : 0;
-  const normalizedVatAmount = typeof value.vatAmountMinor === "bigint" ? absBigInt2(value.vatAmountMinor) : null;
-  const isApplicable = value.vatApplicable === true || typeof value.vatAmountMinor === "bigint" && absBigInt2(value.vatAmountMinor) > 0n || normalizedRate > 0;
+  const normalizedVatAmount = typeof value.vatAmountMinor === "bigint" ? absBigInt3(value.vatAmountMinor) : null;
+  const isApplicable = value.vatApplicable === true || typeof value.vatAmountMinor === "bigint" && absBigInt3(value.vatAmountMinor) > 0n || normalizedRate > 0;
   return {
     hasSource,
     isApplicable,
@@ -47502,7 +48086,7 @@ function departmentExpenseTrendKpis(dataset, filters, months) {
     }
     const existing = trends.get(path.department.id);
     const series = existing?.series ?? months.map(() => 0n);
-    series[monthIndex] = eofMoney.add(series[monthIndex] ?? 0n, absBigInt2(transaction.amountMinor));
+    series[monthIndex] = eofMoney.add(series[monthIndex] ?? 0n, absBigInt3(transaction.amountMinor));
     trends.set(path.department.id, {
       departmentLabel: path.department.name,
       series
@@ -47549,8 +48133,8 @@ function roundSignedRatioBp(numerator, denominator) {
     return 0;
   }
   const negative = numerator < 0n !== denominator < 0n;
-  const absoluteNumerator = absBigInt2(numerator);
-  const absoluteDenominator = absBigInt2(denominator);
+  const absoluteNumerator = absBigInt3(numerator);
+  const absoluteDenominator = absBigInt3(denominator);
   const magnitude = Number((absoluteNumerator * 10000n + absoluteDenominator / 2n) / absoluteDenominator);
   return negative ? -magnitude : magnitude;
 }
@@ -47644,7 +48228,7 @@ function toOfficeLedgerTransactions(dataset, filters) {
       id: transaction.id,
       transactionDate: transaction.transactionDate.slice(0, 10),
       direction: transaction.type,
-      amount: createMoneyAmount(createMoneyMicroUnits(absBigInt2(transaction.amountMinor)), createCurrencyCode("MUR")),
+      amount: createMoneyAmount(createMoneyMicroUnits(absBigInt3(transaction.amountMinor)), createCurrencyCode("MUR")),
       categoryId: transaction.categoryId,
       departmentId,
       divisionId,

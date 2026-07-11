@@ -1,7 +1,7 @@
 # Parser Migration Design (Frontend -> Backend Authority)
 
 Last updated: 2026-07-11
-Status: design started
+Status: in progress (Stage B slice landed)
 
 ## 1) Goal
 Move statement/import parsing authority to backend APIs so frontend no longer owns business parsing logic in production.
@@ -13,6 +13,7 @@ Current frontend parser ownership:
 
 Current behavior:
 - Frontend reads file text (and PDF extraction in browser), parses rows client-side, then sends normalized row payload to API preview/confirm endpoints.
+- New dual path exists: when `VITE_OFFICE_BACKEND_PARSER` is enabled, frontend sends extracted text to `eof/v1/bank-import/parse-preview` and uses API-normalized rows for preview/confirm.
 
 Important clarification:
 - This is local TypeScript code, not a runtime link to the old WordPress engine.
@@ -32,17 +33,14 @@ Method: POST
 Path: eof/v1/bank-import/parse-preview (or compatible namespace route)
 Input:
 - workspaceId
-- accountId (optional when auto-detect is allowed)
-- source hint (optional)
-- file metadata (name, mime)
-- payload (multipart file or base64/text)
+- fileName
+- sourceHint (optional)
+- contentText (raw CSV text or extracted PDF text)
 Output:
-- parseSessionId
-- detected source/currency/date window
-- normalized rows with row ids
-- rejected rows with reasons
-- warnings
-- checksum/fingerprint
+- detected source/currency
+- parsedRowCount
+- normalized rows (header-keyed records ready for existing preview endpoint)
+- parsingNotes
 
 ### 4.2 Parse confirm endpoint
 Method: POST
@@ -61,11 +59,13 @@ Output:
 ### Stage A - Backend parser parity harness
 - Build backend parser module with fixture-driven tests.
 - Reuse golden fixtures from current frontend parser outputs.
+Status: started (backend parser module in place; fixture diff harness still pending).
 
 ### Stage B - Dual path (hidden switch)
 - Keep current frontend parse path.
 - Add feature flag: useBackendParser.
 - When enabled, frontend uses new parse-preview endpoint.
+Status: shipped (hidden flag `VITE_OFFICE_BACKEND_PARSER`, fallback preserved).
 
 ### Stage C - Parity validation
 - Run same sample statements through both paths.

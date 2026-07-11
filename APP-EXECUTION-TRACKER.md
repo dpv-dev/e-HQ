@@ -3,13 +3,13 @@
 Last updated: 2026-07-11
 Branch: theme/distribution-command
 Main baseline: 146e25b
-Current head: cf5075c
+Current head: 218f539
 
 ## Current Snapshot
 - Repo health: clean working tree, green local gates.
 - Frontend quality trend: shared request-state/request-status helpers are now centralized and tested.
 - Deployment baseline: production last confirmed on commit 2411977 in this session.
-- Parser ownership: parser logic currently exists in frontend files apps/hq/src/app/bank-parser.ts and apps/hq/src/app/pdf-extract.ts.
+- Parser ownership: API parse-preview endpoint and backend parser module now exist; frontend parser remains fallback path behind a hidden flag.
 
 ## Program Phases
 
@@ -58,7 +58,7 @@ Exit criteria:
 - All critical writes covered by idempotency and audit receipts.
 
 ### Phase 3 - Parser Ownership Migration
-Status: in-progress (design started)
+Status: in-progress (stage B slice landed)
 Owner: engineering
 Goal: parsing authority moves to API; frontend parser becomes fallback then removable.
 
@@ -66,6 +66,13 @@ Deliverables:
 - Parser migration architecture in PARSER-MIGRATION-DESIGN.md.
 - API contracts for parse preview and normalized row output.
 - Rollout and rollback plan with parity fixtures.
+
+Done:
+- Added API route POST eof/v1/bank-import/parse-preview with Office permission enforcement.
+- Added backend parser module services/api/src/office-bank-parser.ts (CSV + extracted statement text to normalized rows).
+- Added typed client contract/method (BankImportParsePreviewRequest/Response).
+- Added HQ hidden switch VITE_OFFICE_BACKEND_PARSER for dual path (backend parse when enabled, frontend parser fallback when disabled).
+- Added API regression test for parse-preview permissions and CSV parsing; canonical gate green.
 
 Exit criteria:
 - Production parsing path uses backend parser endpoints.
@@ -108,5 +115,5 @@ Done:
 - Deployment evidence logged in DEPLOY-LOG-2026-07-11.md.
 
 ## Immediate Next Window (Now -> Next Commit Wave)
-1. Execute Phase 3 parser ownership migration from frontend parser to API parser endpoints.
+1. Execute Phase 3 Stage C parity validation: fixture diff between frontend parser and backend parser outputs for SBI/MCB/CSV samples.
 2. Keep running canonical gate + deploy after each scoped phase slice.
