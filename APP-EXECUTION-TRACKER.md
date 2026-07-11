@@ -3,13 +3,14 @@
 Last updated: 2026-07-11
 Branch: theme/distribution-command
 Main baseline: 146e25b
-Current head: 4f03f99
+Current head: 2d264ce
 
 ## Current Snapshot
 - Repo health: clean working tree, green local gates.
 - Frontend quality trend: shared request-state/request-status helpers are now centralized and tested.
 - Deployment baseline: production API + frontend confirmed on commit b1200b9 in this session.
 - Parser ownership: Office imports now use backend parse-preview path only; frontend statement parser fallback has been removed from production flow.
+- Financial correctness hardening: deployed commit pair `4d5697d` + `2d264ce` to lock EUR reconciliation currency normalization and debit/credit-only direction ingestion.
 
 ## Program Phases
 
@@ -127,6 +128,17 @@ Done:
 - Deployment evidence logged in DEPLOY-LOG-2026-07-11.md.
 - Fresh completion cycle executed on current branch head: ordered checks (`api-client`/`api`/`hq` check + smoke + canonical `./deploy-build.sh`) all green, artifacts redeployed, health warmed from 503 `starting` to 200, post-deploy smoke PASS, and targeted protected status routes returned expected 401 unauthenticated.
 
+### Post-Plan Financial Correctness Hardening (2026-07-11)
+Status: complete
+Goal: eliminate false figures in Office bank import/reconciliation by enforcing explicit direction truth and consistent FX currency semantics.
+
+Done:
+- Commit `4d5697d`: reconciliation create-transaction now persists normalized currency (`MUR`) whenever the bank line already carries converted `amount_mur_minor`.
+- Commit `2d264ce`: bank import parsing now accepts direction only from explicit debit/credit columns (no signed/generic amount fallback, no default direction fallback).
+- Added API regressions for missing FX conversion rejection and EUR reconciliation-create normalization.
+- Validation: API tests 91/91 pass and canonical `./deploy-build.sh` gate green.
+- Rollout: API + frontend artifacts redeployed; post-restart health recovered to 200; critical smoke routes PASS.
+
 ## Immediate Next Window (Now -> Next Commit Wave)
-1. Master plan phases are complete.
-2. Optional hardening: continue parity corpus enrichment from additional real extracted statement samples.
+1. Master plan phases and urgent financial correctness hardening are complete.
+2. Optional: continue parser parity corpus enrichment from additional real extracted statement samples.

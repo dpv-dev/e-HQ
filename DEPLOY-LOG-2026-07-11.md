@@ -93,3 +93,40 @@
   - `https://app.eeee.mu/console/office/bank` -> 200
   - `https://app.eeee.mu/console/distribution/settings` -> 200
   - `https://app.eeee.mu/console/command-center/settings` -> 200
+
+## Financial Correctness Hardening Cycle - 2026-07-11 (Direction + EUR FX)
+
+### Scope
+- Deployed commit `4d5697d` (EUR reconciliation-create currency normalization).
+- Deployed commit `2d264ce` (strict debit/credit-only direction ingestion for office bank import parsing).
+
+### Ordered validation sequence
+- Ran `corepack pnpm --filter @ehq/api test` -> `91/91` pass (after EUR + direction hardening).
+- Ran `./deploy-build.sh` -> success
+  - API typecheck/build: pass
+  - API tests: 91/91 pass
+  - HQ check/build: pass
+  - Regression gate: pass
+  - SQL column check: pass
+- Pre-deploy `corepack pnpm smoke:critical`
+  - first run: health `503` (warm-up)
+  - immediate rerun: PASS
+
+### Rollout
+- Uploaded `app-eeee-api-hostinger.zip` + `app-eeee-frontend.zip` to `~/ehq-deploy-upload/` via `scp`.
+- Unzipped API artifact to `~/domains/api.eeee.mu/nodejs/`.
+- Unzipped frontend artifact to `~/domains/app.eeee.mu/public_html/`.
+- Restarted API via `touch ~/domains/api.eeee.mu/nodejs/tmp/restart.txt`.
+
+### Post-deploy verification
+- Initial post-restart smoke observed expected startup `503` on `/healthz`.
+- Direct check then returned `200` with DB status `ok` on `https://api.eeee.mu/healthz`.
+- Final post-deploy `corepack pnpm smoke:critical` -> PASS
+  - `https://api.eeee.mu/healthz` -> 200
+  - `https://app.eeee.mu/` -> 200
+  - `https://app.eeee.mu/console/office/bank` -> 200
+  - `https://app.eeee.mu/console/distribution/settings` -> 200
+  - `https://app.eeee.mu/console/command-center/settings` -> 200
+
+### Notes
+- Warm-up 503 behavior remains consistent with startup-loading design; recovery observed without intervention beyond restart wait window.
