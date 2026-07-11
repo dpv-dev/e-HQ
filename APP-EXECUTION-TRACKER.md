@@ -3,12 +3,12 @@
 Last updated: 2026-07-11
 Branch: theme/distribution-command
 Main baseline: 146e25b
-Current head: 33963bc
+Current head: b1200b9
 
 ## Current Snapshot
 - Repo health: clean working tree, green local gates.
 - Frontend quality trend: shared request-state/request-status helpers are now centralized and tested.
-- Deployment baseline: production frontend last confirmed on commit e01119e in this session (API unchanged in this slice).
+- Deployment baseline: production API + frontend confirmed on commit b1200b9 in this session.
 - Parser ownership: Office imports now use backend parse-preview path only; frontend statement parser fallback has been removed from production flow.
 
 ## Program Phases

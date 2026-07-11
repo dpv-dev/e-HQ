@@ -65,3 +65,31 @@
 - Targeted auth guard checks:
   - `https://api.eeee.mu/eof/v1/status?workspaceId=eeee-mu` -> 401
   - `https://api.eeee.mu/cc/v1/status?workspaceId=eeee-mu` -> 401
+
+## Master Plan Completion Cycle - 2026-07-11 (Phase 3 Stage E)
+
+### Scope
+- Completed parser migration cleanup by removing runtime frontend statement parser fallback from Office import flow.
+- Release commit: `b1200b9`.
+
+### Ordered gate sequence
+- Ran `./deploy-build.sh` -> success
+  - API tests: 89/89 pass
+  - HQ check/build: pass
+  - Regression gate: pass
+  - SQL column check: pass
+- Ran `corepack pnpm --filter @ehq/api parser:parity-report` -> `ok (10 cases)`
+
+### Rollout
+- Uploaded fresh artifacts (`app-eeee-api-hostinger.zip`, `app-eeee-frontend.zip`) to `~/ehq-deploy-upload/`
+- Deployed API + frontend artifacts to Hostinger targets
+- Restarted API via `touch ~/domains/api.eeee.mu/nodejs/tmp/restart.txt`
+
+### Verification
+- Warm-up observed (`/healthz` returned `503 {"status":"starting"}` across initial retries), then recovered during smoke run.
+- Post-deploy `corepack pnpm smoke:critical` -> PASS
+  - `https://api.eeee.mu/healthz` -> 200
+  - `https://app.eeee.mu/` -> 200
+  - `https://app.eeee.mu/console/office/bank` -> 200
+  - `https://app.eeee.mu/console/distribution/settings` -> 200
+  - `https://app.eeee.mu/console/command-center/settings` -> 200
