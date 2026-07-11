@@ -87,6 +87,7 @@
     | "coa"
     | "transactions"
     | "imports"
+    | "waveInvoices"
     | "reconciliation"
     | "pending"
     | "cashflow"
@@ -237,6 +238,12 @@
           subtitle: "Monthly bank statements with automatic analysis then confirmed import."
         },
         {
+          id: "waveInvoices",
+          label: "Wave invoices",
+          title: "Wave invoices",
+          subtitle: "Dedicated lane for Wave invoice operations and follow-up."
+        },
+        {
           id: "bank",
           label: "Bank",
           title: "Bank",
@@ -372,6 +379,7 @@
     coa: "layout-grid",
     transactions: "file-text",
     imports: "upload",
+    waveInvoices: "upload",
     reconciliation: "check",
     pending: "clock",
     cashflow: "trending-up",
@@ -1716,10 +1724,9 @@
       return "imports";
     }
 
-    // Legacy Office route: render the imports workflow instead of falling
-    // through to dashboard.
+    // Legacy Office route now has its own dedicated page.
     if (normalizedPath.endsWith("/console/wave-invoices")) {
-      return "imports";
+      return "waveInvoices";
     }
 
     if (normalizedPath.endsWith("/console/pl")) {
@@ -1871,7 +1878,7 @@
     }
 
     if (normalizedPath.endsWith("/console/office/wave-invoices")) {
-      return "imports";
+      return "waveInvoices";
     }
 
     if (normalizedPath.endsWith("/console/office/reconciliation")) {
@@ -1945,6 +1952,10 @@
 
     if (pageId === "imports") {
       return "/console/office/imports";
+    }
+
+    if (pageId === "waveInvoices") {
+      return "/console/office/wave-invoices";
     }
 
     if (pageId === "reconciliation") {
@@ -4329,6 +4340,48 @@
         <ProjectsView client={client.office} workspaceId={officeWorkspaceId} {period} dateFrom={activeRange.from} dateTo={activeRange.to} writesEnabled={writesEnabled} />
       {:else if activePageId === "monitoring"}
         <MonitoringView client={client.office} workspaceId={officeWorkspaceId} {period} dateFrom={activeRange.from} dateTo={activeRange.to} />
+      {:else if activePageId === "waveInvoices"}
+        <section class="statement-import-panel ehq-edge-surface" aria-label="Wave invoices lane">
+          <header>
+            <div>
+              <span class="ehq-type-label-mono">Wave invoices</span>
+              <h2>Dedicated Wave lane</h2>
+              <p>This page is dedicated to Wave invoice operations while keeping bank-statement imports in their existing workspace.</p>
+            </div>
+            <strong>{writesEnabled ? "Entries enabled" : "Entries locked"}</strong>
+          </header>
+
+          <div class="import-steps" aria-label="Wave invoices actions">
+            <article class:complete={recentImportRows.length > 0}>
+              <b>1</b>
+              <span>Review latest imports</span>
+              <small>{recentImportRows.length > 0 ? `${recentImportRows.length} batch(es) visible` : "No batch loaded"}</small>
+            </article>
+            <article class:complete={reconciliationRows.length > 0}>
+              <b>2</b>
+              <span>Check reconciliation queue</span>
+              <small>{reconciliationRows.length > 0 ? `${reconciliationRows.length} row(s) in scope` : "No row in current scope"}</small>
+            </article>
+            <article class:complete={pendingRows.length > 0}>
+              <b>3</b>
+              <span>Classify pending transactions</span>
+              <small>{pendingRows.length > 0 ? `${pendingRows.length} pending row(s)` : "No pending row in current scope"}</small>
+            </article>
+          </div>
+
+          <div class="import-actions">
+            <Button label="Open imports workflow" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Open imports workflow" onclick={(): void => { selectPage("imports"); }} />
+            <Button label="Open reconciliation" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Open reconciliation" onclick={(): void => { selectPage("reconciliation"); }} />
+            <Button label="Open pending" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Open pending" onclick={(): void => { selectPage("pending"); }} />
+          </div>
+        </section>
+
+        <section class="dashboard-grid">
+          <BarsChart title="Import quality" points={importQualityPoints} tone="warning" />
+          <BarsChart title="Reconciliation status" points={reconciliationStatusPoints} tone="info" />
+        </section>
+
+        <Table title="Recent batches" columns={importColumns} rows={recentImportRows} state={dashboardState.status === "loading" ? "loading" : dashboardState.status === "error" ? "error" : recentImportRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={importRowActions} />
       {:else if activePageId === "imports"}
         <section class="statement-import-panel ehq-edge-surface" aria-label="Import a bank statement">
           <header>
