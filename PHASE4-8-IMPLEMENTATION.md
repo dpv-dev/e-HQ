@@ -57,7 +57,7 @@ Objective:
 Work packages:
 - P7-01 Done now: scripts/smoke-critical-routes.mjs added and executed.
 - P7-02 Done now: root script alias smoke:critical added and executed.
-- P7-03 Embed in release sequence docs (pre-deploy and post-deploy checks).
+- P7-03 Done now: embedded in release sequence docs (pre-deploy and post-deploy checks).
 
 Definition of done:
 - Smoke script exits non-zero on failing critical route/health checks.
@@ -78,6 +78,13 @@ Definition of done:
 - Production endpoints/routes healthy.
 - Critical workflows validated after deploy.
 - Tracker updated with deployed commit + evidence links.
+
+Completion update (current slice):
+- Ran ordered Phase 8 gate sequence: `corepack pnpm --filter @ehq/api-client check`, `corepack pnpm --filter @ehq/api check`, `corepack pnpm --filter @ehq/hq check`, `corepack pnpm smoke:critical`, `./deploy-build.sh`.
+- Redeployed API + frontend artifacts to Hostinger and restarted API.
+- Observed expected startup warm-up (`/healthz` 503 `starting`) then recovery to 200.
+- Post-deploy `corepack pnpm smoke:critical` passed all critical routes.
+- Targeted unauthenticated API checks returned expected `401` for protected `eof/v1/status` and `cc/v1/status`.
 
 ## Ordered execution command set
 1. Build + compile checks:

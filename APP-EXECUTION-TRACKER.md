@@ -83,18 +83,20 @@ Exit criteria:
 - Frontend parser path disabled or removed from production flow.
 
 ### Phase 4 - Office Completion
-Status: in-progress
+Status: complete
 Goal: complete all critical accounting workflows with stable UX states and API truth.
 
 Done:
 - Residual mutation consistency pass extended to low-frequency handlers (import confirm, reconcile-create, pending classify/validate) so dashboard analytics and reconciliation operations stay in sync after writes.
+- Mutation reload audit finalized with no remaining Office critical-path stale-state gaps (see PHASE4-MUTATION-RELOAD-AUDIT.md).
 
 ### Phase 5 - Distribution Completion
-Status: in-progress
+Status: complete
 Goal: complete import-to-payment lifecycle with auditable, non-stub actions.
 
 Done:
 - Residual mutation consistency pass extended to low-frequency handlers (import reverse/confirm, mapping apply, allocation run start, payment actions) with suspense/revenue/reconciliation/audit refreshes.
+- Maintenance-only reconciliation actions remain explicitly labeled and disabled in UI; active business actions remain operational and API-backed.
 
 ### Phase 6 - Command Center Completion
 Status: complete
@@ -105,15 +107,16 @@ Done:
 - Added focused regression coverage in `apps/hq/src/app/canonical/command-center/kpi-derivation.test.ts` to prevent reintroduction of static KPI values for integrations/settings.
 
 ### Phase 7 - E2E Quality Gate
-Status: in-progress
+Status: complete
 Goal: full green gate + smoke evidence across all three apps.
 
 Done:
 - Added executable smoke script scripts/smoke-critical-routes.mjs.
 - Added root command smoke:critical and validated it against live routes.
+- Embedded smoke gate usage in deploy runbooks DEPLOY.md and DEPLOYMENT.md (pre/post deploy checks).
 
 ### Phase 8 - Final Deploy and Stabilization
-Status: in-progress
+Status: complete
 Goal: production rollout with verification and short stabilization window.
 
 Done:
@@ -121,7 +124,8 @@ Done:
 - Production rollout executed (API + frontend artifacts uploaded and unpacked, API restart triggered).
 - Post-deploy smoke checks passed after startup warm-up (healthz and critical app routes).
 - Deployment evidence logged in DEPLOY-LOG-2026-07-11.md.
+- Fresh completion cycle executed on current branch head: ordered checks (`api-client`/`api`/`hq` check + smoke + canonical `./deploy-build.sh`) all green, artifacts redeployed, health warmed from 503 `starting` to 200, post-deploy smoke PASS, and targeted protected status routes returned expected 401 unauthenticated.
 
 ## Immediate Next Window (Now -> Next Commit Wave)
-1. Keep extending parser parity corpus from real imported statement extracts.
-2. Keep running canonical gate + deploy after each scoped phase slice.
+1. Phase 3 Stage E cleanup: remove production frontend parser path after fallback stabilization window closes.
+2. Continue parity corpus enrichment from additional real extracted statement samples.

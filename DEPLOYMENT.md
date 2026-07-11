@@ -43,6 +43,11 @@ node --env-file=.env packages/db/diag.mjs
 
 ## Étape 0 — Build des artefacts (déjà faisable, aucune prod touchée)
 
+Pré-gate routes critiques (optionnel mais recommandé avant upload) :
+```bash
+corepack pnpm smoke:critical
+```
+
 ```bash
 ./deploy-build.sh
 # produit : services/api/deploy/server.bundle.js  et  apps/hq/dist/
@@ -160,6 +165,7 @@ par défaut ; ajouter d'autres devises = `TARGET_CURRENCIES` dans le script — 
 ## Vérification finale (prod)
 
 ```bash
+corepack pnpm smoke:critical
 curl -fsS "$API_URL/healthz"
 curl -fsS "$API_URL/eof/v1/pl/global?workspaceId=workspace_1&period=2026-02"   # route Office réelle
 # ouvrir https://app.eeee.mu/  puis /login puis une page /console/* (vérifier le fallback SPA)
