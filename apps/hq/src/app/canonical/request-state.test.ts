@@ -9,10 +9,18 @@ import {
 import {
   apiRequestStateLabel,
   apiRequestStateLabelFr,
-  isApiRequestLoading
+  isApiRequestLoading,
+  isRequestStatusLoading
 } from "./request-state.js";
 
 describe("canonical request-state helpers", () => {
+  it("treats idle and loading request statuses as loading", () => {
+    expect(isRequestStatusLoading("idle")).toBe(true);
+    expect(isRequestStatusLoading("loading")).toBe(true);
+    expect(isRequestStatusLoading("success")).toBe(false);
+    expect(isRequestStatusLoading("error")).toBe(false);
+  });
+
   it("treats idle and loading as loading states", () => {
     const idleState = createIdleState<unknown>();
     const loadingState = createLoadingState<unknown>();

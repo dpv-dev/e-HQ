@@ -51,7 +51,8 @@
   import { sortOptionsAlphabetically } from "../../select-options.js";
   import { appendPageResult, createTablePagination, loadPageResult, readPageItems, TABLE_PAGE_SIZE, type PageLoadMode } from "../../table-pagination.js";
   import {
-    apiRequestStateLabelFr as stateLabel
+    apiRequestStateLabelFr as stateLabel,
+    isRequestStatusLoading
   } from "../request-state.js";
   import {
     canCancelDistributionImportBatch,
@@ -3722,7 +3723,7 @@
   }
 
   function isLoadingStatus(status: RequestStatus): boolean {
-    return status === "loading" || status === "idle";
+    return isRequestStatusLoading(status);
   }
 
   function tableStateFor(status: RequestStatus, count: number): "loading" | "error" | "empty" | "default" {
