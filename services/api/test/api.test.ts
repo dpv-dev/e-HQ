@@ -2753,6 +2753,44 @@ test("bank import preview surfaces account_not_found when no target account reso
   assert.ok(json.rowResults.every((row) => row.issues.includes("account_not_found")));
 });
 
+test("bank import preview rejects foreign rows when no FX rate can convert to MUR", async () => {
+  const app = createWriteEnabledFixtureApiService();
+  const preview = await app.request("/eof/v1/bank-import/preview", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      source: "csv",
+      fileName: "eur-missing-rate.csv",
+      checksum: "checksum-bank-preview-missing-fx",
+      rows: [
+        {
+          date: "2026-05-27",
+          description: "Foreign row without FX",
+          debit: "40.00",
+          currency: "USD",
+          accountId: "bank_eur"
+        }
+      ]
+    })
+  });
+  assert.equal(preview.status, 200);
+  const json = (await preview.json()) as {
+    readonly acceptedRowCount: number;
+    readonly rejectedRowCount: number;
+    readonly rejectionReasons: readonly { readonly reason: string; readonly count: number }[];
+    readonly rowResults: readonly { readonly id: string; readonly status: string; readonly issues: readonly string[] }[];
+  };
+  assert.equal(json.acceptedRowCount, 0);
+  assert.equal(json.rejectedRowCount, 1);
+  const fxReason = json.rejectionReasons.find((entry) => entry.reason === "amount_mur_missing_for_foreign_currency");
+  assert.ok(fxReason !== undefined, "expected missing FX rejection reason to be surfaced");
+  assert.equal(fxReason?.count, 1);
+  assert.equal(json.rowResults.length, 1);
+  assert.equal(json.rowResults[0]?.status, "rejected");
+  assert.ok(json.rowResults[0]?.issues.includes("amount_mur_missing_for_foreign_currency"));
+});
+
 async function reconciliationLineStatus(
   app: ReturnType<typeof createApiService>,
   statementLineId: string
@@ -3024,6 +3062,71 @@ test("reconciliation create-transaction builds a ledger line from a bank line an
   const candidate = await reconciliationLineStatus(app, "bank_line_unmatched");
   assert.equal(candidate?.status, "matched");
   assert.equal(candidate?.transactionId, receipt.id);
+});
+
+test("reconciliation create-transaction normalizes EUR bank lines to MUR for persisted transaction currency", async () => {
+  const fixtures = createFixtureStore();
+  const baseLine = fixtures.office.bankStatementLines.find((line) => line.id === "bank_line_unmatched");
+  assert.ok(baseLine !== undefined);
+  const eurLine = {
+    ...baseLine,
+    id: "bank_line_eur_unmatched",
+    accountId: "bank_eur",
+    occurredOn: "2026-02-16",
+    description: "Fixture EUR unmatched",
+    reference: "EUR-UNMATCHED",
+    direction: "debit" as const,
+    amountMinor: 1_000n,
+    balanceMinor: 1_000n,
+    currency: "EUR",
+    amountMurMinor: 51_000n,
+    balanceMurMinor: 51_000n,
+    isDuplicateCandidate: false,
+    reconciliationStatus: "unmatched" as const,
+    matchedTransactionId: null,
+    rawData: {}
+  };
+  const app = createWriteEnabledFixtureApiServiceWithOverrides({
+    office: {
+      ...fixtures.office,
+      bankStatementLines: [eurLine],
+      bankReconciliationMatches: []
+    }
+  });
+
+  const receipt = await jsonWrite(app, "/eof/v1/reconciliations/create-transaction", "POST", "recon-create-eur-1", {
+    workspaceId: "workspace_1",
+    statementLineId: "bank_line_eur_unmatched",
+    categoryId: null,
+    projectId: null,
+    matchedAt: "2026-02-20T10:00:00.000Z"
+  });
+  assertReceipt(receipt);
+
+  const line = await reconciliationLineStatus(app, "bank_line_eur_unmatched");
+  assert.equal(line?.status, "matched");
+  assert.equal(line?.transactionId, receipt.id);
+
+  const transactionsResponse = await app.request(
+    "/eof/v1/transactions?workspaceId=workspace_1&period=2026-02&accountId=bank_eur&limit=50",
+    { headers: authHeaders() }
+  );
+  assert.equal(transactionsResponse.status, 200);
+  const transactions = (await transactionsResponse.json()) as {
+    readonly items: readonly {
+      readonly id: string;
+      readonly amountMicro: string;
+      readonly currency: string;
+      readonly type: string;
+      readonly accountId: string | null;
+    }[];
+  };
+  const created = transactions.items.find((item) => item.id === receipt.id);
+  assert.ok(created !== undefined);
+  assert.equal(created?.amountMicro, "510.00");
+  assert.equal(created?.currency, "MUR");
+  assert.equal(created?.type, "expense");
+  assert.equal(created?.accountId, "bank_eur");
 });
 
 test("VAT report is empty when no VAT source metadata exists", async () => {

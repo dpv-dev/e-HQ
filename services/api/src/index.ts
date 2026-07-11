@@ -2851,6 +2851,10 @@ async function officeReconciliationCreateTransactionResponse(context: ApiContext
   const request = await readZodBody<OfficeReconciliationCreateTransactionRequest>(context, officeReconciliationCreateTransactionSchema);
   const line = requireOfficeBankLine(dependencies.fixtures.office, request.statementLineId);
   const transactionId = randomUUID();
+  // Reconciliation compares against MUR whenever a bank line already carries a
+  // converted MUR amount; persist the created transaction in that same currency
+  // to avoid mixed "MUR amount + EUR currency" records.
+  const reconciliationCurrency = line.amountMurMinor === null ? line.currency : "MUR";
   const writeRequest: OfficeTransactionWriteRequest = {
     workspaceId: request.workspaceId,
     occurredOn: line.occurredOn,
@@ -2859,7 +2863,7 @@ async function officeReconciliationCreateTransactionResponse(context: ApiContext
     projectId: request.projectId,
     description: line.description ?? line.reference ?? "Ligne bancaire",
     amountMicro: bankLineAmountText(line),
-    currency: line.currency
+    currency: reconciliationCurrency
   };
   const amountMinor = normalizeEofAmountField(context, writeRequest.amountMicro, "amountMicro");
   // The bank direction is the source of truth for income/expense (credit = money
@@ -2867,7 +2871,7 @@ async function officeReconciliationCreateTransactionResponse(context: ApiContext
   // rewrites the type.
   const transactionType: OfficeTransactionRow["type"] = line.direction === "credit" ? "income" : "expense";
   const transactionStatus: OfficeTransactionRow["status"] = request.categoryId === null ? "draft" : "validated";
-  assertOfficeReconciliationKernelCreate(context, line, transactionId, amountMinor, line.amountMurMinor === null ? line.currency : "MUR");
+  assertOfficeReconciliationKernelCreate(context, line, transactionId, amountMinor, reconciliationCurrency);
   const idempotencyKey = requireIdempotencyKey(context);
   const actor = context.get("authUser");
   const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
