@@ -2605,7 +2605,7 @@
           loadDashboardAnalytics(),
           loadTransactions(),
           loadPendingTransactions(),
-          loadReconciliations()
+          refreshReconciliationViews()
         ]);
         return;
       } catch (error: unknown) {
@@ -2620,7 +2620,13 @@
         }
       }
     }
-
+        await Promise.all([
+          refreshReconciliationViews(),
+          loadTransactions(),
+          loadPendingTransactions(),
+          loadDashboard(),
+          loadDashboardAnalytics()
+        ]);
     importState = {
       ...importState,
       status: "error",
@@ -2805,7 +2811,7 @@
         )
       );
       actionReceipt = writeResults[writeResults.length - 1] ?? null;
-      await Promise.all([loadPendingTransactions(), loadTransactions(), loadDashboard()]);
+      await Promise.all([loadPendingTransactions(), loadTransactions(), loadDashboard(), loadDashboardAnalytics()]);
     } catch (error: unknown) {
       pendingState = createErrorState<PageResult<OfficeTransaction>>(error);
     }
@@ -2832,7 +2838,13 @@
       );
       actionReceipt = writeResults[writeResults.length - 1] ?? null;
       selectedPendingIds = [];
-      await Promise.all([loadPendingTransactions(), loadTransactions(), loadDashboard(), refreshReconciliationViews()]);
+      await Promise.all([
+        loadPendingTransactions(),
+        loadTransactions(),
+        loadDashboard(),
+        loadDashboardAnalytics(),
+        refreshReconciliationViews()
+      ]);
     } catch (error: unknown) {
       pendingState = createErrorState<PageResult<OfficeTransaction>>(error);
     }

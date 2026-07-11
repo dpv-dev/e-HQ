@@ -2077,7 +2077,7 @@
       if (mappingBatchFilter === batch.id) {
         mappingBatchFilter = allValue;
       }
-      await Promise.all([loadImportBatches(), loadMappingRows(), loadDashboard()]);
+      await Promise.all([loadImportBatches(), loadMappingRows(), loadDashboard(), loadSuspense(), loadRevenue(), loadReconciliation(), loadAuditLog()]);
     } catch (error: unknown) {
       reportActionError(error);
     }
@@ -2356,7 +2356,7 @@
         confirm,
         message: "Import confirmé."
       };
-      await Promise.all([loadImportBatches(), loadMappingRows(), loadDashboard()]);
+      await Promise.all([loadImportBatches(), loadMappingRows(), loadDashboard(), loadSuspense(), loadRevenue(), loadReconciliation(), loadAuditLog()]);
     } catch (error: unknown) {
       importState = {
         ...importState,
@@ -2399,7 +2399,7 @@
       );
       mutationReceiptPageId = activePageId;
       clearMappingSelection();
-      await loadMappingRows();
+      await Promise.all([loadMappingRows(), loadSuspense(), loadRevenue(), loadReconciliation(), loadAuditLog()]);
     } catch (error: unknown) {
       reportActionError(error);
     }
@@ -2776,7 +2776,7 @@
       );
       runReceiptPageId = activePageId;
       // The cadenced run persists a new calculation run; refresh the run list.
-      await loadAllocationRuns();
+      await Promise.all([loadAllocationRuns(), loadStatements(), loadPayments(), loadRevenue(), loadReconciliation(), loadAuditLog()]);
     } catch (error: unknown) {
       reportActionError(error);
     }
@@ -3143,7 +3143,7 @@
       mutationReceiptPageId = activePageId;
       recordStatementId = "";
       recordPaymentReference = "";
-      await Promise.all([loadPayments(), loadStatements()]);
+      await Promise.all([loadPayments(), loadStatements(), loadRevenue(), loadReconciliation(), loadAuditLog()]);
     } catch (error: unknown) {
       reportActionError(error);
     }
@@ -3174,7 +3174,7 @@
       );
       mutationReceiptPageId = activePageId;
       closePaymentPanel();
-      await Promise.all([loadPayments(), loadStatements(), loadReconciliation()]);
+      await Promise.all([loadPayments(), loadStatements(), loadReconciliation(), loadAuditLog()]);
     } catch (error: unknown) {
       reportActionError(error);
     }
@@ -3204,7 +3204,7 @@
       );
       mutationReceiptPageId = activePageId;
       closePaymentPanel();
-      await Promise.all([loadPayments(), loadStatements(), loadReconciliation()]);
+      await Promise.all([loadPayments(), loadStatements(), loadReconciliation(), loadAuditLog()]);
     } catch (error: unknown) {
       reportActionError(error);
     }
@@ -3233,7 +3233,7 @@
       );
       mutationReceiptPageId = activePageId;
       closePaymentPanel();
-      await Promise.all([loadPayments(), loadStatements(), loadRevenue(), loadReconciliation()]);
+      await Promise.all([loadPayments(), loadStatements(), loadRevenue(), loadReconciliation(), loadAuditLog()]);
     } catch (error: unknown) {
       reportActionError(error);
     }

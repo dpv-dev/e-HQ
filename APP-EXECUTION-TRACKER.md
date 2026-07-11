@@ -3,7 +3,7 @@
 Last updated: 2026-07-11
 Branch: theme/distribution-command
 Main baseline: 146e25b
-Current head: 13eff27
+Current head: 18f730c
 
 ## Current Snapshot
 - Repo health: clean working tree, green local gates.
@@ -71,9 +71,15 @@ Exit criteria:
 Status: in-progress
 Goal: complete all critical accounting workflows with stable UX states and API truth.
 
+Done:
+- Residual mutation consistency pass extended to low-frequency handlers (import confirm, reconcile-create, pending classify/validate) so dashboard analytics and reconciliation operations stay in sync after writes.
+
 ### Phase 5 - Distribution Completion
 Status: in-progress
 Goal: complete import-to-payment lifecycle with auditable, non-stub actions.
+
+Done:
+- Residual mutation consistency pass extended to low-frequency handlers (import reverse/confirm, mapping apply, allocation run start, payment actions) with suspense/revenue/reconciliation/audit refreshes.
 
 ### Phase 6 - Command Center Completion
 Status: in-progress
@@ -99,5 +105,5 @@ Done:
 
 ## Immediate Next Window (Now -> Next Commit Wave)
 1. Expand PHASE1-ROUTE-ACTION-MATRIX.md from high-traffic rows to full visible action coverage.
-2. Implement cc/v1/overview persistence-backed rows (settings/integrations) and remove remaining static API-side placeholders.
-3. Add phase-7 smoke script and integrate it into release gate docs.
+2. Add focused UI tests for multi-surface post-mutation refresh expectations on the highest-risk handlers.
+3. Decide/implement cross-surface refresh policy for plan-comptable writes if product requires immediate non-plan view propagation.
