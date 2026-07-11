@@ -54,6 +54,7 @@
     apiRequestStateLabelFr as stateLabel,
     isRequestStatusLoading
   } from "../request-state.js";
+  import type { CanonicalRequestStatus } from "../request-state.js";
   import {
     canCancelDistributionImportBatch,
     canOpenDistributionImportBatch,
@@ -86,7 +87,7 @@
   type SuspenseStatusFilter = "all" | "open" | "resolved";
   type PaymentStatusFilter = "all" | "draft" | "queued" | "paid" | "voided";
   type RevenueGroupBy = "payee" | "track" | "currency" | "store" | "period";
-  type RequestStatus = "idle" | "loading" | "success" | "error";
+  type RequestStatus = CanonicalRequestStatus;
   type DistributionPagedTableId =
     | "importBatches"
     | "mapping"

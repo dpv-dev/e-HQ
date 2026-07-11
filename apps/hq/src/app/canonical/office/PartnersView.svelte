@@ -36,14 +36,17 @@
     type OfficePartnerWriteRequest,
     type PageResult
   } from "@ehq/api-client";
-  import { isApiRequestLoading as isLoadingState } from "../request-state.js";
+  import {
+    isApiRequestLoading as isLoadingState,
+    type CanonicalRequestStatus
+  } from "../request-state.js";
   import { formatDateOnly } from "../../date-format.js";
   import { formatMoneyValue, moneySignForValue, moneyToneForValue } from "../../money-format.js";
   import { createTablePagination, loadPageResult, readPageItems, TABLE_PAGE_SIZE, type PageLoadMode } from "../../table-pagination.js";
   import { untrack } from "svelte";
 
   type DrawerMode = "closed" | "detail" | "create" | "edit";
-  type RequestStatus = "idle" | "loading" | "success" | "error";
+  type RequestStatus = CanonicalRequestStatus;
   type PayeeLinkAction = "link" | "unlink";
 
   interface Props {
