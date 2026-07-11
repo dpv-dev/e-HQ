@@ -101,8 +101,12 @@ import type {
   OfficeImportRejectionReason,
   OfficeBankPreviewRowResult,
   CashflowBucket,
+  CommandCenterOverviewIntegration,
+  CommandCenterOverviewResponse,
+  CommandCenterOverviewSetting,
   CommandCenterNotification,
   CommandCenterNotificationsResponse,
+  CommandCenterReadinessItem,
   CurrencyCode,
   DistributionContract,
   DistributionContractExpense,
@@ -1958,6 +1962,21 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
 }
 
 function registerCommandCenterRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServiceDependencies): void {
+  app.get("/cc/v1/overview", async (context) => {
+    const workspaceId = resolveWorkspaceId(context);
+    assertNonBotRouteAccess(context, "command_center_overview_read");
+    return context.json(
+      await toCommandCenterOverview(
+        context,
+        dependencies.fixtures,
+        dependencies.persistence,
+        workspaceId,
+        dependencies.persistence.writesEnabled,
+        dependencies.nowIso()
+      )
+    );
+  });
+
   app.get("/cc/v1/status", (context) => {
     resolveWorkspaceId(context);
     assertNonBotRouteAccess(context, "command_center_status_read");
@@ -11885,6 +11904,385 @@ function toCommandCenterNotifications(
     generatedAt,
     items
   };
+}
+
+async function toCommandCenterOverview(
+  context: ApiContext,
+  store: ApiFixtureStore,
+  persistence: ApiPersistenceRuntime,
+  workspaceId: string,
+  writesEnabled: boolean,
+  generatedAt: string
+): Promise<CommandCenterOverviewResponse> {
+  const actor = context.get("authUser");
+  const officePendingCount = store.office.transactions.filter(
+    (transaction): boolean => transaction.categoryId === null || transaction.status === "draft"
+  ).length;
+  const openSuspenseCount = store.distribution.suspenseItems.filter((item): boolean => !item.resolved).length;
+  const pendingStatementCount = store.distribution.statements.filter((statement): boolean => statement.status !== "void").length;
+
+  const readiness: readonly CommandCenterReadinessItem[] = [
+    {
+      id: "write-gate",
+      label: "Write gate",
+      detail: writesEnabled ? "Writes enabled with idempotency and audit." : "Writes disabled at runtime.",
+      tone: writesEnabled ? "success" : "warning"
+    },
+    {
+      id: "office-queue",
+      label: "Office queue",
+      detail: `${String(officePendingCount)} transaction${officePendingCount === 1 ? "" : "s"} pending classification or validation.`,
+      tone: officePendingCount === 0 ? "success" : "warning"
+    },
+    {
+      id: "distribution-suspense",
+      label: "Distribution suspense",
+      detail: `${String(openSuspenseCount)} suspense item${openSuspenseCount === 1 ? "" : "s"} open.`,
+      tone: openSuspenseCount === 0 ? "success" : "warning"
+    },
+    {
+      id: "distribution-statements",
+      label: "Statement queue",
+      detail: `${String(pendingStatementCount)} statement${pendingStatementCount === 1 ? "" : "s"} available for payment workflows.`,
+      tone: pendingStatementCount === 0 ? "info" : "success"
+    },
+    {
+      id: "session",
+      label: "Session",
+      detail: `${actor.email} · ${actor.role}`,
+      tone: "success"
+    }
+  ];
+
+  const persistedOverview = await readCommandCenterOverviewPersistence(persistence, workspaceId);
+  const defaultIntegrations = commandCenterDefaultIntegrations();
+  const integrations: readonly CommandCenterOverviewIntegration[] = defaultIntegrations.map(
+    (integration): CommandCenterOverviewIntegration => {
+      const persisted = persistedOverview.integrationsById.get(integration.id) ?? null;
+      const enabled = persisted === null ? integration.status !== "idle" : persisted.enabled;
+      const status =
+        persisted === null
+          ? integration.status
+          : toCommandCenterIntegrationStatus(persisted.status, persisted.enabled);
+      return {
+        ...integration,
+        status,
+        action: enabled ? "Manage" : "Enable"
+      };
+    }
+  );
+
+  const defaultSettings = commandCenterDefaultSettings();
+  const settingsFromDefaults: readonly CommandCenterOverviewSetting[] = defaultSettings.map(
+    (setting): CommandCenterOverviewSetting => {
+      const persisted = persistedOverview.settingsByKey.get(setting.id) ?? null;
+      if (persisted === null) {
+        return setting;
+      }
+
+      return {
+        id: setting.id,
+        key: setting.key,
+        value: commandCenterSettingValueLabel(setting.id, persisted.valueJson, setting.value),
+        status: persisted.status,
+        tone: commandCenterSettingTone(persisted.status)
+      };
+    }
+  );
+
+  const extraPersistedSettings: readonly CommandCenterOverviewSetting[] = persistedOverview.settings
+    .filter((setting): boolean => !defaultSettings.some((candidate): boolean => candidate.id === setting.key))
+    .map(
+      (setting): CommandCenterOverviewSetting => ({
+        id: setting.key,
+        key: setting.key,
+        value: commandCenterSettingValueLabel(setting.key, setting.valueJson, "-") ,
+        status: setting.status,
+        tone: commandCenterSettingTone(setting.status)
+      })
+    );
+
+  const settings: readonly CommandCenterOverviewSetting[] = [...settingsFromDefaults, ...extraPersistedSettings];
+
+  return {
+    workspaceId,
+    generatedAt,
+    readiness,
+    integrations,
+    settings
+  };
+}
+
+interface CommandCenterPersistedIntegrationState {
+  readonly integrationId: string;
+  readonly enabled: boolean;
+  readonly status: string;
+}
+
+interface CommandCenterPersistedSettingState {
+  readonly key: string;
+  readonly valueJson: JsonRecord;
+  readonly status: string;
+}
+
+interface CommandCenterPersistedOverview {
+  readonly integrations: readonly CommandCenterPersistedIntegrationState[];
+  readonly settings: readonly CommandCenterPersistedSettingState[];
+  readonly integrationsById: ReadonlyMap<string, CommandCenterPersistedIntegrationState>;
+  readonly settingsByKey: ReadonlyMap<string, CommandCenterPersistedSettingState>;
+}
+
+function commandCenterDefaultIntegrations(): readonly CommandCenterOverviewIntegration[] {
+  return [
+    {
+      id: "supabase-runtime",
+      connector: "Supabase runtime",
+      kind: "Auth · Postgres · Hono",
+      scope: "All workspaces",
+      status: "connected",
+      action: "Manage"
+    },
+    {
+      id: "mcp",
+      connector: "Project MCP",
+      kind: "Scoped tools",
+      scope: "ehq-platform only",
+      status: "connected",
+      action: "Inspect"
+    },
+    {
+      id: "mcb",
+      connector: "MCB statements",
+      kind: "Bank connector",
+      scope: "Office imports",
+      status: "connected",
+      action: "Manage"
+    },
+    {
+      id: "sbi",
+      connector: "SBI statements",
+      kind: "Bank connector",
+      scope: "Office imports",
+      status: "connected",
+      action: "Manage"
+    }
+  ];
+}
+
+function commandCenterDefaultSettings(): readonly CommandCenterOverviewSetting[] {
+  return [
+    {
+      id: "theme",
+      key: "Theme",
+      value: "Dark command center",
+      status: "Locked",
+      tone: "active"
+    },
+    {
+      id: "permissions",
+      key: "Permissions source",
+      value: "@ehq/auth",
+      status: "Shared",
+      tone: "success"
+    },
+    {
+      id: "navigation",
+      key: "Navigation scope",
+      value: "Command Center only",
+      status: "Enforced",
+      tone: "success"
+    },
+    {
+      id: "release",
+      key: "Release gate",
+      value: "Manual approval",
+      status: "Required",
+      tone: "warning"
+    }
+  ];
+}
+
+async function readCommandCenterOverviewPersistence(
+  persistence: ApiPersistenceRuntime,
+  workspaceId: string
+): Promise<CommandCenterPersistedOverview> {
+  const persisted = await persistence.withTx(
+    async (tx: ApiWriteTransaction): Promise<{
+      readonly integrations: readonly CommandCenterPersistedIntegrationState[];
+      readonly settings: readonly CommandCenterPersistedSettingState[];
+    }> => {
+      if (tx.kind === "memory") {
+        return {
+          integrations: [],
+          settings: []
+        };
+      }
+
+      const integrationRows = queryRowsFromResult(await tx.executor.execute(sql`
+        select integration_id, enabled, status
+        from command_center_integration_states
+        where workspace_id = ${workspaceId}
+      `));
+      const settingRows = queryRowsFromResult(await tx.executor.execute(sql`
+        select key, value_json, status
+        from command_center_settings
+        where workspace_id = ${workspaceId}
+      `));
+
+      return {
+        integrations: integrationRows.map(
+          (row): CommandCenterPersistedIntegrationState => ({
+            integrationId: stringQueryField(row, "integration_id"),
+            enabled: booleanQueryField(row, "enabled"),
+            status: stringQueryField(row, "status")
+          })
+        ),
+        settings: settingRows.map(
+          (row): CommandCenterPersistedSettingState => ({
+            key: stringQueryField(row, "key"),
+            valueJson: jsonRecordQueryField(row, "value_json"),
+            status: stringQueryField(row, "status")
+          })
+        )
+      };
+    }
+  );
+
+  return {
+    integrations: persisted.integrations,
+    settings: persisted.settings,
+    integrationsById: new Map(
+      persisted.integrations.map((integration): readonly [string, CommandCenterPersistedIntegrationState] => [integration.integrationId, integration])
+    ),
+    settingsByKey: new Map(
+      persisted.settings.map((setting): readonly [string, CommandCenterPersistedSettingState] => [setting.key, setting])
+    )
+  };
+}
+
+function toCommandCenterIntegrationStatus(
+  status: string,
+  enabled: boolean
+): CommandCenterOverviewIntegration["status"] {
+  const normalized = status.trim().toLowerCase();
+  if (normalized === "attention" || normalized === "error") {
+    return "attention";
+  }
+
+  if (!enabled || normalized === "idle" || normalized === "disabled") {
+    return "idle";
+  }
+
+  return "connected";
+}
+
+function commandCenterSettingValueLabel(key: string, valueJson: JsonRecord, fallback: string): string {
+  const namedValue = valueJson["name"];
+  if (typeof namedValue === "string" && namedValue.trim().length > 0) {
+    return namedValue.trim();
+  }
+
+  const rawValue = valueJson["value"];
+  if (typeof rawValue === "string" && rawValue.trim().length > 0) {
+    return rawValue.trim();
+  }
+
+  const jsonPreview = JSON.stringify(valueJson);
+  if (jsonPreview === undefined || jsonPreview === "{}") {
+    return fallback;
+  }
+
+  if (jsonPreview.length <= 60) {
+    return jsonPreview;
+  }
+
+  return `${jsonPreview.slice(0, 57)}...`;
+}
+
+function commandCenterSettingTone(status: string): CommandCenterOverviewSetting["tone"] {
+  const normalized = status.trim().toLowerCase();
+  if (normalized === "locked") {
+    return "active";
+  }
+
+  if (normalized === "required" || normalized === "pending" || normalized === "review") {
+    return "warning";
+  }
+
+  if (
+    normalized === "shared" ||
+    normalized === "enforced" ||
+    normalized === "reviewed" ||
+    normalized === "enabled" ||
+    normalized === "active"
+  ) {
+    return "success";
+  }
+
+  return "info";
+}
+
+function stringQueryField(row: JsonRecord | undefined, key: string): string {
+  if (row === undefined) {
+    return "";
+  }
+
+  const value = row[key];
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (typeof value === "number" || typeof value === "bigint" || typeof value === "boolean") {
+    return String(value);
+  }
+
+  return "";
+}
+
+function booleanQueryField(row: JsonRecord | undefined, key: string): boolean {
+  if (row === undefined) {
+    return false;
+  }
+
+  const value = row[key];
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    return value !== 0;
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    return normalized === "true" || normalized === "t" || normalized === "1" || normalized === "yes";
+  }
+
+  return false;
+}
+
+function jsonRecordQueryField(row: JsonRecord | undefined, key: string): JsonRecord {
+  if (row === undefined) {
+    return {};
+  }
+
+  const value = row[key];
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    return value as JsonRecord;
+  }
+
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+        return parsed as JsonRecord;
+      }
+    } catch {
+      return {};
+    }
+  }
+
+  return {};
 }
 
 function balanceReference(payeeId: string, currency: string, balanceId: string | null): string | null {

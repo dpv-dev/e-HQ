@@ -1,6 +1,7 @@
 import { createRestTransport, encodePathSegment } from "./transport.js";
 import type {
   ApiClientConfig,
+  CommandCenterOverviewResponse,
   ApiMutationReceipt,
   CommandCenterNotificationsResponse,
   CommandCenterIntegrationToggleRequest,
@@ -10,6 +11,7 @@ import type {
 } from "./types.js";
 
 export interface CommandCenterApiClient {
+  readonly getOverview: (query: CommandCenterWorkspaceQuery) => Promise<CommandCenterOverviewResponse>;
   readonly updateSetting: (
     request: CommandCenterSettingUpdateRequest,
     options: { readonly idempotencyKey: string }
@@ -30,6 +32,10 @@ export function createCommandCenterApiClient(config: ApiClientConfig): CommandCe
   const transport = createRestTransport(config, "cc/v1");
 
   return {
+    getOverview: (query: CommandCenterWorkspaceQuery): Promise<CommandCenterOverviewResponse> =>
+      transport.get<CommandCenterOverviewResponse>("overview", {
+        workspaceId: query.workspaceId
+      }),
     updateSetting: (
       request: CommandCenterSettingUpdateRequest,
       options: { readonly idempotencyKey: string }

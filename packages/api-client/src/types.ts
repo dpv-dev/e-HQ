@@ -96,6 +96,44 @@ export interface CommandCenterNotificationsResponse {
   readonly items: readonly CommandCenterNotification[];
 }
 
+export type CommandCenterReadinessTone = "success" | "warning" | "error" | "info";
+
+export interface CommandCenterReadinessItem {
+  readonly id: EntityId;
+  readonly label: string;
+  readonly detail: string;
+  readonly tone: CommandCenterReadinessTone;
+}
+
+export type CommandCenterIntegrationStatus = "connected" | "idle" | "attention";
+
+export interface CommandCenterOverviewIntegration {
+  readonly id: EntityId;
+  readonly connector: string;
+  readonly kind: string;
+  readonly scope: string;
+  readonly status: CommandCenterIntegrationStatus;
+  readonly action: string;
+}
+
+export type CommandCenterSettingTone = "active" | "success" | "warning" | "info";
+
+export interface CommandCenterOverviewSetting {
+  readonly id: EntityId;
+  readonly key: string;
+  readonly value: string;
+  readonly status: string;
+  readonly tone: CommandCenterSettingTone;
+}
+
+export interface CommandCenterOverviewResponse {
+  readonly workspaceId: EntityId;
+  readonly generatedAt: IsoDateTimeString;
+  readonly readiness: readonly CommandCenterReadinessItem[];
+  readonly integrations: readonly CommandCenterOverviewIntegration[];
+  readonly settings: readonly CommandCenterOverviewSetting[];
+}
+
 export interface CommandCenterSettingUpdateRequest {
   readonly workspaceId: EntityId;
   readonly key: string;

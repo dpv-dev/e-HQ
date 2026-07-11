@@ -2077,7 +2077,7 @@
       if (mappingBatchFilter === batch.id) {
         mappingBatchFilter = allValue;
       }
-      await Promise.all([loadImportBatches(), loadMappingRows()]);
+      await Promise.all([loadImportBatches(), loadMappingRows(), loadDashboard()]);
     } catch (error: unknown) {
       reportActionError(error);
     }
@@ -2356,7 +2356,7 @@
         confirm,
         message: "Import confirmé."
       };
-      await loadImportBatches();
+      await Promise.all([loadImportBatches(), loadMappingRows(), loadDashboard()]);
     } catch (error: unknown) {
       importState = {
         ...importState,
@@ -3174,7 +3174,7 @@
       );
       mutationReceiptPageId = activePageId;
       closePaymentPanel();
-      await loadPayments();
+      await Promise.all([loadPayments(), loadStatements(), loadReconciliation()]);
     } catch (error: unknown) {
       reportActionError(error);
     }
@@ -3204,7 +3204,7 @@
       );
       mutationReceiptPageId = activePageId;
       closePaymentPanel();
-      await loadPayments();
+      await Promise.all([loadPayments(), loadStatements(), loadReconciliation()]);
     } catch (error: unknown) {
       reportActionError(error);
     }

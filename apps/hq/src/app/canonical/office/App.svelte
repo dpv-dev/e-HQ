@@ -2805,7 +2805,7 @@
         )
       );
       actionReceipt = writeResults[writeResults.length - 1] ?? null;
-      await loadPendingTransactions();
+      await Promise.all([loadPendingTransactions(), loadTransactions(), loadDashboard()]);
     } catch (error: unknown) {
       pendingState = createErrorState<PageResult<OfficeTransaction>>(error);
     }
@@ -2832,7 +2832,7 @@
       );
       actionReceipt = writeResults[writeResults.length - 1] ?? null;
       selectedPendingIds = [];
-      await loadPendingTransactions();
+      await Promise.all([loadPendingTransactions(), loadTransactions(), loadDashboard(), refreshReconciliationViews()]);
     } catch (error: unknown) {
       pendingState = createErrorState<PageResult<OfficeTransaction>>(error);
     }

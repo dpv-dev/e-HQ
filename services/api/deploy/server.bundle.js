@@ -40564,6 +40564,20 @@ function registerDistributionRoutes(app, dependencies) {
   });
 }
 function registerCommandCenterRoutes(app, dependencies) {
+  app.get("/cc/v1/overview", async (context) => {
+    const workspaceId = resolveWorkspaceId(context);
+    assertNonBotRouteAccess(context, "command_center_overview_read");
+    return context.json(
+      await toCommandCenterOverview(
+        context,
+        dependencies.fixtures,
+        dependencies.persistence,
+        workspaceId,
+        dependencies.persistence.writesEnabled,
+        dependencies.nowIso()
+      )
+    );
+  });
   app.get("/cc/v1/status", (context) => {
     resolveWorkspaceId(context);
     assertNonBotRouteAccess(context, "command_center_status_read");
@@ -48789,6 +48803,300 @@ function toCommandCenterNotifications(context, store, workspaceId, writesEnabled
     generatedAt,
     items
   };
+}
+async function toCommandCenterOverview(context, store, persistence, workspaceId, writesEnabled, generatedAt) {
+  const actor = context.get("authUser");
+  const officePendingCount = store.office.transactions.filter(
+    (transaction) => transaction.categoryId === null || transaction.status === "draft"
+  ).length;
+  const openSuspenseCount = store.distribution.suspenseItems.filter((item) => !item.resolved).length;
+  const pendingStatementCount = store.distribution.statements.filter((statement) => statement.status !== "void").length;
+  const readiness = [
+    {
+      id: "write-gate",
+      label: "Write gate",
+      detail: writesEnabled ? "Writes enabled with idempotency and audit." : "Writes disabled at runtime.",
+      tone: writesEnabled ? "success" : "warning"
+    },
+    {
+      id: "office-queue",
+      label: "Office queue",
+      detail: `${String(officePendingCount)} transaction${officePendingCount === 1 ? "" : "s"} pending classification or validation.`,
+      tone: officePendingCount === 0 ? "success" : "warning"
+    },
+    {
+      id: "distribution-suspense",
+      label: "Distribution suspense",
+      detail: `${String(openSuspenseCount)} suspense item${openSuspenseCount === 1 ? "" : "s"} open.`,
+      tone: openSuspenseCount === 0 ? "success" : "warning"
+    },
+    {
+      id: "distribution-statements",
+      label: "Statement queue",
+      detail: `${String(pendingStatementCount)} statement${pendingStatementCount === 1 ? "" : "s"} available for payment workflows.`,
+      tone: pendingStatementCount === 0 ? "info" : "success"
+    },
+    {
+      id: "session",
+      label: "Session",
+      detail: `${actor.email} \xB7 ${actor.role}`,
+      tone: "success"
+    }
+  ];
+  const persistedOverview = await readCommandCenterOverviewPersistence(persistence, workspaceId);
+  const defaultIntegrations = commandCenterDefaultIntegrations();
+  const integrations = defaultIntegrations.map(
+    (integration) => {
+      const persisted = persistedOverview.integrationsById.get(integration.id) ?? null;
+      const enabled = persisted === null ? integration.status !== "idle" : persisted.enabled;
+      const status = persisted === null ? integration.status : toCommandCenterIntegrationStatus(persisted.status, persisted.enabled);
+      return {
+        ...integration,
+        status,
+        action: enabled ? "Manage" : "Enable"
+      };
+    }
+  );
+  const defaultSettings = commandCenterDefaultSettings();
+  const settingsFromDefaults = defaultSettings.map(
+    (setting) => {
+      const persisted = persistedOverview.settingsByKey.get(setting.id) ?? null;
+      if (persisted === null) {
+        return setting;
+      }
+      return {
+        id: setting.id,
+        key: setting.key,
+        value: commandCenterSettingValueLabel(setting.id, persisted.valueJson, setting.value),
+        status: persisted.status,
+        tone: commandCenterSettingTone(persisted.status)
+      };
+    }
+  );
+  const extraPersistedSettings = persistedOverview.settings.filter((setting) => !defaultSettings.some((candidate) => candidate.id === setting.key)).map(
+    (setting) => ({
+      id: setting.key,
+      key: setting.key,
+      value: commandCenterSettingValueLabel(setting.key, setting.valueJson, "-"),
+      status: setting.status,
+      tone: commandCenterSettingTone(setting.status)
+    })
+  );
+  const settings = [...settingsFromDefaults, ...extraPersistedSettings];
+  return {
+    workspaceId,
+    generatedAt,
+    readiness,
+    integrations,
+    settings
+  };
+}
+function commandCenterDefaultIntegrations() {
+  return [
+    {
+      id: "supabase-runtime",
+      connector: "Supabase runtime",
+      kind: "Auth \xB7 Postgres \xB7 Hono",
+      scope: "All workspaces",
+      status: "connected",
+      action: "Manage"
+    },
+    {
+      id: "mcp",
+      connector: "Project MCP",
+      kind: "Scoped tools",
+      scope: "ehq-platform only",
+      status: "connected",
+      action: "Inspect"
+    },
+    {
+      id: "mcb",
+      connector: "MCB statements",
+      kind: "Bank connector",
+      scope: "Office imports",
+      status: "connected",
+      action: "Manage"
+    },
+    {
+      id: "sbi",
+      connector: "SBI statements",
+      kind: "Bank connector",
+      scope: "Office imports",
+      status: "connected",
+      action: "Manage"
+    }
+  ];
+}
+function commandCenterDefaultSettings() {
+  return [
+    {
+      id: "theme",
+      key: "Theme",
+      value: "Dark command center",
+      status: "Locked",
+      tone: "active"
+    },
+    {
+      id: "permissions",
+      key: "Permissions source",
+      value: "@ehq/auth",
+      status: "Shared",
+      tone: "success"
+    },
+    {
+      id: "navigation",
+      key: "Navigation scope",
+      value: "Command Center only",
+      status: "Enforced",
+      tone: "success"
+    },
+    {
+      id: "release",
+      key: "Release gate",
+      value: "Manual approval",
+      status: "Required",
+      tone: "warning"
+    }
+  ];
+}
+async function readCommandCenterOverviewPersistence(persistence, workspaceId) {
+  const persisted = await persistence.withTx(
+    async (tx) => {
+      if (tx.kind === "memory") {
+        return {
+          integrations: [],
+          settings: []
+        };
+      }
+      const integrationRows = queryRowsFromResult(await tx.executor.execute(sql`
+        select integration_id, enabled, status
+        from command_center_integration_states
+        where workspace_id = ${workspaceId}
+      `));
+      const settingRows = queryRowsFromResult(await tx.executor.execute(sql`
+        select key, value_json, status
+        from command_center_settings
+        where workspace_id = ${workspaceId}
+      `));
+      return {
+        integrations: integrationRows.map(
+          (row) => ({
+            integrationId: stringQueryField(row, "integration_id"),
+            enabled: booleanQueryField(row, "enabled"),
+            status: stringQueryField(row, "status")
+          })
+        ),
+        settings: settingRows.map(
+          (row) => ({
+            key: stringQueryField(row, "key"),
+            valueJson: jsonRecordQueryField(row, "value_json"),
+            status: stringQueryField(row, "status")
+          })
+        )
+      };
+    }
+  );
+  return {
+    integrations: persisted.integrations,
+    settings: persisted.settings,
+    integrationsById: new Map(
+      persisted.integrations.map((integration) => [integration.integrationId, integration])
+    ),
+    settingsByKey: new Map(
+      persisted.settings.map((setting) => [setting.key, setting])
+    )
+  };
+}
+function toCommandCenterIntegrationStatus(status, enabled) {
+  const normalized = status.trim().toLowerCase();
+  if (normalized === "attention" || normalized === "error") {
+    return "attention";
+  }
+  if (!enabled || normalized === "idle" || normalized === "disabled") {
+    return "idle";
+  }
+  return "connected";
+}
+function commandCenterSettingValueLabel(key, valueJson, fallback) {
+  const namedValue = valueJson["name"];
+  if (typeof namedValue === "string" && namedValue.trim().length > 0) {
+    return namedValue.trim();
+  }
+  const rawValue = valueJson["value"];
+  if (typeof rawValue === "string" && rawValue.trim().length > 0) {
+    return rawValue.trim();
+  }
+  const jsonPreview = JSON.stringify(valueJson);
+  if (jsonPreview === void 0 || jsonPreview === "{}") {
+    return fallback;
+  }
+  if (jsonPreview.length <= 60) {
+    return jsonPreview;
+  }
+  return `${jsonPreview.slice(0, 57)}...`;
+}
+function commandCenterSettingTone(status) {
+  const normalized = status.trim().toLowerCase();
+  if (normalized === "locked") {
+    return "active";
+  }
+  if (normalized === "required" || normalized === "pending" || normalized === "review") {
+    return "warning";
+  }
+  if (normalized === "shared" || normalized === "enforced" || normalized === "reviewed" || normalized === "enabled" || normalized === "active") {
+    return "success";
+  }
+  return "info";
+}
+function stringQueryField(row, key) {
+  if (row === void 0) {
+    return "";
+  }
+  const value = row[key];
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number" || typeof value === "bigint" || typeof value === "boolean") {
+    return String(value);
+  }
+  return "";
+}
+function booleanQueryField(row, key) {
+  if (row === void 0) {
+    return false;
+  }
+  const value = row[key];
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return value !== 0;
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    return normalized === "true" || normalized === "t" || normalized === "1" || normalized === "yes";
+  }
+  return false;
+}
+function jsonRecordQueryField(row, key) {
+  if (row === void 0) {
+    return {};
+  }
+  const value = row[key];
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch {
+      return {};
+    }
+  }
+  return {};
 }
 function balanceReference(payeeId, currency, balanceId) {
   void payeeId;

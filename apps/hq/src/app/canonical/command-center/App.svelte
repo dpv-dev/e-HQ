@@ -11,8 +11,7 @@
     createLoadingState,
     createSuccessState,
     type ApiRequestState,
-    type DistributionDashboardResponse,
-    type OfficeDashboardResponse
+    type CommandCenterOverviewResponse
   } from "@ehq/api-client";
   import {
     Alert,
@@ -33,6 +32,7 @@
     type SurfaceState,
     type TableColumn,
     type TableRow,
+    type TableRowAction,
     type TableState,
     type IconName,
     type Tone,
@@ -71,6 +71,7 @@
   }
 
   interface ReadinessItem {
+    readonly id: string;
     readonly label: string;
     readonly detail: string;
     readonly tone: Tone;
@@ -228,46 +229,6 @@
       title: "Locked setting · view only"
     }
   ]);
-  const integrations: readonly IntegrationRow[] = [
-    {
-      id: "supabase-runtime",
-      connector: "Supabase runtime",
-      kind: "Auth · Postgres · Hono",
-      scope: "All workspaces",
-      status: "connected",
-      action: "Manage"
-    },
-    {
-      id: "mcp",
-      connector: "Project MCP",
-      kind: "Scoped tools",
-      scope: "ehq-platform only",
-      status: "connected",
-      action: "Inspect"
-    },
-    {
-      id: "mcb",
-      connector: "MCB statements",
-      kind: "Bank connector",
-      scope: "Office imports",
-      status: "connected",
-      action: "Manage"
-    },
-    {
-      id: "sbi",
-      connector: "SBI statements",
-      kind: "Bank connector",
-      scope: "Office imports",
-      status: "connected",
-      action: "Manage"
-    }
-  ];
-  const settingRows: readonly SettingRow[] = [
-    { id: "theme", key: "Theme", value: "Dark command center", status: "Locked", tone: "active" },
-    { id: "permissions", key: "Permissions source", value: "@ehq/auth", status: "Shared", tone: "success" },
-    { id: "navigation", key: "Navigation scope", value: "Command Center only", status: "Enforced", tone: "success" },
-    { id: "release", key: "Release gate", value: "Manual approval", status: "Required", tone: "warning" }
-  ];
   let activePageId = $state<CommandCenterPageId>("dashboard");
   const navIcons: Readonly<Record<CommandCenterPageId, IconName>> = {
     dashboard: "home",
@@ -303,61 +264,54 @@
     commandNoticeTone = tone;
     commandNotice = text;
   }
-  let officeDashboardState = $state<ApiRequestState<OfficeDashboardResponse>>(createIdleState<OfficeDashboardResponse>());
-  let distributionDashboardState = $state<ApiRequestState<DistributionDashboardResponse>>(
-    createIdleState<DistributionDashboardResponse>()
-  );
+  let overviewState = $state<ApiRequestState<CommandCenterOverviewResponse>>(createIdleState<CommandCenterOverviewResponse>());
 
   const activePage = $derived(getNavItem(activePageId));
   const permissionUsers = $derived<readonly CommandPermissionUser[]>([createPermissionUser(session)]);
   const commandAccess = $derived(getWorkspaceAccess(session, "command-center"));
   const canUseCommandCenter = $derived(commandAccess.status === "allowed");
   const systemStatusLabel = $derived(createSystemStatusLabel(session));
-  const readinessItems = $derived(createReadinessItems(officeDashboardState, distributionDashboardState, permissionUsers));
+  const readinessItems = $derived(createReadinessItems(overviewState));
   const readinessOkCount = $derived(countReadyChecks(readinessItems));
-  const readinessPercent = $derived(Math.round((readinessOkCount / readinessItems.length) * 100));
+  const readinessPercent = $derived(readinessItems.length === 0 ? 0 : Math.round((readinessOkCount / readinessItems.length) * 100));
+  const integrations = $derived(createIntegrations(overviewState));
+  const settingRows = $derived(createSettings(overviewState));
   const dashboardKpis = $derived(createDashboardKpis(readinessItems, permissionUsers, integrations));
   const usersKpis = $derived(createUsersKpis(permissionUsers));
   const integrationKpis = $derived(createIntegrationKpis(integrations, writesEnabled, writeGateMessage));
   const settingsKpis = $derived(createSettingsKpis(settingRows));
   const actionRows = $derived(createActionRows(permissionUsers, integrations, settingRows));
-  const dashboardSurfaceState = $derived(deriveDashboardSurfaceState(officeDashboardState, distributionDashboardState));
+  const dashboardSurfaceState = $derived(deriveDashboardSurfaceState(overviewState));
   const actionTableState = $derived(deriveActionTableState(dashboardSurfaceState, actionRows));
   const permissionRows = $derived(createPermissionRows(permissionUsers));
   const integrationRows = $derived(createIntegrationRows(integrations));
+  const integrationTableState = $derived(deriveAuxTableState(overviewState, integrationRows.length));
+  const integrationRowActions = $derived(createIntegrationRowActions());
   const settingsRows = $derived(createSettingsRows(settingRows));
+  const settingsTableState = $derived(deriveAuxTableState(overviewState, settingsRows.length));
 
   onMount((): (() => void) => {
     syncPageFromLocation();
     window.addEventListener("popstate", syncPageFromLocation);
     void loadWriteGate();
-    void loadCommandReadiness();
+    void loadCommandOverview();
 
     return (): void => {
       window.removeEventListener("popstate", syncPageFromLocation);
     };
   });
 
-  async function loadCommandReadiness(): Promise<void> {
-    officeDashboardState = createLoadingState<OfficeDashboardResponse>();
-    distributionDashboardState = createLoadingState<DistributionDashboardResponse>();
+  async function loadCommandOverview(): Promise<void> {
+    overviewState = createLoadingState<CommandCenterOverviewResponse>();
 
     try {
-      const [officeDashboard, distributionDashboard] = await Promise.all([
-        client.office.getDashboard({
-          workspaceId,
-          period
-        }),
-        client.distribution.getDashboard({
-          workspaceId,
-          period
-        })
-      ]);
-      officeDashboardState = createSuccessState<OfficeDashboardResponse>(officeDashboard);
-      distributionDashboardState = createSuccessState<DistributionDashboardResponse>(distributionDashboard);
+      const overview = await client.commandCenter.getOverview({
+        workspaceId
+      });
+      overviewState = createSuccessState<CommandCenterOverviewResponse>(overview);
     } catch (error: unknown) {
-      officeDashboardState = createErrorState<OfficeDashboardResponse>(error);
-      distributionDashboardState = createErrorState<DistributionDashboardResponse>(error);
+      setCommandNotice("error", `Overview unavailable · ${errorMessage(error)}.`);
+      overviewState = createErrorState<CommandCenterOverviewResponse>(error);
     }
   }
 
@@ -388,7 +342,7 @@
     }
 
     if (filter.actionId === "period") {
-      void loadCommandReadiness();
+      void loadCommandOverview();
       setCommandNotice("info", `Readiness refresh requested for ${periodLabel(period)}.`);
       return;
     }
@@ -429,7 +383,7 @@
     }
 
     if (filter.actionId === "network") {
-      void loadCommandReadiness();
+      void loadCommandOverview();
       setCommandNotice("info", "API readiness refresh requested.");
       return;
     }
@@ -549,71 +503,75 @@
     };
   }
 
-  function createReadinessItems(
-    officeState: ApiRequestState<OfficeDashboardResponse>,
-    distributionState: ApiRequestState<DistributionDashboardResponse>,
-    users: readonly CommandPermissionUser[]
-  ): readonly ReadinessItem[] {
-    const reviewCount = countReviewUsers(users);
+  function createReadinessItems(overview: ApiRequestState<CommandCenterOverviewResponse>): readonly ReadinessItem[] {
+    if (overview.status === "success") {
+      return overview.data.readiness.map((item): ReadinessItem => ({
+        id: item.id,
+        label: item.label,
+        detail: item.detail,
+        tone: item.tone
+      }));
+    }
+
+    if (isLoadingState(overview)) {
+      return [
+        {
+          id: "loading",
+          label: "Readiness",
+          detail: "loading live API",
+          tone: "warning"
+        }
+      ];
+    }
+
+    if (overview.status === "error") {
+      return [
+        {
+          id: "error",
+          label: "Readiness",
+          detail: "live API unavailable",
+          tone: "error"
+        }
+      ];
+    }
 
     return [
       {
-        label: "Office API",
-        detail: officeReadinessDetail(officeState),
-        tone: requestStateTone(officeState)
-      },
-      {
-        label: "Distribution API",
-        detail: distributionReadinessDetail(distributionState),
-        tone: requestStateTone(distributionState)
-      },
-      { label: "Auth gate", detail: "denied cards remain visible", tone: "success" },
-      {
-        label: "Review queue",
-        detail: reviewCount > 0 ? `${String(reviewCount)} permission reviews pending` : "no permission reviews pending",
-        tone: reviewCount > 0 ? "warning" : "success"
+        id: "idle",
+        label: "Readiness",
+        detail: "waiting for live API",
+        tone: "warning"
       }
     ];
   }
 
-  function officeReadinessDetail(state: ApiRequestState<OfficeDashboardResponse>): string {
-    if (state.status === "success") {
-      return `${String(state.data.unreconciledTransactionCount)} unreconciled · eof/v1`;
+  function createIntegrations(overview: ApiRequestState<CommandCenterOverviewResponse>): readonly IntegrationRow[] {
+    if (overview.status !== "success") {
+      return [];
     }
 
-    return requestStateDetail(state);
+    return overview.data.integrations.map((integration): IntegrationRow => ({
+      id: integration.id,
+      connector: integration.connector,
+      kind: integration.kind,
+      scope: integration.scope,
+      status: integration.status,
+      action: integration.action
+    }));
   }
 
-  function distributionReadinessDetail(state: ApiRequestState<DistributionDashboardResponse>): string {
-    if (state.status === "success") {
-      return `${String(state.data.suspenseCount)} suspense · erh/v1`;
+  function createSettings(overview: ApiRequestState<CommandCenterOverviewResponse>): readonly SettingRow[] {
+    if (overview.status !== "success") {
+      return [];
     }
 
-    return requestStateDetail(state);
-  }
-
-  function requestStateDetail<TData>(state: ApiRequestState<TData>): string {
-    if (isLoadingState(state)) {
-      return "loading live API";
-    }
-
-    if (state.status === "error") {
-      return "live API unavailable";
-    }
-
-    return "waiting for live API";
-  }
-
-  function requestStateTone<TData>(state: ApiRequestState<TData>): Tone {
-    if (state.status === "success") {
-      return "success";
-    }
-
-    if (state.status === "error") {
-      return "error";
-    }
-
-    return "warning";
+    return overview.data.settings.map((setting): SettingRow => ({
+      id: setting.id,
+      key: setting.key,
+      value: setting.value,
+      status: setting.status,
+      tone: setting.tone
+    }));
   }
 
   function countReadyChecks(items: readonly ReadinessItem[]): number {
@@ -740,19 +698,12 @@
     return rows;
   }
 
-  function deriveDashboardSurfaceState(
-    officeState: ApiRequestState<OfficeDashboardResponse>,
-    distributionState: ApiRequestState<DistributionDashboardResponse>
-  ): SurfaceState {
-    if (isLoadingState(officeState) || isLoadingState(distributionState)) {
+  function deriveDashboardSurfaceState(overview: ApiRequestState<CommandCenterOverviewResponse>): SurfaceState {
+    if (isLoadingState(overview)) {
       return "loading";
     }
 
-    if (officeState.status === "error" || distributionState.status === "error") {
-      return "error";
-    }
-
-    return "default";
+    return overview.status === "success" ? "default" : "error";
   }
 
   function deriveActionTableState(surfaceState: SurfaceState, rows: readonly TableRow[]): TableState {
@@ -765,6 +716,22 @@
     }
 
     return rows.length === 0 ? "empty" : "default";
+  }
+
+  function deriveAuxTableState(overview: ApiRequestState<CommandCenterOverviewResponse>, rowCount: number): TableState {
+    if (isLoadingState(overview)) {
+      return "loading";
+    }
+
+    if (overview.status === "error") {
+      return "error";
+    }
+
+    if (overview.status === "success" && rowCount === 0) {
+      return "empty";
+    }
+
+    return overview.status === "success" ? "default" : "error";
   }
 
   function createPermissionRows(users: readonly CommandPermissionUser[]): readonly TableRow[] {
@@ -791,6 +758,19 @@
         { kind: "badge", value: row.action.toLowerCase(), tone: row.status === "attention" ? "error" : "muted" }
       ])
     );
+  }
+
+  function createIntegrationRowActions(): readonly TableRowAction[] {
+    return [
+      {
+        label: "Toggle",
+        onAction: (integrationId: string): void => {
+          void toggleIntegration(integrationId);
+        },
+        isEnabled: (integrationId: string): boolean => canToggleIntegration(integrationId),
+        disabledReason: (integrationId: string): string | null => integrationToggleDisabledReason(integrationId)
+      }
+    ];
   }
 
   function createSettingsRows(rows: readonly SettingRow[]): readonly TableRow[] {
@@ -831,6 +811,26 @@
     }
 
     return "muted";
+  }
+
+  function canToggleIntegration(integrationId: string): boolean {
+    return writesEnabled && !commandBusy && integrations.some((row: IntegrationRow): boolean => row.id === integrationId);
+  }
+
+  function integrationToggleDisabledReason(integrationId: string): string | null {
+    if (!writesEnabled) {
+      return writeGateMessage;
+    }
+
+    if (commandBusy) {
+      return "Another command is running.";
+    }
+
+    if (!integrations.some((row: IntegrationRow): boolean => row.id === integrationId)) {
+      return "Integration unavailable.";
+    }
+
+    return null;
   }
 
   function countRole(users: readonly CommandPermissionUser[], roleId: string): number {
@@ -982,6 +982,38 @@
     setCommandNotice("info", `${row.connector} · ${row.kind} · ${row.scope} · status ${row.status}.`);
   }
 
+  async function toggleIntegration(integrationId: string): Promise<void> {
+    const row = integrations.find((integration: IntegrationRow): boolean => integration.id === integrationId);
+
+    if (row === undefined) {
+      throw new Error(`Unknown integration: ${integrationId}.`);
+    }
+
+    const enabled = row.status !== "connected";
+    const nextStatus = enabled ? "connected" : "idle";
+
+    commandBusy = true;
+    try {
+      const receipt = await client.commandCenter.toggleIntegration(
+        {
+          workspaceId,
+          integrationId,
+          enabled,
+          status: nextStatus
+        },
+        {
+          idempotencyKey: createCommandIdempotencyKey(`command-center-integration-${integrationId}`)
+        }
+      );
+      setCommandNotice("success", `Integration updated · audit ${receipt.auditEventId ?? "missing"}.`);
+      await loadCommandOverview();
+    } catch (error: unknown) {
+      setCommandNotice("error", `Integration update failed · ${errorMessage(error)}.`);
+    } finally {
+      commandBusy = false;
+    }
+  }
+
   function openOfficeBankStatus(): void {
     window.location.assign("/console/office/bank");
   }
@@ -1090,7 +1122,7 @@
               <p>Admin checks before any app release.</p>
             </header>
             <div class="check-list">
-              {#each readinessItems as item (item.label)}
+              {#each readinessItems as item (item.id)}
                 <article class="ehq-edge-surface">
                   <Badge label={item.tone === "success" ? "ok" : "review"} tone={item.tone} />
                   <div>
@@ -1213,7 +1245,14 @@
           />
         </section>
 
-        <Table title="Connectors" columns={integrationColumns} rows={integrationRows} state="default" actionLabel="" />
+        <Table
+          title="Connectors"
+          columns={integrationColumns}
+          rows={integrationRows}
+          state={integrationTableState}
+          actionLabel=""
+          rowActions={integrationRowActions}
+        />
       {:else}
         <Toolbar label="Settings controls" filters={settingsToolbar} actionLabel="" loading={false} onFilterSelect={selectSettingsToolbarFilter} />
 
@@ -1265,7 +1304,7 @@
           />
         </section>
 
-        <Table title="Preferences" columns={settingColumns} rows={settingsRows} state="default" actionLabel="" />
+        <Table title="Preferences" columns={settingColumns} rows={settingsRows} state={settingsTableState} actionLabel="" />
       {/if}
     </div>
 </WorkspaceShell>
