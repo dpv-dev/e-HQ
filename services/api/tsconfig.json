@@ -3,6 +3,7 @@
   "compilerOptions": {
     "composite": true,
     "skipLibCheck": true,
+    "types": ["node"],
     "rootDir": "src",
     "outDir": "dist",
     "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo"

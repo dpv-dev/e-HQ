@@ -89,6 +89,11 @@ export interface DistributionApiClient {
     request: DistributionImportConfirmRequest,
     options: WriteRequestOptions
   ) => Promise<DistributionImportConfirmResponse>;
+  readonly reverseImportBatch: (
+    batchId: EntityId,
+    request: DistributionWorkspaceQuery,
+    options: WriteRequestOptions
+  ) => Promise<ApiMutationReceipt>;
   readonly listMappingRows: (query: DistributionMappingRowsQuery) => Promise<PageResult<DistributionMappingRow>>;
   readonly applyMappingRules: (
     request: DistributionMappingApplyRulesRequest,
@@ -215,6 +220,7 @@ export function createDistributionApiClient(config: ApiClientConfig): Distributi
         dateFrom: query.dateFrom ?? null,
         dateTo: query.dateTo ?? null,
         importSource: query.importSource,
+        importStatus: query.importStatus,
         mappingStatus: query.mappingStatus,
         suspenseStatus: query.suspenseStatus,
         paymentStatus: query.paymentStatus,
@@ -245,6 +251,16 @@ export function createDistributionApiClient(config: ApiClientConfig): Distributi
       options: WriteRequestOptions
     ): Promise<DistributionImportConfirmResponse> =>
       transport.post<DistributionImportConfirmResponse>("imports/confirm", request, options.idempotencyKey),
+    reverseImportBatch: (
+      batchId: EntityId,
+      request: DistributionWorkspaceQuery,
+      options: WriteRequestOptions
+    ): Promise<ApiMutationReceipt> =>
+      transport.post<ApiMutationReceipt>(
+        `imports/batches/${encodePathSegment(batchId)}/reverse`,
+        request,
+        options.idempotencyKey
+      ),
     listMappingRows: (query: DistributionMappingRowsQuery): Promise<PageResult<DistributionMappingRow>> =>
       transport.get<PageResult<DistributionMappingRow>>("mapping/rows", {
         workspaceId: query.workspaceId,

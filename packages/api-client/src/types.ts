@@ -1024,6 +1024,7 @@ export interface DistributionScreenQuery {
   readonly dateFrom: IsoDateString;
   readonly dateTo: IsoDateString;
   readonly importSource: "kontor" | "routenote" | null;
+  readonly importStatus: "uploaded" | "mapped" | "validated" | "failed" | "voided" | null;
   readonly mappingStatus: "unmapped" | "suggested" | "mapped" | null;
   readonly suspenseStatus: "open" | "resolved" | null;
   readonly paymentStatus: "draft" | "queued" | "paid" | "voided" | null;
@@ -1057,7 +1058,7 @@ export interface DistributionScreenResponse {
 export interface DistributionImportBatchesQuery extends PageQuery {
   readonly workspaceId: EntityId;
   readonly source: "kontor" | "routenote" | null;
-  readonly status: "uploaded" | "mapped" | "validated" | "failed" | null;
+  readonly status: "uploaded" | "mapped" | "validated" | "failed" | "voided" | null;
 }
 
 export interface DistributionImportBatch {
@@ -1073,7 +1074,7 @@ export interface DistributionImportBatch {
   readonly grossMicro: MoneyMicroString;
   readonly payableColumn: string;
   readonly joinKeySummary: string;
-  readonly status: "uploaded" | "mapped" | "validated" | "failed";
+  readonly status: "uploaded" | "mapped" | "validated" | "failed" | "voided";
   readonly nextAction: "review_mapping" | "apply_rules" | "validate" | "retry";
   readonly importedAt: IsoDateTimeString;
 }

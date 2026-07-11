@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID } from "crypto";
 import { Hono } from "hono";
 import type { Context, MiddlewareHandler } from "hono";
 import { cors } from "hono/cors";
@@ -1496,6 +1496,7 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
     const period = requireQuery(context, "period");
     requireQuery(context, "workspaceId");
     const source = nullableQuery(context, "importSource");
+    const importStatus = nullableQuery(context, "importStatus");
     const mappingStatus = nullableQuery(context, "mappingStatus") ?? "unmapped";
     const suspenseStatus = nullableQuery(context, "suspenseStatus") ?? "open";
     const paymentStatus = nullableQuery(context, "paymentStatus");
@@ -1503,7 +1504,8 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
 
     const importBatches = dependencies.fixtures.distribution.importBatches
       .map((batch) => toDistributionImportBatch(dependencies.fixtures.distribution, batch.id))
-      .filter((batch) => source === null || batch.source === source);
+      .filter((batch) => source === null || batch.source === source)
+      .filter((batch) => importStatus === null || batch.status === importStatus);
     const mappingRows = dependencies.fixtures.distributionMappingRows.filter(
       (row) => mappingStatus === null || row.status === mappingStatus
     );
@@ -11385,6 +11387,10 @@ function toDistributionImportBatch(dataset: DistributionReadDataset, batchId: st
 }
 
 function toApiImportStatus(status: string): DistributionImportBatch["status"] {
+  if (status === "void") {
+    return "voided";
+  }
+
   if (status === "completed") {
     return "validated";
   }

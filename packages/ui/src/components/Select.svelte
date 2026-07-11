@@ -31,7 +31,7 @@
     aria-invalid={props.state === "error"}
     onchange={handleChange}
   >
-    {#each props.options as option (option.value)}
+    {#each props.options as option, index (`${option.value}-${String(index)}`)}
       <option value={option.value}>{option.label}</option>
     {/each}
   </select>

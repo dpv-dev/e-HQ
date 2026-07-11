@@ -3311,6 +3311,61 @@ test("distribution import confirm persists raw rows and does not fabricate norma
   assert.ok(batchPage.items.some((item) => item.id === receipt.id && item.status === "failed"));
 });
 
+test("distribution import reverse exposes voided status in list and screen filters", async () => {
+  const app = createWriteEnabledFixtureApiService();
+  const preview = await app.request("/erh/v1/imports/preview", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      source: "routenote",
+      fileName: "routenote-voided.csv",
+      checksum: "checksum-distribution-reverse-voided",
+      rows: [{ title: "Raw song", artist: "Raw artist", currency: "USD", amount: "9.99" }]
+    })
+  });
+  assert.equal(preview.status, 200);
+  const previewJson = (await preview.json()) as { readonly previewId: string };
+
+  const confirm = await app.request("/erh/v1/imports/confirm", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "distribution-confirm-voided-1" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      previewId: previewJson.previewId,
+      acceptedRowIds: ["row_1"],
+      rejectedRowIds: []
+    })
+  });
+  assert.equal(confirm.status, 200);
+  const confirmJson = (await confirm.json()) as { readonly id: string };
+
+  const reverse = await app.request(`/erh/v1/imports/batches/${confirmJson.id}/reverse`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "distribution-reverse-voided-1" },
+    body: JSON.stringify({ workspaceId: "workspace_1" })
+  });
+  assert.equal(reverse.status, 200);
+
+  const voidedList = await app.request("/erh/v1/imports/batches?workspaceId=workspace_1&status=voided&limit=100", {
+    headers: authHeaders()
+  });
+  assert.equal(voidedList.status, 200);
+  const voidedListPage = (await voidedList.json()) as { readonly items: readonly { readonly id: string; readonly status: string }[] };
+  assert.ok(voidedListPage.items.some((item) => item.id === confirmJson.id && item.status === "voided"));
+
+  const screen = await app.request("/erh/v1/screen?workspaceId=workspace_1&period=2026-06&importStatus=voided", {
+    headers: authHeaders()
+  });
+  assert.equal(screen.status, 200);
+  const screenJson = (await screen.json()) as {
+    readonly importBatches: { readonly items: readonly { readonly id: string; readonly status: string }[] };
+  };
+
+  assert.ok(screenJson.importBatches.items.some((item) => item.id === confirmJson.id && item.status === "voided"));
+  assert.equal(screenJson.importBatches.items.every((item) => item.status === "voided"), true);
+});
+
 test("distribution import preview keeps currencies from file rows and never emits RS fallback", async () => {
   const app = createWriteEnabledFixtureApiService();
 

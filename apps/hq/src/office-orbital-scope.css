@@ -1,9 +1,10 @@
 @import "@ehq/ui/tokens/visual-tokens.css";
 @import "../../../design/theme-orbital/tokens/orbital-tokens.css";
 
-/* Office-only Orbital bridge: keep global tokens for HQ/Distribution/Command Center,
-   and remap --ehq-* only under the Office workspace shell. */
-.ehq-workspace-shell.ehq-workspace-office {
+/* Orbital bridge: remap --ehq-* under every workspace shell (Office, Distribution,
+   Command Center) — the Office look is the single app-wide theme. Landing page is
+   untouched (it never renders a .ehq-workspace-shell). */
+.ehq-workspace-shell:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) {
   /* Theme Orbital Office skin calibration (yellow-forward, neutral surfaces). */
   --orb-void: #0A0C10;
   --orb-bg: #0D0F14;

@@ -26,6 +26,24 @@
   --dc-warning-bg: rgba(224, 223, 20, 0.14);
   --dc-warning-border: rgba(224, 223, 20, 0.45);
 
+  /* Layered elevation — ambient + contact + top-highlight, same physical model as Office/Orbital. */
+  --dc-elev-1:
+    0 1px 2px rgba(0, 0, 0, 0.3),
+    0 8px 20px -6px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --dc-elev-2:
+    0 2px 4px rgba(0, 0, 0, 0.32),
+    0 16px 36px -10px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --dc-elev-3:
+    0 4px 8px rgba(0, 0, 0, 0.35),
+    0 28px 64px -16px rgba(0, 0, 0, 0.65),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+
+  /* 3D bevel gradients for buttons and icon plates. */
+  --dc-bevel-primary: linear-gradient(180deg, #ffc03f 0%, var(--dc-primary) 46%, #c47f00 100%);
+  --dc-bevel-primary-hover: linear-gradient(180deg, #ffcb5c 0%, var(--dc-primary-hover) 46%, #cf8800 100%);
+
   --ehq-bg-main: var(--dc-bg);
   --ehq-surface: var(--dc-surface);
   --ehq-surface-high: var(--dc-surface-high);

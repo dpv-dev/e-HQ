@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ë • office — Transactions · Orbital</title>
+<link rel="stylesheet" href="../../tokens/orbital-tokens.css">
+<link rel="stylesheet" href="../../components/orbital-components.css">
+<link rel="stylesheet" href="./_shell.css">
+<link rel="stylesheet" href="./_office-skin.css">
+</head>
+<body>
+<div class="shell">
+  <div class="topbar">
+    <div class="brand">ë&nbsp;•&nbsp;office<em>.</em><span>orbital</span></div>
+    <div class="orb-ticker"><span><i class="dot ok"></i>API 200 · 42 ms</span><span><i class="dot ok"></i>MCB feed <b>sync 06:00</b></span><span><i class="dot warn"></i>SBI import <b>128 unmatched</b></span><span><i class="dot ok"></i>FX MUR <b>à jour</b></span><span><i class="dot ok"></i>Audit <b>évt 8 412</b></span></div>
+    <button class="orb-button orb-button--primary">Nouvelle écriture</button>
+  </div>
+  <div class="cockpit">
+    <nav class="rail-left"><div class="orb-panel" style="padding:12px;"><div class="orb-nav"><span class="orb-nav__group">Pilotage</span><a class="orb-nav__item" href="./dashboard.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-home.svg" alt=""></span>Dashboard</a><a class="orb-nav__item" href="./ceo.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-eye.svg" alt=""></span>CEO View</a><a class="orb-nav__item" href="./pnl.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-chart-bar.svg" alt=""></span>P&L</a><a class="orb-nav__item" href="./cashflow.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-trending-up.svg" alt=""></span>Cash Flow</a><span class="orb-nav__group">Comptabilité</span><a class="orb-nav__item active" href="./transactions.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-file-text.svg" alt=""></span>Transactions</a><a class="orb-nav__item" href="./pending.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-clock.svg" alt=""></span>Pending</a><a class="orb-nav__item" href="./reconciliation.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-check.svg" alt=""></span>Réconciliation</a><a class="orb-nav__item" href="./imports.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-upload.svg" alt=""></span>Imports</a><a class="orb-nav__item" href="./bank.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-bank.svg" alt=""></span>Bank</a><a class="orb-nav__item" href="./coa.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-layout-grid.svg" alt=""></span>Chart of Accounts</a><a class="orb-nav__item" href="./vat.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-file-text.svg" alt=""></span>VAT</a><span class="orb-nav__group">Relations</span><a class="orb-nav__item" href="./clients.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-users.svg" alt=""></span>Clients</a><a class="orb-nav__item" href="./suppliers.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-users.svg" alt=""></span>Suppliers</a><a class="orb-nav__item" href="./projects.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-folder.svg" alt=""></span>Projects</a><a class="orb-nav__item" href="./wave-invoices.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-download.svg" alt=""></span>Wave Invoices</a><span class="orb-nav__group">Système</span><a class="orb-nav__item" href="./monitoring.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-search.svg" alt=""></span>Monitoring</a><a class="orb-nav__item" href="./audit.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-calendar.svg" alt=""></span>Audit</a><a class="orb-nav__item" href="./settings.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-settings.svg" alt=""></span>Settings</a></div></div></nav>
+    <main class="main">
+      <div class="page-head">
+        <div class="left">
+          <span class="kicker">workspace · eeee-mu</span>
+          <h1>Transactions</h1>
+          <span class="sub">Grand livre filtrable ; édition en panneau latéral, signe porté par le type.</span>
+        </div>
+        <div class="actions"><span class="chip">Period: <b>This Year</b></span><button class="orb-button orb-button--secondary">Export CSV</button><button class="orb-button orb-button--primary">New entry</button></div>
+      </div>
+      
+<div class="orb-panel filter-strip">
+  <span class="chip">Account: <b>All</b></span><span class="chip">Department: <b>All</b></span>
+  <span class="chip">Division: <b>All</b></span><span class="chip">Category: <b>All</b></span>
+  <span class="chip">Project: <b>All</b></span><span class="chip">Type: <b>All</b></span>
+  <span class="chip">Status: <b>All</b></span>
+  <span class="spacer"></span>
+  <button class="orb-button orb-button--secondary" style="min-height:32px;">Filter</button>
+</div>
+<div class="two-col">
+  <div class="orb-table-wrap"><div class="orb-table-scroll"><table class="orb-table"><thead><tr><th>Date</th><th>Description</th><th>Classification</th><th>Type</th><th>Amount</th><th>Status</th></tr></thead><tbody><tr><td>04/02</td><td class="lead-cell">DJ performance invoice</td><td>ë • talent · Booking · Perf. Fees</td><td><span class="orb-badge orb-badge--success">income</span></td><td class="money pos">+500 000,00 Rs</td><td><span class="orb-badge orb-badge--success">validated</span></td></tr><tr><td>09/02</td><td class="lead-cell">Projector rental</td><td>bōucan · Equipment · Rental</td><td><span class="orb-badge orb-badge--warning">expense</span></td><td class="money neg">−120 000,00 Rs</td><td><span class="orb-badge orb-badge--success">validated</span></td></tr><tr><td>12/02</td><td class="lead-cell">Current account fee</td><td>ë • office · Finance · Bank Charges</td><td><span class="orb-badge orb-badge--warning">expense</span></td><td class="money neg">−5 000,00 Rs</td><td><span class="orb-badge orb-badge--info">matched</span></td></tr><tr><td>15/02</td><td class="lead-cell">Awaiting category</td><td>to classify</td><td><span class="orb-badge orb-badge--warning">expense</span></td><td class="money neg">−8 500,00 Rs</td><td><span class="orb-badge orb-badge--amber">draft</span></td></tr><tr><td>18/02</td><td class="lead-cell">Salaries — February</td><td>ë • office · HR / Team · Salaries</td><td><span class="orb-badge orb-badge--warning">expense</span></td><td class="money neg">−502 193,00 Rs</td><td><span class="orb-badge orb-badge--success">validated</span></td></tr><tr><td>21/02</td><td class="lead-cell">Label royalties Q1</td><td>ë • music · Labels · Royalties</td><td><span class="orb-badge orb-badge--success">income</span></td><td class="money pos">+236 889,45 Rs</td><td><span class="orb-badge orb-badge--success">validated</span></td></tr></tbody></table></div></div>
+  <div class="drawer-mock">
+    <div class="panel-title">Edit transaction</div>
+    <div class="orb-field"><label>Date</label><input class="orb-input" value="2026-02-09"></div>
+    <div class="orb-field"><label>Description</label><input class="orb-input" value="Projector rental"></div>
+    <div class="orb-field"><label>Amount</label><input class="orb-input" value="120 000.00"></div>
+    <div class="orb-field"><label>Category</label><input class="orb-input" value="bōucan · Equipment · Rental"></div>
+    <div class="row">
+      <button class="orb-button orb-button--primary" style="min-height:32px;">Save</button>
+      <button class="orb-button orb-button--secondary" style="min-height:32px;">Validate</button>
+      <button class="orb-button orb-button--ghost" style="min-height:32px;">Close</button>
+    </div>
+    <div class="orb-alert orb-alert--success"><div class="orb-alert__body"><strong>Success</strong><span>Action accepted · audit recorded.</span></div></div>
+  </div>
+</div>
+<div class="row" style="justify-content:center;color:var(--orb-text-muted);font-size:12px;">
+  <span>312 loaded</span>
+  <button class="orb-button orb-button--ghost" style="min-height:30px;">Load more</button>
+  <button class="orb-button orb-button--ghost" style="min-height:30px;">Load all</button>
+</div>
+
+    </main>
+  </div>
+</div>
+</body>
+</html>

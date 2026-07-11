@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 400" preserveAspectRatio="xMidYMid slice">
+  <!-- Theme Orbital — card veil: corner atmosphere + orbit fragment.
+       Drop behind hero KPI cards or section headers at low opacity. -->
+  <defs>
+    <radialGradient id="cv" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#2FD4FF" stop-opacity=".12"/>
+      <stop offset="100%" stop-color="#2FD4FF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="cvTrail" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#FFB800" stop-opacity="0"/>
+      <stop offset="50%" stop-color="#FFB800" stop-opacity=".5"/>
+      <stop offset="100%" stop-color="#FFB800" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <ellipse cx="560" cy="20" rx="360" ry="240" fill="url(#cv)"/>
+  <ellipse cx="520" cy="60" rx="300" ry="96" fill="none" stroke="#2FD4FF" stroke-opacity=".14" stroke-width="1" transform="rotate(-12 520 60)"/>
+  <ellipse cx="540" cy="40" rx="340" ry="70" fill="none" stroke="url(#cvTrail)" stroke-width="1.2" transform="rotate(-9 540 40)"/>
+  <g fill="#BFEFFF">
+    <circle cx="470" cy="66" r="1.3" opacity=".5"/>
+    <circle cx="540" cy="120" r="1" opacity=".4"/>
+    <circle cx="380" cy="34" r="1.1" opacity=".35"/>
+  </g>
+  <circle cx="300" cy="118" r="2.4" fill="#FFB800" opacity=".85"/>
+</svg>

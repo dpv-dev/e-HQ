@@ -31,7 +31,7 @@
 </script>
 
 <section class="ehq-toolbar ehq-edge-surface" aria-label={props.label}>
-  {#each props.filters as filter (filter.label)}
+  {#each props.filters as filter, index (`${filter.label}-${String(index)}`)}
     <button
       class="ehq-toolbar-filter"
       class:active={filter.active}

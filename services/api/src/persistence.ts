@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "crypto";
 import type { Pool } from "pg";
 import { sql, type SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";

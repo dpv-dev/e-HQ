@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ë • office — Orbital dashboard demo</title>
+<link rel="stylesheet" href="../tokens/orbital-tokens.css">
+<link rel="stylesheet" href="../components/orbital-components.css">
+<style>
+  *{box-sizing:border-box;}
+  body{
+    margin:0;color:var(--orb-text);font-family:var(--orb-font);font-size:var(--orb-ui-size);
+    line-height:var(--orb-ui-line);background:var(--orb-bg);
+  }
+  body::before{
+    content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+    background:url("../assets/backgrounds/bg-page.svg") center/cover no-repeat;
+  }
+  .shell{
+    width:min(100%,1360px);margin:0 auto;padding:22px 24px 80px;
+    display:grid;gap:16px;
+  }
+  .topbar{display:flex;align-items:center;gap:16px;}
+  .brand{display:flex;align-items:baseline;gap:8px;font-weight:700;font-size:16px;}
+  .brand em{font-style:normal;color:var(--orb-amber);}
+  .brand span{font-family:var(--orb-mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--orb-cyan);}
+  .topbar .orb-ticker{flex:1;min-width:0;}
+
+  /* command-center grid: nav | main | right rail */
+  .cockpit{display:grid;grid-template-columns:224px minmax(0,1fr) 300px;gap:16px;align-items:start;}
+  .rail-left,.rail-right{display:grid;gap:16px;}
+  .main{display:grid;gap:16px;}
+
+  .kpi-row{display:grid;grid-template-columns:1.5fr 1fr 1fr;gap:14px;}
+  .kpi-row .orb-kpi{padding:15px 17px;}
+  .kpi-row .orb-kpi--lead .orb-kpi__value{font-size:30px;}
+  .kpi-row .orb-kpi__value{font-size:23px;}
+
+  /* central globe stage */
+  .stage{
+    position:relative;border-radius:var(--orb-radius-lg);overflow:hidden;
+    border:1px solid var(--orb-border);min-height:330px;
+    background:url("../assets/backgrounds/bg-hero-globe.svg") center/cover no-repeat;
+    display:grid;align-content:end;
+  }
+  .stage-meta{
+    display:flex;justify-content:space-between;align-items:flex-end;
+    padding:16px 18px;
+    background:linear-gradient(180deg, transparent, rgba(3,8,12,.82));
+  }
+  .stage-meta .left{display:grid;gap:2px;}
+  .stage-meta .kicker{font-family:var(--orb-mono);font-size:10px;letter-spacing:.22em;text-transform:uppercase;color:var(--orb-cyan);}
+  .stage-meta .title{font-weight:700;font-size:16px;}
+  .stage-meta .sub{color:var(--orb-text-muted);font-size:11.5px;}
+  .stage-badges{display:flex;gap:8px;}
+
+  .panel-pad{padding:16px 18px;display:grid;gap:12px;}
+  .panel-title{
+    display:flex;align-items:center;justify-content:space-between;
+    font-family:var(--orb-mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--orb-text-muted);
+  }
+  .panel-title a{color:var(--orb-cyan);text-decoration:none;font-size:10px;}
+
+  .nav-icon-img{width:16px;height:16px;}
+
+  .mini-table{display:grid;gap:0;}
+  .mini-row{
+    display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;
+    padding:9px 2px;border-bottom:1px solid var(--orb-border-soft);font-size:12px;
+  }
+  .mini-row:last-child{border-bottom:0;}
+  .mini-row .who{display:grid;gap:1px;min-width:0;}
+  .mini-row .who b{color:var(--orb-text);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .mini-row .who span{color:var(--orb-text-muted);font-size:10.5px;}
+  .mini-row .amt{font-variant-numeric:tabular-nums;font-weight:600;}
+  .mini-row .amt.neg{color:var(--orb-error);}
+  .mini-row .amt.pos{color:var(--orb-success);}
+
+  @media (max-width:1100px){
+    .cockpit{grid-template-columns:1fr;}
+    .rail-left{grid-auto-flow:column;overflow-x:auto;}
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <div class="topbar">
+    <div class="brand">ë&nbsp;•&nbsp;office<em>.</em><span>orbital</span></div>
+    <div class="orb-ticker">
+      <span><i class="dot ok"></i>API 200 · 42 ms</span>
+      <span><i class="dot ok"></i>MCB feed <b>sync 06:00</b></span>
+      <span><i class="dot warn"></i>SBI import <b>128 unmatched</b></span>
+      <span><i class="dot ok"></i>FX MUR <b>à jour</b></span>
+      <span><i class="dot idle"></i>Distribution <b>idle</b></span>
+      <span><i class="dot ok"></i>Audit <b>évt 8 412</b></span>
+    </div>
+    <button class="orb-button orb-button--primary">Nouvelle écriture</button>
+  </div>
+
+  <div class="cockpit">
+
+    <!-- ===== left nav ===== -->
+    <nav class="rail-left">
+      <div class="orb-panel" style="padding:12px;">
+        <div class="orb-nav">
+          <span class="orb-nav__group">Office</span>
+          <a class="orb-nav__item active" href="#"><span class="orb-nav__icon"><img class="nav-icon-img" src="../assets/icons/icon-home.svg" alt=""></span>Dashboard</a>
+          <a class="orb-nav__item" href="#"><span class="orb-nav__icon"><img class="nav-icon-img" src="../assets/icons/icon-chart-bar.svg" alt=""></span>P&amp;L</a>
+          <a class="orb-nav__item" href="#"><span class="orb-nav__icon"><img class="nav-icon-img" src="../assets/icons/icon-file-text.svg" alt=""></span>Transactions</a>
+          <a class="orb-nav__item" href="#"><span class="orb-nav__icon"><img class="nav-icon-img" src="../assets/icons/icon-bank.svg" alt=""></span>Bank</a>
+          <a class="orb-nav__item" href="#"><span class="orb-nav__icon"><img class="nav-icon-img" src="../assets/icons/icon-check.svg" alt=""></span>Réconciliation</a>
+          <a class="orb-nav__item" href="#"><span class="orb-nav__icon"><img class="nav-icon-img" src="../assets/icons/icon-upload.svg" alt=""></span>Imports</a>
+          <a class="orb-nav__item" href="#"><span class="orb-nav__icon"><img class="nav-icon-img" src="../assets/icons/icon-users.svg" alt=""></span>Clients</a>
+          <a class="orb-nav__item" href="#"><span class="orb-nav__icon"><img class="nav-icon-img" src="../assets/icons/icon-folder.svg" alt=""></span>Projects</a>
+          <a class="orb-nav__item" href="#"><span class="orb-nav__icon"><img class="nav-icon-img" src="../assets/icons/icon-settings.svg" alt=""></span>Settings</a>
+        </div>
+      </div>
+      <div class="orb-panel panel-pad">
+        <div class="panel-title">Pipeline import</div>
+        <div class="orb-stepper" style="display:grid;gap:12px;">
+          <div style="display:flex;gap:10px;align-items:center;">
+            <span class="orb-step done" style="display:contents;"><span class="orb-step__node">✓</span></span>
+            <div><div class="orb-step__label" style="text-align:left;">Preview</div><div class="orb-step__hint">2 652 lignes lues</div></div>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;">
+            <span class="orb-step done" style="display:contents;"><span class="orb-step__node">✓</span></span>
+            <div><div class="orb-step__label" style="text-align:left;">Confirm</div><div class="orb-step__hint">0 rejet</div></div>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;">
+            <span class="orb-step active" style="display:contents;"><span class="orb-step__node">3</span></span>
+            <div><div class="orb-step__label" style="text-align:left;color:var(--orb-cyan);">Réconcilier</div><div class="orb-step__hint">128 restantes</div></div>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;">
+            <span class="orb-step" style="display:contents;"><span class="orb-step__node">4</span></span>
+            <div><div class="orb-step__label" style="text-align:left;">Valider</div><div class="orb-step__hint">—</div></div>
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <!-- ===== main column ===== -->
+    <main class="main">
+      <div class="kpi-row">
+        <article class="orb-kpi orb-kpi--lead">
+          <div class="orb-kpi__head">
+            <span class="orb-kpi__label">Trésorerie</span>
+            <span class="orb-kpi__icon"><img src="../assets/icons/icon-bank.svg" width="15" height="15" alt=""></span>
+          </div>
+          <div class="orb-kpi__value">2 847 632 Rs</div>
+          <div class="orb-kpi__trend">
+            <span class="orb-kpi__delta up">▲ 12,5 %</span>
+            <span class="orb-kpi__detail">vs période précédente</span>
+          </div>
+        </article>
+        <article class="orb-kpi">
+          <div class="orb-kpi__head"><span class="orb-kpi__label">Income</span></div>
+          <div class="orb-kpi__value">1 422 364 Rs</div>
+          <div class="orb-kpi__trend"><span class="orb-kpi__delta up">▲ 8,1 %</span></div>
+        </article>
+        <article class="orb-kpi">
+          <div class="orb-kpi__head"><span class="orb-kpi__label">Expenses</span></div>
+          <div class="orb-kpi__value">3 999 779 Rs</div>
+          <div class="orb-kpi__trend"><span class="orb-kpi__delta down">▼ 3,2 %</span></div>
+        </article>
+      </div>
+
+      <!-- central stage: the data sphere as command-center hero -->
+      <div class="stage orb-corners">
+        <i></i><i></i><i></i><i></i>
+        <div class="stage-meta">
+          <div class="left">
+            <span class="kicker">Workspace · eeee-mu</span>
+            <span class="title">Activité financière — This Year</span>
+            <span class="sub">312 transactions validées · 18 comptes · 2 devises</span>
+          </div>
+          <div class="stage-badges">
+            <span class="orb-badge orb-badge--info">MUR 92%</span>
+            <span class="orb-badge orb-badge--muted">EUR 8%</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- reconciliation health -->
+      <div class="orb-panel panel-pad">
+        <div class="panel-title">Santé de la réconciliation <a href="#">ouvrir →</a></div>
+        <div class="orb-ring">
+          <div class="orb-ring__dial" style="--ring-stops:var(--orb-success) 0 78%, var(--orb-warning) 78% 91%, rgba(140,210,235,.12) 91% 100%;">
+            <span>78%</span>
+          </div>
+          <div class="orb-ring__legend" style="flex:1;">
+            <div class="item"><span class="swatch" style="background:var(--orb-success);"></span>Matched <span class="val">1 204</span></div>
+            <div class="item"><span class="swatch" style="background:var(--orb-warning);"></span>Suggested <span class="val">204</span></div>
+            <div class="item"><span class="swatch" style="background:rgba(140,210,235,.35);"></span>Unmatched <span class="val">128</span></div>
+          </div>
+          <button class="orb-button orb-button--secondary">Réconcilier</button>
+        </div>
+      </div>
+    </main>
+
+    <!-- ===== right rail ===== -->
+    <aside class="rail-right">
+      <div class="orb-insight">
+        <div class="orb-insight__head">
+          <span class="orb-kpi__icon" style="width:26px;height:26px;"><img src="../assets/icons/icon-check.svg" width="14" height="14" alt=""></span>
+          <span class="orb-insight__title">Prochaine action</span>
+          <span class="orb-badge orb-badge--info">97 %</span>
+        </div>
+        <div class="orb-insight__body">
+          42 lignes SBI correspondent à des écritures existantes (montant + date exacts).
+          Un lot peut être rapproché en une action.
+        </div>
+        <div class="orb-insight__actions">
+          <button class="orb-button orb-button--primary" style="min-height:32px;padding:0 14px;">Rapprocher 42</button>
+          <button class="orb-button orb-button--ghost" style="min-height:32px;padding:0 12px;">Revoir</button>
+        </div>
+      </div>
+
+      <div class="orb-panel panel-pad">
+        <div class="panel-title">Balance âgée — top retards <a href="#">tout →</a></div>
+        <div class="mini-table">
+          <div class="mini-row">
+            <div class="who"><b>Bedouin Ltd</b><span>112 j de retard</span></div>
+            <span class="amt neg">58 400 Rs</span>
+          </div>
+          <div class="mini-row">
+            <div class="who"><b>Blue Penny Events</b><span>74 j de retard</span></div>
+            <span class="amt neg">21 300 Rs</span>
+          </div>
+          <div class="mini-row">
+            <div class="who"><b>Grand Baie Resorts</b><span>29 j de retard</span></div>
+            <span class="amt neg">11 200 Rs</span>
+          </div>
+          <div class="mini-row">
+            <div class="who"><b>MCB Corporate</b><span>à échoir 30 j</span></div>
+            <span class="amt pos">412 800 Rs</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="orb-panel panel-pad">
+        <div class="panel-title">Budget — projets actifs</div>
+        <div style="display:grid;gap:12px;">
+          <div>
+            <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--orb-text-muted);margin-bottom:5px;">
+              <span>Kaya Festival</span><span style="font-variant-numeric:tabular-nums;">64 %</span>
+            </div>
+            <div class="orb-progress"><span style="width:64%"></span></div>
+          </div>
+          <div>
+            <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--orb-text-muted);margin-bottom:5px;">
+              <span>Studio upgrade</span><span style="font-variant-numeric:tabular-nums;">88 %</span>
+            </div>
+            <div class="orb-progress orb-progress--amber"><span style="width:88%"></span></div>
+          </div>
+          <div>
+            <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--orb-text-muted);margin-bottom:5px;">
+              <span>the storë — pop-up</span><span style="font-variant-numeric:tabular-nums;">31 %</span>
+            </div>
+            <div class="orb-progress"><span style="width:31%"></span></div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+  </div>
+</div>
+</body>
+</html>

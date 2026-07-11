@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Tone, TableColumn, TablePagination, TableRow, TableRowAction, TableState } from "./types.js";
+  import { isTableRowActionEnabled, tableRowActionTitle } from "./table-row-actions.js";
   import Badge from "./Badge.svelte";
   import Button from "./Button.svelte";
   import Loader from "./Loader.svelte";
@@ -186,7 +187,7 @@
       <table>
         <thead>
           <tr>
-            {#each props.columns as column, columnIndex (column.label)}
+            {#each props.columns as column, columnIndex (`${column.label}-${String(columnIndex)}`)}
               <th class:right={column.align === "right"} aria-sort={sortColumnIndex === columnIndex ? (sortDirection === "asc" ? "ascending" : "descending") : undefined}>
                 {#if column.sortable}
                   <button type="button" class="sort-header" onclick={() => toggleSort(columnIndex)}>
@@ -222,8 +223,16 @@
               {#if hasRowActions}
                 <td class="right">
                   <div class="row-actions">
-                    {#each props.rowActions ?? [] as action (action.label)}
-                      <button type="button" class="ehq-row-action" class:danger={action.danger} onclick={() => action.onAction(row.id)}>
+                    {#each props.rowActions ?? [] as action, actionIndex (`${action.label}-${String(actionIndex)}`)}
+                      <button
+                        type="button"
+                        class="ehq-row-action"
+                        class:danger={action.danger}
+                        disabled={!isTableRowActionEnabled(action, row.id)}
+                        title={tableRowActionTitle(action, row.id)}
+                        aria-label={tableRowActionTitle(action, row.id)}
+                        onclick={() => action.onAction(row.id)}
+                      >
                         {action.label}
                       </button>
                     {/each}
@@ -498,6 +507,13 @@
   .ehq-row-action:hover {
     color: var(--ehq-text);
     border-color: var(--ehq-border);
+  }
+
+  .ehq-row-action:disabled {
+    cursor: not-allowed;
+    color: var(--ehq-text-disabled);
+    border-color: var(--ehq-border-soft);
+    opacity: 0.6;
   }
 
   .ehq-row-action.danger:hover {

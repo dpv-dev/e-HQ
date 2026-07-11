@@ -45,6 +45,8 @@
   import { getLatestDataPeriod, periodLabel } from "../../period-controls.js";
   import DevSessionMenu from "../../DevSessionMenu.svelte";
   import { normalizeRoutePath } from "../../route-utils.js";
+  import "../../../office-orbital-scope.css";
+  import "../office/orbital-office.css";
 
   type CommandCenterPageId = "dashboard" | "users" | "integrations" | "settings";
   type IntegrationStatus = "connected" | "idle" | "attention";
@@ -212,17 +214,17 @@
       label: "Theme",
       value: "Dark",
       active: false,
-      disabled: commandBusy || !writesEnabled,
+      disabled: true,
       actionId: "theme",
-      title: writesEnabled ? "Persist theme review" : writeGateMessage
+      title: "Locked setting · view only"
     },
     {
       label: "Release gate",
       value: "Manual",
       active: false,
-      disabled: commandBusy || !writesEnabled,
+      disabled: true,
       actionId: "release-gate",
-      title: writesEnabled ? "Persist release gate review" : writeGateMessage
+      title: "Locked setting · view only"
     }
   ]);
   const integrations: readonly IntegrationRow[] = [
@@ -292,6 +294,7 @@
   let selectedRole = $state("administrator");
   let inviteEmail = $state("");
   let workspaceName = $state("ë • Entreprise");
+  let lastSavedWorkspaceName = $state("ë • Entreprise");
   let commandNotice = $state("");
   let commandNoticeTone = $state<AlertTone>("info");
 
@@ -441,12 +444,12 @@
     }
 
     if (filter.actionId === "theme") {
-      void persistCommandSetting("theme", { name: "dark-command-center" }, "reviewed");
+      setCommandNotice("info", "Theme is locked in Command Center and remains view only.");
       return;
     }
 
     if (filter.actionId === "release-gate") {
-      void persistCommandSetting("release_gate", { mode: "manual" }, "reviewed");
+      setCommandNotice("info", "Release gate is locked to manual approval and remains view only.");
       return;
     }
 
@@ -921,7 +924,7 @@
     }
   }
 
-  async function persistCommandSetting(key: string, value: Readonly<Record<string, unknown>>, status: string): Promise<void> {
+  async function persistCommandSetting(key: string, value: Readonly<Record<string, unknown>>, status: string): Promise<boolean> {
     commandBusy = true;
     try {
       const receipt = await client.commandCenter.updateSetting(
@@ -935,16 +938,37 @@
           idempotencyKey: createCommandIdempotencyKey(`command-center-setting-${key}`)
         }
       );
-      setCommandNotice("success", `${key} setting persisted · audit ${receipt.auditEventId ?? "missing"}.`);
+      if (receipt.auditEventId === null) {
+        setCommandNotice("info", `${key} already up to date.`);
+      } else {
+        setCommandNotice("success", `${key} setting persisted · audit ${receipt.auditEventId}.`);
+      }
+      return true;
     } catch (error: unknown) {
       setCommandNotice("error", `${key} setting write failed · ${errorMessage(error)}.`);
+      return false;
     } finally {
       commandBusy = false;
     }
   }
 
   async function saveSettingsReview(): Promise<void> {
-    await persistCommandSetting("workspace_name", { name: workspaceName }, "reviewed");
+    const nextWorkspaceName = workspaceName.trim();
+
+    if (nextWorkspaceName.length === 0) {
+      setCommandNotice("error", "Workspace name is required before saving.");
+      return;
+    }
+
+    if (nextWorkspaceName === lastSavedWorkspaceName) {
+      setCommandNotice("info", "Workspace name is already up to date.");
+      return;
+    }
+
+    const persisted = await persistCommandSetting("workspace_name", { name: nextWorkspaceName }, "reviewed");
+    if (persisted) {
+      lastSavedWorkspaceName = nextWorkspaceName;
+    }
   }
 
   function showIntegrationDetail(integrationId: string): void {

@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ë • office — Audit · Orbital</title>
+<link rel="stylesheet" href="../../tokens/orbital-tokens.css">
+<link rel="stylesheet" href="../../components/orbital-components.css">
+<link rel="stylesheet" href="./_shell.css">
+<link rel="stylesheet" href="./_office-skin.css">
+</head>
+<body>
+<div class="shell">
+  <div class="topbar">
+    <div class="brand">ë&nbsp;•&nbsp;office<em>.</em><span>orbital</span></div>
+    <div class="orb-ticker"><span><i class="dot ok"></i>API 200 · 42 ms</span><span><i class="dot ok"></i>MCB feed <b>sync 06:00</b></span><span><i class="dot warn"></i>SBI import <b>128 unmatched</b></span><span><i class="dot ok"></i>FX MUR <b>à jour</b></span><span><i class="dot ok"></i>Audit <b>évt 8 412</b></span></div>
+    <button class="orb-button orb-button--primary">Nouvelle écriture</button>
+  </div>
+  <div class="cockpit">
+    <nav class="rail-left"><div class="orb-panel" style="padding:12px;"><div class="orb-nav"><span class="orb-nav__group">Pilotage</span><a class="orb-nav__item" href="./dashboard.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-home.svg" alt=""></span>Dashboard</a><a class="orb-nav__item" href="./ceo.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-eye.svg" alt=""></span>CEO View</a><a class="orb-nav__item" href="./pnl.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-chart-bar.svg" alt=""></span>P&L</a><a class="orb-nav__item" href="./cashflow.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-trending-up.svg" alt=""></span>Cash Flow</a><span class="orb-nav__group">Comptabilité</span><a class="orb-nav__item" href="./transactions.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-file-text.svg" alt=""></span>Transactions</a><a class="orb-nav__item" href="./pending.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-clock.svg" alt=""></span>Pending</a><a class="orb-nav__item" href="./reconciliation.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-check.svg" alt=""></span>Réconciliation</a><a class="orb-nav__item" href="./imports.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-upload.svg" alt=""></span>Imports</a><a class="orb-nav__item" href="./bank.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-bank.svg" alt=""></span>Bank</a><a class="orb-nav__item" href="./coa.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-layout-grid.svg" alt=""></span>Chart of Accounts</a><a class="orb-nav__item" href="./vat.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-file-text.svg" alt=""></span>VAT</a><span class="orb-nav__group">Relations</span><a class="orb-nav__item" href="./clients.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-users.svg" alt=""></span>Clients</a><a class="orb-nav__item" href="./suppliers.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-users.svg" alt=""></span>Suppliers</a><a class="orb-nav__item" href="./projects.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-folder.svg" alt=""></span>Projects</a><a class="orb-nav__item" href="./wave-invoices.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-download.svg" alt=""></span>Wave Invoices</a><span class="orb-nav__group">Système</span><a class="orb-nav__item" href="./monitoring.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-search.svg" alt=""></span>Monitoring</a><a class="orb-nav__item active" href="./audit.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-calendar.svg" alt=""></span>Audit</a><a class="orb-nav__item" href="./settings.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-settings.svg" alt=""></span>Settings</a></div></div></nav>
+    <main class="main">
+      <div class="page-head">
+        <div class="left">
+          <span class="kicker">workspace · eeee-mu</span>
+          <h1>Audit</h1>
+          <span class="sub">Journal immuable de toutes les mutations — acteur, action, entité, clé d'idempotence.</span>
+        </div>
+        <div class="actions"><span class="chip">Period: <b>This Year</b></span></div>
+      </div>
+      
+<div class="orb-panel filter-strip">
+  <span class="chip">Actor: <b>All</b></span>
+  <span class="chip">Entity: <b>All</b></span>
+  <span class="chip">Action: <b>All</b></span>
+  <span class="spacer"></span>
+  <button class="orb-button orb-button--secondary" style="min-height:32px;">Filter</button>
+</div>
+<div class="orb-table-wrap"><div class="orb-table-scroll"><table class="orb-table"><thead><tr><th>When</th><th>Actor</th><th>Action</th><th>Entity</th><th>Id</th></tr></thead><tbody><tr><td>10/07 06:02</td><td>bot · sophie@eeee.mu</td><td class="lead-cell">office_bank_import_confirm</td><td>office_bank_import_batch</td><td style="font-family:var(--orb-mono);font-size:10.5px;">batch_8f21…</td></tr><tr><td>09/07 18:44</td><td>d.p.valence@…</td><td class="lead-cell">office_transaction_validate</td><td>office_transaction</td><td style="font-family:var(--orb-mono);font-size:10.5px;">tx_4a90…</td></tr><tr><td>09/07 18:41</td><td>d.p.valence@…</td><td class="lead-cell">office_transaction_update</td><td>office_transaction</td><td style="font-family:var(--orb-mono);font-size:10.5px;">tx_4a90…</td></tr><tr><td>09/07 11:12</td><td>bot · sophie@eeee.mu</td><td class="lead-cell">office_reconciliation_approve</td><td>office_bank_reconciliation_match</td><td style="font-family:var(--orb-mono);font-size:10.5px;">recon_bb02…</td></tr><tr><td>08/07 22:30</td><td>d.p.valence@…</td><td class="lead-cell">office_bank_import_delete</td><td>office_bank_import_batch</td><td style="font-family:var(--orb-mono);font-size:10.5px;">batch_77c1…</td></tr></tbody></table></div></div>
+
+    </main>
+  </div>
+</div>
+</body>
+</html>

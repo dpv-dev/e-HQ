@@ -43,12 +43,21 @@
   import { parseCsvRecords } from "../../bank-parser.js";
   import { formatDateOnly, formatDateRange } from "../../date-format.js";
   import { formatMoneyValue, moneyToneForValue } from "../../money-format.js";
-  import "../../../distribution-command-scope.css";
+  import "../../../office-orbital-scope.css";
+  import "../office/orbital-office.css";
   import "./distribution-command.css";
   import { createPeriodOptions, getLatestDataPeriod, periodLabel, rangeForScope, rangeLabel, todayIso, type DateRange, type PeriodScope } from "../../period-controls.js";
   import { normalizeRoutePath } from "../../route-utils.js";
   import { sortOptionsAlphabetically } from "../../select-options.js";
   import { appendPageResult, createTablePagination, loadPageResult, readPageItems, TABLE_PAGE_SIZE, type PageLoadMode } from "../../table-pagination.js";
+  import {
+    canCancelDistributionImportBatch,
+    canOpenDistributionImportBatch,
+    distributionImportBatchReadOnlyReason,
+    distributionImportActionLabel,
+    distributionImportStatusTone,
+    isDistributionImportBatchReversible
+  } from "./import-batch-status.js";
 
   type DistributionPageId =
     | "dashboard"
@@ -67,6 +76,7 @@
     | "audit-log"
     | "settings";
   type ImportSourceFilter = "all" | "kontor" | "routenote";
+  type ImportBatchStatusFilter = "all" | "uploaded" | "mapped" | "validated" | "failed" | "voided";
   type ImportSource = "kontor" | "routenote";
   type MappingStatusFilter = "all" | "unmapped" | "suggested" | "mapped";
   type SuspenseStatusFilter = "all" | "open" | "resolved";
@@ -189,6 +199,14 @@
     { label: "Kontor", value: "kontor" },
     { label: "RouteNote", value: "routenote" }
   ];
+  const importStatusFilterOptions: readonly SelectOption[] = [
+    { label: "All statuses", value: allValue },
+    { label: "Uploaded", value: "uploaded" },
+    { label: "Mapped", value: "mapped" },
+    { label: "Validated", value: "validated" },
+    { label: "Failed", value: "failed" },
+    { label: "Voided", value: "voided" }
+  ];
   const mappingStatusOptions: readonly SelectOption[] = [
     { label: "Tous", value: allValue },
     { label: "Non mappé", value: "unmapped" },
@@ -248,7 +266,8 @@
     { label: "Store", align: "left", sortable: true },
     { label: "Match suggéré", align: "left", sortable: true },
     { label: "Confiance", align: "left", sortable: true },
-    { label: "Chemin de correction", align: "left", sortable: true }
+    { label: "Chemin de correction", align: "left", sortable: true },
+    { label: "Sélection", align: "left", sortable: true }
   ];
   const catalogColumns: readonly TableColumn[] = [
     { label: "Titre", align: "left", sortable: true },
@@ -444,7 +463,9 @@
     createIdleState<DistributionSettingsResponse>()
   );
   let importSourceFilter = $state<ImportSourceFilter>(allValue);
+  let importStatusFilter = $state<ImportBatchStatusFilter>(allValue);
   let mappingStatusFilter = $state<MappingStatusFilter>("unmapped");
+  let mappingBatchFilter = $state<string>(allValue);
   let suspenseStatusFilter = $state<SuspenseStatusFilter>("open");
   let paymentStatusFilter = $state<PaymentStatusFilter>(allValue);
   let revenueGroupBy = $state<RevenueGroupBy>("store");
@@ -458,6 +479,7 @@
     confirm: null,
     message: "Sélectionnez un export Kontor ou RouteNote (CSV/TSV) pour lancer la prévisualisation."
   });
+  let importFileInput = $state<HTMLInputElement | null>(null);
   let runReceipt = $state<ApiRunReceipt | null>(null);
   let mutationReceipt = $state<ApiMutationReceipt | null>(null);
   let runReceiptPageId = $state<DistributionPageId | null>(null);
@@ -466,6 +488,7 @@
   let writeGateMessage = $state("Vérification du droit d'écriture.");
   let tablePaginationLoading = $state<DistributionPagedTableId | null>(null);
   let tablePaginationErrors = $state<Partial<Record<DistributionPagedTableId, string | null>>>({});
+  let selectedMappingRowIds = $state<readonly string[]>([]);
   let selectedPaymentId = $state<string | null>(null);
   let paymentPanelMode = $state<PaymentPanelMode | null>(null);
   let paymentReferenceInput = $state("");
@@ -533,7 +556,7 @@
   const revenueRows = $derived(readPageItems(revenueState));
   const dashboardRows = $derived(createDashboardRows(suspenseItems, statements, payments));
   const importRows = $derived(createImportRows(importBatches));
-  const mappingTableRows = $derived(createMappingRows(mappingRows));
+  const mappingTableRows = $derived(createMappingRows(mappingRows, selectedMappingRowIds));
   const catalogRows = $derived(createCatalogRows(releases, tracks));
   const contractRows = $derived(createContractRows(contracts, payees));
   const expenseRows = $derived(createExpenseRows(expenses));
@@ -594,8 +617,18 @@
   );
   const settings = $derived(settingsState.status === "success" ? settingsState.data : null);
   const importToolbarFilters = $derived(createImportToolbarFilters(importState));
+  const mappingBatchFilterOptions = $derived<readonly SelectOption[]>([
+    { label: "Tous les batches", value: allValue },
+    ...importBatches
+      .filter((batch: DistributionImportBatch): boolean => batch.status !== "voided")
+      .map((batch: DistributionImportBatch): SelectOption => ({
+      label: `${batch.fileName} · ${batch.period}`,
+      value: batch.id
+      }))
+  ]);
   const canPreviewImport = $derived(importState.rows.length > 0 && importState.status !== "loading");
   const canConfirmImport = $derived(importState.preview !== null && importState.status !== "loading");
+  const canOpenImportAssistant = $derived((importState.preview !== null || importState.rows.length > 0) && importState.status !== "loading");
   const statementPreview = $derived(statements[0] ?? null);
   const selectedPayment = $derived(payments.find((payment: PaymentSummary): boolean => payment.id === selectedPaymentId) ?? null);
   const openStatements = $derived(
@@ -663,6 +696,24 @@
   const statementRowActions: readonly TableRowAction[] = [
     { label: "Imprimer PDF", onAction: printStatementPdf }
   ];
+  const importRowActions: readonly TableRowAction[] = [
+    {
+      label: "Open",
+      onAction: openImportBatch,
+      isEnabled: canOpenImportBatch,
+      disabledReason: importBatchReadOnlyReason
+    },
+    {
+      label: "Cancel batch",
+      onAction: reverseImportBatch,
+      danger: true,
+      isEnabled: canCancelImportBatch,
+      disabledReason: importBatchReadOnlyReason
+    }
+  ];
+  const mappingRowActions: readonly TableRowAction[] = [
+    { label: "Toggle sélection", onAction: toggleMappingRowSelection }
+  ];
   const suspenseRowActions: readonly TableRowAction[] = [
     { label: "Résoudre", onAction: openSuspenseResolution }
   ];
@@ -680,6 +731,19 @@
     };
   });
 
+  $effect((): void => {
+    if (selectedMappingRowIds.length === 0) {
+      return;
+    }
+
+    const visibleIds = new Set(mappingRows.map((row: DistributionMappingRow): string => row.id));
+    const kept = selectedMappingRowIds.filter((rowId: string): boolean => visibleIds.has(rowId));
+
+    if (kept.length !== selectedMappingRowIds.length) {
+      selectedMappingRowIds = kept;
+    }
+  });
+
   async function loadInitialData(): Promise<void> {
     try {
       const screen = await client.distribution.getScreen({
@@ -688,6 +752,7 @@
         dateFrom: activeRange.from,
         dateTo: activeRange.to,
         importSource: toNullableImportSource(importSourceFilter),
+        importStatus: toNullableImportBatchStatus(importStatusFilter),
         mappingStatus: toNullableMappingStatus(mappingStatusFilter),
         suspenseStatus: toNullableSuspenseStatus(suspenseStatusFilter),
         paymentStatus: toNullablePaymentStatus(paymentStatusFilter),
@@ -815,7 +880,7 @@
         client.distribution.listImportBatches({
           workspaceId: distributionWorkspaceId,
           source: toNullableImportSource(importSourceFilter),
-          status: null,
+          status: toNullableImportBatchStatus(importStatusFilter),
           cursor,
           limit: TABLE_PAGE_SIZE
         }),
@@ -841,7 +906,7 @@
       (cursor: string): Promise<PageResult<DistributionMappingRow>> =>
         client.distribution.listMappingRows({
           workspaceId: distributionWorkspaceId,
-          batchId: null,
+          batchId: toNullableBatchFilter(mappingBatchFilter),
           status: toNullableMappingStatus(mappingStatusFilter),
           cursor,
           limit: TABLE_PAGE_SIZE
@@ -1246,7 +1311,7 @@
         await client.distribution.listImportBatches({
           workspaceId: distributionWorkspaceId,
           source: toNullableImportSource(importSourceFilter),
-          status: null,
+          status: toNullableImportBatchStatus(importStatusFilter),
           cursor: null,
           limit: TABLE_PAGE_SIZE
         })
@@ -1264,7 +1329,7 @@
       mappingState = createSuccessState<PageResult<DistributionMappingRow>>(
         await client.distribution.listMappingRows({
           workspaceId: distributionWorkspaceId,
-          batchId: null,
+          batchId: toNullableBatchFilter(mappingBatchFilter),
           status: toNullableMappingStatus(mappingStatusFilter),
           cursor: null,
           limit: TABLE_PAGE_SIZE
@@ -1814,6 +1879,10 @@
     importSourceFilter = value as ImportSourceFilter;
   }
 
+  function updateImportStatusFilter(value: string): void {
+    importStatusFilter = value as ImportBatchStatusFilter;
+  }
+
   function updateImportSource(value: string): void {
     const source = distributionImportSourceFromValue(value);
 
@@ -1946,8 +2015,114 @@
     };
   }
 
+  function openImportFilePicker(): void {
+    importFileInput?.click();
+  }
+
+  async function openImportAssistant(): Promise<void> {
+    if (importState.preview === null) {
+      await previewImport();
+    }
+
+    if (importState.preview === null) {
+      return;
+    }
+
+    mappingBatchFilter = allValue;
+    selectPage("mapping");
+    await loadMappingRows();
+  }
+
+  function openImportBatch(batchId: string): void {
+    if (!canOpenImportBatch(batchId)) {
+      return;
+    }
+
+    mappingBatchFilter = batchId;
+    selectPage("mapping");
+    void loadMappingRows();
+  }
+
+  async function reverseImportBatch(batchId: string): Promise<void> {
+    if (!writesEnabled) {
+      reportActionError(new Error(writeGateMessage));
+      return;
+    }
+
+    const batch = importBatches.find((candidate: DistributionImportBatch): boolean => candidate.id === batchId);
+    if (batch === undefined) {
+      reportActionError(new Error("Batch introuvable dans la liste chargée."));
+      return;
+    }
+
+    if (!isDistributionImportBatchReversible(batch.status)) {
+      reportActionError(new Error("This batch is already voided."));
+      return;
+    }
+
+    clearRunReceipt();
+
+    try {
+      mutationReceipt = await client.distribution.reverseImportBatch(
+        batch.id,
+        { workspaceId: distributionWorkspaceId },
+        { idempotencyKey: createIdempotencyKey("import-reverse") }
+      );
+      mutationReceiptPageId = activePageId;
+      if (mappingBatchFilter === batch.id) {
+        mappingBatchFilter = allValue;
+      }
+      await Promise.all([loadImportBatches(), loadMappingRows()]);
+    } catch (error: unknown) {
+      reportActionError(error);
+    }
+  }
+
+  function canCancelImportBatch(batchId: string): boolean {
+    return canCancelDistributionImportBatch(importBatchById(batchId));
+  }
+
+  function canOpenImportBatch(batchId: string): boolean {
+    return canOpenDistributionImportBatch(importBatchById(batchId));
+  }
+
+  function importBatchReadOnlyReason(batchId: string): string | null {
+    return distributionImportBatchReadOnlyReason(importBatchById(batchId));
+  }
+
+  function importBatchById(batchId: string): DistributionImportBatch | null {
+    const batch = importBatches.find((candidate: DistributionImportBatch): boolean => candidate.id === batchId);
+
+    if (batch === undefined) {
+      return null;
+    }
+
+    return batch;
+  }
+
+  function toggleMappingRowSelection(rowId: string): void {
+    if (selectedMappingRowIds.includes(rowId)) {
+      selectedMappingRowIds = selectedMappingRowIds.filter((candidate: string): boolean => candidate !== rowId);
+      return;
+    }
+
+    selectedMappingRowIds = [...selectedMappingRowIds, rowId];
+  }
+
+  function selectAllVisibleMappingRows(): void {
+    selectedMappingRowIds = mappingRows.map((row: DistributionMappingRow): string => row.id);
+  }
+
+  function clearMappingSelection(): void {
+    selectedMappingRowIds = [];
+  }
+
   function updateMappingStatus(value: string): void {
     mappingStatusFilter = value as MappingStatusFilter;
+  }
+
+  function updateMappingBatchFilter(value: string): void {
+    mappingBatchFilter = value;
   }
 
   function updateSuspenseStatus(value: string): void {
@@ -2187,11 +2362,22 @@
   }
 
   async function applyMappingRules(): Promise<void> {
-    const rowIds = mappingRows.map((row: DistributionMappingRow): string => row.id);
+    const selectedRows = mappingRows.filter((row: DistributionMappingRow): boolean => selectedMappingRowIds.includes(row.id));
+    const targetRows = selectedMappingRowIds.length > 0 ? selectedRows : mappingRows;
 
-    if (rowIds.length === 0) {
+    if (targetRows.length === 0) {
       return;
     }
+
+    const batchIds = [...new Set(targetRows.map((row: DistributionMappingRow): string => row.batchId))];
+    const batchId = batchIds[0];
+
+    if (batchId === undefined || batchIds.length !== 1) {
+      reportActionError(new Error("Sélection invalide: appliquez les règles sur un seul batch à la fois."));
+      return;
+    }
+
+    const rowIds = targetRows.map((row: DistributionMappingRow): string => row.id);
 
     clearRunReceipt();
 
@@ -2199,7 +2385,7 @@
       mutationReceipt = await client.distribution.applyMappingRules(
         {
           workspaceId: distributionWorkspaceId,
-          batchId: mappingRows[0]?.batchId ?? "batch_routenote_may",
+          batchId,
           rowIds
         },
         {
@@ -2207,6 +2393,7 @@
         }
       );
       mutationReceiptPageId = activePageId;
+      clearMappingSelection();
       await loadMappingRows();
     } catch (error: unknown) {
       reportActionError(error);
@@ -3153,6 +3340,52 @@
     ];
   }
 
+  // Client-side CSV export keeps Distribution revenue extractable without adding
+  // a backend endpoint.
+  function downloadCsv(filename: string, header: readonly string[], rows: readonly (readonly string[])[]): void {
+    const escapeCell = (value: string): string => (/[",\n]/u.test(value) ? `"${value.replaceAll('"', '""')}"` : value);
+    const content = [header, ...rows].map((cells: readonly string[]): string => cells.map(escapeCell).join(",")).join("\n");
+    const blob = new Blob([content], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function microToDecimalCsv(value: string): string {
+    try {
+      const parsed = BigInt(value);
+      const sign = parsed < 0n ? "-" : "";
+      const absolute = parsed < 0n ? -parsed : parsed;
+      const whole = absolute / 1_000_000n;
+      const fraction = (absolute % 1_000_000n).toString().padStart(6, "0");
+      return `${sign}${whole.toString()}.${fraction}`;
+    } catch {
+      return "0.000000";
+    }
+  }
+
+  function exportRevenueCsv(): void {
+    const rows = revenueRows.map((row: DistributionRevenueRow): readonly string[] => [
+      row.label,
+      row.grossMicro,
+      row.netMicro,
+      row.payableMicro,
+      microToDecimalCsv(row.grossMicro),
+      microToDecimalCsv(row.netMicro),
+      microToDecimalCsv(row.payableMicro),
+      row.currency,
+      String(row.barLevel)
+    ]);
+    downloadCsv(
+      `distribution-revenue-${revenueGroupBy}-${distributionPeriod}.csv`,
+      ["Groupe", "Brut (micro)", "Net (micro)", "A payer (micro)", "Brut", "Net", "A payer", "Devise", "Bar level"],
+      rows
+    );
+  }
+
   function createDashboardRows(
     suspense: readonly SuspenseItem[],
     statementItems: readonly StatementSummary[],
@@ -3200,13 +3433,13 @@
         { kind: "money", value: formatMoney(batch.grossMicro, batch.currency), tone: "success" },
         { kind: "text", value: String(batch.unmatchedRowCount), strong: false },
         { kind: "text", value: batch.joinKeySummary, strong: false },
-        { kind: "badge", value: batch.status, tone: importStatusTone(batch.status) },
-        { kind: "badge", value: exactImportAction(batch.nextAction), tone: "warning" }
+        { kind: "badge", value: batch.status, tone: distributionImportStatusTone(batch.status) },
+        { kind: "badge", value: distributionImportActionLabel(batch), tone: batch.status === "voided" ? "muted" : "warning" }
       ]
     }));
   }
 
-  function createMappingRows(items: readonly DistributionMappingRow[]): readonly TableRow[] {
+  function createMappingRows(items: readonly DistributionMappingRow[], selectedIds: readonly string[]): readonly TableRow[] {
     return items.map((row: DistributionMappingRow): TableRow => ({
       id: row.id,
       cells: [
@@ -3215,7 +3448,8 @@
         { kind: "text", value: row.sourceStore, strong: false },
         { kind: "text", value: row.suggestedTrackTitle ?? "track manuel requis", strong: false },
         { kind: "badge", value: formatConfidence(row.confidenceBp), tone: confidenceTone(row.confidenceBp) },
-        { kind: "badge", value: row.exactFixPath, tone: "active" }
+        { kind: "badge", value: row.exactFixPath, tone: "active" },
+        { kind: "badge", value: selectedIds.includes(row.id) ? "sélectionnée" : "—", tone: selectedIds.includes(row.id) ? "success" : "muted" }
       ]
     }));
   }
@@ -3532,6 +3766,24 @@
     return null;
   }
 
+  function toNullableImportBatchStatus(
+    value: ImportBatchStatusFilter
+  ): "uploaded" | "mapped" | "validated" | "failed" | "voided" | null {
+    if (value === "uploaded" || value === "mapped" || value === "validated" || value === "failed" || value === "voided") {
+      return value;
+    }
+
+    return null;
+  }
+
+  function toNullableBatchFilter(value: string): string | null {
+    if (value === allValue || value.trim() === "") {
+      return null;
+    }
+
+    return value;
+  }
+
   function toNullableMappingStatus(value: MappingStatusFilter): "unmapped" | "suggested" | "mapped" | null {
     if (value === "unmapped" || value === "suggested" || value === "mapped") {
       return value;
@@ -3697,22 +3949,6 @@
     return payee.displayName;
   }
 
-  function importStatusTone(status: "uploaded" | "mapped" | "validated" | "failed"): Tone {
-    if (status === "validated") {
-      return "success";
-    }
-
-    if (status === "failed") {
-      return "error";
-    }
-
-    if (status === "mapped") {
-      return "info";
-    }
-
-    return "warning";
-  }
-
   function exactImportAction(action: "review_mapping" | "apply_rules" | "validate" | "retry"): string {
     if (action === "review_mapping") {
       return "Revoir le mapping";
@@ -3868,13 +4104,6 @@
             <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state={dashboardState.status === "loading" ? "loading" : "default"} accent={kpi.accent} />
           {/each}
         </section>
-        <section class="distribution-target-strip ehq-edge-surface" aria-label="Distribution target">
-          <div>
-            <strong class="ehq-type-label-mono">Target Q3</strong>
-            <span>Planned objective panel is visible but not wired yet.</span>
-          </div>
-          <Button label="Cible Q3" variant="secondary" size="small" type="button" disabled={true} loading={false} locked={false} focus={false} ariaLabel="Cible Q3 coming soon" title="coming soon" />
-        </section>
         <section class="dashboard-grid">
           <BarsChart title="Revenus par source" points={revenueChartPoints} tone="active" />
           <Table title="Liste d'actions" columns={dashboardColumns} rows={dashboardRows} state={tableStateFor(dashboardActionListStatus, dashboardRows.length)} actionLabel="" />
@@ -3885,14 +4114,16 @@
           <Select id="distribution-import-source" label="Source" value={importState.source} options={importSourceOptions} state="default" message="" onchange={updateImportSource} />
           <label>
             <span>Fichier d'export</span>
-            <input type="file" accept="text/csv,.csv,.tsv,text/tab-separated-values" onchange={handleImportFile} />
+            <input type="file" accept="text/csv,.csv,.tsv,text/tab-separated-values" bind:this={importFileInput} onchange={handleImportFile} />
           </label>
-          <Button label="Prévisualiser l'export" variant="secondary" size="medium" type="button" disabled={!canPreviewImport} loading={false} locked={false} focus={false} ariaLabel="Prévisualiser l'export" title={canPreviewImport ? "" : "Sélectionnez d'abord un fichier d'export CSV/TSV"} onclick={previewImport} />
+          <Button label="Import files" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Import files" title="Choisir un fichier d'export" onclick={openImportFilePicker} />
+          <Button label="Preflight assistant" variant="secondary" size="medium" type="button" disabled={!canPreviewImport} loading={false} locked={false} focus={false} ariaLabel="Preflight assistant" title={canPreviewImport ? "" : "Sélectionnez d'abord un fichier d'export CSV/TSV"} onclick={previewImport} />
+          <Button label="Open assistant" variant="secondary" size="medium" type="button" disabled={!canOpenImportAssistant} loading={false} locked={false} focus={false} ariaLabel="Open assistant" title={canOpenImportAssistant ? "" : "Lancez d'abord le preflight assistant"} onclick={openImportAssistant} />
           <Button label="Valider l'import" variant="primary" size="medium" type="button" disabled={!canConfirmImport || !writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Valider l'import" title={writeDisabledTitle()} onclick={confirmImport} />
-          <Button label="Suggested match" variant="secondary" size="medium" type="button" disabled={true} loading={false} locked={false} focus={false} ariaLabel="Suggested match coming soon" title="coming soon" />
         </section>
         <section class="filter-strip ehq-edge-surface" aria-label="Filtres d'import">
           <Select id="distribution-import-filter" label="Filtre source" value={importSourceFilter} options={importFilterOptions} state="default" message="" onchange={updateImportFilter} />
+          <Select id="distribution-import-status" label="Filtre statut" value={importStatusFilter} options={importStatusFilterOptions} state="default" message="" onchange={updateImportStatusFilter} />
           <Button label="Filtrer" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Appliquer les filtres d'import" onclick={loadImportBatches} />
         </section>
         <section class="import-result ehq-edge-surface" class:error={importState.status === "error"} aria-live="polite">
@@ -3905,14 +4136,18 @@
             <span>{importState.confirm.importedRoyaltyEventCount} événements de royalties importés.</span>
           {/if}
         </section>
-        <Table title="Batches Kontor / RouteNote" columns={importColumns} rows={importRows} state={tableStateFor(importBatchesState.status, importBatches.length)} actionLabel="" pagination={importPagination} />
+        <Table title="Batches Kontor / RouteNote" columns={importColumns} rows={importRows} rowActions={importRowActions} state={tableStateFor(importBatchesState.status, importBatches.length)} actionLabel="" pagination={importPagination} />
       {:else if activePageId === "mapping"}
         <section class="filter-strip ehq-edge-surface" aria-label="Filtres de mapping">
           <Select id="distribution-mapping-status" label="Statut" value={mappingStatusFilter} options={mappingStatusOptions} state="default" message="" onchange={updateMappingStatus} />
+          <Select id="distribution-mapping-batch" label="Batch" value={mappingBatchFilter} options={mappingBatchFilterOptions} state="default" message="" onchange={updateMappingBatchFilter} />
           <Button label="Filtrer" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Appliquer les filtres de mapping" onclick={loadMappingRows} />
-          <Button label="Appliquer les règles réutilisables" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Appliquer les règles réutilisables" title={writeDisabledTitle()} onclick={applyMappingRules} />
+          <Button label="Tout sélectionner (page)" variant="secondary" size="medium" type="button" disabled={mappingRows.length === 0} loading={false} locked={false} focus={false} ariaLabel="Sélectionner toutes les lignes visibles de mapping" onclick={selectAllVisibleMappingRows} />
+          <Button label="Effacer sélection" variant="secondary" size="medium" type="button" disabled={selectedMappingRowIds.length === 0} loading={false} locked={false} focus={false} ariaLabel="Effacer la sélection mapping" onclick={clearMappingSelection} />
+          <Button label="Appliquer les règles réutilisables" variant="primary" size="medium" type="button" disabled={!writesEnabled || (mappingRows.length === 0 && selectedMappingRowIds.length === 0)} loading={false} locked={false} focus={false} ariaLabel="Appliquer les règles réutilisables" title={writeDisabledTitle()} onclick={applyMappingRules} />
+          <span class="ehq-type-label-mono">{selectedMappingRowIds.length} sélectionnée(s)</span>
         </section>
-        <Table title="Lignes Kontor / RouteNote à mapper" columns={mappingColumns} rows={mappingTableRows} state={mappingState.status === "loading" ? "loading" : mappingState.status === "error" ? "error" : mappingRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={mappingPagination} />
+        <Table title="Lignes Kontor / RouteNote à mapper" columns={mappingColumns} rows={mappingTableRows} state={mappingState.status === "loading" ? "loading" : mappingState.status === "error" ? "error" : mappingRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={mappingRowActions} pagination={mappingPagination} />
       {:else if activePageId === "catalog"}
         <section class="contracts-actions ehq-edge-surface">
           <Button label="Nouvelle release" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Nouvelle release" onclick={() => openCatalogPanel("release")} />
@@ -4079,7 +4314,6 @@
           {/if}
           <div class="statement-summary-actions">
             <Button label="Générer les statements" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Générer les statements" title={writeDisabledTitle()} onclick={generateStatements} />
-            <Button label="Generate batch PDF" variant="secondary" size="medium" type="button" disabled={true} loading={false} locked={false} focus={false} ariaLabel="Generate batch PDF coming soon" title="coming soon" />
           </div>
         </section>
         <section class="statement-pdf ehq-edge-surface" aria-label="Prévisualisation PDF statement A4">
@@ -4136,6 +4370,7 @@
       {:else if activePageId === "revenue"}
         <section class="filter-strip ehq-edge-surface" aria-label="Filtres revenus">
           <Select id="distribution-revenue-group" label="Grouper par" value={revenueGroupBy} options={revenueGroupOptions} state="default" message="" onchange={updateRevenueGroup} />
+          <Button label="Exporter CSV" variant="secondary" size="medium" type="button" disabled={revenueRows.length === 0} loading={false} locked={false} focus={false} ariaLabel="Exporter les revenus en CSV" onclick={exportRevenueCsv} />
           <Button label="Actualiser" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Actualiser les revenus" onclick={loadRevenue} />
         </section>
         <section class="dashboard-grid">

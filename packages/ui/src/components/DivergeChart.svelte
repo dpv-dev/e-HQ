@@ -23,7 +23,7 @@
     <h3 class="ehq-type-heading">{props.title}</h3>
   </div>
   <div class="rows">
-    {#each props.points as point (point.label)}
+    {#each props.points as point, index (`${point.label}-${String(index)}`)}
       <div class="row">
         <span>{point.label}</span>
         <div class="track">

@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice">
+  <!-- Theme Orbital — quiet page background: deep space, two soft glows,
+       faint grid, sparse particle field. Meant to sit behind the app shell. -->
+  <defs>
+    <radialGradient id="pv" cx="50%" cy="40%" r="80%">
+      <stop offset="0%" stop-color="#060B10"/>
+      <stop offset="70%" stop-color="#05090D"/>
+      <stop offset="100%" stop-color="#030608"/>
+    </radialGradient>
+    <radialGradient id="gCyan" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#2FD4FF" stop-opacity=".07"/>
+      <stop offset="100%" stop-color="#2FD4FF" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="gAmber" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#FF8A3C" stop-opacity=".05"/>
+      <stop offset="100%" stop-color="#FF8A3C" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="90" height="90" patternUnits="userSpaceOnUse">
+      <path d="M90 0H0V90" fill="none" stroke="#7CE7FF" stroke-opacity=".035" stroke-width="1"/>
+    </pattern>
+  </defs>
+
+  <rect width="1920" height="1080" fill="url(#pv)"/>
+  <rect width="1920" height="1080" fill="url(#grid)"/>
+
+  <ellipse cx="1560" cy="120" rx="720" ry="480" fill="url(#gCyan)"/>
+  <ellipse cx="220" cy="1010" rx="640" ry="420" fill="url(#gAmber)"/>
+
+  <!-- one distant orbit hairline for depth -->
+  <ellipse cx="1700" cy="180" rx="820" ry="260" fill="none" stroke="#2FD4FF" stroke-opacity=".06" stroke-width="1" transform="rotate(-16 1700 180)"/>
+
+  <g fill="#BFEFFF">
+    <circle cx="180" cy="200" r="1.2" opacity=".30"/><circle cx="420" cy="90" r="1" opacity=".25"/>
+    <circle cx="760" cy="160" r="1.3" opacity=".28"/><circle cx="1120" cy="70" r="1" opacity=".22"/>
+    <circle cx="1450" cy="240" r="1.4" opacity=".30"/><circle cx="1720" cy="420" r="1.1" opacity=".25"/>
+    <circle cx="1840" cy="760" r="1.3" opacity=".26"/><circle cx="1560" cy="920" r="1" opacity=".22"/>
+    <circle cx="1180" cy="1000" r="1.2" opacity=".24"/><circle cx="820" cy="930" r="1" opacity=".2"/>
+    <circle cx="500" cy="1010" r="1.3" opacity=".24"/><circle cx="120" cy="620" r="1.1" opacity=".24"/>
+    <circle cx="320" cy="430" r="1" opacity=".2"/><circle cx="960" cy="540" r="1" opacity=".14"/>
+  </g>
+</svg>

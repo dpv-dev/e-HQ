@@ -64,6 +64,8 @@ export interface TableRowAction {
   readonly label: string;
   readonly onAction: (rowId: string) => void | Promise<void>;
   readonly danger?: boolean;
+  readonly isEnabled?: (rowId: string) => boolean;
+  readonly disabledReason?: (rowId: string) => string | null;
 }
 
 export interface TablePagination {

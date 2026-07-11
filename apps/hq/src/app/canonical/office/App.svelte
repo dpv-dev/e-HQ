@@ -64,6 +64,12 @@
   } from "@ehq/api-client";
   import { createShellApiClient } from "../../app-shell-data.js";
   import "./orbital-office.css";
+  import {
+    canCancelRecentImportItem,
+    canDeleteRecentImportItem,
+    recentImportCancelDisabledReasonFor,
+    recentImportDeleteDisabledReasonFor
+  } from "./recent-import-actions.js";
   import { extractPdfText } from "../../pdf-extract.js";
   import { parseBankStatement, parseBankCsv, parseCsvRecords, detectBankFormat, detectStatementCurrency, detectCsvCurrency, type ParsedBankRow } from "../../bank-parser.js";
   import { formatDateOnly } from "../../date-format.js";
@@ -606,10 +612,30 @@
   const importRowActions = $derived<readonly TableRowAction[]>(
     session.roleId === "administrator"
       ? [
-          { label: "Cancel import", onAction: reverseImportBatch, danger: true },
-          { label: "Delete permanently", onAction: deleteImportBatch, danger: true }
+          {
+            label: "Cancel import",
+            onAction: reverseImportBatch,
+            danger: true,
+            isEnabled: canCancelRecentImport,
+            disabledReason: recentImportCancelDisabledReason
+          },
+          {
+            label: "Delete permanently",
+            onAction: deleteImportBatch,
+            danger: true,
+            isEnabled: canDeleteRecentImport,
+            disabledReason: recentImportDeleteDisabledReason
+          }
         ]
-      : [{ label: "Cancel import", onAction: reverseImportBatch, danger: true }]
+      : [
+          {
+            label: "Cancel import",
+            onAction: reverseImportBatch,
+            danger: true,
+            isEnabled: canCancelRecentImport,
+            disabledReason: recentImportCancelDisabledReason
+          }
+        ]
   );
   const planRowActions = $derived<readonly TableRowAction[]>([
     { label: "Activate / Deactivate", onAction: togglePlanNodeActive },
@@ -1480,7 +1506,43 @@
     }
   }
 
+  function recentImportById(importId: string): OfficeRecentImport | null {
+    if (dashboardState.status !== "success") {
+      return null;
+    }
+
+    const found = (dashboardState.data.recentImports ?? []).find(
+      (item: OfficeRecentImport): boolean => item.id === importId
+    );
+
+    if (found === undefined) {
+      return null;
+    }
+
+    return found;
+  }
+
+  function canCancelRecentImport(importId: string): boolean {
+    return canCancelRecentImportItem(recentImportById(importId));
+  }
+
+  function recentImportCancelDisabledReason(importId: string): string | null {
+    return recentImportCancelDisabledReasonFor(recentImportById(importId));
+  }
+
+  function canDeleteRecentImport(importId: string): boolean {
+    return canDeleteRecentImportItem(recentImportById(importId));
+  }
+
+  function recentImportDeleteDisabledReason(importId: string): string | null {
+    return recentImportDeleteDisabledReasonFor(recentImportById(importId));
+  }
+
   async function reverseImportBatch(batchId: string): Promise<void> {
+    if (!canCancelRecentImport(batchId)) {
+      return;
+    }
+
     if (!window.confirm("Cancel this import? All its rows will be removed (action reserved for administrators).")) {
       return;
     }
@@ -1502,6 +1564,10 @@
   // batch row); any transaction created from or matched to those lines is left untouched
   // (only its bank-line link disappears) — this cannot be undone, hence the double confirm.
   async function deleteImportBatch(batchId: string): Promise<void> {
+    if (!canDeleteRecentImport(batchId)) {
+      return;
+    }
+
     if (!window.confirm("Permanently delete this import? Its bank lines and reconciliation matches are erased and cannot be recovered. Linked transactions are kept (cancel those separately if unwanted).")) {
       return;
     }
@@ -4182,7 +4248,7 @@
       {:else if activePageId === "pnl"}
         <section class="kpi-grid" aria-label="P&L indicators">
           {#each pnlKpis as kpi (kpi.label)}
-            <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state={pnlState.status === "loading" ? "loading" : "default"} accent={kpi.accent} />
+            <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state={pnlState.status === "loading" || pnlState.status === "idle" ? "loading" : "default"} accent={kpi.accent} />
           {/each}
         </section>
 
@@ -4199,7 +4265,7 @@
           <Button label="Filter" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Apply P&L filters" onclick={applyPnlFilters} />
         </section>
 
-        {#if pnlState.status === "loading"}
+        {#if pnlState.status === "loading" || pnlState.status === "idle"}
           <Loader label="Loading P&L" detail="Reading validated projections." size="medium" />
         {:else}
           <section class="dashboard-grid">

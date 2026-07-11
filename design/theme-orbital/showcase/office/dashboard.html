@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ë • office — Dashboard · Orbital</title>
+<link rel="stylesheet" href="../../tokens/orbital-tokens.css">
+<link rel="stylesheet" href="../../components/orbital-components.css">
+<link rel="stylesheet" href="./_shell.css">
+<link rel="stylesheet" href="./_office-skin.css">
+</head>
+<body>
+<div class="shell">
+  <div class="topbar">
+    <div class="brand">ë&nbsp;•&nbsp;office<em>.</em><span>orbital</span></div>
+    <div class="orb-ticker"><span><i class="dot ok"></i>API 200 · 42 ms</span><span><i class="dot ok"></i>MCB feed <b>sync 06:00</b></span><span><i class="dot warn"></i>SBI import <b>128 unmatched</b></span><span><i class="dot ok"></i>FX MUR <b>à jour</b></span><span><i class="dot ok"></i>Audit <b>évt 8 412</b></span></div>
+    <button class="orb-button orb-button--primary">Nouvelle écriture</button>
+  </div>
+  <div class="cockpit">
+    <nav class="rail-left"><div class="orb-panel" style="padding:12px;"><div class="orb-nav"><span class="orb-nav__group">Pilotage</span><a class="orb-nav__item active" href="./dashboard.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-home.svg" alt=""></span>Dashboard</a><a class="orb-nav__item" href="./ceo.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-eye.svg" alt=""></span>CEO View</a><a class="orb-nav__item" href="./pnl.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-chart-bar.svg" alt=""></span>P&L</a><a class="orb-nav__item" href="./cashflow.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-trending-up.svg" alt=""></span>Cash Flow</a><span class="orb-nav__group">Comptabilité</span><a class="orb-nav__item" href="./transactions.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-file-text.svg" alt=""></span>Transactions</a><a class="orb-nav__item" href="./pending.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-clock.svg" alt=""></span>Pending</a><a class="orb-nav__item" href="./reconciliation.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-check.svg" alt=""></span>Réconciliation</a><a class="orb-nav__item" href="./imports.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-upload.svg" alt=""></span>Imports</a><a class="orb-nav__item" href="./bank.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-bank.svg" alt=""></span>Bank</a><a class="orb-nav__item" href="./coa.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-layout-grid.svg" alt=""></span>Chart of Accounts</a><a class="orb-nav__item" href="./vat.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-file-text.svg" alt=""></span>VAT</a><span class="orb-nav__group">Relations</span><a class="orb-nav__item" href="./clients.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-users.svg" alt=""></span>Clients</a><a class="orb-nav__item" href="./suppliers.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-users.svg" alt=""></span>Suppliers</a><a class="orb-nav__item" href="./projects.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-folder.svg" alt=""></span>Projects</a><a class="orb-nav__item" href="./wave-invoices.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-download.svg" alt=""></span>Wave Invoices</a><span class="orb-nav__group">Système</span><a class="orb-nav__item" href="./monitoring.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-search.svg" alt=""></span>Monitoring</a><a class="orb-nav__item" href="./audit.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-calendar.svg" alt=""></span>Audit</a><a class="orb-nav__item" href="./settings.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-settings.svg" alt=""></span>Settings</a></div></div></nav>
+    <main class="main">
+      <div class="page-head">
+        <div class="left">
+          <span class="kicker">workspace · eeee-mu</span>
+          <h1>Dashboard</h1>
+          <span class="sub">Vue d'ensemble : trésorerie, activité, santé de la réconciliation.</span>
+        </div>
+        <div class="actions"><span class="chip">Period: <b>This Year</b></span></div>
+      </div>
+      
+<div class="kpi-row">
+  <article class="orb-kpi orb-kpi--lead"><div class="orb-kpi__head"><span class="orb-kpi__label">Trésorerie</span><span class="orb-kpi__icon"><img class="nav-icon-img" style="width:15px;height:15px" src="../../assets/icons/icon-bank.svg" alt=""></span></div><div class="orb-kpi__value">2 847 632 Rs</div><div class="orb-kpi__trend"><span class="orb-kpi__delta up">▲ 12,5 %</span><span class="orb-kpi__detail">vs période préc.</span></div></article>
+  <article class="orb-kpi"><div class="orb-kpi__head"><span class="orb-kpi__label">Income</span></div><div class="orb-kpi__value">1 422 364 Rs</div><div class="orb-kpi__trend"><span class="orb-kpi__delta up">▲ 8,1 %</span><span class="orb-kpi__detail">vs période préc.</span></div></article>
+  <article class="orb-kpi"><div class="orb-kpi__head"><span class="orb-kpi__label">Expenses</span></div><div class="orb-kpi__value">3 999 779 Rs</div><div class="orb-kpi__trend"><span class="orb-kpi__delta down">▼ 3,2 %</span><span class="orb-kpi__detail">vs période préc.</span></div></article>
+  <article class="orb-kpi"><div class="orb-kpi__head"><span class="orb-kpi__label">À réconcilier</span></div><div class="orb-kpi__value">128</div><div class="orb-kpi__trend"><span class="orb-kpi__detail">lignes bancaires</span></div></article>
+</div>
+<div class="two-col">
+  <div class="orb-panel panel-pad"><div class="panel-title">Santé de la réconciliation <a href="#">ouvrir →</a></div>
+    <div class="orb-ring">
+      <div class="orb-ring__dial" style="--ring-stops:var(--orb-success) 0 78%, var(--orb-warning) 78% 91%, rgba(140,210,235,.12) 91% 100%;"><span>78%</span></div>
+      <div class="orb-ring__legend" style="flex:1;">
+        <div class="item"><span class="swatch" style="background:var(--orb-success);"></span>Matched <span class="val">1 204</span></div>
+        <div class="item"><span class="swatch" style="background:var(--orb-warning);"></span>Suggested <span class="val">204</span></div>
+        <div class="item"><span class="swatch" style="background:rgba(140,210,235,.35);"></span>Unmatched <span class="val">128</span></div>
+      </div>
+      <a class="orb-button orb-button--secondary" href="./reconciliation.html">Réconcilier</a>
+    </div></div>
+  <div style="display:grid;gap:16px;">
+    <div class="orb-insight">
+      <div class="orb-insight__head">
+        <span class="orb-kpi__icon" style="width:26px;height:26px;"><img class="nav-icon-img" style="width:14px;height:14px" src="../../assets/icons/icon-check.svg" alt=""></span>
+        <span class="orb-insight__title">Prochaine action</span>
+        <span class="orb-badge orb-badge--info">97 %</span>
+      </div>
+      <div class="orb-insight__body">42 lignes SBI correspondent à des écritures existantes (montant + date exacts).</div>
+      <div class="orb-insight__actions">
+        <button class="orb-button orb-button--primary" style="min-height:32px;">Rapprocher 42</button>
+        <button class="orb-button orb-button--ghost" style="min-height:32px;">Revoir</button>
+      </div>
+    </div>
+    <div class="orb-panel panel-pad"><div class="panel-title">Balance âgée — top retards <a href="#">tout →</a></div>
+      <div class="mini-table">
+        <div class="mini-row"><div class="who"><b>Bedouin Ltd</b><span>112 j de retard</span></div><span class="amt neg">58 400 Rs</span></div>
+        <div class="mini-row"><div class="who"><b>Blue Penny Events</b><span>74 j de retard</span></div><span class="amt neg">21 300 Rs</span></div>
+        <div class="mini-row"><div class="who"><b>MCB Corporate</b><span>à échoir 30 j</span></div><span class="amt pos">412 800 Rs</span></div>
+      </div></div>
+  </div>
+</div>
+
+    </main>
+  </div>
+</div>
+</body>
+</html>

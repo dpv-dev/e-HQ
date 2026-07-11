@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ë • office — Imports · Orbital</title>
+<link rel="stylesheet" href="../../tokens/orbital-tokens.css">
+<link rel="stylesheet" href="../../components/orbital-components.css">
+<link rel="stylesheet" href="./_shell.css">
+<link rel="stylesheet" href="./_office-skin.css">
+</head>
+<body>
+<div class="shell">
+  <div class="topbar">
+    <div class="brand">ë&nbsp;•&nbsp;office<em>.</em><span>orbital</span></div>
+    <div class="orb-ticker"><span><i class="dot ok"></i>API 200 · 42 ms</span><span><i class="dot ok"></i>MCB feed <b>sync 06:00</b></span><span><i class="dot warn"></i>SBI import <b>128 unmatched</b></span><span><i class="dot ok"></i>FX MUR <b>à jour</b></span><span><i class="dot ok"></i>Audit <b>évt 8 412</b></span></div>
+    <button class="orb-button orb-button--primary">Nouvelle écriture</button>
+  </div>
+  <div class="cockpit">
+    <nav class="rail-left"><div class="orb-panel" style="padding:12px;"><div class="orb-nav"><span class="orb-nav__group">Pilotage</span><a class="orb-nav__item" href="./dashboard.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-home.svg" alt=""></span>Dashboard</a><a class="orb-nav__item" href="./ceo.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-eye.svg" alt=""></span>CEO View</a><a class="orb-nav__item" href="./pnl.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-chart-bar.svg" alt=""></span>P&L</a><a class="orb-nav__item" href="./cashflow.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-trending-up.svg" alt=""></span>Cash Flow</a><span class="orb-nav__group">Comptabilité</span><a class="orb-nav__item" href="./transactions.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-file-text.svg" alt=""></span>Transactions</a><a class="orb-nav__item" href="./pending.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-clock.svg" alt=""></span>Pending</a><a class="orb-nav__item" href="./reconciliation.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-check.svg" alt=""></span>Réconciliation</a><a class="orb-nav__item active" href="./imports.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-upload.svg" alt=""></span>Imports</a><a class="orb-nav__item" href="./bank.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-bank.svg" alt=""></span>Bank</a><a class="orb-nav__item" href="./coa.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-layout-grid.svg" alt=""></span>Chart of Accounts</a><a class="orb-nav__item" href="./vat.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-file-text.svg" alt=""></span>VAT</a><span class="orb-nav__group">Relations</span><a class="orb-nav__item" href="./clients.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-users.svg" alt=""></span>Clients</a><a class="orb-nav__item" href="./suppliers.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-users.svg" alt=""></span>Suppliers</a><a class="orb-nav__item" href="./projects.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-folder.svg" alt=""></span>Projects</a><a class="orb-nav__item" href="./wave-invoices.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-download.svg" alt=""></span>Wave Invoices</a><span class="orb-nav__group">Système</span><a class="orb-nav__item" href="./monitoring.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-search.svg" alt=""></span>Monitoring</a><a class="orb-nav__item" href="./audit.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-calendar.svg" alt=""></span>Audit</a><a class="orb-nav__item" href="./settings.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-settings.svg" alt=""></span>Settings</a></div></div></nav>
+    <main class="main">
+      <div class="page-head">
+        <div class="left">
+          <span class="kicker">workspace · eeee-mu</span>
+          <h1>Imports</h1>
+          <span class="sub">Relevés bancaires CSV (MCB, SBI, générique) et cashflow — preview, confirmation idempotente, réversibilité.</span>
+        </div>
+        <div class="actions"><span class="chip">Period: <b>This Year</b></span></div>
+      </div>
+      
+<div class="two-col">
+  <div style="display:grid;gap:16px;">
+    <div class="dropzone">
+      <img class="nav-icon-img" style="width:30px;height:30px" src="../../assets/icons/icon-upload.svg" alt="">
+      <b>Déposer un relevé CSV</b>
+      <small>MCB · SBI · CSV générique — parse auto, aperçu avant écriture</small>
+      <button class="orb-button orb-button--secondary" style="min-height:32px;">Choisir un fichier</button>
+    </div>
+    <div class="orb-alert orb-alert--success"><div class="orb-alert__body"><strong>SBI JUL 21 — MAY 26.csv</strong><span>2 652 lignes acceptées · 0 rejet · 14 doublons ignorés · compte SBI MUR détecté</span></div></div>
+  </div>
+  <div class="orb-panel panel-pad"><div class="panel-title">Pipeline du dernier import </div>
+    <div class="orb-stepper">
+      <div class="orb-step done"><span class="orb-step__node">✓</span><span class="orb-step__label">Preview</span><span class="orb-step__hint">2 652 lues</span></div>
+      <div class="orb-step done"><span class="orb-step__node">✓</span><span class="orb-step__label">Confirm</span><span class="orb-step__hint">0 rejet</span></div>
+      <div class="orb-step active"><span class="orb-step__node">3</span><span class="orb-step__label">Réconcilier</span><span class="orb-step__hint">128 restantes</span></div>
+      <div class="orb-step"><span class="orb-step__node">4</span><span class="orb-step__label">Valider</span><span class="orb-step__hint">—</span></div>
+    </div></div>
+</div>
+<div class="orb-table-wrap"><div class="orb-table-scroll"><table class="orb-table"><thead><tr><th>Source</th><th>File</th><th>Period</th><th>Accepted</th><th>Rejected</th><th>Dupl.</th><th>Status</th><th></th></tr></thead><tbody><tr><td><span class="orb-badge orb-badge--info">SBI</span></td><td class="lead-cell">SBI JUL 21 — MAY 26.csv</td><td>2021-07 → 2026-05</td><td>2 652</td><td>0</td><td>14</td><td><span class="orb-badge orb-badge--success">confirmed</span></td><td><button class="orb-button orb-button--danger" style="min-height:26px;padding:0 10px;font-size:11px;">Cancel import</button></td></tr><tr><td><span class="orb-badge orb-badge--info">MCB</span></td><td class="lead-cell">fixture-mcb-feb.csv</td><td>2026-02</td><td>3</td><td>0</td><td>1</td><td><span class="orb-badge orb-badge--success">confirmed</span></td><td><button class="orb-button orb-button--danger" style="min-height:26px;padding:0 10px;font-size:11px;">Cancel import</button></td></tr><tr><td><span class="orb-badge orb-badge--muted">cashflow</span></td><td class="lead-cell">cashflow-2026-H1.xlsx</td><td>2026-01 → 2026-06</td><td>6</td><td>0</td><td>0</td><td><span class="orb-badge orb-badge--success">confirmed</span></td><td></td></tr></tbody></table></div></div>
+
+    </main>
+  </div>
+</div>
+</body>
+</html>

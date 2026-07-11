@@ -1,0 +1,66 @@
+/* ë • HQ — Orbital → ehq bridge
+   Adoption path: import THIS file instead of packages/ui/tokens/visual-tokens.css
+   and the whole app re-skins to Orbital without touching a single component —
+   every --ehq-* variable the app consumes is re-pointed at its Orbital value.
+   Brand-locked values (#FFB800 action accent, #EF4444 error, Inter/Space Mono)
+   are preserved by construction. */
+
+@import url('./orbital-tokens.css');
+
+:root{
+  /* Core accent — unchanged (locked) */
+  --ehq-yellow:var(--orb-amber);
+  --ehq-yellow-hover:var(--orb-amber-hover);
+  --ehq-yellow-active:var(--orb-amber-active);
+  --ehq-yellow-muted:var(--orb-amber-muted);
+  --ehq-yellow-border:var(--orb-amber-border);
+
+  /* Surfaces — deep-space scale replaces the neutral dark scale */
+  --ehq-black:var(--orb-void);
+  --ehq-bg-main:var(--orb-bg);
+  --ehq-surface:var(--orb-surface);
+  --ehq-surface-high:var(--orb-surface-high);
+  --ehq-surface-raised:var(--orb-surface-raised);
+
+  /* Text — cool atmosphere-tinted white */
+  --ehq-text:var(--orb-text);
+  --ehq-text-white:rgba(255,255,255,1);
+  --ehq-text-muted:var(--orb-text-muted);
+  --ehq-text-soft:var(--orb-text-soft);
+  --ehq-text-secondary:var(--orb-text-soft);
+  --ehq-text-disabled:var(--orb-text-disabled);
+  --ehq-text-on-yellow:var(--orb-text-on-amber);
+
+  /* Borders — cyan-tinted hairlines */
+  --ehq-border:var(--orb-border);
+  --ehq-border-soft:var(--orb-border-soft);
+  --ehq-border-strong:var(--orb-amber-border);
+
+  /* States — info becomes atmosphere cyan; success shifts to signal teal;
+     warning and error unchanged (error locked) */
+  --ehq-success:var(--orb-success); --ehq-success-bg:var(--orb-success-bg); --ehq-success-border:var(--orb-success-border);
+  --ehq-info:var(--orb-info);       --ehq-info-bg:var(--orb-info-bg);       --ehq-info-border:var(--orb-info-border);
+  --ehq-warning:var(--orb-warning); --ehq-warning-bg:var(--orb-warning-bg);
+  --ehq-error:var(--orb-error);     --ehq-error-bg:var(--orb-error-bg);     --ehq-error-border:var(--orb-error-border);
+  --ehq-error-hover:rgba(239,68,68,.20);
+  --ehq-purple:#A855F7;
+
+  /* Shadows gain the atmosphere glow */
+  --ehq-shadow-sm:var(--orb-shadow-sm);
+  --ehq-shadow-md:var(--orb-shadow-md);
+  --ehq-shadow-lg:var(--orb-shadow-lg);
+  --ehq-glow-yellow:var(--orb-glow-amber);
+
+  /* Radius — one step rounder across the board */
+  --ehq-radius-sm:var(--orb-radius-sm);
+  --ehq-radius-md:var(--orb-radius-md);
+  --ehq-radius-lg:var(--orb-radius-lg);
+  --ehq-radius-xl:var(--orb-radius-xl);
+  --ehq-radius-pill:var(--orb-radius-pill);
+
+  /* Workspace accents — Office adopts the atmosphere cyan */
+  --ehq-workspace-office:var(--orb-cyan);
+  --ehq-workspace-office-bg:var(--orb-cyan-muted);
+  --ehq-workspace-distribution:var(--orb-amber);
+  --ehq-workspace-distribution-bg:var(--orb-amber-muted);
+}

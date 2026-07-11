@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ë • HQ — Theme Orbital</title>
+<link rel="stylesheet" href="../tokens/orbital-tokens.css">
+<link rel="stylesheet" href="../components/orbital-components.css">
+<style>
+  *{box-sizing:border-box;}
+  body{
+    margin:0;color:var(--orb-text);font-family:var(--orb-font);font-size:var(--orb-ui-size);
+    line-height:var(--orb-ui-line);background:var(--orb-bg);
+  }
+  /* fixed page backdrop as its own composited layer — background-attachment:fixed
+     on a large SVG re-rasterizes on every scroll and can freeze the renderer */
+  body::before{
+    content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+    background:url("../assets/backgrounds/bg-page.svg") center/cover no-repeat;
+  }
+  .page{width:min(100%,1240px);margin:0 auto;padding:0 var(--orb-space-5) 120px;display:grid;gap:64px;}
+
+  /* hero */
+  .hero{
+    position:relative;margin:0 calc(-1 * var(--orb-space-5));min-height:480px;
+    display:grid;place-items:center;text-align:center;overflow:hidden;
+    background:url("../assets/backgrounds/bg-hero-globe.svg") center/cover no-repeat;
+  }
+  .hero-inner{display:grid;gap:14px;padding:70px 24px;}
+  .hero-kicker{font-family:var(--orb-mono);font-size:12px;letter-spacing:.3em;text-transform:uppercase;color:var(--orb-cyan);}
+  .hero h1{margin:0;font-size:clamp(34px,5vw,56px);font-weight:700;letter-spacing:-.01em;text-wrap:balance;}
+  .hero h1 em{font-style:normal;color:var(--orb-amber);}
+  .hero p{margin:0 auto;max-width:60ch;color:var(--orb-text-soft);font-size:14px;}
+  .hero-cta{display:flex;gap:12px;justify-content:center;margin-top:8px;}
+
+  section{display:grid;gap:var(--orb-space-4);}
+  .sec-head{display:grid;gap:4px;}
+  .sec-head h2{margin:0;font-size:var(--orb-h3);font-weight:600;color:var(--orb-text);}
+  .sec-head h2::after{
+    content:"";display:block;width:56px;height:2px;margin-top:8px;border-radius:2px;
+    background:linear-gradient(90deg,var(--orb-cyan),transparent);box-shadow:0 0 8px rgba(47,212,255,.6);
+  }
+  .sec-head p{margin:0;color:var(--orb-text-muted);font-size:12px;max-width:80ch;}
+
+  /* palette */
+  .swatches{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:var(--orb-space-3);}
+  .swatch{border:1px solid var(--orb-border);border-radius:var(--orb-radius-sm);overflow:hidden;background:var(--orb-surface);}
+  .swatch .chip{height:64px;}
+  .swatch .meta{padding:9px 11px;display:grid;gap:1px;}
+  .swatch .meta b{font-size:11.5px;color:var(--orb-text);}
+  .swatch .meta span{font-family:var(--orb-mono);font-size:10px;color:var(--orb-text-muted);}
+
+  /* grids */
+  .row{display:flex;gap:var(--orb-space-3);flex-wrap:wrap;align-items:center;}
+  .grid-2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--orb-space-3);}
+  .kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--orb-space-3);}
+  .kpi-grid .orb-kpi--lead{grid-column:span 2;}
+  .picto-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:var(--orb-space-3);}
+  .picto-cell{display:grid;justify-items:center;gap:10px;padding:var(--orb-space-4);
+    border:1px solid var(--orb-border-soft);border-radius:var(--orb-radius-md);background:var(--orb-surface);}
+  .picto-cell span{font-family:var(--orb-mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--orb-text-muted);}
+  .icon-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:var(--orb-space-2);}
+  .icon-cell{
+    display:grid;justify-items:center;gap:8px;padding:14px 6px;color:var(--orb-cyan);
+    border:1px solid var(--orb-border-soft);border-radius:var(--orb-radius-sm);background:var(--orb-surface);
+    transition:border-color var(--orb-transition-fast),box-shadow var(--orb-transition-fast);
+  }
+  .icon-cell:hover{border-color:var(--orb-cyan-border);box-shadow:var(--orb-glow-cyan-soft);}
+  .icon-cell img{width:22px;height:22px;filter:drop-shadow(0 0 5px rgba(47,212,255,.55));}
+  .icon-cell span{font-family:var(--orb-mono);font-size:9.5px;color:var(--orb-text-muted);}
+
+  .bg-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--orb-space-3);}
+  .bg-cell{display:grid;gap:8px;}
+  .bg-cell img{width:100%;border-radius:var(--orb-radius-md);border:1px solid var(--orb-border);aspect-ratio:16/9;object-fit:cover;}
+  .bg-cell span{font-family:var(--orb-mono);font-size:10.5px;color:var(--orb-text-muted);}
+
+  .nav-demo{width:264px;padding:var(--orb-space-3);border:1px solid var(--orb-border);
+    border-radius:var(--orb-radius-md);background:var(--orb-surface);}
+  .nav-demo .orb-nav__icon img{width:16px;height:16px;filter:drop-shadow(0 0 4px rgba(47,212,255,.5));}
+
+  .demo-panel{padding:var(--orb-space-5);display:grid;gap:var(--orb-space-4);}
+  .alerts-stack{display:grid;gap:var(--orb-space-2);}
+  .fields-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--orb-space-3);align-items:end;}
+  .gauge-row{display:flex;align-items:center;gap:18px;}
+  .progress-demo{display:grid;gap:14px;max-width:420px;}
+  .progress-demo .line{display:grid;gap:6px;}
+  .progress-demo .line .lbl{display:flex;justify-content:space-between;font-size:11.5px;color:var(--orb-text-muted);font-variant-numeric:tabular-nums;}
+
+  @media (max-width:900px){
+    .kpi-grid{grid-template-columns:1fr 1fr;}
+    .kpi-grid .orb-kpi--lead{grid-column:span 2;}
+    .grid-2,.fields-row,.bg-grid{grid-template-columns:1fr;}
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="hero">
+    <div class="hero-inner">
+      <span class="hero-kicker">ë • HQ — design theme</span>
+      <h1>Orbital<em>.</em></h1>
+      <p>Un thème sombre « espace de données » pour ehq-platform : atmosphère cyan pour la donnée,
+      ambre <b>#FFB800</b> (accent de marque, verrouillé) pour l'action, typographies Inter + Space Mono conservées.</p>
+      <div class="hero-cta">
+        <button class="orb-button orb-button--primary">Action principale</button>
+        <button class="orb-button orb-button--secondary">Explorer les données</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============ PALETTE ============ -->
+  <section>
+    <div class="sec-head">
+      <h2>Palette</h2>
+      <p>Espace (fonds) · atmosphère (cyan, donnée) · action (ambre, marque) · états. L'orange #FF8A3C n'existe que dans les dégradés décoratifs.</p>
+    </div>
+    <div class="swatches">
+      <div class="swatch"><div class="chip" style="background:#030608"></div><div class="meta"><b>Void</b><span>#030608</span></div></div>
+      <div class="swatch"><div class="chip" style="background:#05090D"></div><div class="meta"><b>Background</b><span>#05090D</span></div></div>
+      <div class="swatch"><div class="chip" style="background:#0A121A"></div><div class="meta"><b>Surface</b><span>#0A121A</span></div></div>
+      <div class="swatch"><div class="chip" style="background:#101C26"></div><div class="meta"><b>Surface high</b><span>#101C26</span></div></div>
+      <div class="swatch"><div class="chip" style="background:#2FD4FF"></div><div class="meta"><b>Cyan — data</b><span>#2FD4FF</span></div></div>
+      <div class="swatch"><div class="chip" style="background:#7CE7FF"></div><div class="meta"><b>Cyan bright</b><span>#7CE7FF</span></div></div>
+      <div class="swatch"><div class="chip" style="background:#FFB800"></div><div class="meta"><b>Amber — action</b><span>#FFB800 · verrouillé</span></div></div>
+      <div class="swatch"><div class="chip" style="background:linear-gradient(90deg,#FF8A3C,#FFB800)"></div><div class="meta"><b>Trail</b><span>#FF8A3C → décor only</span></div></div>
+      <div class="swatch"><div class="chip" style="background:#2EE6A8"></div><div class="meta"><b>Success</b><span>#2EE6A8</span></div></div>
+      <div class="swatch"><div class="chip" style="background:#FBBF24"></div><div class="meta"><b>Warning</b><span>#FBBF24</span></div></div>
+      <div class="swatch"><div class="chip" style="background:#EF4444"></div><div class="meta"><b>Error</b><span>#EF4444 · verrouillé</span></div></div>
+      <div class="swatch"><div class="chip" style="background:#EAF6FA"></div><div class="meta"><b>Text</b><span>#EAF6FA</span></div></div>
+    </div>
+  </section>
+
+  <!-- ============ KPI CARDS ============ -->
+  <section>
+    <div class="sec-head">
+      <h2>Cartes KPI</h2>
+      <p>Composant vedette : carte lead (ambre) pour le chiffre qui compte, cartes standard avec tendance + sparkline, jauge conique pour les ratios.</p>
+    </div>
+    <div class="kpi-grid">
+      <article class="orb-kpi orb-kpi--lead">
+        <div class="orb-kpi__head">
+          <span class="orb-kpi__label">Trésorerie</span>
+          <span class="orb-kpi__icon"><img src="../assets/icons/icon-bank.svg" width="16" height="16" alt=""></span>
+        </div>
+        <div class="orb-kpi__value">2 847 632 Rs</div>
+        <div class="orb-kpi__trend">
+          <span class="orb-kpi__delta up">▲ 12,5 %</span>
+          <span class="orb-kpi__detail">vs 2025-01-01 → 2025-12-31</span>
+        </div>
+        <svg class="orb-kpi__spark" viewBox="0 0 300 38" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="sga" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#FFB800" stop-opacity=".35"/>
+              <stop offset="100%" stop-color="#FFB800" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          <path d="M0 30 L30 26 L60 28 L90 20 L120 22 L150 14 L180 17 L210 10 L240 12 L270 6 L300 8 V38 H0 Z" fill="url(#sga)"/>
+          <path d="M0 30 L30 26 L60 28 L90 20 L120 22 L150 14 L180 17 L210 10 L240 12 L270 6 L300 8" fill="none" stroke="#FFB800" stroke-width="1.8"/>
+          <circle cx="300" cy="8" r="2.6" fill="#FFB800"/>
+        </svg>
+      </article>
+
+      <article class="orb-kpi">
+        <div class="orb-kpi__head">
+          <span class="orb-kpi__label">Income</span>
+          <span class="orb-kpi__icon"><img src="../assets/icons/icon-trending-up.svg" width="16" height="16" alt=""></span>
+        </div>
+        <div class="orb-kpi__value">1 422 364 Rs</div>
+        <div class="orb-kpi__trend">
+          <span class="orb-kpi__delta up">▲ 8,1 %</span>
+          <span class="orb-kpi__detail">vs période préc.</span>
+        </div>
+        <svg class="orb-kpi__spark" viewBox="0 0 300 38" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="sgc" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#2FD4FF" stop-opacity=".35"/>
+              <stop offset="100%" stop-color="#2FD4FF" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          <path d="M0 28 L38 30 L76 24 L114 26 L152 18 L190 21 L228 13 L266 15 L300 9 V38 H0 Z" fill="url(#sgc)"/>
+          <path d="M0 28 L38 30 L76 24 L114 26 L152 18 L190 21 L228 13 L266 15 L300 9" fill="none" stroke="#2FD4FF" stroke-width="1.8"/>
+          <circle cx="300" cy="9" r="2.6" fill="#7CE7FF"/>
+        </svg>
+      </article>
+
+      <article class="orb-kpi">
+        <div class="orb-kpi__head">
+          <span class="orb-kpi__label">Expenses</span>
+          <span class="orb-kpi__icon"><img src="../assets/icons/icon-chart-bar.svg" width="16" height="16" alt=""></span>
+        </div>
+        <div class="orb-kpi__value">3 999 779 Rs</div>
+        <div class="orb-kpi__trend">
+          <span class="orb-kpi__delta down">▼ 3,2 %</span>
+          <span class="orb-kpi__detail">vs période préc.</span>
+        </div>
+        <svg class="orb-kpi__spark" viewBox="0 0 300 38" preserveAspectRatio="none">
+          <path d="M0 12 L38 15 L76 11 L114 18 L152 16 L190 22 L228 20 L266 26 L300 24" fill="none" stroke="#2FD4FF" stroke-width="1.8" opacity=".85"/>
+          <circle cx="300" cy="24" r="2.6" fill="#7CE7FF"/>
+        </svg>
+      </article>
+
+      <article class="orb-kpi">
+        <div class="orb-kpi__head">
+          <span class="orb-kpi__label">Runway</span>
+          <span class="orb-kpi__icon"><img src="../assets/icons/icon-clock.svg" width="16" height="16" alt=""></span>
+        </div>
+        <div class="gauge-row">
+          <div class="orb-kpi__gauge" style="--gauge-pct:64%"><span>7,7</span></div>
+          <div class="orb-kpi__trend" style="display:grid;gap:2px;">
+            <span class="orb-kpi__delta up" style="font-size:13px;">mois</span>
+            <span class="orb-kpi__detail">burn moyen<br>368 k Rs / mois</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="orb-kpi">
+        <div class="orb-kpi__head">
+          <span class="orb-kpi__label">À réconcilier</span>
+          <span class="orb-kpi__icon"><img src="../assets/icons/icon-check.svg" width="16" height="16" alt=""></span>
+        </div>
+        <div class="orb-kpi__value">128</div>
+        <div class="orb-kpi__trend">
+          <span class="orb-kpi__delta down">▲ 14</span>
+          <span class="orb-kpi__detail">lignes bancaires</span>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <!-- ============ BUTTONS / INPUTS ============ -->
+  <section>
+    <div class="sec-head">
+      <h2>Boutons, champs &amp; contrôles</h2>
+      <p>L'ambre est réservé à l'action primaire ; le cyan porte les actions secondaires et les états de focus.</p>
+    </div>
+    <div class="orb-panel demo-panel">
+      <div class="row">
+        <button class="orb-button orb-button--primary">Valider l'écriture</button>
+        <button class="orb-button orb-button--secondary">Voir le détail</button>
+        <button class="orb-button orb-button--ghost">Annuler</button>
+        <button class="orb-button orb-button--danger">Supprimer</button>
+        <button class="orb-button orb-button--primary" disabled>Indisponible</button>
+      </div>
+      <div class="fields-row">
+        <div class="orb-field">
+          <label for="f1">Description</label>
+          <input id="f1" class="orb-input" placeholder="Loyer studio — juillet">
+        </div>
+        <div class="orb-field">
+          <label for="f2">Montant</label>
+          <input id="f2" class="orb-input" value="17 250.00">
+        </div>
+        <div class="orb-field">
+          <label for="f3">Référence (erreur)</label>
+          <input id="f3" class="orb-input error" value="REF-∅">
+        </div>
+      </div>
+      <div class="row">
+        <label class="orb-toggle"><input type="checkbox" checked><span class="track"></span>Compte actif</label>
+        <label class="orb-toggle"><input type="checkbox"><span class="track"></span>Notifications</label>
+        <span class="orb-badge orb-badge--success"><span class="orb-badge__dot"></span>validated</span>
+        <span class="orb-badge orb-badge--info">matched</span>
+        <span class="orb-badge orb-badge--warning">pending</span>
+        <span class="orb-badge orb-badge--error">rejected</span>
+        <span class="orb-badge orb-badge--amber">draft</span>
+        <span class="orb-badge orb-badge--muted">ignored</span>
+      </div>
+      <div class="progress-demo">
+        <div class="line">
+          <div class="lbl"><span>Budget consommé — Kaya Festival</span><span>64 %</span></div>
+          <div class="orb-progress"><span style="width:64%"></span></div>
+        </div>
+        <div class="line">
+          <div class="lbl"><span>Objectif income annuel</span><span>88 %</span></div>
+          <div class="orb-progress orb-progress--amber"><span style="width:88%"></span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ ALERTS ============ -->
+  <section>
+    <div class="sec-head"><h2>Alertes</h2></div>
+    <div class="alerts-stack">
+      <div class="orb-alert orb-alert--success"><div class="orb-alert__body"><strong>Success</strong><span>Import confirmé — 2 652 lignes écrites, 0 rejet.</span></div></div>
+      <div class="orb-alert orb-alert--info"><div class="orb-alert__body"><strong>Info</strong><span>Run d'allocation en file — verrou tenu par le workflow.</span></div></div>
+      <div class="orb-alert orb-alert--warning"><div class="orb-alert__body"><strong>Warning</strong><span>3 catégories dépensent sans ligne de budget en face.</span></div></div>
+      <div class="orb-alert orb-alert--error"><div class="orb-alert__body"><strong>Error</strong><span>Taux de change EUR→MUR manquant pour le 2026-07-04.</span></div></div>
+    </div>
+  </section>
+
+  <!-- ============ TABLE + NAV ============ -->
+  <section>
+    <div class="sec-head"><h2>Table &amp; navigation</h2></div>
+    <div class="grid-2">
+      <div class="orb-table-wrap">
+        <div class="orb-table-scroll">
+          <table class="orb-table">
+            <thead><tr><th>Description</th><th>Date</th><th>Montant</th><th>Statut</th></tr></thead>
+            <tbody>
+              <tr><td class="lead-cell">DJ performance invoice</td><td>04/02</td><td class="money pos">+500 000,00 Rs</td><td><span class="orb-badge orb-badge--success">validated</span></td></tr>
+              <tr><td class="lead-cell">Projector rental</td><td>09/02</td><td class="money neg">−120 000,00 Rs</td><td><span class="orb-badge orb-badge--success">validated</span></td></tr>
+              <tr><td class="lead-cell">Current account fee</td><td>12/02</td><td class="money neg">−5 000,00 Rs</td><td><span class="orb-badge orb-badge--info">matched</span></td></tr>
+              <tr><td class="lead-cell">Awaiting category</td><td>15/02</td><td class="money neg">−8 500,00 Rs</td><td><span class="orb-badge orb-badge--amber">draft</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div>
+        <nav class="nav-demo orb-nav">
+          <span class="orb-nav__group">Office</span>
+          <a class="orb-nav__item active" href="#"><span class="orb-nav__icon"><img src="../assets/icons/icon-home.svg" alt=""></span>Dashboard</a>
+          <a class="orb-nav__item" href="#"><span class="orb-nav__icon"><img src="../assets/icons/icon-chart-bar.svg" alt=""></span>P&amp;L</a>
+          <a class="orb-nav__item" href="#"><span class="orb-nav__icon"><img src="../assets/icons/icon-file-text.svg" alt=""></span>Transactions</a>
+          <a class="orb-nav__item" href="#"><span class="orb-nav__icon"><img src="../assets/icons/icon-bank.svg" alt=""></span>Bank</a>
+          <span class="orb-nav__group">Operations</span>
+          <a class="orb-nav__item" href="#"><span class="orb-nav__icon"><img src="../assets/icons/icon-upload.svg" alt=""></span>Imports</a>
+          <a class="orb-nav__item" href="#"><span class="orb-nav__icon"><img src="../assets/icons/icon-check.svg" alt=""></span>Réconciliation</a>
+          <a class="orb-nav__item" href="#"><span class="orb-nav__icon"><img src="../assets/icons/icon-users.svg" alt=""></span>Clients</a>
+        </nav>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ PICTOGRAMS ============ -->
+  <section>
+    <div class="sec-head">
+      <h2>Pictogrammes</h2>
+      <p>Pour les états vides, les cartes d'accueil et l'onboarding — duotone cyan/ambre avec halo.</p>
+    </div>
+    <div class="picto-grid">
+      <div class="picto-cell"><div class="orb-picto"><img src="../assets/pictograms/picto-globe.svg" alt=""></div><span>globe</span></div>
+      <div class="picto-cell"><div class="orb-picto"><img src="../assets/pictograms/picto-network.svg" alt=""></div><span>network</span></div>
+      <div class="picto-cell"><div class="orb-picto"><img src="../assets/pictograms/picto-orbit-chart.svg" alt=""></div><span>orbit-chart</span></div>
+      <div class="picto-cell"><div class="orb-picto"><img src="../assets/pictograms/picto-datastream.svg" alt=""></div><span>datastream</span></div>
+      <div class="picto-cell"><div class="orb-picto"><img src="../assets/pictograms/picto-beacon.svg" alt=""></div><span>beacon</span></div>
+      <div class="picto-cell"><div class="orb-picto"><img src="../assets/pictograms/picto-vault.svg" alt=""></div><span>vault</span></div>
+    </div>
+  </section>
+
+  <!-- ============ ICONS ============ -->
+  <section>
+    <div class="sec-head">
+      <h2>Icônes</h2>
+      <p>Trait 1.5, 24 px, <code>currentColor</code> — teinte cyan + drop-shadow lumineux en contexte.</p>
+    </div>
+    <div class="icon-grid">
+      <div class="icon-cell"><img src="../assets/icons/icon-home.svg" alt=""><span>home</span></div>
+      <div class="icon-cell"><img src="../assets/icons/icon-chart-bar.svg" alt=""><span>chart-bar</span></div>
+      <div class="icon-cell"><img src="../assets/icons/icon-trending-up.svg" alt=""><span>trending-up</span></div>
+      <div class="icon-cell"><img src="../assets/icons/icon-bank.svg" alt=""><span>bank</span></div>
+      <div class="icon-cell"><img src="../assets/icons/icon-users.svg" alt=""><span>users</span></div>
+      <div class="icon-cell"><img src="../assets/icons/icon-folder.svg" alt=""><span>folder</span></div>
+      <div class="icon-cell"><img src="../assets/icons/icon-file-text.svg" alt=""><span>file-text</span></div>
+      <div class="icon-cell"><img src="../assets/icons/icon-upload.svg" alt=""><span>upload</span></div>
+      <div class="icon-cell"><img src="../assets/icons/icon-download.svg" alt=""><span>download</span></div>
+      <div class="icon-cell"><img src="../assets/icons/icon-search.svg" alt=""><span>search</span></div>
+      <div class="icon-cell"><img src="../assets/icons/icon-settings.svg" alt=""><span>settings</span></div>
+      <div class="icon-cell"><img src="../assets/icons/icon-bell.svg" alt=""><span>bell</span></div>
+      <div class="icon-cell"><img src="../assets/icons/icon-calendar.svg" alt=""><span>calendar</span></div>
+      <div class="icon-cell"><img src="../assets/icons/icon-check.svg" alt=""><span>check</span></div>
+      <div class="icon-cell"><img src="../assets/icons/icon-clock.svg" alt=""><span>clock</span></div>
+      <div class="icon-cell"><img src="../assets/icons/icon-globe.svg" alt=""><span>globe</span></div>
+    </div>
+  </section>
+
+  <!-- ============ BACKGROUNDS ============ -->
+  <section>
+    <div class="sec-head">
+      <h2>Fonds</h2>
+      <p>Trois SVG auto-suffisants : hero (landing/login), page (derrière le shell), veil (coin de carte).</p>
+    </div>
+    <div class="bg-grid">
+      <div class="bg-cell"><img src="../assets/backgrounds/bg-hero-globe.svg" alt=""><span>bg-hero-globe.svg</span></div>
+      <div class="bg-cell"><img src="../assets/backgrounds/bg-page.svg" alt=""><span>bg-page.svg</span></div>
+      <div class="bg-cell"><img src="../assets/backgrounds/bg-card-veil.svg" alt="" style="background:#0A121A;"><span>bg-card-veil.svg</span></div>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

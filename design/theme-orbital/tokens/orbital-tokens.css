@@ -1,0 +1,167 @@
+/* ë • HQ — Theme "Orbital" — Canonical tokens
+   Derived from the reference image (digital Earth, cyan atmosphere, amber
+   orbital trails on near-black space).
+   Color roles:
+     - Cyan   = atmosphere & data (glows, charts, informational accents)
+     - Amber  = ACTION. Locked to the ehq brand accent #FFB800 (David, 2026-06);
+                the deeper orange #FF8A3C appears only inside decorative
+                gradients (orbital trails), never on interactive elements.
+     - Error  = #EF4444 (locked, design-system reference 2026-07).
+   Fonts stay Inter + Space Mono (locked, 2026-07-07) — the theme changes the
+   atmosphere, not the brand voice.
+   Scope: UI/CSS layer only. Never touches financial logic or data. */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
+
+:root{
+  /* ---- Space (backgrounds, darkest → lightest) ---- */
+  --orb-void:#030608;            /* page edges, vignette */
+  --orb-bg:#05090D;              /* page background */
+  --orb-surface:#0A121A;         /* cards, panels */
+  --orb-surface-high:#101C26;    /* hover, nested surfaces */
+  --orb-surface-raised:#16242F;  /* modals, popovers */
+
+  /* ---- Atmosphere — cyan (data, glow, info) ---- */
+  --orb-cyan:#2FD4FF;
+  --orb-cyan-bright:#7CE7FF;
+  --orb-cyan-deep:#0E7FA6;
+  --orb-cyan-muted:rgba(47,212,255,.12);
+  --orb-cyan-border:rgba(47,212,255,.38);
+  --orb-cyan-ghost:rgba(47,212,255,.06);
+
+  /* ---- Action — amber (brand #FFB800 locked) ---- */
+  --orb-amber:#FFB800;
+  --orb-amber-hover:#FFC633;
+  --orb-amber-active:#E6A600;
+  --orb-amber-muted:rgba(255,184,0,.13);
+  --orb-amber-border:rgba(255,184,0,.45);
+  --orb-trail:#FF8A3C;           /* decorative gradients only */
+  --orb-text-on-amber:#0A0A0A;
+
+  /* ---- Text (cool white, tinted by the atmosphere) ---- */
+  --orb-text:#EAF6FA;
+  --orb-text-soft:rgba(234,246,250,.74);
+  --orb-text-muted:rgba(234,246,250,.48);
+  --orb-text-disabled:rgba(234,246,250,.30);
+
+  /* ---- Borders ---- */
+  --orb-border:rgba(140,210,235,.12);
+  --orb-border-soft:rgba(140,210,235,.07);
+  --orb-border-strong:var(--orb-cyan-border);
+
+  /* ---- States ---- */
+  --orb-success:#2EE6A8; --orb-success-bg:rgba(46,230,168,.12); --orb-success-border:rgba(46,230,168,.35);
+  --orb-info:var(--orb-cyan); --orb-info-bg:var(--orb-cyan-muted); --orb-info-border:var(--orb-cyan-border);
+  --orb-warning:#FBBF24; --orb-warning-bg:rgba(251,191,36,.12); --orb-warning-border:rgba(251,191,36,.35);
+  --orb-error:#EF4444;   --orb-error-bg:rgba(239,68,68,.12);    --orb-error-border:rgba(239,68,68,.40);
+
+  /* ---- Glows (the theme's signature) ---- */
+  --orb-glow-cyan:0 0 20px rgba(47,212,255,.28),0 0 60px rgba(47,212,255,.10);
+  --orb-glow-cyan-soft:0 0 14px rgba(47,212,255,.16);
+  --orb-glow-amber:0 0 20px rgba(255,184,0,.30),0 0 56px rgba(255,184,0,.10);
+  --orb-glow-error:0 0 16px rgba(239,68,68,.25);
+  --orb-ring-cyan:0 0 0 1px var(--orb-cyan-border);
+
+  /* ---- Elevation system — layered, physically-plausible shadows.
+     Every level stacks: a soft ambient shadow (large, low-opacity) + a tighter
+     contact shadow (small, sharper) + a hairline top highlight (inset) that
+     reads as a light source from above. This is what gives cards volume
+     instead of a flat "border + one shadow" look. ---- */
+  --orb-elev-0:inset 0 1px 0 rgba(255,255,255,.04);
+  --orb-elev-1:
+    0 1px 2px rgba(0,0,0,.30),
+    0 8px 20px -6px rgba(0,0,0,.45),
+    inset 0 1px 0 rgba(255,255,255,.05);
+  --orb-elev-2:
+    0 2px 4px rgba(0,0,0,.32),
+    0 16px 36px -10px rgba(0,0,0,.55),
+    0 0 0 1px rgba(255,255,255,.02) inset,
+    inset 0 1px 0 rgba(255,255,255,.06);
+  --orb-elev-3:
+    0 4px 8px rgba(0,0,0,.35),
+    0 28px 64px -16px rgba(0,0,0,.65),
+    inset 0 1px 0 rgba(255,255,255,.07);
+  --orb-elev-pressed:
+    inset 0 2px 6px rgba(0,0,0,.45),
+    inset 0 1px 0 rgba(0,0,0,.2);
+
+  /* legacy aliases kept for existing rules */
+  --orb-shadow-sm:var(--orb-elev-1);
+  --orb-shadow-md:var(--orb-elev-2);
+  --orb-shadow-lg:var(--orb-elev-3);
+
+  /* ---- Glass surfaces — frosted panels floating over the starfield ---- */
+  --orb-glass-bg:rgba(16,24,32,.62);
+  --orb-glass-bg-high:rgba(22,32,42,.68);
+  --orb-glass-blur:18px;
+  --orb-glass-border:rgba(255,255,255,.08);
+
+  /* ---- 3D bevel gradients — used on buttons, icon plates, KPI value tiles ---- */
+  --orb-bevel-amber:linear-gradient(180deg, #FFCB4D 0%, var(--orb-amber) 46%, #E08F00 100%);
+  --orb-bevel-amber-hover:linear-gradient(180deg, #FFD466 0%, var(--orb-amber-hover) 46%, #E89A00 100%);
+  --orb-bevel-surface:linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,0) 40%);
+  --orb-bevel-cyan:linear-gradient(180deg, var(--orb-cyan-bright) 0%, var(--orb-cyan) 55%, var(--orb-cyan-deep) 100%);
+
+  /* ---- Fine surface grain — breaks up flat gradients, adds material feel.
+     Single-pixel noise via SVG data URI, tiled, extremely low opacity. ---- */
+  --orb-grain:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.4'/%3E%3C/svg%3E");
+
+  /* ---- Typography (Inter + Space Mono, locked) ---- */
+  --orb-font:'Inter','Segoe UI',-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif;
+  --orb-display:'Inter','Segoe UI',-apple-system,BlinkMacSystemFont,sans-serif;
+  --orb-mono:'Space Mono','SFMono-Regular','JetBrains Mono',Consolas,monospace;
+  --orb-h1:32px; --orb-h2:24px; --orb-h3:18px;
+  --orb-body:16px; --orb-small:14px; --orb-caption:12px;
+  --orb-ui-size:13px; --orb-ui-line:1.5;
+  --orb-menu-size:14.5px;
+  --orb-label-size:12px;
+  --orb-kpi-value-size:28px;
+  --orb-kpi-hero-size:38px;
+  --orb-display-weight:700;
+  --orb-heading-weight:600;
+  --orb-body-weight:400;
+
+  /* ---- Spacing ---- */
+  --orb-space-1:4px; --orb-space-2:8px; --orb-space-3:12px; --orb-space-4:16px;
+  --orb-space-5:24px; --orb-space-6:32px; --orb-space-7:40px; --orb-space-8:48px;
+
+  /* ---- Radius (slightly rounder than the current theme — orbital curves) ---- */
+  --orb-radius-sm:10px; --orb-radius-md:14px; --orb-radius-lg:18px;
+  --orb-radius-xl:24px; --orb-radius-pill:999px;
+
+  /* ---- Motion ---- */
+  --orb-transition-fast:130ms ease;
+  --orb-transition-normal:200ms ease;
+  --orb-ease:cubic-bezier(.19,1,.22,1);
+  --orb-orbit-duration:80s;      /* decorative ring rotation */
+  --orb-pulse-duration:2.6s;     /* beacon pulse */
+
+  /* ---- Layout ---- */
+  --orb-sidebar-width:264px;
+  --orb-topbar-height:72px;
+  --orb-content-max:1480px;
+  --orb-page-gap:24px;
+}
+
+/* ---- Type utility classes (mirror the ehq conventions) ---- */
+.orb-type-display{font-family:var(--orb-display);font-weight:var(--orb-display-weight);letter-spacing:0;}
+.orb-type-heading{font-family:var(--orb-display);font-weight:var(--orb-heading-weight);color:var(--orb-text-soft);}
+.orb-type-body{font-family:var(--orb-font);font-size:var(--orb-ui-size);line-height:var(--orb-ui-line);}
+.orb-type-label{
+  font-family:var(--orb-mono);font-size:var(--orb-label-size);
+  color:var(--orb-text-muted);letter-spacing:.14em;text-transform:uppercase;
+}
+.orb-type-figure{font-family:var(--orb-font);font-variant-numeric:tabular-nums;}
+
+/* ---- Decorative keyframes (respect reduced motion) ---- */
+@keyframes orb-spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}
+@keyframes orb-pulse{
+  0%{box-shadow:0 0 0 0 rgba(47,212,255,.35);}
+  70%{box-shadow:0 0 0 14px rgba(47,212,255,0);}
+  100%{box-shadow:0 0 0 0 rgba(47,212,255,0);}
+}
+@media (prefers-reduced-motion: reduce){
+  .orb-anim-spin,.orb-anim-pulse{animation:none !important;}
+}
+.orb-anim-spin{animation:orb-spin var(--orb-orbit-duration) linear infinite;}
+.orb-anim-pulse{animation:orb-pulse var(--orb-pulse-duration) ease-out infinite;}

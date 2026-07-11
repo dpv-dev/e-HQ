@@ -1,0 +1,422 @@
+/* ë • HQ — Theme "Orbital" — Component classes
+   Pure CSS, namespaced .orb-*. Consumes orbital-tokens.css.
+   These are the reference implementations; Svelte adoption is a mechanical
+   port of each block into the matching @ehq/ui component. */
+
+/* =========================================================
+   Buttons — amber = action (brand), cyan = secondary/data.
+   Primary is a physical 3D bevel (gradient fill + top highlight + contact
+   shadow) that visibly presses in on :active instead of just dimming.
+   ========================================================= */
+.orb-button{
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  min-height:38px;padding:0 18px;border-radius:var(--orb-radius-pill);
+  text-decoration:none;
+  font-family:var(--orb-font);font-size:var(--orb-ui-size);font-weight:600;
+  border:1px solid transparent;cursor:pointer;
+  transition:background var(--orb-transition-fast),box-shadow var(--orb-transition-fast),
+             border-color var(--orb-transition-fast),color var(--orb-transition-fast),
+             transform var(--orb-transition-fast);
+}
+.orb-button:focus-visible{outline:none;box-shadow:0 0 0 3px var(--orb-cyan-muted),var(--orb-ring-cyan);}
+.orb-button--primary{
+  background:var(--orb-bevel-amber);color:var(--orb-text-on-amber);
+  box-shadow:0 1px 0 rgba(255,255,255,.35) inset, 0 -2px 0 rgba(0,0,0,.16) inset, 0 6px 16px -4px rgba(255,184,0,.45);
+}
+.orb-button--primary:hover{background:var(--orb-bevel-amber-hover);box-shadow:0 1px 0 rgba(255,255,255,.4) inset, 0 -2px 0 rgba(0,0,0,.14) inset, var(--orb-glow-amber);transform:translateY(-1px);}
+.orb-button--primary:active{background:var(--orb-amber-active);box-shadow:var(--orb-elev-pressed);transform:translateY(1px);}
+.orb-button--primary:disabled{background:var(--orb-amber-muted);color:var(--orb-text-disabled);cursor:not-allowed;box-shadow:none;transform:none;}
+.orb-button--secondary{background:var(--orb-glass-bg);color:var(--orb-cyan);border-color:var(--orb-cyan-border);box-shadow:var(--orb-elev-0);backdrop-filter:blur(var(--orb-glass-blur));}
+.orb-button--secondary:hover{background:var(--orb-cyan-ghost);box-shadow:var(--orb-elev-0),var(--orb-glow-cyan-soft);transform:translateY(-1px);}
+.orb-button--secondary:active{transform:translateY(1px);box-shadow:var(--orb-elev-pressed);}
+.orb-button--ghost{background:transparent;color:var(--orb-text-soft);}
+.orb-button--ghost:hover{background:var(--orb-surface-high);color:var(--orb-text);}
+.orb-button--danger{background:transparent;color:var(--orb-error);border-color:var(--orb-error-border);}
+.orb-button--danger:hover{background:var(--orb-error-bg);box-shadow:var(--orb-glow-error);transform:translateY(-1px);}
+.orb-button--danger:active{transform:translateY(1px);}
+
+/* =========================================================
+   Inputs & selects
+   ========================================================= */
+.orb-field{display:grid;gap:6px;}
+.orb-field > label{
+  font-family:var(--orb-mono);font-size:var(--orb-label-size);
+  letter-spacing:.12em;text-transform:uppercase;color:var(--orb-text-muted);
+}
+.orb-input{
+  min-height:38px;padding:0 14px;border-radius:var(--orb-radius-sm);
+  background:rgba(3,8,12,.6);color:var(--orb-text);
+  border:1px solid var(--orb-border);
+  box-shadow:inset 0 2px 5px rgba(0,0,0,.35);
+  font-family:var(--orb-font);font-size:var(--orb-ui-size);
+  transition:border-color var(--orb-transition-fast),box-shadow var(--orb-transition-fast);
+}
+.orb-input::placeholder{color:var(--orb-text-disabled);}
+.orb-input:hover{border-color:var(--orb-cyan-border);}
+.orb-input:focus{outline:none;border-color:var(--orb-cyan);box-shadow:inset 0 2px 5px rgba(0,0,0,.35),var(--orb-glow-cyan-soft);}
+.orb-input.error{border-color:var(--orb-error);box-shadow:inset 0 2px 5px rgba(0,0,0,.35),var(--orb-glow-error);}
+
+/* =========================================================
+   Panels & cards — glass surface, layered elevation, top highlight.
+   The gradient border trick (padding-box/border-box double background)
+   gives a crisp lit edge instead of a flat 1px hairline.
+   ========================================================= */
+.orb-panel{
+  position:relative;border-radius:var(--orb-radius-lg);
+  background:
+    radial-gradient(120% 90% at 85% -10%, var(--orb-cyan-ghost), transparent 55%),
+    var(--orb-glass-bg);
+  backdrop-filter:blur(var(--orb-glass-blur));
+  border:1px solid var(--orb-glass-border);
+  box-shadow:var(--orb-elev-1);
+  transition:border-color var(--orb-transition-normal),box-shadow var(--orb-transition-normal);
+}
+.orb-panel::after{
+  content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;
+  background-image:var(--orb-grain);background-size:120px 120px;opacity:.025;mix-blend-mode:overlay;
+}
+.orb-panel:hover{border-color:var(--orb-cyan-border);box-shadow:var(--orb-elev-2);}
+
+/* =========================================================
+   KPI cards — the theme's flagship component.
+   Volume comes from three things together: a raised icon "token" (bevel +
+   its own shadow), a layered card elevation that grows on hover, and a
+   subtle top-lit gradient standing in for a light source.
+   ========================================================= */
+.orb-kpi{
+  position:relative;display:grid;gap:10px;overflow:hidden;
+  padding:18px 20px;border-radius:var(--orb-radius-md);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.045), transparent 90px),
+    radial-gradient(140% 100% at 100% 0%, var(--orb-cyan-ghost), transparent 50%),
+    var(--orb-glass-bg);
+  backdrop-filter:blur(var(--orb-glass-blur));
+  border:1px solid var(--orb-glass-border);
+  box-shadow:var(--orb-elev-1);
+  transition:border-color var(--orb-transition-normal),box-shadow var(--orb-transition-normal),transform var(--orb-transition-normal);
+  transform-style:preserve-3d;
+}
+.orb-kpi::after{
+  content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;
+  background-image:var(--orb-grain);background-size:120px 120px;opacity:.03;mix-blend-mode:overlay;
+}
+.orb-kpi:hover{border-color:var(--orb-cyan-border);box-shadow:var(--orb-elev-2),var(--orb-glow-cyan-soft);transform:translateY(-3px);}
+.orb-kpi__head{display:flex;align-items:center;justify-content:space-between;gap:10px;}
+.orb-kpi__label{
+  font-family:var(--orb-mono);font-size:11px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--orb-text-muted);
+}
+.orb-kpi__icon{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:32px;height:32px;border-radius:10px;color:var(--orb-cyan);
+  background:linear-gradient(155deg, var(--orb-surface-raised), var(--orb-surface-high) 60%);
+  border:1px solid var(--orb-cyan-border);
+  box-shadow:0 1px 0 rgba(255,255,255,.10) inset, 0 3px 8px rgba(0,0,0,.35), 0 0 0 1px rgba(0,0,0,.2);
+}
+.orb-kpi__value{
+  font-family:var(--orb-font);font-size:var(--orb-kpi-value-size);font-weight:700;
+  font-variant-numeric:tabular-nums;line-height:1.05;color:var(--orb-text);
+  text-shadow:0 1px 0 rgba(0,0,0,.3), 0 0 26px rgba(255,255,255,.06);
+}
+.orb-kpi__trend{display:flex;align-items:baseline;gap:8px;font-size:12px;}
+.orb-kpi__delta{font-weight:700;font-variant-numeric:tabular-nums;}
+.orb-kpi__delta.up{color:var(--orb-success);}
+.orb-kpi__delta.down{color:var(--orb-error);}
+.orb-kpi__detail{color:var(--orb-text-muted);}
+.orb-kpi__spark{margin:2px -4px -6px;display:block;width:calc(100% + 8px);height:38px;filter:drop-shadow(0 2px 4px rgba(0,0,0,.35));}
+
+/* Lead variant — amber halo for the one number that matters most, and a
+   more pronounced bevel/lift so it reads as physically closer to the viewer */
+.orb-kpi--lead{
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.06), transparent 90px),
+    radial-gradient(130% 110% at 0% 110%, rgba(255,138,60,.12), transparent 55%),
+    radial-gradient(140% 100% at 100% 0%, var(--orb-cyan-ghost), transparent 50%),
+    var(--orb-glass-bg-high);
+  border-color:var(--orb-amber-border);
+  box-shadow:var(--orb-elev-2);
+}
+.orb-kpi--lead:hover{box-shadow:var(--orb-elev-3),var(--orb-glow-amber);border-color:var(--orb-amber);transform:translateY(-4px);}
+.orb-kpi--lead .orb-kpi__value{color:var(--orb-amber);font-size:var(--orb-kpi-hero-size);text-shadow:0 1px 0 rgba(0,0,0,.3), 0 0 30px rgba(255,184,0,.18);}
+.orb-kpi--lead .orb-kpi__icon{
+  color:var(--orb-text-on-amber);background:var(--orb-bevel-amber);border-color:rgba(255,255,255,.25);
+  box-shadow:0 1px 0 rgba(255,255,255,.4) inset, 0 -2px 0 rgba(0,0,0,.15) inset, 0 4px 12px -2px rgba(255,184,0,.5);
+}
+
+/* Gauge variant — conic ring set into a recessed dial (inset shadow on the
+   base) with a raised, bevelled center disc — reads as a real instrument. */
+.orb-kpi__gauge{
+  --gauge-pct:64%;
+  position:relative;width:76px;height:76px;border-radius:50%;
+  background:conic-gradient(var(--orb-cyan) var(--gauge-pct), rgba(140,210,235,.10) 0);
+  box-shadow:inset 0 2px 6px rgba(0,0,0,.5);
+}
+.orb-kpi__gauge::before{
+  content:"";position:absolute;inset:8px;border-radius:50%;
+  background:linear-gradient(155deg, var(--orb-surface-raised), var(--orb-surface) 65%);
+  box-shadow:0 1px 0 rgba(255,255,255,.08) inset, 0 3px 10px rgba(0,0,0,.4);
+}
+.orb-kpi__gauge > span{
+  position:absolute;inset:0;display:grid;place-items:center;
+  font-family:var(--orb-font);font-weight:700;font-size:15px;
+  font-variant-numeric:tabular-nums;color:var(--orb-cyan);
+  text-shadow:0 1px 2px rgba(0,0,0,.4);
+}
+
+/* =========================================================
+   Badges
+   ========================================================= */
+.orb-badge{
+  display:inline-flex;align-items:center;gap:6px;padding:3px 10px;
+  border-radius:var(--orb-radius-pill);
+  font-family:var(--orb-mono);font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;
+  border:1px solid transparent;
+  box-shadow:0 1px 0 rgba(255,255,255,.05) inset, 0 2px 4px rgba(0,0,0,.2);
+}
+.orb-badge--success{background:var(--orb-success-bg);color:var(--orb-success);border-color:var(--orb-success-border);}
+.orb-badge--info{background:var(--orb-info-bg);color:var(--orb-info);border-color:var(--orb-info-border);}
+.orb-badge--warning{background:var(--orb-warning-bg);color:var(--orb-warning);}
+.orb-badge--error{background:var(--orb-error-bg);color:var(--orb-error);border-color:var(--orb-error-border);}
+.orb-badge--muted{background:rgba(255,255,255,.05);color:var(--orb-text-muted);}
+.orb-badge--amber{background:var(--orb-amber-muted);color:var(--orb-amber);border-color:var(--orb-amber-border);}
+.orb-badge__dot{width:6px;height:6px;border-radius:50%;background:currentColor;}
+
+/* =========================================================
+   Alerts — glowing signal edge
+   ========================================================= */
+.orb-alert{
+  display:flex;gap:12px;align-items:flex-start;
+  padding:14px 16px;border-radius:var(--orb-radius-sm);
+  border:1px solid var(--orb-border);background:var(--orb-glass-bg);
+  backdrop-filter:blur(var(--orb-glass-blur));
+  box-shadow:var(--orb-elev-1);
+  position:relative;overflow:hidden;
+}
+.orb-alert::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;}
+.orb-alert__body{display:grid;gap:2px;font-size:var(--orb-ui-size);}
+.orb-alert__body strong{color:var(--orb-text);}
+.orb-alert__body span{color:var(--orb-text-soft);}
+.orb-alert--success{border-color:var(--orb-success-border);}
+.orb-alert--success::before{background:var(--orb-success);box-shadow:0 0 12px var(--orb-success);}
+.orb-alert--info{border-color:var(--orb-info-border);}
+.orb-alert--info::before{background:var(--orb-info);box-shadow:0 0 12px var(--orb-info);}
+.orb-alert--warning::before{background:var(--orb-warning);box-shadow:0 0 12px var(--orb-warning);}
+.orb-alert--error{border-color:var(--orb-error-border);}
+.orb-alert--error::before{background:var(--orb-error);box-shadow:0 0 12px var(--orb-error);}
+
+/* =========================================================
+   Table — mono headers, tabular money, hover trace
+   ========================================================= */
+.orb-table-wrap{
+  border:1px solid var(--orb-glass-border);border-radius:var(--orb-radius-md);overflow:hidden;
+  background:var(--orb-glass-bg);backdrop-filter:blur(var(--orb-glass-blur));box-shadow:var(--orb-elev-1);
+}
+.orb-table-scroll{overflow-x:auto;scrollbar-color:rgba(255,255,255,.18) transparent;}
+.orb-table-scroll::-webkit-scrollbar{height:8px;}
+.orb-table-scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:4px;}
+.orb-table-scroll::-webkit-scrollbar-track{background:transparent;}
+.orb-table{width:100%;min-width:640px;border-collapse:collapse;}
+.orb-table thead th{
+  text-align:right;padding:12px 14px;white-space:nowrap;
+  font-family:var(--orb-mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--orb-text-muted);border-bottom:1px solid var(--orb-border);
+  background:rgba(3,8,12,.4);box-shadow:0 1px 0 rgba(255,255,255,.04) inset;
+}
+.orb-table thead th:first-child,.orb-table tbody td:first-child{text-align:left;}
+.orb-table tbody td{
+  padding:12px 14px;text-align:right;white-space:nowrap;
+  font-variant-numeric:tabular-nums;font-size:var(--orb-ui-size);
+  border-bottom:1px solid var(--orb-border-soft);color:var(--orb-text-soft);
+}
+.orb-table tbody tr:last-child td{border-bottom:0;}
+.orb-table tbody tr{transition:background var(--orb-transition-fast);}
+.orb-table tbody tr:hover{background:var(--orb-cyan-ghost);}
+.orb-table .money.pos{color:var(--orb-success);}
+.orb-table .money.neg{color:var(--orb-error);}
+.orb-table .lead-cell{color:var(--orb-text);font-weight:600;}
+
+/* =========================================================
+   Navigation — active item gets the atmosphere edge
+   ========================================================= */
+.orb-nav{display:grid;gap:2px;}
+.orb-nav__group{
+  margin:14px 12px 6px;font-family:var(--orb-mono);font-size:11px;
+  letter-spacing:.16em;text-transform:uppercase;color:var(--orb-text-muted);
+}
+.orb-nav__item{
+  display:flex;align-items:center;gap:10px;min-height:40px;padding:0 14px;
+  border-radius:var(--orb-radius-sm);color:var(--orb-text-soft);text-decoration:none;
+  font-family:var(--orb-font);font-size:var(--orb-menu-size);
+  position:relative;transition:background var(--orb-transition-fast),color var(--orb-transition-fast);
+}
+.orb-nav__item:hover{background:var(--orb-surface-high);color:var(--orb-text);}
+.orb-nav__item.active{
+  background:linear-gradient(180deg, rgba(255,255,255,.05), transparent 70%),
+             linear-gradient(90deg, var(--orb-cyan-muted), transparent 70%);
+  color:var(--orb-text);
+  box-shadow:0 1px 0 rgba(255,255,255,.06) inset, 0 4px 12px -4px rgba(0,0,0,.4);
+}
+.orb-nav__item.active::before{
+  content:"";position:absolute;left:0;top:8px;bottom:8px;width:2.5px;
+  border-radius:2px;background:var(--orb-cyan);box-shadow:0 0 10px var(--orb-cyan);
+}
+.orb-nav__icon{display:inline-flex;width:18px;color:var(--orb-cyan);}
+.orb-nav__item.active .orb-nav__icon{filter:drop-shadow(0 0 6px rgba(47,212,255,.6));}
+
+/* =========================================================
+   Toggle
+   ========================================================= */
+.orb-toggle{display:inline-flex;align-items:center;gap:10px;cursor:pointer;font-size:var(--orb-ui-size);color:var(--orb-text-soft);}
+.orb-toggle input{position:absolute;opacity:0;width:0;height:0;}
+.orb-toggle .track{
+  width:42px;height:23px;border-radius:999px;position:relative;
+  background:rgba(140,210,235,.14);border:1px solid var(--orb-border);
+  box-shadow:inset 0 2px 4px rgba(0,0,0,.4);
+  transition:background var(--orb-transition-normal),box-shadow var(--orb-transition-normal);
+}
+.orb-toggle .track::after{
+  content:"";position:absolute;top:2px;left:2px;width:17px;height:17px;border-radius:50%;
+  background:linear-gradient(155deg, #fff, var(--orb-text-soft));
+  box-shadow:0 1px 3px rgba(0,0,0,.4), 0 0 0 1px rgba(0,0,0,.05);
+  transition:transform var(--orb-transition-normal),background var(--orb-transition-normal);
+}
+.orb-toggle input:checked + .track{background:var(--orb-cyan-deep);box-shadow:inset 0 2px 4px rgba(0,0,0,.3),var(--orb-glow-cyan-soft);}
+.orb-toggle input:checked + .track::after{transform:translateX(19px);background:linear-gradient(155deg, #fff, var(--orb-cyan-bright));}
+.orb-toggle input:focus-visible + .track{box-shadow:0 0 0 3px var(--orb-cyan-muted);}
+
+/* =========================================================
+   Progress — data stream bar
+   ========================================================= */
+.orb-progress{
+  height:8px;border-radius:999px;overflow:hidden;
+  background:rgba(140,210,235,.10);position:relative;
+  box-shadow:inset 0 2px 4px rgba(0,0,0,.45);
+}
+.orb-progress > span{
+  display:block;height:100%;border-radius:999px;position:relative;
+  background:linear-gradient(90deg, var(--orb-cyan-deep), var(--orb-cyan));
+  box-shadow:0 0 12px rgba(47,212,255,.45), 0 1px 0 rgba(255,255,255,.25) inset;
+}
+.orb-progress--amber > span{
+  background:linear-gradient(90deg, var(--orb-trail), var(--orb-amber));
+  box-shadow:0 0 12px rgba(255,184,0,.45);
+}
+
+/* =========================================================
+   Pictogram frame — glowing circular stage for empty states
+   ========================================================= */
+.orb-picto{
+  display:grid;place-items:center;width:112px;height:112px;border-radius:50%;
+  background:
+    radial-gradient(closest-side, var(--orb-cyan-ghost), transparent),
+    linear-gradient(155deg, var(--orb-surface-raised), var(--orb-surface) 65%);
+  border:1px solid var(--orb-cyan-border);
+  box-shadow:
+    var(--orb-glow-cyan-soft),
+    0 10px 24px -8px rgba(0,0,0,.5),
+    0 1px 0 rgba(255,255,255,.07) inset,
+    inset 0 0 30px rgba(47,212,255,.06);
+}
+.orb-picto img,.orb-picto svg{width:64px;height:64px;}
+
+/* =========================================================
+   Command-center patterns (from the "futuristic dashboard"
+   reference sweep, 2026-07): ticker, HUD corners, insight
+   card, ring gauge with legend, pipeline stepper.
+   ========================================================= */
+
+/* Edge ticker — thin mono status strip (imports, workspaces, feeds) */
+.orb-ticker{
+  display:flex;align-items:center;gap:22px;overflow:hidden;white-space:nowrap;
+  padding:8px 16px;border:1px solid var(--orb-glass-border);border-radius:var(--orb-radius-pill);
+  background:var(--orb-glass-bg);backdrop-filter:blur(var(--orb-glass-blur));
+  box-shadow:inset 0 1px 3px rgba(0,0,0,.35), 0 1px 0 rgba(255,255,255,.04) inset;
+  font-family:var(--orb-mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--orb-text-muted);
+}
+.orb-ticker b{color:var(--orb-text-soft);font-weight:400;}
+.orb-ticker .dot{width:6px;height:6px;border-radius:50%;display:inline-block;margin-right:7px;vertical-align:1px;}
+.orb-ticker .dot.ok{background:var(--orb-success);box-shadow:0 0 8px var(--orb-success);}
+.orb-ticker .dot.warn{background:var(--orb-warning);box-shadow:0 0 8px var(--orb-warning);}
+.orb-ticker .dot.err{background:var(--orb-error);box-shadow:0 0 8px var(--orb-error);}
+.orb-ticker .dot.idle{background:var(--orb-text-disabled);}
+
+/* HUD corner brackets — frames a hero visual */
+.orb-corners{position:relative;}
+.orb-corners > i{
+  position:absolute;width:18px;height:18px;border:0 solid var(--orb-cyan);opacity:.75;
+}
+.orb-corners > i:nth-child(1){top:10px;left:10px;border-top-width:1.5px;border-left-width:1.5px;}
+.orb-corners > i:nth-child(2){top:10px;right:10px;border-top-width:1.5px;border-right-width:1.5px;}
+.orb-corners > i:nth-child(3){bottom:10px;left:10px;border-bottom-width:1.5px;border-left-width:1.5px;}
+.orb-corners > i:nth-child(4){bottom:10px;right:10px;border-bottom-width:1.5px;border-right-width:1.5px;}
+
+/* Insight card — "next best action" (suggestion + CTA) */
+.orb-insight{
+  display:grid;gap:10px;padding:16px 18px;border-radius:var(--orb-radius-md);
+  border:1px solid var(--orb-cyan-border);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.05), transparent 60px),
+    linear-gradient(135deg, var(--orb-cyan-muted), transparent 55%),
+    var(--orb-glass-bg-high);
+  backdrop-filter:blur(var(--orb-glass-blur));
+  box-shadow:var(--orb-elev-2);
+}
+.orb-insight__head{display:flex;align-items:center;gap:9px;}
+.orb-insight__head .orb-badge{margin-left:auto;}
+.orb-insight__title{font-weight:600;color:var(--orb-text);font-size:13px;}
+.orb-insight__body{color:var(--orb-text-soft);font-size:12.5px;}
+.orb-insight__actions{display:flex;gap:10px;margin-top:2px;}
+
+/* Ring gauge with legend (conic center + labelled series) */
+.orb-ring{display:flex;align-items:center;gap:18px;}
+.orb-ring__dial{
+  --ring-stops:var(--orb-cyan) 0 60%, rgba(140,210,235,.12) 60% 100%;
+  position:relative;width:96px;height:96px;border-radius:50%;flex:none;
+  background:conic-gradient(var(--ring-stops));
+  box-shadow:inset 0 2px 8px rgba(0,0,0,.5);
+}
+.orb-ring__dial::before{
+  content:"";position:absolute;inset:9px;border-radius:50%;
+  background:linear-gradient(155deg, var(--orb-surface-raised), var(--orb-surface) 65%);
+  box-shadow:0 1px 0 rgba(255,255,255,.08) inset, 0 4px 14px rgba(0,0,0,.45);
+}
+.orb-ring__dial > span{
+  position:absolute;inset:0;display:grid;place-items:center;
+  font-weight:700;font-size:19px;font-variant-numeric:tabular-nums;color:var(--orb-text);
+  text-shadow:0 1px 2px rgba(0,0,0,.4);
+}
+.orb-ring__legend{display:grid;gap:7px;font-size:12px;color:var(--orb-text-soft);}
+.orb-ring__legend .item{display:flex;align-items:center;gap:8px;}
+.orb-ring__legend .swatch{width:9px;height:9px;border-radius:3px;flex:none;}
+.orb-ring__legend .val{margin-left:auto;font-variant-numeric:tabular-nums;color:var(--orb-text);font-weight:600;padding-left:16px;}
+
+/* Pipeline stepper — import lifecycle */
+.orb-stepper{display:flex;align-items:flex-start;}
+.orb-step{flex:1;display:grid;justify-items:center;gap:7px;position:relative;text-align:center;}
+.orb-step::before{
+  content:"";position:absolute;top:14px;left:calc(50% + 20px);right:calc(-50% + 20px);height:2px;
+  background:rgba(140,210,235,.15);
+}
+.orb-step:last-child::before{display:none;}
+.orb-step__node{
+  width:28px;height:28px;border-radius:50%;display:grid;place-items:center;z-index:1;
+  font-family:var(--orb-mono);font-size:11px;
+  border:1.5px solid var(--orb-border);
+  background:linear-gradient(155deg, var(--orb-surface-raised), var(--orb-surface) 65%);
+  color:var(--orb-text-muted);
+  box-shadow:0 1px 0 rgba(255,255,255,.06) inset, 0 3px 8px rgba(0,0,0,.4);
+  transition:box-shadow var(--orb-transition-fast), border-color var(--orb-transition-fast), color var(--orb-transition-fast);
+}
+.orb-step__label{font-family:var(--orb-mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--orb-text-muted);}
+.orb-step__hint{font-size:11px;color:var(--orb-text-soft);}
+.orb-step.done .orb-step__node{
+  border-color:var(--orb-success-border);background:var(--orb-success-bg);color:var(--orb-success);
+  box-shadow:0 1px 0 rgba(255,255,255,.08) inset, 0 3px 10px rgba(46,230,168,.18);
+}
+.orb-step.done::before{background:var(--orb-success);opacity:.5;}
+.orb-step.active .orb-step__node{
+  border-color:var(--orb-cyan);color:var(--orb-cyan);
+  box-shadow:var(--orb-glow-cyan-soft), 0 1px 0 rgba(255,255,255,.1) inset, 0 4px 12px -2px rgba(0,0,0,.45);
+}
+.orb-step.active .orb-step__label{color:var(--orb-cyan);}

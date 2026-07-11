@@ -1,0 +1,153 @@
+/* Theme Orbital — Office skin.
+   Feedback David (2026-07): pour Office, se rapprocher des couleurs actuelles de
+   l'app (jaune #FFB800 dominant, surfaces neutres, bleu info #3B82F6, vert #22C55E)
+   et donner plus de FORME aux cartes KPI et aux éléments (barres d'accent, plaques
+   d'icône, séparations tête/valeur/tendance, reliefs).
+   Chargé APRÈS orbital-components.css + _shell.css — uniquement sur les pages Office.
+   Le cyan Orbital reste présent mais démis au rang d'accent data ponctuel. */
+
+:root{
+  /* Surfaces : retour à l'échelle neutre actuelle de l'app */
+  --orb-void:#0A0C10;
+  --orb-bg:#0D0F14;
+  --orb-surface:#171B22;
+  --orb-surface-high:#212933;
+  --orb-surface-raised:#2A3440;
+
+  /* Texte : blanc chaud actuel */
+  --orb-text:#F6F7F9;
+  --orb-text-soft:rgba(255,255,255,.74);
+  --orb-text-muted:rgba(255,255,255,.48);
+  --orb-text-disabled:rgba(255,255,255,.30);
+
+  /* Bordures neutres actuelles */
+  --orb-border:rgba(255,255,255,.10);
+  --orb-border-soft:rgba(255,255,255,.06);
+
+  /* États : valeurs actuelles de l'app (success/info) ; error/warning déjà alignés */
+  --orb-success:#22C55E; --orb-success-bg:rgba(34,197,94,.12); --orb-success-border:rgba(34,197,94,.35);
+  --orb-info:#3B82F6;    --orb-info-bg:rgba(59,130,246,.12);   --orb-info-border:rgba(59,130,246,.35);
+
+  /* Le glow signature passe du cyan à l'ambre (marque) pour les éléments actifs */
+  --orb-glow-cyan-soft:0 0 14px rgba(255,184,0,.14);
+}
+
+/* Fond de page : plus sobre (pas de nébuleuse cyan) */
+body::before{opacity:.35;}
+
+/* ---------- Icônes (mockup uniquement) ----------
+   Les SVG sont cyan en dur ; on les neutralise ici par filtre CSS.
+   Dans l'app réelle, Icon.svelte + currentColor rend ce hack inutile (cf. PORTING). */
+.nav-icon-img{filter:grayscale(1) brightness(1.7);opacity:.8;}
+.orb-nav__item.active .nav-icon-img,
+.orb-kpi__icon img{filter:grayscale(1) sepia(1) saturate(6) hue-rotate(-8deg) brightness(1.05);opacity:1;}
+
+/* ---------- Navigation : actif jaune (comme l'app actuelle) ---------- */
+.orb-nav__item.active{
+  background:linear-gradient(90deg, var(--orb-amber-muted), transparent 75%);
+  color:var(--orb-text);
+}
+.orb-nav__item.active::before{
+  background:var(--orb-amber);box-shadow:0 0 10px rgba(255,184,0,.55);
+}
+.orb-nav__icon{color:var(--orb-text-soft);}
+
+/* ---------- Boutons : secondaire = contour brand ---------- */
+.orb-button--secondary{color:var(--orb-amber);border-color:var(--orb-amber-border);}
+.orb-button--secondary:hover{background:var(--orb-amber-muted);box-shadow:0 0 14px rgba(255,184,0,.18);}
+.orb-button:focus-visible{box-shadow:0 0 0 3px var(--orb-amber-muted);}
+.orb-input:hover{border-color:var(--orb-amber-border);}
+.orb-input:focus{border-color:var(--orb-amber);box-shadow:0 0 12px rgba(255,184,0,.15);}
+
+/* ---------- Cartes KPI : plus de forme ----------
+   Structure en 3 zones (tête / valeur / tendance), barre d'accent gauche,
+   plaque d'icône pleine, relief haut, ombre portée réelle. */
+.orb-kpi{
+  gap:0;padding:0;overflow:hidden;
+  background:linear-gradient(180deg, rgba(255,255,255,.03), transparent 90px), var(--orb-surface);
+  border:1px solid var(--orb-border);
+  box-shadow:var(--orb-elev-1);
+}
+.orb-kpi::before{
+  content:"";position:absolute;left:0;top:0;bottom:0;width:3px;
+  background:linear-gradient(180deg, var(--orb-amber), rgba(255,184,0,.15));
+}
+.orb-kpi__head{
+  padding:12px 16px 10px 18px;
+  border-bottom:1px solid var(--orb-border-soft);
+  background:linear-gradient(180deg, rgba(255,255,255,.03), transparent);
+}
+.orb-kpi__icon{
+  width:34px;height:34px;border-radius:10px;
+  background:var(--orb-surface-high);border:1px solid var(--orb-border);
+}
+.orb-kpi__value{padding:14px 18px 4px;}
+.orb-kpi__trend{padding:4px 18px 14px;}
+.orb-kpi__delta{
+  padding:2px 8px;border-radius:999px;font-size:11px;
+}
+.orb-kpi__delta.up{background:var(--orb-success-bg);}
+.orb-kpi__delta.down{background:var(--orb-error-bg);}
+.orb-kpi:hover{border-color:var(--orb-amber-border);box-shadow:var(--orb-elev-2), 0 0 18px rgba(255,184,0,.10);}
+
+.orb-kpi--lead{
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.05), transparent 90px),
+    radial-gradient(120% 130% at 0% 0%, rgba(255,184,0,.10), transparent 55%),
+    var(--orb-surface);
+  border-color:var(--orb-amber-border);
+  box-shadow:var(--orb-elev-2);
+}
+.orb-kpi--lead::before{background:var(--orb-amber);box-shadow:0 0 12px rgba(255,184,0,.5);}
+.orb-kpi--lead .orb-kpi__icon{background:var(--orb-amber-muted);border-color:var(--orb-amber-border);}
+.orb-kpi--lead:hover{box-shadow:var(--orb-elev-3), var(--orb-glow-amber);}
+
+/* Jauges : brand + états actuels */
+.orb-kpi__gauge{background:conic-gradient(var(--orb-amber) var(--gauge-pct), rgba(255,255,255,.08) 0);}
+.orb-kpi__gauge > span{color:var(--orb-amber);}
+
+/* ---------- Panneaux : en-tête de section marqué ---------- */
+.orb-panel{background:linear-gradient(180deg, rgba(255,255,255,.03), transparent 120px), var(--orb-surface);}
+.orb-panel:hover{border-color:var(--orb-border);box-shadow:var(--orb-elev-2);}
+.panel-title{position:relative;padding-left:12px;color:var(--orb-text-soft);}
+.panel-title::before{
+  content:"";position:absolute;left:0;top:50%;transform:translateY(-50%);
+  width:3px;height:12px;border-radius:2px;background:var(--orb-amber);
+  box-shadow:0 0 8px rgba(255,184,0,.5);
+}
+.panel-title a{color:var(--orb-amber);}
+
+/* ---------- Insight : style "reçu" jaune actuel ---------- */
+.orb-insight{
+  border-color:var(--orb-amber-border);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.05), transparent 60px),
+    linear-gradient(135deg, var(--orb-amber-muted), transparent 60%),
+    var(--orb-surface);
+  box-shadow:var(--orb-elev-2);
+}
+.orb-insight__head .orb-kpi__icon{background:var(--orb-amber-muted);border-color:var(--orb-amber-border);}
+
+/* ---------- Tables : tête plus affirmée, hover brand ---------- */
+.orb-table thead th{
+  background:var(--orb-surface-high);
+  border-bottom:1px solid var(--orb-border);
+  color:var(--orb-text-soft);
+}
+.orb-table tbody tr:hover{background:var(--orb-amber-muted);}
+.orb-table-wrap{box-shadow:var(--orb-elev-1);}
+
+/* ---------- Divers ---------- */
+.chip:hover{border-color:var(--orb-amber-border);}
+.orb-progress > span{
+  background:linear-gradient(90deg, #E6A600, var(--orb-amber));
+  box-shadow:0 0 12px rgba(255,184,0,.4);
+}
+.tree-row .name .tw{color:var(--orb-amber);}
+.orb-ticker{background:var(--orb-surface);}
+.drawer-mock{border-color:var(--orb-border);background:var(--orb-surface-high);}
+.dropzone{border-color:var(--orb-amber-border);background:var(--orb-amber-muted);}
+.dropzone .nav-icon-img{filter:grayscale(1) sepia(1) saturate(6) hue-rotate(-8deg) brightness(1.05);}
+.page-head .kicker{color:var(--orb-amber);}
+.brand span{color:var(--orb-amber);}
+.orb-ring__dial{/* stops passés inline par page ; les pages utilisent déjà success/warning actuels */}

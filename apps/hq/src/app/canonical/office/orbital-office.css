@@ -1,13 +1,17 @@
-/* Orbital Office port (style-only): Office-scoped overrides for @ehq/ui + Office pages. */
+/* Orbital theme port (style-only): global overrides for @ehq/ui, applied to every workspace
+   (Office, Distribution, Command Center) — the Office look is now the single app-wide theme.
+   Landing page is untouched (it never renders a .ehq-workspace-shell). */
 
-.ehq-workspace-shell.ehq-workspace-office {
+.ehq-workspace-shell:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) {
+  --ehq-workspace-accent: var(--ehq-yellow);
+  --ehq-workspace-accent-bg: var(--ehq-yellow-muted);
   background:
     radial-gradient(circle at 10% 4%, rgba(255, 184, 0, 0.14), transparent 26%),
     radial-gradient(circle at 78% 10%, rgba(59, 130, 246, 0.12), transparent 22%),
     var(--ehq-bg-main);
 }
 
-.ehq-workspace-shell.ehq-workspace-office::before {
+.ehq-workspace-shell:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center)::before {
   content: "";
   position: fixed;
   inset: 0;
@@ -18,16 +22,16 @@
     radial-gradient(circle at 86% 14%, rgba(59, 130, 246, 0.08), transparent 34%);
 }
 
-.ehq-workspace-office .shell-main {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .shell-main {
   background: transparent;
 }
 
-.ehq-workspace-shell.ehq-workspace-office aside {
+.ehq-workspace-shell:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) aside {
   padding: 22px 18px 22px 24px;
   background: transparent;
 }
 
-.ehq-workspace-shell.ehq-workspace-office nav {
+.ehq-workspace-shell:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) nav {
   padding: 18px 14px;
   border: 1px solid var(--ehq-border);
   border-radius: var(--ehq-radius-lg);
@@ -35,15 +39,15 @@
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.36);
 }
 
-.ehq-workspace-shell.ehq-workspace-office .nav-group {
+.ehq-workspace-shell:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .nav-group {
   margin: var(--ehq-space-3) 0 var(--ehq-space-2);
 }
 
-.ehq-workspace-shell.ehq-workspace-office .shell-mark {
+.ehq-workspace-shell:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .shell-mark {
   display: none;
 }
 
-.ehq-workspace-shell.ehq-workspace-office .shell-topbar {
+.ehq-workspace-shell:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .shell-topbar {
   position: relative;
   min-height: 76px;
   padding: 12px 24px;
@@ -52,7 +56,7 @@
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 82%);
 }
 
-.ehq-workspace-shell.ehq-workspace-office .shell-topbar::after {
+.ehq-workspace-shell:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .shell-topbar::after {
   content: "";
   position: absolute;
   left: 24px;
@@ -62,13 +66,13 @@
   background: linear-gradient(90deg, transparent, var(--ehq-border), transparent);
 }
 
-.ehq-workspace-shell.ehq-workspace-office .shell-title {
+.ehq-workspace-shell:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .shell-title {
   display: inline-flex;
   align-items: baseline;
   gap: 10px;
 }
 
-.ehq-workspace-shell.ehq-workspace-office .shell-title::after {
+.ehq-workspace-shell:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .shell-title::after {
   content: ". ORBITAL";
   color: var(--ehq-yellow);
   font-family: var(--ehq-mono);
@@ -77,7 +81,7 @@
   text-transform: uppercase;
 }
 
-.ehq-workspace-shell.ehq-workspace-office .shell-search {
+.ehq-workspace-shell:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .shell-search {
   min-height: 46px;
   padding: 0 14px;
   border-radius: var(--ehq-radius-pill);
@@ -88,7 +92,7 @@
   color: var(--ehq-text-muted);
 }
 
-.ehq-workspace-shell.ehq-workspace-office .shell-search span {
+.ehq-workspace-shell:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .shell-search span {
   color: var(--ehq-text-soft);
   font-family: var(--ehq-mono);
   font-size: var(--ehq-type-label-size);
@@ -96,19 +100,19 @@
   text-transform: uppercase;
 }
 
-.ehq-workspace-shell.ehq-workspace-office .shell-search kbd {
+.ehq-workspace-shell:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .shell-search kbd {
   border-color: var(--ehq-yellow-border);
   background: var(--ehq-yellow-muted);
   color: var(--ehq-yellow);
 }
 
-.ehq-workspace-shell.ehq-workspace-office .shell-user {
+.ehq-workspace-shell:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .shell-user {
   border-color: var(--ehq-yellow-border);
   background: linear-gradient(180deg, rgba(255, 184, 0, 0.1), rgba(255, 184, 0, 0.03));
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.28);
 }
 
-.ehq-workspace-shell.ehq-workspace-office .shell-user b {
+.ehq-workspace-shell:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .shell-user b {
   width: 40px;
   height: 40px;
   border: 1px solid var(--ehq-yellow-border);
@@ -116,51 +120,51 @@
   color: var(--ehq-yellow);
 }
 
-.ehq-workspace-shell.ehq-workspace-office .shell-user strong {
+.ehq-workspace-shell:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .shell-user strong {
   color: var(--ehq-text);
 }
 
-.ehq-workspace-shell.ehq-workspace-office .shell-user small {
+.ehq-workspace-shell:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .shell-user small {
   letter-spacing: 0.16em;
 }
 
-.ehq-workspace-office .content {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .content {
   gap: var(--ehq-space-5);
 }
 
-.ehq-workspace-office .shell-mark {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .shell-mark {
   border-color: var(--ehq-yellow-border);
   color: var(--ehq-yellow);
   box-shadow: 0 0 10px rgba(255, 184, 0, 0.22);
 }
 
-.ehq-workspace-office .shell-status {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .shell-status {
   background: var(--ehq-surface);
   border-color: var(--ehq-border-soft);
 }
 
-.ehq-workspace-office .ehq-page-header {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-page-header {
   min-height: 0;
   padding: 2px 0 0;
   border-bottom: 0;
   align-items: start;
 }
 
-.ehq-workspace-office .ehq-page-header p {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-page-header p {
   color: var(--ehq-yellow);
 }
 
-.ehq-workspace-office .ehq-page-header h1 {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-page-header h1 {
   color: var(--ehq-yellow);
   font-size: clamp(2.05rem, 1.75rem + 1.1vw, 3rem);
 }
 
-.ehq-workspace-office .ehq-page-header span {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-page-header span {
   color: var(--ehq-text-soft);
   max-width: 76ch;
 }
 
-.ehq-workspace-office .period-control {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .period-control {
   margin-top: -2px;
   margin-left: auto;
   width: fit-content;
@@ -172,16 +176,16 @@
   gap: var(--ehq-space-2);
 }
 
-.ehq-workspace-office .period-control .ehq-select-field {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .period-control .ehq-select-field {
   width: fit-content;
   min-width: 0;
 }
 
-.ehq-workspace-office .period-control .ehq-select-field > span {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .period-control .ehq-select-field > span {
   display: none;
 }
 
-.ehq-workspace-office .period-control .ehq-select-field select {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .period-control .ehq-select-field select {
   min-height: 48px;
   width: auto;
   min-width: 182px;
@@ -192,22 +196,30 @@
   font-weight: 600;
 }
 
-.ehq-workspace-office .period-control p {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .period-control p {
   margin: 0;
   padding: 0 var(--ehq-space-2);
   color: var(--ehq-text-muted);
 }
 
-.ehq-workspace-office .nav-item.active {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .nav-item.active {
   background: linear-gradient(90deg, var(--ehq-yellow-muted), transparent 78%);
 }
 
-.ehq-workspace-office .nav-item {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .nav-item {
   border: 1px solid transparent;
   transition: background var(--ehq-transition-fast), border-color var(--ehq-transition-fast);
 }
 
-.ehq-workspace-office .nav-item.active::after {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .nav-icon {
+  color: var(--ehq-yellow);
+}
+
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .nav-item.disabled .nav-icon {
+  color: var(--ehq-text-disabled);
+}
+
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .nav-item.active::after {
   content: "";
   position: absolute;
   left: 0;
@@ -219,55 +231,57 @@
   box-shadow: 0 0 10px rgba(255, 184, 0, 0.5);
 }
 
-.ehq-workspace-office .ehq-edge-surface {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-edge-surface {
   --ehq-edge-fill: var(--ehq-surface);
   --ehq-edge-border-color: var(--ehq-border);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 12px 28px rgba(0, 0, 0, 0.34);
+  box-shadow: var(--orb-elev-1, 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 12px 28px rgba(0, 0, 0, 0.34));
+  transition: box-shadow var(--ehq-transition-fast), border-color var(--ehq-transition-fast);
 }
 
-.ehq-workspace-office .panel-card.ehq-edge-surface {
-  background: var(--ehq-surface);
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .panel-card.ehq-edge-surface {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 120px), var(--ehq-surface);
 }
 
-.ehq-workspace-office .ehq-edge-surface:hover {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-edge-surface:hover {
   --ehq-edge-border-color: var(--ehq-yellow-border);
+  box-shadow: var(--orb-elev-2, 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 16px 34px rgba(0, 0, 0, 0.4));
 }
 
-.ehq-workspace-office .period-control,
-.ehq-workspace-office .filter-strip,
-.ehq-workspace-office .filter-grid,
-.ehq-workspace-office .form-panel,
-.ehq-workspace-office .pending-actions,
-.ehq-workspace-office .office-edit-panel,
-.ehq-workspace-office .statement-import-panel,
-.ehq-workspace-office .bank-account-form,
-.ehq-workspace-office .monitoring-panel,
-.ehq-workspace-office .partners-head,
-.ehq-workspace-office .partners-toolbar,
-.ehq-workspace-office .project-list,
-.ehq-workspace-office .project-form,
-.ehq-workspace-office .project-detail,
-.ehq-workspace-office .config-grid {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .period-control,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .filter-strip,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .filter-grid,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .form-panel,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .pending-actions,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .office-edit-panel,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .statement-import-panel,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .bank-account-form,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .monitoring-panel,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .partners-head,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .partners-toolbar,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .project-list,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .project-form,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .project-detail,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .config-grid {
   border: 1px solid var(--ehq-border-soft);
   background: var(--ehq-surface);
 }
 
-.ehq-workspace-office .ehq-section-template header p,
-.ehq-workspace-office .panel-title,
-.ehq-workspace-office .ehq-type-label-mono {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-section-template header p,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .panel-title,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-type-label-mono {
   color: var(--ehq-text-muted);
 }
 
-.ehq-workspace-office .ehq-section-template header h2 {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-section-template header h2 {
   color: var(--ehq-text);
 }
 
-.ehq-workspace-office .ehq-section-template header p {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-section-template header p {
   padding-left: 12px;
   position: relative;
 }
 
-.ehq-workspace-office .ehq-section-template header p::before {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-section-template header p::before {
   content: "";
   position: absolute;
   left: 0;
@@ -281,17 +295,25 @@
 }
 
 /* KPI cards: 3-zone card, left accent rail, lead first card. */
-.ehq-workspace-office .ehq-stat-card,
-.ehq-workspace-office .ehq-kpi {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-stat-card,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-kpi {
   position: relative;
   overflow: hidden;
   gap: 0;
-  background: var(--ehq-surface);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 90px), var(--ehq-surface);
   border-radius: var(--ehq-radius-md);
+  box-shadow: var(--orb-elev-1, 0 10px 28px rgba(0, 0, 0, 0.35));
+  transition: box-shadow var(--ehq-transition-fast), border-color var(--ehq-transition-fast), transform var(--ehq-transition-fast);
 }
 
-.ehq-workspace-office .ehq-stat-card::before,
-.ehq-workspace-office .ehq-kpi::before {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-stat-card:hover,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-kpi:hover {
+  box-shadow: var(--orb-elev-2, 0 12px 32px rgba(0, 0, 0, 0.45)), 0 0 18px rgba(255, 184, 0, 0.1);
+  transform: translateY(-2px);
+}
+
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-stat-card::before,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-kpi::before {
   content: "";
   position: absolute;
   left: 0;
@@ -301,8 +323,8 @@
   background: linear-gradient(180deg, var(--ehq-yellow), rgba(255, 184, 0, 0.2));
 }
 
-.ehq-workspace-office .ehq-stat-card .label,
-.ehq-workspace-office .ehq-kpi p {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-stat-card .label,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-kpi p {
   width: 100%;
   margin: 0;
   padding: 12px 16px 10px 18px;
@@ -310,76 +332,81 @@
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent);
 }
 
-.ehq-workspace-office .ehq-stat-card .value,
-.ehq-workspace-office .ehq-kpi strong {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-stat-card .value,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-kpi strong {
   width: 100%;
   margin: 0;
   padding: 14px 18px 4px;
   line-height: 1.1;
 }
 
-.ehq-workspace-office .ehq-stat-card .trend,
-.ehq-workspace-office .ehq-kpi span {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-stat-card .trend,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-kpi span {
   width: 100%;
   margin: 0;
   padding: 4px 18px 14px;
 }
 
-.ehq-workspace-office .ehq-stat-card .icon {
-  background: var(--ehq-surface-high);
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-stat-card .icon {
+  background: linear-gradient(155deg, var(--ehq-surface-raised), var(--ehq-surface-high) 60%);
   border: 1px solid var(--ehq-border);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.1) inset, 0 3px 8px rgba(0, 0, 0, 0.35);
 }
 
-.ehq-workspace-office .kpi-grid > :first-child {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .kpi-grid > :first-child {
   --ehq-edge-border-color: var(--ehq-yellow-border);
-  box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.05) inset,
-    0 16px 34px rgba(0, 0, 0, 0.45),
-    0 0 16px rgba(255, 184, 0, 0.14);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 90px), var(--ehq-surface);
+  box-shadow: var(--orb-elev-2, 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 16px 34px rgba(0, 0, 0, 0.45)), 0 0 16px rgba(255, 184, 0, 0.14);
 }
 
-.ehq-workspace-office .kpi-grid > :first-child::before {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .kpi-grid > :first-child:hover {
+  box-shadow: var(--orb-elev-3, 0 20px 44px rgba(0, 0, 0, 0.5)), 0 0 24px rgba(255, 184, 0, 0.2);
+  transform: translateY(-3px);
+}
+
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .kpi-grid > :first-child::before {
   box-shadow: 0 0 10px rgba(255, 184, 0, 0.5);
 }
 
 /* Tables and badges. */
-.ehq-workspace-office .ehq-table-shell {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-table-shell {
   border-radius: var(--ehq-radius-md);
   overflow: hidden;
+  box-shadow: var(--orb-elev-1, 0 8px 24px rgba(0, 0, 0, 0.3));
 }
 
-.ehq-workspace-office .ehq-table-shell thead th {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-table-shell thead th {
   background: var(--ehq-surface-high);
   border-bottom: 1px solid var(--ehq-border);
   color: var(--ehq-text-soft);
 }
 
-.ehq-workspace-office .ehq-table-shell tbody tr:hover {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-table-shell tbody tr:hover {
   background: var(--ehq-yellow-muted);
 }
 
-.ehq-workspace-office .ehq-table-shell .sort-header:hover {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-table-shell .sort-header:hover {
   color: var(--ehq-yellow);
 }
 
-.ehq-workspace-office .ehq-badge {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-badge {
   border-color: var(--ehq-border);
 }
 
-.ehq-workspace-office .ehq-badge.warning,
-.ehq-workspace-office .ehq-badge.active {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-badge.warning,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-badge.active {
   border-color: var(--ehq-yellow-border);
   background: var(--ehq-yellow-muted);
   color: var(--ehq-yellow);
 }
 
 /* Alerts with luminous left rail. */
-.ehq-workspace-office .ehq-alert {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-alert {
   position: relative;
   overflow: hidden;
 }
 
-.ehq-workspace-office .ehq-alert::before {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-alert::before {
   content: "";
   position: absolute;
   left: 0;
@@ -391,180 +418,180 @@
 }
 
 /* Inputs, strips, and action panels. */
-.ehq-workspace-office .period-control,
-.ehq-workspace-office .filter-strip,
-.ehq-workspace-office .filter-grid,
-.ehq-workspace-office .form-panel,
-.ehq-workspace-office .pending-actions,
-.ehq-workspace-office .office-edit-panel,
-.ehq-workspace-office .statement-import-panel,
-.ehq-workspace-office .bank-account-form,
-.ehq-workspace-office .monitoring-panel,
-.ehq-workspace-office .partners-head,
-.ehq-workspace-office .partners-toolbar,
-.ehq-workspace-office .project-list,
-.ehq-workspace-office .project-form,
-.ehq-workspace-office .project-detail,
-.ehq-workspace-office .config-grid,
-.ehq-workspace-office .vat-view .dashboard-grid,
-.ehq-workspace-office .ceo-view .dashboard-grid,
-.ehq-workspace-office .bank-view .dashboard-grid {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .period-control,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .filter-strip,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .filter-grid,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .form-panel,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .pending-actions,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .office-edit-panel,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .statement-import-panel,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .bank-account-form,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .monitoring-panel,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .partners-head,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .partners-toolbar,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .project-list,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .project-form,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .project-detail,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .config-grid,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .vat-view .dashboard-grid,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ceo-view .dashboard-grid,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .bank-view .dashboard-grid {
   border-radius: var(--ehq-radius-md);
 }
 
-.ehq-workspace-office .panel-card,
-.ehq-workspace-office .dashboard-grid > .ehq-edge-surface,
-.ehq-workspace-office .dashboard-grid > .ehq-chart,
-.ehq-workspace-office .dashboard-grid > .ehq-table-shell {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .panel-card,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .dashboard-grid > .ehq-edge-surface,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .dashboard-grid > .ehq-chart,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .dashboard-grid > .ehq-table-shell {
   border-radius: var(--ehq-radius-md);
 }
 
-.ehq-workspace-office .panel-card .ehq-section-template > header p {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .panel-card .ehq-section-template > header p {
   color: var(--ehq-text-muted);
 }
 
-.ehq-workspace-office input:focus,
-.ehq-workspace-office .ehq-field input:focus,
-.ehq-workspace-office .ehq-select-field select:focus {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) input:focus,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-field input:focus,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-select-field select:focus {
   border-color: var(--ehq-yellow-border);
   box-shadow: 0 0 0 3px var(--ehq-yellow-muted);
 }
 
 /* Imports page visual parity: progress cards + highlighted drop area. */
-.ehq-workspace-office .import-steps article.complete {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .import-steps article.complete {
   border-color: var(--ehq-yellow-border);
   box-shadow: inset 3px 0 0 var(--ehq-yellow);
 }
 
-.ehq-workspace-office .import-row--rejected {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .import-row--rejected {
   background: var(--ehq-yellow-muted);
   color: var(--ehq-yellow);
 }
 
-.ehq-workspace-office .import-row-flag {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .import-row-flag {
   box-shadow: 0 0 10px rgba(255, 184, 0, 0.4);
 }
 
-.ehq-workspace-office .import-rows-table {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .import-rows-table {
   border-color: var(--ehq-border);
   background: var(--ehq-surface);
 }
 
-.ehq-workspace-office .import-row--header {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .import-row--header {
   background: var(--ehq-surface-high);
 }
 
 /* Pending page cards. */
-.ehq-workspace-office .pending-list button.selected {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .pending-list button.selected {
   border-color: var(--ehq-yellow-border);
   box-shadow: inset 3px 0 0 var(--ehq-yellow);
 }
 
-.ehq-workspace-office .pending-list button {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .pending-list button {
   border: 1px solid var(--ehq-border-soft);
   background: var(--ehq-surface);
 }
 
 /* PnL / CoA / grid-heavy pages. */
-.ehq-workspace-office .dashboard-grid {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .dashboard-grid {
   align-items: start;
 }
 
-.ehq-workspace-office .panel-card {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .panel-card {
   border-radius: var(--ehq-radius-md);
 }
 
 /* Page-specific alignments against Orbital office mockups. */
-.ehq-workspace-office .office-page-dashboard .dashboard-wide-panel {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .office-page-dashboard .dashboard-wide-panel {
   background:
     radial-gradient(circle at 8% 14%, rgba(255, 184, 0, 0.08), transparent 32%),
     var(--ehq-surface);
 }
 
-.ehq-workspace-office .office-page-reconciliation .kpi-grid > article {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .office-page-reconciliation .kpi-grid > article {
   min-height: 126px;
 }
 
-.ehq-workspace-office .office-page-pnl .filter-strip,
-.ehq-workspace-office .office-page-cashflow .filter-strip {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .office-page-pnl .filter-strip,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .office-page-cashflow .filter-strip {
   border-color: var(--ehq-border);
 }
 
-.ehq-workspace-office .office-page-coa .form-panel,
-.ehq-workspace-office .office-page-transactions .filter-grid,
-.ehq-workspace-office .office-page-transactions .office-edit-panel {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .office-page-coa .form-panel,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .office-page-transactions .filter-grid,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .office-page-transactions .office-edit-panel {
   background: var(--ehq-surface);
 }
 
-.ehq-workspace-office .partners-layout,
-.ehq-workspace-office .projects-layout,
-.ehq-workspace-office .monitoring-layout {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .partners-layout,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .projects-layout,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .monitoring-layout {
   align-items: start;
 }
 
-.ehq-workspace-office .partner-drawer,
-.ehq-workspace-office .project-detail {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .partner-drawer,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .project-detail {
   border: 1px solid var(--ehq-border-soft);
   border-radius: var(--ehq-radius-md);
   background: var(--ehq-surface);
 }
 
-.ehq-workspace-office .suggestions,
-.ehq-workspace-office .link-panel,
-.ehq-workspace-office .drawer-mock,
-.ehq-workspace-office .project-buttons button,
-.ehq-workspace-office .monitoring-panel header {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .suggestions,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .link-panel,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .drawer-mock,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .project-buttons button,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .monitoring-panel header {
   border: 1px solid var(--ehq-border-soft);
   border-radius: var(--ehq-radius-sm);
   background: var(--ehq-surface-high);
 }
 
-.ehq-workspace-office .project-buttons button.selected {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .project-buttons button.selected {
   border-color: var(--ehq-yellow-border);
   box-shadow: inset 3px 0 0 var(--ehq-yellow);
 }
 
-.ehq-workspace-office .office-page-bank .bank-account-actions,
-.ehq-workspace-office .office-page-projects .project-form-actions,
-.ehq-workspace-office .office-page-projects .project-detail-actions,
-.ehq-workspace-office .office-page-clients .drawer-actions,
-.ehq-workspace-office .office-page-suppliers .drawer-actions {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .office-page-bank .bank-account-actions,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .office-page-projects .project-form-actions,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .office-page-projects .project-detail-actions,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .office-page-clients .drawer-actions,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .office-page-suppliers .drawer-actions {
   flex-wrap: wrap;
 }
 
-.ehq-workspace-office .office-page-settings .config-grid > article {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .office-page-settings .config-grid > article {
   border: 1px solid var(--ehq-border-soft);
   border-radius: var(--ehq-radius-sm);
   background: var(--ehq-surface-high);
   padding: var(--ehq-space-3);
 }
 
-.ehq-workspace-office .office-page-vat .kpi-grid {
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .office-page-vat .kpi-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 /* Responsive guardrails aligned with mockup one-column fallback. */
 @media (max-width: 1100px) {
-  .ehq-workspace-office .kpi-grid,
-  .ehq-workspace-office .dashboard-grid {
+  :is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .kpi-grid,
+  :is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .dashboard-grid {
     grid-template-columns: 1fr 1fr;
   }
 
-  .ehq-workspace-office .config-grid {
+  :is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .config-grid {
     grid-template-columns: 1fr;
   }
 }
 
 @media (max-width: 760px) {
-  .ehq-workspace-office .kpi-grid,
-  .ehq-workspace-office .dashboard-grid,
-  .ehq-workspace-office .filter-grid,
-  .ehq-workspace-office .import-steps,
-  .ehq-workspace-office .pending-list {
+  :is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .kpi-grid,
+  :is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .dashboard-grid,
+  :is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .filter-grid,
+  :is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .import-steps,
+  :is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .pending-list {
     grid-template-columns: 1fr;
   }
 
-  .ehq-workspace-office .office-page-vat .kpi-grid {
+  :is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .office-page-vat .kpi-grid {
     grid-template-columns: 1fr;
   }
 }

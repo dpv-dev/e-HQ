@@ -464,6 +464,62 @@
     });
   }
 
+  function downloadCsv(filename: string, header: readonly string[], rows: readonly (readonly string[])[]): void {
+    const escapeCell = (value: string): string => (/[",\n]/u.test(value) ? `"${value.replaceAll('"', '""')}"` : value);
+    const content = [header, ...rows].map((cells: readonly string[]): string => cells.map(escapeCell).join(",")).join("\n");
+    const blob = new Blob([content], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function microToDecimalCsv(value: string): string {
+    try {
+      const parsed = BigInt(value);
+      const sign = parsed < 0n ? "-" : "";
+      const absolute = parsed < 0n ? -parsed : parsed;
+      const whole = absolute / 1_000_000n;
+      const fraction = (absolute % 1_000_000n).toString().padStart(6, "0");
+      return `${sign}${whole.toString()}.${fraction}`;
+    } catch {
+      return "0.000000";
+    }
+  }
+
+  function exportPartnersCsv(): void {
+    const rows = partners.map((partner: OfficePartnerListItem): readonly string[] => {
+      const side = facetActivity(partner);
+      const otherSide = alsoActivity(partner);
+
+      return [
+        partner.name,
+        microToDecimalCsv(side.periodTotalMicro),
+        microToDecimalCsv(side.openBalanceMicro),
+        microToDecimalCsv(otherSide.periodTotalMicro),
+        microToDecimalCsv(otherSide.openBalanceMicro),
+        lastActivityLabel(partner),
+        partner.status
+      ];
+    });
+
+    downloadCsv(
+      `office-partners-${props.facet}-${props.period}.csv`,
+      [
+        "Name",
+        "Primary side period total",
+        "Primary side open balance",
+        "Other side period total",
+        "Other side open balance",
+        "Last activity",
+        "Status"
+      ],
+      rows
+    );
+  }
+
   function readPartnerDetail(state: ApiRequestState<OfficePartnerDetail>): OfficePartnerDetail | null {
     if (state.status === "success") {
       return state.data;
@@ -762,18 +818,32 @@
           <p>{copy.tableTitle}</p>
           <strong>{partners.length} visible</strong>
         </div>
-        <Button
-          label="Refresh"
-          variant="secondary"
-          size="small"
-          type="button"
-          disabled={false}
-          loading={false}
-          locked={false}
-          focus={false}
-          ariaLabel="Refresh partners"
-          onclick={loadPartners}
-        />
+        <div class="toolbar-actions">
+          <Button
+            label="Export CSV"
+            variant="secondary"
+            size="small"
+            type="button"
+            disabled={partners.length === 0}
+            loading={false}
+            locked={false}
+            focus={false}
+            ariaLabel="Export partners as CSV"
+            onclick={exportPartnersCsv}
+          />
+          <Button
+            label="Refresh"
+            variant="secondary"
+            size="small"
+            type="button"
+            disabled={false}
+            loading={false}
+            locked={false}
+            focus={false}
+            ariaLabel="Refresh partners"
+            onclick={loadPartners}
+          />
+        </div>
       </header>
 
       <section class="dashboard-grid">
@@ -1059,6 +1129,12 @@
 
   .partners-toolbar {
     padding: var(--ehq-space-3);
+  }
+
+  .toolbar-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--ehq-space-2);
   }
 
   p,

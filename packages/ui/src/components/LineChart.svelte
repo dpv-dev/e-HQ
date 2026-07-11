@@ -22,7 +22,7 @@
   </div>
   <div class="line-frame">
     <span class="axis"></span>
-    {#each props.points as point, index (point.label)}
+    {#each props.points as point, index (`${point.label}-${String(index)}`)}
       <i style={pointStyle(point, index)} aria-label={`${point.label}: ${String(point.value)}`}></i>
     {/each}
   </div>
