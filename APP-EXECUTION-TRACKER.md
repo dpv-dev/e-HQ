@@ -3,7 +3,7 @@
 Last updated: 2026-07-11
 Branch: theme/distribution-command
 Main baseline: 146e25b
-Current head: e01119e
+Current head: 33963bc
 
 ## Current Snapshot
 - Repo health: clean working tree, green local gates.
