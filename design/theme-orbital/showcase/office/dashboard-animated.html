@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ë • office — Dashboard · animations</title>
+<link rel="stylesheet" href="../../tokens/orbital-tokens.css">
+<link rel="stylesheet" href="../../components/orbital-components.css">
+<link rel="stylesheet" href="./_shell.css">
+<link rel="stylesheet" href="./_office-skin.css">
+<style>
+  /* ---- Animation layer (demo-only, not part of the shipped theme) ---- */
+  @media (prefers-reduced-motion: no-preference) {
+    .orb-kpi { opacity: 0; transform: translateY(10px); animation: kpi-in 480ms var(--orb-ease) forwards; }
+    .orb-kpi:nth-child(1) { animation-delay: 40ms; }
+    .orb-kpi:nth-child(2) { animation-delay: 110ms; }
+    .orb-kpi:nth-child(3) { animation-delay: 180ms; }
+    .orb-kpi:nth-child(4) { animation-delay: 250ms; }
+    @keyframes kpi-in { to { opacity: 1; transform: translateY(0); } }
+
+    .orb-ring__dial { transition: background 900ms cubic-bezier(.19,1,.22,1) 300ms; }
+
+    .skel { position: relative; overflow: hidden; background: var(--orb-surface-high); border-radius: 6px; }
+    .skel::after {
+      content: ""; position: absolute; inset: 0;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,.06), transparent);
+      animation: skel-pulse 1100ms ease-in-out infinite;
+    }
+    @keyframes skel-pulse { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+  }
+  .demo-bar {
+    display: flex; align-items: center; gap: 10px; margin: 0 0 18px;
+    padding: 10px 14px; border-radius: var(--orb-radius-md);
+    background: var(--orb-glass-bg); border: 1px solid var(--orb-glass-border);
+    font-family: var(--orb-mono); font-size: 12px; color: var(--orb-text-soft);
+  }
+  .demo-bar button {
+    font-family: var(--orb-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
+    padding: 6px 12px; border-radius: var(--orb-radius-pill); border: 1px solid var(--orb-cyan-border);
+    background: var(--orb-cyan-ghost); color: var(--orb-cyan); cursor: pointer;
+  }
+  .demo-bar button:hover { background: var(--orb-cyan-muted); }
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="topbar">
+    <div class="brand">ë&nbsp;•&nbsp;office<em>.</em><span>orbital</span></div>
+    <div class="orb-ticker"><span><i class="dot ok"></i>API 200 · 42 ms</span><span><i class="dot ok"></i>MCB feed <b>sync 06:00</b></span><span><i class="dot warn"></i>SBI import <b>128 unmatched</b></span><span><i class="dot ok"></i>FX MUR <b>à jour</b></span><span><i class="dot ok"></i>Audit <b>évt 8 412</b></span></div>
+    <button class="orb-button orb-button--primary">Nouvelle écriture</button>
+  </div>
+  <div class="cockpit">
+    <nav class="rail-left"><div class="orb-panel" style="padding:12px;"><div class="orb-nav"><span class="orb-nav__group">Pilotage</span><a class="orb-nav__item active" href="./dashboard.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-home.svg" alt=""></span>Dashboard</a><a class="orb-nav__item" href="./ceo.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-eye.svg" alt=""></span>CEO View</a><a class="orb-nav__item" href="./pnl.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-chart-bar.svg" alt=""></span>P&L</a><a class="orb-nav__item" href="./cashflow.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-trending-up.svg" alt=""></span>Cash Flow</a><span class="orb-nav__group">Comptabilité</span><a class="orb-nav__item" href="./transactions.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-file-text.svg" alt=""></span>Transactions</a><a class="orb-nav__item" href="./pending.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-clock.svg" alt=""></span>Pending</a><a class="orb-nav__item" href="./reconciliation.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-check.svg" alt=""></span>Réconciliation</a><a class="orb-nav__item" href="./imports.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-upload.svg" alt=""></span>Imports</a><a class="orb-nav__item" href="./bank.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-bank.svg" alt=""></span>Bank</a><a class="orb-nav__item" href="./coa.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-layout-grid.svg" alt=""></span>Chart of Accounts</a><a class="orb-nav__item" href="./vat.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-file-text.svg" alt=""></span>VAT</a><span class="orb-nav__group">Relations</span><a class="orb-nav__item" href="./clients.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-users.svg" alt=""></span>Clients</a><a class="orb-nav__item" href="./suppliers.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-users.svg" alt=""></span>Suppliers</a><a class="orb-nav__item" href="./projects.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-folder.svg" alt=""></span>Projects</a><a class="orb-nav__item" href="./wave-invoices.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-download.svg" alt=""></span>Wave Invoices</a><span class="orb-nav__group">Système</span><a class="orb-nav__item" href="./monitoring.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-search.svg" alt=""></span>Monitoring</a><a class="orb-nav__item" href="./audit.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-calendar.svg" alt=""></span>Audit</a><a class="orb-nav__item" href="./settings.html"><span class="orb-nav__icon"><img class="nav-icon-img" style="width:16px;height:16px" src="../../assets/icons/icon-settings.svg" alt=""></span>Settings</a></div></div></nav>
+    <main class="main">
+      <div class="demo-bar">
+        <span>DÉMO ANIMATIONS — count-up KPI, tracé de la jauge, pulse de chargement</span>
+        <button id="replay">↻ rejouer</button>
+        <button id="replaySlow">🐢 rejouer au ralenti</button>
+      </div>
+      <div class="page-head">
+        <div class="left">
+          <span class="kicker">workspace · eeee-mu</span>
+          <h1>Dashboard</h1>
+          <span class="sub">Vue d'ensemble : trésorerie, activité, santé de la réconciliation.</span>
+        </div>
+        <div class="actions"><span class="chip">Period: <b>This Year</b></span></div>
+      </div>
+
+<div class="kpi-row" id="kpiRow">
+  <article class="orb-kpi orb-kpi--lead"><div class="orb-kpi__head"><span class="orb-kpi__label">Trésorerie</span><span class="orb-kpi__icon"><img class="nav-icon-img" style="width:15px;height:15px" src="../../assets/icons/icon-bank.svg" alt=""></span></div><div class="orb-kpi__value" data-target="2847632" data-suffix=" Rs">0 Rs</div><div class="orb-kpi__trend"><span class="orb-kpi__delta up">▲ 12,5 %</span><span class="orb-kpi__detail">vs période préc.</span></div></article>
+  <article class="orb-kpi"><div class="orb-kpi__head"><span class="orb-kpi__label">Income</span></div><div class="orb-kpi__value" data-target="1422364" data-suffix=" Rs">0 Rs</div><div class="orb-kpi__trend"><span class="orb-kpi__delta up">▲ 8,1 %</span><span class="orb-kpi__detail">vs période préc.</span></div></article>
+  <article class="orb-kpi"><div class="orb-kpi__head"><span class="orb-kpi__label">Expenses</span></div><div class="orb-kpi__value" data-target="3999779" data-suffix=" Rs">0 Rs</div><div class="orb-kpi__trend"><span class="orb-kpi__delta down">▼ 3,2 %</span><span class="orb-kpi__detail">vs période préc.</span></div></article>
+  <article class="orb-kpi"><div class="orb-kpi__head"><span class="orb-kpi__label">À réconcilier</span></div><div class="orb-kpi__value" data-target="128" data-suffix="">0</div><div class="orb-kpi__trend"><span class="orb-kpi__detail">lignes bancaires</span></div></article>
+</div>
+<div class="two-col">
+  <div class="orb-panel panel-pad"><div class="panel-title">Santé de la réconciliation <a href="#">ouvrir →</a></div>
+    <div class="orb-ring">
+      <div class="orb-ring__dial" id="ringDial" style="--ring-stops:rgba(140,210,235,.12) 0 100%;"><span id="ringValue">0%</span></div>
+      <div class="orb-ring__legend" style="flex:1;">
+        <div class="item"><span class="swatch" style="background:var(--orb-success);"></span>Matched <span class="val">1 204</span></div>
+        <div class="item"><span class="swatch" style="background:var(--orb-warning);"></span>Suggested <span class="val">204</span></div>
+        <div class="item"><span class="swatch" style="background:rgba(140,210,235,.35);"></span>Unmatched <span class="val">128</span></div>
+      </div>
+      <a class="orb-button orb-button--secondary" href="./reconciliation.html">Réconcilier</a>
+    </div></div>
+  <div style="display:grid;gap:16px;">
+    <div class="orb-insight">
+      <div class="orb-insight__head">
+        <span class="orb-kpi__icon" style="width:26px;height:26px;"><img class="nav-icon-img" style="width:14px;height:14px" src="../../assets/icons/icon-check.svg" alt=""></span>
+        <span class="orb-insight__title">Prochaine action</span>
+        <span class="orb-badge orb-badge--info">97 %</span>
+      </div>
+      <div class="orb-insight__body">42 lignes SBI correspondent à des écritures existantes (montant + date exacts).</div>
+      <div class="orb-insight__actions">
+        <button class="orb-button orb-button--primary" style="min-height:32px;">Rapprocher 42</button>
+        <button class="orb-button orb-button--ghost" style="min-height:32px;">Revoir</button>
+      </div>
+    </div>
+    <div class="orb-panel panel-pad"><div class="panel-title">Balance âgée — top retards <a href="#">tout →</a></div>
+      <div class="mini-table" id="agedTable">
+        <div class="mini-row"><div class="who"><b>Bedouin Ltd</b><span>112 j de retard</span></div><span class="amt neg">58 400 Rs</span></div>
+        <div class="mini-row"><div class="who"><b>Blue Penny Events</b><span>74 j de retard</span></div><span class="amt neg">21 300 Rs</span></div>
+        <div class="mini-row"><div class="who"><b>MCB Corporate</b><span>à échoir 30 j</span></div><span class="amt pos">412 800 Rs</span></div>
+      </div></div>
+  </div>
+</div>
+
+    </main>
+  </div>
+</div>
+<script>
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function easeOutExpo(t) { return t === 1 ? 1 : 1 - Math.pow(2, -10 * t); }
+  function fmt(n) { return Math.round(n).toLocaleString('fr-FR'); }
+
+  function countUp(el, speed) {
+    const target = Number(el.dataset.target);
+    const suffix = el.dataset.suffix || '';
+    if (reduceMotion) { el.textContent = fmt(target) + suffix; return; }
+    const duration = 900 * speed;
+    const start = performance.now() + 260 * speed; // waits for the card's own fade-in
+    function tick(now) {
+      const elapsed = now - start;
+      if (elapsed < 0) { requestAnimationFrame(tick); return; }
+      const t = Math.min(elapsed / duration, 1);
+      el.textContent = fmt(target * easeOutExpo(t)) + suffix;
+      if (t < 1) requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  }
+
+  function drawRing(speed) {
+    const dial = document.getElementById('ringDial');
+    const label = document.getElementById('ringValue');
+    const target = 78; // matched %
+    if (reduceMotion) {
+      dial.style.background = 'conic-gradient(var(--orb-success) 0 78%, var(--orb-warning) 78% 91%, rgba(140,210,235,.12) 91% 100%)';
+      label.textContent = '78%';
+      return;
+    }
+    const duration = 900 * speed;
+    const start = performance.now() + 300 * speed;
+    function tick(now) {
+      const elapsed = now - start;
+      if (elapsed < 0) { requestAnimationFrame(tick); return; }
+      const t = Math.min(elapsed / duration, 1);
+      const p = easeOutExpo(t) * target;
+      const stops = `var(--orb-success) 0 ${p}%, var(--orb-warning) ${p}% ${Math.min(p + 13, 100)}%, rgba(140,210,235,.12) ${Math.min(p + 13, 100)}% 100%`;
+      dial.style.background = `conic-gradient(${stops})`;
+      label.textContent = Math.round(p) + '%';
+      if (t < 1) requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  }
+
+  function resetToZero() {
+    document.querySelectorAll('.orb-kpi__value').forEach((el) => {
+      el.textContent = '0' + (el.dataset.suffix || '');
+    });
+    const dial = document.getElementById('ringDial');
+    dial.style.background = 'conic-gradient(rgba(140,210,235,.12) 0 100%)';
+    document.getElementById('ringValue').textContent = '0%';
+  }
+
+  function playIntro(speed = 1) {
+    resetToZero();
+    document.querySelectorAll('.orb-kpi__value').forEach((el) => countUp(el, speed));
+    drawRing(speed);
+    // re-trigger the card fade-in, scaled to the same speed
+    document.querySelectorAll('.orb-kpi').forEach((card, i) => {
+      card.style.animation = 'none';
+      void card.offsetWidth;
+      card.style.animation = `kpi-in ${480 * speed}ms var(--orb-ease) ${(40 + i * 70) * speed}ms forwards`;
+    });
+  }
+
+  window.addEventListener('load', () => playIntro(1));
+  document.getElementById('replay').addEventListener('click', () => playIntro(1));
+  document.getElementById('replaySlow').addEventListener('click', () => playIntro(4));
+</script>
+</body>
+</html>
