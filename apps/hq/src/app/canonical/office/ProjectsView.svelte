@@ -551,7 +551,7 @@
 
   function stateLabel(state: ApiRequestState<unknown>): string {
     if (state.status === "idle") {
-      return "idle";
+      return "loading";
     }
 
     if (state.status === "loading") {
@@ -563,6 +563,10 @@
     }
 
     return "loaded";
+  }
+
+  function isLoadingState(state: ApiRequestState<unknown>): boolean {
+    return state.status === "loading" || state.status === "idle";
   }
 
   function moneyTone(amountMicro: string): Tone {
@@ -585,7 +589,7 @@
 <section class="projects-view">
   <section class="kpi-grid" aria-label="Selected project indicators">
     {#each projectKpis as kpi (kpi.label)}
-      <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state={projectPnlState.status === "loading" ? "loading" : "default"} accent={kpi.accent} />
+      <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state={isLoadingState(projectPnlState) ? "loading" : "default"} accent={kpi.accent} />
     {/each}
   </section>
 
@@ -686,7 +690,7 @@
         {/if}
       </section>
 
-      {#if projectsState.status === "loading"}
+      {#if isLoadingState(projectsState)}
         <Loader label="Loading projects" detail="Reading active projects." size="medium" />
       {:else if projectsState.status === "error"}
         <div class="state-copy error">
@@ -737,7 +741,7 @@
         {/if}
       </header>
 
-      {#if projectPnlState.status === "loading"}
+      {#if isLoadingState(projectPnlState)}
         <Loader label="Loading project P&L" detail="Reading validated project projection." size="medium" />
       {:else if projectPnlState.status === "error"}
         <div class="state-copy error">
@@ -754,8 +758,8 @@
     </section>
   </section>
 
-  <Table title="Active projects" columns={projectColumns} rows={projectRows} state={projectsState.status === "loading" ? "loading" : projectsState.status === "error" ? "error" : projectRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={projectsPagination} />
-  <Table title="Coherence violations" columns={violationColumns} rows={violationRows} state={violationsState.status === "loading" ? "loading" : violationsState.status === "error" ? "error" : violationRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={violationsPagination} />
+  <Table title="Active projects" columns={projectColumns} rows={projectRows} state={isLoadingState(projectsState) ? "loading" : projectsState.status === "error" ? "error" : projectRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={projectsPagination} />
+  <Table title="Coherence violations" columns={violationColumns} rows={violationRows} state={isLoadingState(violationsState) ? "loading" : violationsState.status === "error" ? "error" : violationRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={violationsPagination} />
 </section>
 
 <script module lang="ts">

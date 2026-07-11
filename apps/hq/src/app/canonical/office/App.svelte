@@ -3857,7 +3857,7 @@
 
   function stateLabel(state: ApiRequestState<unknown>): string {
     if (state.status === "idle") {
-      return "idle";
+      return "loading";
     }
 
     if (state.status === "loading") {
@@ -3869,6 +3869,10 @@
     }
 
     return "loaded";
+  }
+
+  function isLoadingState(state: ApiRequestState<unknown>): boolean {
+    return state.status === "loading" || state.status === "idle";
   }
 
   function toNullableFilter(value: SelectFilterValue): string | null {
@@ -4189,7 +4193,7 @@
               value={kpi.value}
               detail={kpi.detail}
               tone={kpi.tone}
-              state={dashboardAnalyticsState.status === "loading" ? "loading" : "default"}
+              state={isLoadingState(dashboardAnalyticsState) ? "loading" : "default"}
               accent={kpi.accent}
             />
           {/each}
@@ -4197,8 +4201,8 @@
 
         <section class="dashboard-grid">
           <div class="panel-card ehq-edge-surface">
-            <SectionTemplate eyebrow="PROMPT 1 · runway — months of cash left" title="Runway" detail="Cash left and average burn based on selected period." state={dashboardAnalyticsState.status === "loading" ? "loading" : dashboardAnalyticsState.status === "error" ? "error" : "ready"}>
-              <KPI label="Runway" value={dashboardRunwayPanel.value} detail={dashboardRunwayPanel.detail} tone={dashboardRunwayPanel.tone} state={dashboardAnalyticsState.status === "loading" ? "loading" : "default"} accent={true} />
+            <SectionTemplate eyebrow="PROMPT 1 · runway — months of cash left" title="Runway" detail="Cash left and average burn based on selected period." state={isLoadingState(dashboardAnalyticsState) ? "loading" : dashboardAnalyticsState.status === "error" ? "error" : "ready"}>
+              <KPI label="Runway" value={dashboardRunwayPanel.value} detail={dashboardRunwayPanel.detail} tone={dashboardRunwayPanel.tone} state={isLoadingState(dashboardAnalyticsState) ? "loading" : "default"} accent={true} />
               <div class="runway-meta">
                 <span>Cash {dashboardRunwayPanel.cash}</span>
                 <span>Avg burn {dashboardRunwayPanel.burn} / month</span>
@@ -4214,34 +4218,34 @@
           </div>
 
           <div class="panel-card ehq-edge-surface">
-            <SectionTemplate eyebrow="PROMPT 4 · reconciliation health — by account" title="Reconciliation health" detail="Matched rate, unmatched pressure, and ageing by bank account." state={dashboardAnalyticsState.status === "loading" ? "loading" : dashboardAnalyticsState.status === "error" ? "error" : "ready"}>
+            <SectionTemplate eyebrow="PROMPT 4 · reconciliation health — by account" title="Reconciliation health" detail="Matched rate, unmatched pressure, and ageing by bank account." state={isLoadingState(dashboardAnalyticsState) ? "loading" : dashboardAnalyticsState.status === "error" ? "error" : "ready"}>
               <BarsChart title="Unmatched lines by account" points={dashboardReconciliationPoints} tone="info" />
-              <Table title="Account reconciliation health" columns={dashboardReconciliationColumns} rows={dashboardReconciliationRows} state={dashboardAnalyticsState.status === "loading" ? "loading" : dashboardAnalyticsState.status === "error" ? "error" : dashboardReconciliationRows.length === 0 ? "empty" : "default"} actionLabel="" />
+              <Table title="Account reconciliation health" columns={dashboardReconciliationColumns} rows={dashboardReconciliationRows} state={isLoadingState(dashboardAnalyticsState) ? "loading" : dashboardAnalyticsState.status === "error" ? "error" : dashboardReconciliationRows.length === 0 ? "empty" : "default"} actionLabel="" />
             </SectionTemplate>
           </div>
         </section>
 
         <section class="dashboard-grid">
           <div class="panel-card ehq-edge-surface">
-            <SectionTemplate eyebrow="PROMPT 2 · top categories by expense" title="Top categories by expense" detail="Fiable par categorie. Classement fournisseur: champ contrepartie structure requis." state={dashboardAnalyticsState.status === "loading" ? "loading" : dashboardAnalyticsState.status === "error" ? "error" : "ready"}>
+            <SectionTemplate eyebrow="PROMPT 2 · top categories by expense" title="Top categories by expense" detail="Fiable par categorie. Classement fournisseur: champ contrepartie structure requis." state={isLoadingState(dashboardAnalyticsState) ? "loading" : dashboardAnalyticsState.status === "error" ? "error" : "ready"}>
               <BarsChart title="Expense concentration" points={dashboardExpenseCategoryPoints} tone="warning" />
-              <Table title="Top expense categories" columns={dashboardExpenseCategoryColumns} rows={dashboardExpenseCategoryRows} state={dashboardAnalyticsState.status === "loading" ? "loading" : dashboardAnalyticsState.status === "error" ? "error" : dashboardExpenseCategoryRows.length === 0 ? "empty" : "default"} actionLabel="" />
+              <Table title="Top expense categories" columns={dashboardExpenseCategoryColumns} rows={dashboardExpenseCategoryRows} state={isLoadingState(dashboardAnalyticsState) ? "loading" : dashboardAnalyticsState.status === "error" ? "error" : dashboardExpenseCategoryRows.length === 0 ? "empty" : "default"} actionLabel="" />
             </SectionTemplate>
           </div>
 
           <div class="panel-card ehq-edge-surface">
-            <SectionTemplate eyebrow="PROMPT 3 · project profitability — worst first" title="Project profitability" detail="Net contribution ranking over the selected period." state={dashboardAnalyticsState.status === "loading" ? "loading" : dashboardAnalyticsState.status === "error" ? "error" : "ready"}>
+            <SectionTemplate eyebrow="PROMPT 3 · project profitability — worst first" title="Project profitability" detail="Net contribution ranking over the selected period." state={isLoadingState(dashboardAnalyticsState) ? "loading" : dashboardAnalyticsState.status === "error" ? "error" : "ready"}>
               <BarsChart title="Top project net contribution" points={dashboardProjectProfitabilityPoints} tone="success" />
-              <Table title="Project profitability" columns={dashboardProjectProfitabilityColumns} rows={dashboardProjectProfitabilityRows} state={dashboardAnalyticsState.status === "loading" ? "loading" : dashboardAnalyticsState.status === "error" ? "error" : dashboardProjectProfitabilityRows.length === 0 ? "empty" : "default"} actionLabel="" />
+              <Table title="Project profitability" columns={dashboardProjectProfitabilityColumns} rows={dashboardProjectProfitabilityRows} state={isLoadingState(dashboardAnalyticsState) ? "loading" : dashboardAnalyticsState.status === "error" ? "error" : dashboardProjectProfitabilityRows.length === 0 ? "empty" : "default"} actionLabel="" />
             </SectionTemplate>
           </div>
         </section>
 
         <section class="dashboard-grid">
           <div class="panel-card ehq-edge-surface dashboard-wide-panel">
-            <SectionTemplate eyebrow="PROMPT 5 · expense trend by department — monthly" title="Expense trend by department" detail="Monthly rolling trend by department." state={dashboardAnalyticsState.status === "loading" ? "loading" : dashboardAnalyticsState.status === "error" ? "error" : "ready"}>
+            <SectionTemplate eyebrow="PROMPT 5 · expense trend by department — monthly" title="Expense trend by department" detail="Monthly rolling trend by department." state={isLoadingState(dashboardAnalyticsState) ? "loading" : dashboardAnalyticsState.status === "error" ? "error" : "ready"}>
               <LineChart title="Rolling expense trend (top department)" points={dashboardExpenseTrendPoints} tone="active" />
-              <Table title="Department trend snapshot" columns={dashboardExpenseTrendColumns} rows={dashboardExpenseTrendRows} state={dashboardAnalyticsState.status === "loading" ? "loading" : dashboardAnalyticsState.status === "error" ? "error" : dashboardExpenseTrendRows.length === 0 ? "empty" : "default"} actionLabel="" />
+              <Table title="Department trend snapshot" columns={dashboardExpenseTrendColumns} rows={dashboardExpenseTrendRows} state={isLoadingState(dashboardAnalyticsState) ? "loading" : dashboardAnalyticsState.status === "error" ? "error" : dashboardExpenseTrendRows.length === 0 ? "empty" : "default"} actionLabel="" />
             </SectionTemplate>
           </div>
         </section>
@@ -4274,9 +4278,9 @@
           </section>
           <section class="dashboard-grid">
             <BarsChart title="Top category impact (absolute net)" points={pnlCategoryImpactPoints} tone="active" />
-            <Table title="Result by division" columns={divisionPnlColumns} rows={divisionPnlTableRows} state={divisionPnlState.status === "loading" ? "loading" : divisionPnlState.status === "error" ? "error" : divisionPnlTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={divisionPnlPagination} />
+            <Table title="Result by division" columns={divisionPnlColumns} rows={divisionPnlTableRows} state={isLoadingState(divisionPnlState) ? "loading" : divisionPnlState.status === "error" ? "error" : divisionPnlTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={divisionPnlPagination} />
           </section>
-          <Table title="Result by category" columns={pnlLineColumns} rows={pnlLineTableRows} state={pnlCategoryState.status === "loading" ? "loading" : pnlCategoryState.status === "error" ? "error" : pnlLineTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={pnlCategoryPagination} />
+          <Table title="Result by category" columns={pnlLineColumns} rows={pnlLineTableRows} state={isLoadingState(pnlCategoryState) ? "loading" : pnlCategoryState.status === "error" ? "error" : pnlLineTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={pnlCategoryPagination} />
         {/if}
       {:else if activePageId === "coa"}
         <section class="form-panel ehq-edge-surface" aria-label="Chart of accounts editor">
@@ -4295,7 +4299,7 @@
           <BarsChart title="Chart of accounts node mix" points={coaStructurePoints} tone="info" />
         </section>
 
-        <Table title="Department → Division → Category" columns={planColumns} rows={planTableRows} state={planTableState.status === "loading" ? "loading" : planTableState.status === "error" ? "error" : planTableRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={planRowActions} pagination={planPagination} />
+        <Table title="Department → Division → Category" columns={planColumns} rows={planTableRows} state={isLoadingState(planTableState) ? "loading" : planTableState.status === "error" ? "error" : planTableRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={planRowActions} pagination={planPagination} />
       {:else if activePageId === "transactions"}
         <section class="filter-grid ehq-edge-surface" aria-label="Transaction filters">
           <Select id="office-filter-account" label="Account" value={accountFilter} options={accountOptions} state="default" message="" onchange={updateAccountFilter} />
@@ -4379,7 +4383,7 @@
           </section>
         {/if}
 
-        <Table title={`Ledger · ${rangeLabel(activeRange)}`} columns={transactionColumns} rows={transactionTableRows} state={transactionsState.status === "loading" ? "loading" : transactionsState.status === "error" ? "error" : transactionRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={ledgerRowActions} pagination={transactionPagination} />
+        <Table title={`Ledger · ${rangeLabel(activeRange)}`} columns={transactionColumns} rows={transactionTableRows} state={isLoadingState(transactionsState) ? "loading" : transactionsState.status === "error" ? "error" : transactionRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={ledgerRowActions} pagination={transactionPagination} />
       {:else if activePageId === "clients"}
         <PartnersView
           facet="client"
@@ -4447,7 +4451,7 @@
           <BarsChart title="Reconciliation status" points={reconciliationStatusPoints} tone="info" />
         </section>
 
-        <Table title="Recent batches" columns={importColumns} rows={recentImportRows} state={dashboardState.status === "loading" ? "loading" : dashboardState.status === "error" ? "error" : recentImportRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={importRowActions} />
+        <Table title="Recent batches" columns={importColumns} rows={recentImportRows} state={isLoadingState(dashboardState) ? "loading" : dashboardState.status === "error" ? "error" : recentImportRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={importRowActions} />
       {:else if activePageId === "imports"}
         <section class="statement-import-panel ehq-edge-surface" aria-label="Import a bank statement">
           <header>
@@ -4596,7 +4600,7 @@
           {/if}
         </section>
 
-        <Table title="Bank batches known to the API" columns={importColumns} rows={recentImportRows} state={dashboardState.status === "loading" ? "loading" : dashboardState.status === "error" ? "error" : recentImportRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={importRowActions} />
+        <Table title="Bank batches known to the API" columns={importColumns} rows={recentImportRows} state={isLoadingState(dashboardState) ? "loading" : dashboardState.status === "error" ? "error" : recentImportRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={importRowActions} />
       {:else if activePageId === "reconciliation"}
         <section class="filter-strip ehq-edge-surface" aria-label="Reconciliation filters">
           <Select id="office-reconciliation-account" label="Account" value={accountFilter} options={accountOptions} state="default" message="" onchange={updateAccountFilter} />
@@ -4612,7 +4616,7 @@
               value={kpi.value}
               detail={kpi.detail}
               tone={kpi.tone}
-              state={reconciliationOperationsState.status === "loading" ? "loading" : "default"}
+              state={isLoadingState(reconciliationOperationsState) ? "loading" : "default"}
               accent={kpi.accent}
             />
           {/each}
@@ -4622,7 +4626,7 @@
           <BarsChart title="Reconciliation status mix" points={reconciliationStatusPoints} tone="info" />
         </section>
 
-        <Table title="Bank ↔ ledger matching" columns={reconciliationColumns} rows={reconciliationTableRows} state={reconciliationState.status === "loading" ? "loading" : reconciliationState.status === "error" ? "error" : reconciliationRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={reconciliationRowActions} pagination={reconciliationPagination} />
+        <Table title="Bank ↔ ledger matching" columns={reconciliationColumns} rows={reconciliationTableRows} state={isLoadingState(reconciliationState) ? "loading" : reconciliationState.status === "error" ? "error" : reconciliationRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={reconciliationRowActions} pagination={reconciliationPagination} />
 
         {#if reconcileDrawerLineId !== null}
           <Drawer
@@ -4716,7 +4720,7 @@
           {/each}
         </div>
 
-        <Table title="Queue pending" columns={pendingColumns} rows={pendingTableRows} state={pendingState.status === "loading" ? "loading" : pendingState.status === "error" ? "error" : pendingRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={pendingPagination} />
+        <Table title="Queue pending" columns={pendingColumns} rows={pendingTableRows} state={isLoadingState(pendingState) ? "loading" : pendingState.status === "error" ? "error" : pendingRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={pendingPagination} />
       {:else if activePageId === "cashflow"}
         <section class="filter-strip ehq-edge-surface" aria-label="Cash-flow filters">
           <Select id="office-cashflow-account" label="Account" value={accountFilter} options={accountOptions} state="default" message="" onchange={updateAccountFilter} />
@@ -4741,7 +4745,7 @@
           <BarsChart title="Outflows" points={cashflowOutflowPoints} tone="error" />
         </section>
 
-        <Table title="Cash-flow by month" columns={cashflowColumns} rows={cashflowTableRows} state={cashflowState.status === "loading" ? "loading" : cashflowState.status === "error" ? "error" : cashflowTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
+        <Table title="Cash-flow by month" columns={cashflowColumns} rows={cashflowTableRows} state={isLoadingState(cashflowState) ? "loading" : cashflowState.status === "error" ? "error" : cashflowTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
       {:else if activePageId === "ceo"}
         <CeoView client={client.office} workspaceId={officeWorkspaceId} {period} dateFrom={activeRange.from} dateTo={activeRange.to} />
       {:else if activePageId === "bank"}
@@ -4751,7 +4755,7 @@
           <BarsChart title="Top audit actions" points={auditActionPoints} tone="muted" />
         </section>
 
-        <Table title="Audit log" columns={auditColumns} rows={auditTableRows} state={auditState.status === "loading" ? "loading" : auditState.status === "error" ? "error" : auditTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={auditPagination} />
+        <Table title="Audit log" columns={auditColumns} rows={auditTableRows} state={isLoadingState(auditState) ? "loading" : auditState.status === "error" ? "error" : auditTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={auditPagination} />
       {:else if activePageId === "vat"}
         <VatView client={client.office} workspaceId={officeWorkspaceId} {period} dateFrom={activeRange.from} dateTo={activeRange.to} />
       {:else if activePageId === "settings"}

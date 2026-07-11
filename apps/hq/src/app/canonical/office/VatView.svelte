@@ -183,7 +183,7 @@
 
   function stateLabel(state: ApiRequestState<unknown>): string {
     if (state.status === "idle") {
-      return "idle";
+      return "loading";
     }
 
     if (state.status === "loading") {
@@ -195,6 +195,10 @@
     }
 
     return "loaded";
+  }
+
+  function isLoadingState(state: ApiRequestState<unknown>): boolean {
+    return state.status === "loading" || state.status === "idle";
   }
 
   function formatRate(rateBp: number): string {
@@ -225,11 +229,11 @@
 <section class="vat-view">
   <section class="kpi-grid" aria-label="VAT indicators">
     {#each vatKpis as kpi (kpi.label)}
-      <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state={vatState.status === "loading" ? "loading" : "default"} accent={kpi.accent} />
+      <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state={isLoadingState(vatState) ? "loading" : "default"} accent={kpi.accent} />
     {/each}
   </section>
 
-  {#if vatState.status === "loading"}
+  {#if isLoadingState(vatState)}
     <Loader label="Loading VAT" detail="Reading the VAT report for the period." size="medium" />
   {:else if vatState.status === "error"}
     <div class="state-copy error">

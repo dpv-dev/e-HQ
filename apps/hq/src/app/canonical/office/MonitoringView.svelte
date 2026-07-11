@@ -78,11 +78,11 @@
   const integrityRows = $derived(readIntegrityRows(integrityState));
   const monitoringKpis = $derived(createMonitoringKpis(integrityState, bankQualityState, pendingState, dashboardState));
   const monitoringLoading = $derived(
-    integrityState.status === "loading" ||
-    bankQualityState.status === "loading" ||
-    pendingState.status === "loading" ||
-    auditState.status === "loading" ||
-    dashboardState.status === "loading"
+    isLoadingState(integrityState) ||
+    isLoadingState(bankQualityState) ||
+    isLoadingState(pendingState) ||
+    isLoadingState(auditState) ||
+    isLoadingState(dashboardState)
   );
   const bankQualityPoints = $derived(createBankQualityPoints(bankQualityState));
   const importActivityPoints = $derived(createImportActivityPoints(recentImports));
@@ -331,7 +331,7 @@
   }
 
   function kpiState(state: ApiRequestState<unknown>): SurfaceState {
-    return state.status === "loading" ? "loading" : "default";
+    return isLoadingState(state) ? "loading" : "default";
   }
 
   // checkedAt is an ISO datetime; render it as "YYYY-MM-DD HH:MM" so it matches
@@ -452,7 +452,7 @@
 
   function stateLabel(state: ApiRequestState<unknown>): string {
     if (state.status === "idle") {
-      return "idle";
+      return "loading";
     }
 
     if (state.status === "loading") {
@@ -464,6 +464,10 @@
     }
 
     return "loaded";
+  }
+
+  function isLoadingState(state: ApiRequestState<unknown>): boolean {
+    return state.status === "loading" || state.status === "idle";
   }
 
   function integrityTone(status: string): Tone {
@@ -543,7 +547,7 @@
           onclick={loadMonitoring}
         />
       </header>
-      {#if integrityState.status === "loading"}
+      {#if isLoadingState(integrityState)}
         <Loader label="Loading monitoring" detail="Reading Office monitoring endpoints." size="medium" />
       {:else if integrityState.status === "error"}
         <div class="state-copy error">
@@ -561,12 +565,12 @@
 
   <section class="monitoring-layout" aria-label="Import activity">
     <BarsChart title="Import activity" points={importActivityPoints} tone="info" />
-    <Table title="Recent imports" columns={importColumns} rows={importTableRows} state={dashboardState.status === "loading" ? "loading" : dashboardState.status === "error" ? "error" : importTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
+    <Table title="Recent imports" columns={importColumns} rows={importTableRows} state={isLoadingState(dashboardState) ? "loading" : dashboardState.status === "error" ? "error" : importTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
   </section>
 
-  <Table title="Integrity checks" columns={integrityColumns} rows={integrityTableRows} state={integrityState.status === "loading" ? "loading" : integrityState.status === "error" ? "error" : integrityTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
-  <Table title="Pending transactions" columns={pendingColumns} rows={pendingTableRows} state={pendingState.status === "loading" ? "loading" : pendingState.status === "error" ? "error" : pendingTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={pendingPagination} />
-  <Table title="Audit log" columns={auditColumns} rows={auditTableRows} state={auditState.status === "loading" ? "loading" : auditState.status === "error" ? "error" : auditTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={auditPagination} />
+  <Table title="Integrity checks" columns={integrityColumns} rows={integrityTableRows} state={isLoadingState(integrityState) ? "loading" : integrityState.status === "error" ? "error" : integrityTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
+  <Table title="Pending transactions" columns={pendingColumns} rows={pendingTableRows} state={isLoadingState(pendingState) ? "loading" : pendingState.status === "error" ? "error" : pendingTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={pendingPagination} />
+  <Table title="Audit log" columns={auditColumns} rows={auditTableRows} state={isLoadingState(auditState) ? "loading" : auditState.status === "error" ? "error" : auditTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={auditPagination} />
 </section>
 
 <script module lang="ts">

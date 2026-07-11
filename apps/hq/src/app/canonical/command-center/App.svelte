@@ -592,7 +592,7 @@
   }
 
   function requestStateDetail<TData>(state: ApiRequestState<TData>): string {
-    if (state.status === "loading") {
+    if (isLoadingState(state)) {
       return "loading live API";
     }
 
@@ -601,6 +601,10 @@
     }
 
     return "waiting for live API";
+  }
+
+  function isLoadingState<TData>(state: ApiRequestState<TData>): boolean {
+    return state.status === "loading" || state.status === "idle";
   }
 
   function requestStateTone<TData>(state: ApiRequestState<TData>): Tone {
@@ -743,7 +747,7 @@
     officeState: ApiRequestState<OfficeDashboardResponse>,
     distributionState: ApiRequestState<DistributionDashboardResponse>
   ): SurfaceState {
-    if (officeState.status === "loading" || distributionState.status === "loading") {
+    if (isLoadingState(officeState) || isLoadingState(distributionState)) {
       return "loading";
     }
 

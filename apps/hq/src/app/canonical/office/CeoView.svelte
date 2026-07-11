@@ -222,7 +222,7 @@
 
   function stateLabel(state: ApiRequestState<unknown>): string {
     if (state.status === "idle") {
-      return "idle";
+      return "loading";
     }
 
     if (state.status === "loading") {
@@ -234,6 +234,10 @@
     }
 
     return "loaded";
+  }
+
+  function isLoadingState(state: ApiRequestState<unknown>): boolean {
+    return state.status === "loading" || state.status === "idle";
   }
 
   function formatMicro(amountMicro: string): string {
@@ -260,11 +264,11 @@
 <section class="ceo-view">
   <section class="kpi-grid" aria-label="Executive indicators">
     {#each ceoKpis as kpi (kpi.label)}
-      <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state={globalPnlState.status === "loading" ? "loading" : "default"} accent={kpi.accent} />
+      <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state={isLoadingState(globalPnlState) ? "loading" : "default"} accent={kpi.accent} />
     {/each}
   </section>
 
-  {#if globalPnlState.status === "loading"}
+  {#if isLoadingState(globalPnlState)}
     <Loader label="Loading CEO view" detail="Composing dashboard and validated P&L." size="medium" />
   {:else if globalPnlState.status === "error"}
     <div class="state-copy error">
@@ -285,7 +289,7 @@
       <DivergeChart title="Revenue and expenses by department" points={departmentChartPoints} />
     {/if}
     <Table title="Result by category" columns={categoryColumns} rows={departmentTableRows} state={departmentTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
-    <Table title="Result by division" columns={divisionColumns} rows={divisionTableRows} state={divisionState.status === "loading" ? "loading" : divisionState.status === "error" ? "error" : divisionTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={divisionPagination} />
+    <Table title="Result by division" columns={divisionColumns} rows={divisionTableRows} state={isLoadingState(divisionState) ? "loading" : divisionState.status === "error" ? "error" : divisionTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={divisionPagination} />
   {/if}
 </section>
 

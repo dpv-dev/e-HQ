@@ -791,7 +791,7 @@
 
   function stateLabel(state: ApiRequestState<unknown>): string {
     if (state.status === "idle") {
-      return "idle";
+      return "loading";
     }
 
     if (state.status === "loading") {
@@ -803,6 +803,10 @@
     }
 
     return "loaded";
+  }
+
+  function isLoadingState(state: ApiRequestState<unknown>): boolean {
+    return state.status === "loading" || state.status === "idle";
   }
 
   function reconciliationTone(status: "unmatched" | "suggested" | "matched" | "rejected" | "ignored"): Tone {
@@ -856,11 +860,11 @@
 <section class="bank-view">
   <section class="kpi-grid" aria-label="Bank indicators">
     {#each bankKpis as kpi (kpi.label)}
-      <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state={accountsState.status === "loading" ? "loading" : "default"} accent={kpi.accent} />
+      <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state={isLoadingState(accountsState) ? "loading" : "default"} accent={kpi.accent} />
     {/each}
   </section>
 
-  {#if accountsState.status === "loading"}
+  {#if isLoadingState(accountsState)}
     <Loader label="Loading bank" detail="Reading accounts, raw lines, and bank quality." size="medium" />
   {:else if accountsState.status === "error"}
     <div class="state-copy error">
@@ -952,7 +956,7 @@
          loading and error statuses are handled by the view-level Loader and
          error copy above, so the table only distinguishes empty from default. -->
     <Table title="Bank accounts" columns={accountColumns} rows={accountTableRows} state={accountTableRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={accountRowActions} pagination={accountsPagination} />
-    <Table title="Raw bank lines" columns={rawColumns} rows={rawTableRows} state={rawState.status === "loading" ? "loading" : rawState.status === "error" ? "error" : rawTableRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={rawRowActions} pagination={rawPagination} />
+    <Table title="Raw bank lines" columns={rawColumns} rows={rawTableRows} state={isLoadingState(rawState) ? "loading" : rawState.status === "error" ? "error" : rawTableRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={rawRowActions} pagination={rawPagination} />
     {#if movingRawLineId !== null}
       <section class="bank-account-form ehq-edge-surface" aria-label="Move bank line to a different account">
         <Select
@@ -968,7 +972,7 @@
         <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel moving bank line" onclick={cancelMoveRawLine} />
       </section>
     {/if}
-    <Table title="Reconciliation candidates" columns={reconciliationColumns} rows={reconciliationTableRows} state={reconciliationState.status === "loading" ? "loading" : reconciliationState.status === "error" ? "error" : reconciliationTableRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={reconciliationRowActions} pagination={reconciliationPagination} />
+    <Table title="Reconciliation candidates" columns={reconciliationColumns} rows={reconciliationTableRows} state={isLoadingState(reconciliationState) ? "loading" : reconciliationState.status === "error" ? "error" : reconciliationTableRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={reconciliationRowActions} pagination={reconciliationPagination} />
     {#if reconciliationActionMessage !== null}
       <Alert
         tone={reconciliationActionStatus === "error" ? "error" : "success"}

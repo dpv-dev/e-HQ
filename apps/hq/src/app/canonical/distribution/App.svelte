@@ -3718,8 +3718,12 @@
     return "success";
   }
 
+  function isLoadingStatus(status: RequestStatus): boolean {
+    return status === "loading" || status === "idle";
+  }
+
   function tableStateFor(status: RequestStatus, count: number): "loading" | "error" | "empty" | "default" {
-    if (status === "loading") {
+    if (isLoadingStatus(status)) {
       return "loading";
     }
 
@@ -3744,7 +3748,7 @@
 
   function stateLabel(state: ApiRequestState<unknown>): string {
     if (state.status === "idle") {
-      return "au repos";
+      return "chargement";
     }
 
     if (state.status === "loading") {
@@ -4101,7 +4105,7 @@
       {#if activePageId === "dashboard"}
         <section class="kpi-grid" aria-label="KPI Distribution">
           {#each dashboardKpis as kpi (kpi.label)}
-            <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state={dashboardState.status === "loading" ? "loading" : "default"} accent={kpi.accent} />
+            <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state={isLoadingStatus(dashboardState.status) ? "loading" : "default"} accent={kpi.accent} />
           {/each}
         </section>
         <section class="dashboard-grid">
@@ -4109,7 +4113,7 @@
           <Table title="Liste d'actions" columns={dashboardColumns} rows={dashboardRows} state={tableStateFor(dashboardActionListStatus, dashboardRows.length)} actionLabel="" />
         </section>
       {:else if activePageId === "imports"}
-        <Toolbar label="Import Kontor RouteNote" filters={importToolbarFilters} actionLabel="" loading={importState.status === "loading"} onFilterSelect={selectImportToolbarFilter} />
+        <Toolbar label="Import Kontor RouteNote" filters={importToolbarFilters} actionLabel="" loading={isLoadingStatus(importState.status)} onFilterSelect={selectImportToolbarFilter} />
         <section class="form-panel ehq-edge-surface" aria-label="Import Kontor RouteNote">
           <Select id="distribution-import-source" label="Source" value={importState.source} options={importSourceOptions} state="default" message="" onchange={updateImportSource} />
           <label>
@@ -4147,7 +4151,7 @@
           <Button label="Appliquer les règles réutilisables" variant="primary" size="medium" type="button" disabled={!writesEnabled || (mappingRows.length === 0 && selectedMappingRowIds.length === 0)} loading={false} locked={false} focus={false} ariaLabel="Appliquer les règles réutilisables" title={writeDisabledTitle()} onclick={applyMappingRules} />
           <span class="ehq-type-label-mono">{selectedMappingRowIds.length} sélectionnée(s)</span>
         </section>
-        <Table title="Lignes Kontor / RouteNote à mapper" columns={mappingColumns} rows={mappingTableRows} state={mappingState.status === "loading" ? "loading" : mappingState.status === "error" ? "error" : mappingRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={mappingRowActions} pagination={mappingPagination} />
+        <Table title="Lignes Kontor / RouteNote à mapper" columns={mappingColumns} rows={mappingTableRows} state={isLoadingStatus(mappingState.status) ? "loading" : mappingState.status === "error" ? "error" : mappingRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={mappingRowActions} pagination={mappingPagination} />
       {:else if activePageId === "catalog"}
         <section class="contracts-actions ehq-edge-surface">
           <Button label="Nouvelle release" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Nouvelle release" onclick={() => openCatalogPanel("release")} />
@@ -4297,7 +4301,7 @@
             <Button label="Annuler" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Annuler la résolution du suspens" onclick={closeSuspensePanel} />
           </section>
         {/if}
-        <Table title="Suspens groupés par motif" columns={suspenseColumns} rows={suspenseTableRows} state={suspenseState.status === "loading" ? "loading" : suspenseState.status === "error" ? "error" : suspenseItems.length === 0 ? "empty" : "default"} actionLabel="" rowActions={suspenseRowActions} pagination={suspensePagination} />
+        <Table title="Suspens groupés par motif" columns={suspenseColumns} rows={suspenseTableRows} state={isLoadingStatus(suspenseState.status) ? "loading" : suspenseState.status === "error" ? "error" : suspenseItems.length === 0 ? "empty" : "default"} actionLabel="" rowActions={suspenseRowActions} pagination={suspensePagination} />
       {:else if activePageId === "statements"}
         <section class="statement-summary ehq-edge-surface">
           {#if statementPreview !== null}
@@ -4366,7 +4370,7 @@
             <Button label="Annuler" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Fermer le panneau paiement" onclick={closePaymentPanel} />
           </section>
         {/if}
-        <Table title="Paiements" columns={paymentColumns} rows={paymentRows} state={paymentsState.status === "loading" ? "loading" : paymentsState.status === "error" ? "error" : payments.length === 0 ? "empty" : "default"} actionLabel="" rowActions={paymentRowActions} pagination={paymentsPagination} />
+        <Table title="Paiements" columns={paymentColumns} rows={paymentRows} state={isLoadingStatus(paymentsState.status) ? "loading" : paymentsState.status === "error" ? "error" : payments.length === 0 ? "empty" : "default"} actionLabel="" rowActions={paymentRowActions} pagination={paymentsPagination} />
       {:else if activePageId === "revenue"}
         <section class="filter-strip ehq-edge-surface" aria-label="Filtres revenus">
           <Select id="distribution-revenue-group" label="Grouper par" value={revenueGroupBy} options={revenueGroupOptions} state="default" message="" onchange={updateRevenueGroup} />
@@ -4378,7 +4382,7 @@
           <Table title="Détail des revenus" columns={revenueColumns} rows={revenueTableRows} state={tableStateFor(revenueState.status, revenueRows.length)} actionLabel="" pagination={revenuePagination} />
         </section>
       {:else if activePageId === "financial-reconciliation"}
-        {#if reconciliationState.status === "loading"}
+        {#if isLoadingStatus(reconciliationState.status)}
           <Loader label="Chargement du rapprochement" detail="Calcul des diagnostics en lecture seule." size="medium" />
         {:else if reconciliationState.status === "error"}
           <section class="empty-state error ehq-edge-surface">
@@ -4466,7 +4470,7 @@
           <Table title="Journal d'audit" columns={auditColumns} rows={auditRows} state={tableStateFor(auditLogState.status, auditEntries.length)} actionLabel="" pagination={auditPagination} />
         {/if}
       {:else if activePageId === "settings"}
-        {#if settingsState.status === "loading"}
+        {#if isLoadingStatus(settingsState.status)}
           <Loader label="Chargement des paramètres" detail="Lecture de la configuration workspace." size="medium" />
         {:else if settingsState.status === "error"}
           <section class="empty-state error ehq-edge-surface">

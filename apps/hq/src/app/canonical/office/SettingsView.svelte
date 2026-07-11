@@ -194,6 +194,10 @@
 
     return "Settings request failed.";
   }
+
+  function isLoadingState(state: ApiRequestState<unknown>): boolean {
+    return state.status === "loading" || state.status === "idle";
+  }
 </script>
 
 <section class="settings-view">
@@ -234,7 +238,7 @@
     <BarsChart title="Currency balance distribution (MUR)" points={currencyBalancePoints} tone="info" />
   </section>
 
-  {#if accountsState.status === "loading"}
+  {#if isLoadingState(accountsState)}
     <Loader label="Loading settings" detail="Reading currency configuration from accounts." size="medium" />
   {:else if accountsState.status === "error"}
     <div class="state-copy error">

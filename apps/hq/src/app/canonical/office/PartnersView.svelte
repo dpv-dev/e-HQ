@@ -772,6 +772,10 @@
     return "Partner action failed.";
   }
 
+  function isLoadingState(state: ApiRequestState<unknown>): boolean {
+    return state.status === "loading" || state.status === "idle";
+  }
+
   function writeDisabledTitle(): string {
     return props.writesEnabled ? "" : "enable writes";
   }
@@ -854,7 +858,7 @@
         title={copy.tableTitle}
         columns={partnerColumns(copy)}
         rows={partnerTableRows}
-        state={partnersState.status === "loading" ? "loading" : partnersState.status === "error" ? "error" : partnerTableRows.length === 0 ? "empty" : "default"}
+        state={isLoadingState(partnersState) ? "loading" : partnersState.status === "error" ? "error" : partnerTableRows.length === 0 ? "empty" : "default"}
         actionLabel=""
         rowActions={partnerRowActions}
         pagination={partnersPagination}
@@ -887,7 +891,7 @@
           onSecondary={closeDrawer}
         >
           {#snippet content()}
-            {#if detailState.status === "loading"}
+            {#if isLoadingState(detailState)}
               <Loader label="Loading partner" detail="Reading income and expense sides." size="medium" />
             {:else if detailState.status === "error"}
               <div class="drawer-empty error-state">
