@@ -1,0 +1,240 @@
+/* e-HQ Command theme for Distribution pages (presentation only). */
+.ehq-workspace-distribution .shell-main {
+  background: transparent;
+}
+
+.ehq-workspace-distribution aside {
+  background: transparent;
+}
+
+.ehq-workspace-distribution nav {
+  border: 1px solid var(--ehq-border);
+  border-radius: var(--ehq-radius-lg);
+  background: linear-gradient(180deg, rgba(240, 164, 0, 0.05), transparent 34%), var(--ehq-surface);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.35);
+}
+
+.ehq-workspace-distribution .shell-topbar {
+  min-height: 78px;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--ehq-border-soft);
+  background: linear-gradient(180deg, rgba(240, 164, 0, 0.07), transparent 72%);
+}
+
+.ehq-workspace-distribution .shell-title {
+  color: var(--ehq-text);
+  font-family: var(--dc-heading);
+  font-size: 1.02rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.ehq-workspace-distribution .shell-search {
+  min-height: 46px;
+  border-radius: var(--ehq-radius-pill);
+  border-color: var(--ehq-yellow-border);
+  background: linear-gradient(90deg, rgba(240, 164, 0, 0.12), transparent 34%), var(--ehq-surface);
+}
+
+.ehq-workspace-distribution .shell-search span,
+.ehq-workspace-distribution .shell-search kbd,
+.ehq-workspace-distribution .shell-status span,
+.ehq-workspace-distribution .shell-user small {
+  font-family: var(--ehq-mono);
+}
+
+.ehq-workspace-distribution .shell-search kbd {
+  color: var(--ehq-yellow);
+  border-color: var(--ehq-yellow-border);
+  background: var(--ehq-yellow-muted);
+}
+
+.ehq-workspace-distribution .nav-item.active {
+  background: linear-gradient(90deg, rgba(240, 164, 0, 0.22), transparent 82%);
+}
+
+.ehq-workspace-distribution .nav-item.active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--ehq-yellow);
+  box-shadow: 0 0 12px rgba(240, 164, 0, 0.45);
+}
+
+.ehq-workspace-distribution .content {
+  gap: var(--ehq-space-5);
+}
+
+.ehq-workspace-distribution .ehq-page-header {
+  min-height: 0;
+  padding: 2px 0 0;
+  border: 0;
+}
+
+.ehq-workspace-distribution .ehq-page-header h1 {
+  color: var(--ehq-text);
+  font-family: var(--dc-heading);
+  font-size: clamp(1.9rem, 1.5rem + 1vw, 2.7rem);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.ehq-workspace-distribution .ehq-page-header p {
+  color: var(--ehq-yellow);
+  font-family: var(--ehq-mono);
+  letter-spacing: 0.12em;
+}
+
+.ehq-workspace-distribution .ehq-page-header span {
+  color: var(--ehq-text-soft);
+  max-width: 86ch;
+}
+
+.ehq-workspace-distribution .content .ehq-edge-surface,
+.ehq-workspace-distribution .content .form-panel,
+.ehq-workspace-distribution .content .filter-strip,
+.ehq-workspace-distribution .content .contracts-actions,
+.ehq-workspace-distribution .content .lock-panel,
+.ehq-workspace-distribution .content .period-control,
+.ehq-workspace-distribution .content .statement-summary,
+.ehq-workspace-distribution .content .recon-actions,
+.ehq-workspace-distribution .content .settings-panel,
+.ehq-workspace-distribution .content .statement-pdf,
+.ehq-workspace-distribution .content .empty-state,
+.ehq-workspace-distribution .content .recon-action {
+  --ehq-edge-fill: var(--ehq-surface);
+  --ehq-edge-border-color: var(--ehq-border);
+  border: 1px solid var(--ehq-border);
+  border-radius: var(--ehq-radius-md);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 38%), var(--ehq-surface);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 12px 28px rgba(0, 0, 0, 0.34);
+}
+
+.ehq-workspace-distribution .content .ehq-table-shell {
+  border-radius: var(--ehq-radius-md);
+  overflow: hidden;
+}
+
+.ehq-workspace-distribution .content .ehq-table-shell thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  border-bottom: 1px solid var(--ehq-border);
+  background: var(--ehq-surface-high);
+}
+
+.ehq-workspace-distribution .content .ehq-table-shell tbody tr:hover {
+  background: rgba(240, 164, 0, 0.12);
+}
+
+.ehq-workspace-distribution .content .ehq-table-shell td,
+.ehq-workspace-distribution .content .ehq-table-shell th {
+  color: var(--ehq-text);
+}
+
+.ehq-workspace-distribution .content .ehq-table-shell .money,
+.ehq-workspace-distribution .content .ehq-table-shell td:last-child,
+.ehq-workspace-distribution .statement-summary dd,
+.ehq-workspace-distribution .settings-panel dd,
+.ehq-workspace-distribution .period-control p,
+.ehq-workspace-distribution .ehq-type-label-mono {
+  font-family: var(--ehq-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.ehq-workspace-distribution .ehq-badge.warning {
+  border-color: var(--ehq-warning-border);
+  background: var(--ehq-warning-bg);
+  color: var(--ehq-text);
+}
+
+.ehq-workspace-distribution .ehq-badge.success,
+.ehq-workspace-distribution .ehq-badge.info,
+.ehq-workspace-distribution .ehq-badge.active,
+.ehq-workspace-distribution .ehq-badge.error,
+.ehq-workspace-distribution .ehq-badge.muted {
+  color: var(--ehq-text);
+}
+
+.ehq-workspace-distribution .ehq-button.primary {
+  border-color: var(--ehq-yellow);
+  background: linear-gradient(180deg, var(--ehq-yellow-hover), var(--ehq-yellow));
+  color: var(--ehq-text-on-yellow);
+}
+
+.ehq-workspace-distribution .ehq-button:focus-visible {
+  border-color: var(--ehq-yellow-border);
+  box-shadow: 0 0 0 3px rgba(240, 164, 0, 0.25);
+}
+
+.ehq-workspace-distribution .distribution-coming-soon {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--ehq-warning-border);
+  border-radius: var(--ehq-radius-pill);
+  background: var(--ehq-warning-bg);
+  color: var(--ehq-text);
+  font-family: var(--ehq-mono);
+  font-size: var(--ehq-type-label-size);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ehq-workspace-distribution .distribution-target-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ehq-space-3);
+  padding: var(--ehq-space-3);
+}
+
+.ehq-workspace-distribution .distribution-target-strip span {
+  color: var(--ehq-text-soft);
+  font-family: var(--ehq-mono);
+  font-size: var(--ehq-type-caption-size);
+}
+
+.ehq-workspace-distribution .statement-summary-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--ehq-space-2);
+  justify-content: flex-end;
+}
+
+.ehq-workspace-distribution .distribution-page-imports .ehq-table-shell .table-frame {
+  overflow-x: auto;
+}
+
+.ehq-workspace-distribution .distribution-page-imports .ehq-table-shell table {
+  min-width: 1180px;
+}
+
+.ehq-workspace-distribution .distribution-page-statements .statement-summary dl {
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+}
+
+.ehq-workspace-distribution .distribution-page-dashboard .kpi-grid article:first-child {
+  --ehq-edge-border-color: var(--ehq-yellow-border);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.04) inset,
+    0 16px 34px rgba(0, 0, 0, 0.45),
+    0 0 16px rgba(240, 164, 0, 0.16);
+}
+
+.ehq-workspace-distribution .distribution-page-dashboard .dashboard-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+@media (max-width: 1280px) {
+  .ehq-workspace-distribution .kpi-grid,
+  .ehq-workspace-distribution .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+}

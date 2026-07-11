@@ -1,0 +1,78 @@
+@import "@ehq/ui/tokens/visual-tokens.css";
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Orbitron:wght@500;700&display=swap");
+
+/* Distribution command theme token bridge (presentation only). */
+.ehq-workspace-shell.ehq-workspace-distribution {
+  --dc-bg: #090b10;
+  --dc-surface: #141922;
+  --dc-surface-high: #1a2230;
+  --dc-surface-raised: #243041;
+
+  --dc-ink: #f4f6fa;
+  --dc-ink-muted: rgba(244, 246, 250, 0.72);
+  --dc-ink-soft: rgba(244, 246, 250, 0.56);
+  --dc-ink-disabled: rgba(244, 246, 250, 0.34);
+
+  --dc-line: rgba(240, 164, 0, 0.24);
+  --dc-line-soft: rgba(244, 246, 250, 0.1);
+
+  --dc-primary: #f0a400;
+  --dc-primary-hover: #ffb11c;
+  --dc-primary-active: #e69800;
+  --dc-primary-muted: rgba(240, 164, 0, 0.2);
+  --dc-primary-border: rgba(240, 164, 0, 0.45);
+
+  --dc-warning: #e0df14;
+  --dc-warning-bg: rgba(224, 223, 20, 0.14);
+  --dc-warning-border: rgba(224, 223, 20, 0.45);
+
+  --ehq-bg-main: var(--dc-bg);
+  --ehq-surface: var(--dc-surface);
+  --ehq-surface-high: var(--dc-surface-high);
+  --ehq-surface-raised: var(--dc-surface-raised);
+
+  --ehq-text: var(--dc-ink);
+  --ehq-text-white: var(--dc-ink);
+  --ehq-text-muted: var(--dc-ink-soft);
+  --ehq-text-soft: var(--dc-ink-muted);
+  --ehq-text-secondary: var(--dc-ink-muted);
+  --ehq-text-disabled: var(--dc-ink-disabled);
+  --ehq-text-on-yellow: #1a1200;
+
+  --ehq-border: var(--dc-line-soft);
+  --ehq-border-soft: rgba(244, 246, 250, 0.06);
+  --ehq-border-strong: var(--dc-line);
+
+  --ehq-yellow: var(--dc-primary);
+  --ehq-yellow-hover: var(--dc-primary-hover);
+  --ehq-yellow-active: var(--dc-primary-active);
+  --ehq-yellow-muted: rgba(240, 164, 0, 0.25);
+  --ehq-yellow-border: var(--dc-primary-border);
+
+  --ehq-warning: var(--dc-warning);
+  --ehq-warning-bg: var(--dc-warning-bg);
+  --ehq-warning-border: var(--dc-warning-border);
+
+  --ehq-font: Inter, "Helvetica Neue", Arial, sans-serif;
+  --ehq-display: Inter, "Helvetica Neue", Arial, sans-serif;
+  --ehq-mono: "IBM Plex Mono", "Space Mono", Consolas, monospace;
+  --dc-heading: "Orbitron", Inter, "Helvetica Neue", Arial, sans-serif;
+
+  background:
+    radial-gradient(circle at 12% 8%, rgba(240, 164, 0, 0.18), transparent 26%),
+    radial-gradient(circle at 88% 10%, rgba(59, 130, 246, 0.12), transparent 24%),
+    linear-gradient(140deg, #080a0e, #0c1018 52%, #121824);
+}
+
+.ehq-workspace-shell.ehq-workspace-distribution::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  background-size: 80px 80px;
+  mask-image: radial-gradient(circle at 50% 28%, black 0%, transparent 72%);
+}

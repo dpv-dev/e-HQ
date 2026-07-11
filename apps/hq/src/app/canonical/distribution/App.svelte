@@ -43,6 +43,8 @@
   import { parseCsvRecords } from "../../bank-parser.js";
   import { formatDateOnly, formatDateRange } from "../../date-format.js";
   import { formatMoneyValue, moneyToneForValue } from "../../money-format.js";
+  import "../../../distribution-command-scope.css";
+  import "./distribution-command.css";
   import { createPeriodOptions, getLatestDataPeriod, periodLabel, rangeForScope, rangeLabel, todayIso, type DateRange, type PeriodScope } from "../../period-controls.js";
   import { normalizeRoutePath } from "../../route-utils.js";
   import { sortOptionsAlphabetically } from "../../select-options.js";
@@ -3614,7 +3616,7 @@
   }
 
   function formatMicro(amountMicro: string): string {
-    return formatMoney(amountMicro, "MUR");
+    return formatMoney(amountMicro, "EUR");
   }
 
   function formatMoney(amountMicro: string, currency: CurrencyCode): string {
@@ -3812,7 +3814,7 @@
   onNavigate={handleShellNavigate}
   onSignOut={onLogout}
 >
-    <div class="content">
+  <div class={`content distribution-page-${activePageId}`}>
       <PageHeader
         workspace="distribution"
         eyebrow="Distribution"
@@ -3866,6 +3868,13 @@
             <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state={dashboardState.status === "loading" ? "loading" : "default"} accent={kpi.accent} />
           {/each}
         </section>
+        <section class="distribution-target-strip ehq-edge-surface" aria-label="Distribution target">
+          <div>
+            <strong class="ehq-type-label-mono">Target Q3</strong>
+            <span>Planned objective panel is visible but not wired yet.</span>
+          </div>
+          <Button label="Cible Q3" variant="secondary" size="small" type="button" disabled={true} loading={false} locked={false} focus={false} ariaLabel="Cible Q3 coming soon" title="coming soon" />
+        </section>
         <section class="dashboard-grid">
           <BarsChart title="Revenus par source" points={revenueChartPoints} tone="active" />
           <Table title="Liste d'actions" columns={dashboardColumns} rows={dashboardRows} state={tableStateFor(dashboardActionListStatus, dashboardRows.length)} actionLabel="" />
@@ -3880,10 +3889,11 @@
           </label>
           <Button label="Prévisualiser l'export" variant="secondary" size="medium" type="button" disabled={!canPreviewImport} loading={false} locked={false} focus={false} ariaLabel="Prévisualiser l'export" title={canPreviewImport ? "" : "Sélectionnez d'abord un fichier d'export CSV/TSV"} onclick={previewImport} />
           <Button label="Valider l'import" variant="primary" size="medium" type="button" disabled={!canConfirmImport || !writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Valider l'import" title={writeDisabledTitle()} onclick={confirmImport} />
+          <Button label="Suggested match" variant="secondary" size="medium" type="button" disabled={true} loading={false} locked={false} focus={false} ariaLabel="Suggested match coming soon" title="coming soon" />
         </section>
         <section class="filter-strip ehq-edge-surface" aria-label="Filtres d'import">
           <Select id="distribution-import-filter" label="Filtre source" value={importSourceFilter} options={importFilterOptions} state="default" message="" onchange={updateImportFilter} />
-          <Button label="Filtrer" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Appliquer les filtres d'import" onclick={loadImportBatches} />
+          <Button label="Filtrer" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Appliquer les filtres d'import" onclick={loadImportBatches} />
         </section>
         <section class="import-result ehq-edge-surface" class:error={importState.status === "error"} aria-live="polite">
           <strong>{importState.message}</strong>
@@ -4067,7 +4077,10 @@
               </dl>
             </div>
           {/if}
-          <Button label="Générer les statements" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Générer les statements" title={writeDisabledTitle()} onclick={generateStatements} />
+          <div class="statement-summary-actions">
+            <Button label="Générer les statements" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Générer les statements" title={writeDisabledTitle()} onclick={generateStatements} />
+            <Button label="Generate batch PDF" variant="secondary" size="medium" type="button" disabled={true} loading={false} locked={false} focus={false} ariaLabel="Generate batch PDF coming soon" title="coming soon" />
+          </div>
         </section>
         <section class="statement-pdf ehq-edge-surface" aria-label="Prévisualisation PDF statement A4">
           <header>
