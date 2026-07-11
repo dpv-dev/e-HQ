@@ -33,6 +33,10 @@
     type OfficeProjectSummary,
     type PageResult
   } from "@ehq/api-client";
+  import {
+    apiRequestStateLabel as stateLabel,
+    isApiRequestLoading as isLoadingState
+  } from "../request-state.js";
   import { formatDateOnly } from "../../date-format.js";
   import { formatMoneyValue, moneyToneForValue } from "../../money-format.js";
   import { createTablePagination, loadPageResult, readPageItems, TABLE_PAGE_SIZE, type PageLoadMode } from "../../table-pagination.js";
@@ -547,26 +551,6 @@
         { kind: "badge", value: violation.exactFixPath, tone: "info" }
       ]
     }));
-  }
-
-  function stateLabel(state: ApiRequestState<unknown>): string {
-    if (state.status === "idle") {
-      return "loading";
-    }
-
-    if (state.status === "loading") {
-      return "loading";
-    }
-
-    if (state.status === "error") {
-      return "error";
-    }
-
-    return "loaded";
-  }
-
-  function isLoadingState(state: ApiRequestState<unknown>): boolean {
-    return state.status === "loading" || state.status === "idle";
   }
 
   function moneyTone(amountMicro: string): Tone {

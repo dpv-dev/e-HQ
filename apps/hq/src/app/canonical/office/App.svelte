@@ -75,6 +75,10 @@
   import { formatDateOnly } from "../../date-format.js";
   import { apiMoneyToMicroUnits, formatMoneyValue, formatSignedMoneyValue, moneyToneForValue } from "../../money-format.js";
   import { createPeriodOptions, getLatestDataPeriod, periodLabel, rangeForScope, rangeLabel, todayIso, type DateRange, type PeriodScope } from "../../period-controls.js";
+  import {
+    apiRequestStateLabel as stateLabel,
+    isApiRequestLoading as isLoadingState
+  } from "../request-state.js";
   import { normalizeRoutePath } from "../../route-utils.js";
   import { sortOptionsAlphabetically } from "../../select-options.js";
   import { createTablePagination, loadPageResult, readPageItems, TABLE_PAGE_SIZE, type PageLoadMode } from "../../table-pagination.js";
@@ -3855,26 +3859,6 @@
     return sortOptionsAlphabetically([{ label: "All projects", value: allValue }, ...uniqueProjects], 1);
   }
 
-  function stateLabel(state: ApiRequestState<unknown>): string {
-    if (state.status === "idle") {
-      return "loading";
-    }
-
-    if (state.status === "loading") {
-      return "loading";
-    }
-
-    if (state.status === "error") {
-      return "error";
-    }
-
-    return "loaded";
-  }
-
-  function isLoadingState(state: ApiRequestState<unknown>): boolean {
-    return state.status === "loading" || state.status === "idle";
-  }
-
   function toNullableFilter(value: SelectFilterValue): string | null {
     if (value === allValue) {
       return null;
@@ -4252,7 +4236,7 @@
       {:else if activePageId === "pnl"}
         <section class="kpi-grid" aria-label="P&L indicators">
           {#each pnlKpis as kpi (kpi.label)}
-            <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state={pnlState.status === "loading" || pnlState.status === "idle" ? "loading" : "default"} accent={kpi.accent} />
+            <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state={isLoadingState(pnlState) ? "loading" : "default"} accent={kpi.accent} />
           {/each}
         </section>
 
@@ -4269,7 +4253,7 @@
           <Button label="Filter" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Apply P&L filters" onclick={applyPnlFilters} />
         </section>
 
-        {#if pnlState.status === "loading" || pnlState.status === "idle"}
+        {#if isLoadingState(pnlState)}
           <Loader label="Loading P&L" detail="Reading validated projections." size="medium" />
         {:else}
           <section class="dashboard-grid">

@@ -31,6 +31,10 @@
     type OfficeReconciliationCandidate,
     type PageResult
   } from "@ehq/api-client";
+  import {
+    apiRequestStateLabel as stateLabel,
+    isApiRequestLoading as isLoadingState
+  } from "../request-state.js";
   import { formatDateOnly } from "../../date-format.js";
   import { sortOptionsAlphabetically } from "../../select-options.js";
   import { formatMoneyValue, formatSignedMoneyValue, moneyToneForValue } from "../../money-format.js";
@@ -787,26 +791,6 @@
     }
 
     return normalized.slice(0, 10);
-  }
-
-  function stateLabel(state: ApiRequestState<unknown>): string {
-    if (state.status === "idle") {
-      return "loading";
-    }
-
-    if (state.status === "loading") {
-      return "loading";
-    }
-
-    if (state.status === "error") {
-      return "error";
-    }
-
-    return "loaded";
-  }
-
-  function isLoadingState(state: ApiRequestState<unknown>): boolean {
-    return state.status === "loading" || state.status === "idle";
   }
 
   function reconciliationTone(status: "unmatched" | "suggested" | "matched" | "rejected" | "ignored"): Tone {

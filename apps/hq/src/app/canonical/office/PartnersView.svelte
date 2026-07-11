@@ -36,6 +36,7 @@
     type OfficePartnerWriteRequest,
     type PageResult
   } from "@ehq/api-client";
+  import { isApiRequestLoading as isLoadingState } from "../request-state.js";
   import { formatDateOnly } from "../../date-format.js";
   import { formatMoneyValue, moneySignForValue, moneyToneForValue } from "../../money-format.js";
   import { createTablePagination, loadPageResult, readPageItems, TABLE_PAGE_SIZE, type PageLoadMode } from "../../table-pagination.js";
@@ -770,10 +771,6 @@
     }
 
     return "Partner action failed.";
-  }
-
-  function isLoadingState(state: ApiRequestState<unknown>): boolean {
-    return state.status === "loading" || state.status === "idle";
   }
 
   function writeDisabledTitle(): string {

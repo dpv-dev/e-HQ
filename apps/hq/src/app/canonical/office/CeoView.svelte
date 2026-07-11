@@ -24,6 +24,10 @@
     type OfficePnlProjectionRow,
     type PageResult
   } from "@ehq/api-client";
+  import {
+    apiRequestStateLabel as stateLabel,
+    isApiRequestLoading as isLoadingState
+  } from "../request-state.js";
   import { formatMoneyValue, formatSignedMoneyValue, moneyToneForValue } from "../../money-format.js";
   import { createTablePagination, loadPageResult, readPageItems, TABLE_PAGE_SIZE, type PageLoadMode } from "../../table-pagination.js";
   import { untrack } from "svelte";
@@ -218,26 +222,6 @@
         { kind: "money", value: formatSignedMicro(row.netMicro), tone: moneyTone(row.netMicro) }
       ]
     }));
-  }
-
-  function stateLabel(state: ApiRequestState<unknown>): string {
-    if (state.status === "idle") {
-      return "loading";
-    }
-
-    if (state.status === "loading") {
-      return "loading";
-    }
-
-    if (state.status === "error") {
-      return "error";
-    }
-
-    return "loaded";
-  }
-
-  function isLoadingState(state: ApiRequestState<unknown>): boolean {
-    return state.status === "loading" || state.status === "idle";
   }
 
   function formatMicro(amountMicro: string): string {

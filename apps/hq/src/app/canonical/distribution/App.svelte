@@ -51,6 +51,9 @@
   import { sortOptionsAlphabetically } from "../../select-options.js";
   import { appendPageResult, createTablePagination, loadPageResult, readPageItems, TABLE_PAGE_SIZE, type PageLoadMode } from "../../table-pagination.js";
   import {
+    apiRequestStateLabelFr as stateLabel
+  } from "../request-state.js";
+  import {
     canCancelDistributionImportBatch,
     canOpenDistributionImportBatch,
     distributionImportBatchReadOnlyReason,
@@ -3744,22 +3747,6 @@
       { label: "Fichier", value: state.fileName === "" ? "aucun fichier sélectionné" : state.fileName, active: false, disabled: false, actionId: "file", title: "Effacer le fichier sélectionné" },
       { label: "État", value: state.status, active: false, disabled: false, actionId: "status", title: "Lancer la prévisualisation" }
     ];
-  }
-
-  function stateLabel(state: ApiRequestState<unknown>): string {
-    if (state.status === "idle") {
-      return "chargement";
-    }
-
-    if (state.status === "loading") {
-      return "chargement";
-    }
-
-    if (state.status === "error") {
-      return "erreur";
-    }
-
-    return "chargé";
   }
 
   function toNullableImportSource(value: ImportSourceFilter): "kontor" | "routenote" | null {

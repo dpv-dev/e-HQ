@@ -45,6 +45,7 @@
   import { getLatestDataPeriod, periodLabel } from "../../period-controls.js";
   import DevSessionMenu from "../../DevSessionMenu.svelte";
   import { normalizeRoutePath } from "../../route-utils.js";
+  import { isApiRequestLoading as isLoadingState } from "../request-state.js";
   import "../../../office-orbital-scope.css";
   import "../office/orbital-office.css";
 
@@ -601,10 +602,6 @@
     }
 
     return "waiting for live API";
-  }
-
-  function isLoadingState<TData>(state: ApiRequestState<TData>): boolean {
-    return state.status === "loading" || state.status === "idle";
   }
 
   function requestStateTone<TData>(state: ApiRequestState<TData>): Tone {
