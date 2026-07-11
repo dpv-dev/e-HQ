@@ -92,6 +92,7 @@ Update (corpus expansion):
 ### Stage D - Default flip
 - Enable backend parser path by default in production.
 - Keep frontend path behind emergency fallback flag for one stabilization window.
+Status: started (HQ default now backend parser when env is unset; explicit `VITE_OFFICE_BACKEND_PARSER=false` keeps frontend fallback available).
 
 ### Stage E - Cleanup
 - Remove production use of frontend parser.

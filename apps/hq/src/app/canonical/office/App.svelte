@@ -365,7 +365,11 @@
   const bankStatementSourceOptions: readonly SelectOption[] = importSourceOptions.filter(
     (option: SelectOption): boolean => option.value === "mcb" || option.value === "sbi"
   );
-  const officeUseBackendParser = parseBooleanEnvValue(import.meta.env.VITE_OFFICE_BACKEND_PARSER);
+  // Stage D default flip: backend parser is primary unless explicitly disabled.
+  const officeUseBackendParser = parseBooleanEnvValue(
+    import.meta.env.VITE_OFFICE_BACKEND_PARSER,
+    true
+  );
   const planKindOptions: readonly SelectOption[] = [
     { label: "Department", value: "department" },
     { label: "Division", value: "division" },
@@ -2361,12 +2365,18 @@
     editingImportRowNumber = null;
   }
 
-  function parseBooleanEnvValue(value: unknown): boolean {
+  function parseBooleanEnvValue(value: unknown, fallback: boolean): boolean {
     if (typeof value !== "string") {
-      return false;
+      return fallback;
     }
     const normalized = value.trim().toLowerCase();
-    return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+    if (normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on") {
+      return true;
+    }
+    if (normalized === "0" || normalized === "false" || normalized === "no" || normalized === "off") {
+      return false;
+    }
+    return fallback;
   }
 
   // Apply a manual fix to one rejected row, then re-run the preview so the API re-validates it.
