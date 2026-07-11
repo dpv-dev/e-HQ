@@ -2484,7 +2484,7 @@
       );
       mutationReceiptPageId = activePageId;
       closeExpensePanel();
-      await loadContracts();
+      await Promise.all([loadContracts(), loadReconciliation(), loadAuditLog()]);
     } catch (error: unknown) {
       reportActionError(error);
     }
@@ -2535,7 +2535,7 @@
       );
       mutationReceiptPageId = activePageId;
       closeCatalogPanel();
-      await loadCatalog();
+      await Promise.all([loadCatalog(), loadAliases(), loadDuplicates()]);
     } catch (error: unknown) {
       reportActionError(error);
     }
@@ -2568,7 +2568,7 @@
       );
       mutationReceiptPageId = activePageId;
       closeCatalogPanel();
-      await loadCatalog();
+      await Promise.all([loadCatalog(), loadAliases(), loadDuplicates()]);
     } catch (error: unknown) {
       reportActionError(error);
     }
@@ -2670,7 +2670,7 @@
       );
       mutationReceiptPageId = activePageId;
       closeContractPanel();
-      await loadContracts();
+      await Promise.all([loadContracts(), loadRevenue(), loadReconciliation()]);
     } catch (error: unknown) {
       reportActionError(error);
     }
@@ -2733,7 +2733,7 @@
       );
       mutationReceiptPageId = activePageId;
       closeContractRulePanel();
-      await loadContracts();
+      await Promise.all([loadContracts(), loadRevenue(), loadReconciliation()]);
     } catch (error: unknown) {
       reportActionError(error);
     }
@@ -2825,7 +2825,7 @@
       );
       runReceiptPageId = activePageId;
       closeUnpostPanel();
-      await loadAllocationRuns();
+      await Promise.all([loadAllocationRuns(), loadStatements(), loadPayments(), loadRevenue(), loadReconciliation()]);
     } catch (error: unknown) {
       reportActionError(error);
     }
@@ -2936,7 +2936,7 @@
       );
       mutationReceiptPageId = activePageId;
       closeSuspensePanel();
-      await loadSuspense();
+      await Promise.all([loadSuspense(), loadReconciliation(), loadAuditLog()]);
     } catch (error: unknown) {
       reportActionError(error);
     }
@@ -2959,7 +2959,7 @@
       );
       runReceiptPageId = activePageId;
       // The generation run persists new statements; refresh the list.
-      await loadStatements();
+      await Promise.all([loadStatements(), loadPayments(), loadRevenue(), loadReconciliation(), loadAuditLog()]);
     } catch (error: unknown) {
       reportActionError(error);
     }
@@ -3233,7 +3233,7 @@
       );
       mutationReceiptPageId = activePageId;
       closePaymentPanel();
-      await Promise.all([loadPayments(), loadStatements()]);
+      await Promise.all([loadPayments(), loadStatements(), loadRevenue(), loadReconciliation()]);
     } catch (error: unknown) {
       reportActionError(error);
     }
@@ -3267,7 +3267,7 @@
           { idempotencyKey: createIdempotencyKey("recon-link-payment") }
         );
         mutationReceiptPageId = activePageId;
-        await Promise.all([loadPayments(), loadReconciliation(), loadAuditLog()]);
+        await Promise.all([loadPayments(), loadStatements(), loadRevenue(), loadReconciliation(), loadAuditLog()]);
       } catch (error: unknown) {
         reportActionError(error);
       }
@@ -3310,7 +3310,7 @@
           { idempotencyKey: createIdempotencyKey("recon-void-statement") }
         );
         mutationReceiptPageId = activePageId;
-        await Promise.all([loadStatements(), loadReconciliation(), loadAuditLog()]);
+        await Promise.all([loadStatements(), loadPayments(), loadRevenue(), loadReconciliation(), loadAuditLog()]);
       } catch (error: unknown) {
         reportActionError(error);
       }

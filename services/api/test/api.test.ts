@@ -294,6 +294,152 @@ test("Command Center notifications expose guarded live readiness items", async (
   assert.equal((await botDenied.json()).error.code, "bot_route_denied");
 });
 
+test("Command Center overview merges persisted integration and setting overrides", async () => {
+  const pglite = new PGlite();
+  await createPgliteWriteTables(pglite);
+  const app = createApiService({
+    fixtures: createFixtureStore(),
+    persistence: createDrizzlePersistenceRuntime(drizzle(pglite) as Parameters<typeof createDrizzlePersistenceRuntime>[0], { WRITES_ENABLED: "true" }),
+    health: null,
+    nowIso: (): string => "2026-06-21T00:00:00.000Z",
+    auth: createTestAuthVerifier()
+  });
+
+  try {
+    await pglite.exec(`
+      insert into command_center_integration_states (workspace_id, integration_id, enabled, status, updated_by_user_id)
+      values
+        ('eeee-mu', 'mcp', false, 'disabled', 'user_fixture'),
+        ('eeee-mu', 'mcb', true, 'attention', 'user_fixture');
+
+      insert into command_center_settings (workspace_id, key, value_json, status, updated_by_user_id)
+      values
+        ('eeee-mu', 'theme', '{"name":"Light command room"}'::jsonb, 'review', 'user_fixture'),
+        ('eeee-mu', 'ops-window', '{"value":"02:00 UTC"}'::jsonb, 'required', 'user_fixture');
+    `);
+
+    const response = await app.request("/cc/v1/overview?workspaceId=eeee-mu", {
+      headers: authHeaders()
+    });
+    assert.equal(response.status, 200);
+    const overview = (await response.json()) as {
+      readonly workspaceId: string;
+      readonly generatedAt: string;
+      readonly readiness: readonly { readonly id: string; readonly tone: string }[];
+      readonly integrations: readonly { readonly id: string; readonly status: string; readonly action: string }[];
+      readonly settings: readonly { readonly id: string; readonly value: string; readonly status: string; readonly tone: string }[];
+    };
+
+    assert.equal(overview.workspaceId, "eeee-mu");
+    assert.equal(overview.generatedAt, "2026-06-21T00:00:00.000Z");
+    assert.ok(overview.readiness.some((item) => item.id === "write-gate" && item.tone === "success"));
+
+    const mcp = overview.integrations.find((integration) => integration.id === "mcp");
+    assert.notEqual(mcp, undefined);
+    assert.equal(mcp.status, "idle");
+    assert.equal(mcp.action, "Enable");
+
+    const mcb = overview.integrations.find((integration) => integration.id === "mcb");
+    assert.notEqual(mcb, undefined);
+    assert.equal(mcb.status, "attention");
+    assert.equal(mcb.action, "Manage");
+
+    const theme = overview.settings.find((setting) => setting.id === "theme");
+    assert.notEqual(theme, undefined);
+    assert.equal(theme.value, "Light command room");
+    assert.equal(theme.status, "review");
+    assert.equal(theme.tone, "warning");
+
+    const opsWindow = overview.settings.find((setting) => setting.id === "ops-window");
+    assert.notEqual(opsWindow, undefined);
+    assert.equal(opsWindow.value, "02:00 UTC");
+    assert.equal(opsWindow.status, "required");
+    assert.equal(opsWindow.tone, "warning");
+  } finally {
+    await pglite.close();
+  }
+});
+
+test("Command Center integration toggle persists state and replays idempotently", async () => {
+  const pglite = new PGlite();
+  await createPgliteWriteTables(pglite);
+  const app = createApiService({
+    fixtures: createFixtureStore(),
+    persistence: createDrizzlePersistenceRuntime(drizzle(pglite) as Parameters<typeof createDrizzlePersistenceRuntime>[0], { WRITES_ENABLED: "true" }),
+    health: null,
+    nowIso: (): string => "2026-06-21T00:00:00.000Z",
+    auth: createTestAuthVerifier()
+  });
+
+  try {
+    const payload = {
+      workspaceId: "eeee-mu",
+      integrationId: "mcb",
+      enabled: false,
+      status: "disabled"
+    };
+
+    const first = await app.request("/cc/v1/integrations/mcb/toggle", {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "cc-toggle-pglite-1" },
+      body: JSON.stringify(payload)
+    });
+    assert.equal(first.status, 200);
+    const firstReceipt = (await first.json()) as { readonly id: string; readonly auditEventId: string | null };
+    assert.equal(firstReceipt.id, "eeee-mu:integration:mcb");
+    assert.ok(firstReceipt.auditEventId !== null);
+    assert.equal(await pgliteCount(pglite, "command_center_integration_states"), 1);
+    assert.equal(await pgliteCount(pglite, "api_idempotency_keys"), 1);
+    assert.equal(await pgliteCountWhere(pglite, "audit_logs", "action = 'command_center_integration_toggle'"), 1);
+
+    const persistedStateResult = await pglite.query(
+      "select enabled, status, updated_by_user_id from command_center_integration_states where workspace_id = $1 and integration_id = $2",
+      ["eeee-mu", "mcb"]
+    );
+    const persistedState = persistedStateResult.rows[0] as
+      | { readonly enabled: boolean; readonly status: string; readonly updated_by_user_id: string }
+      | undefined;
+    assert.notEqual(persistedState, undefined);
+    assert.equal(persistedState.enabled, false);
+    assert.equal(persistedState.status, "disabled");
+    assert.equal(persistedState.updated_by_user_id, "user_fixture");
+
+    const replay = await app.request("/cc/v1/integrations/mcb/toggle", {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "cc-toggle-pglite-1" },
+      body: JSON.stringify(payload)
+    });
+    assert.equal(replay.status, 200);
+    const replayReceipt = (await replay.json()) as { readonly id: string; readonly auditEventId: string | null };
+    assert.equal(replayReceipt.id, firstReceipt.id);
+    assert.equal(replayReceipt.auditEventId, firstReceipt.auditEventId);
+    assert.equal(await pgliteCount(pglite, "command_center_integration_states"), 1);
+    assert.equal(await pgliteCount(pglite, "api_idempotency_keys"), 1);
+    assert.equal(await pgliteCountWhere(pglite, "audit_logs", "action = 'command_center_integration_toggle'"), 1);
+
+    const conflict = await app.request("/cc/v1/integrations/mcb/toggle", {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "cc-toggle-pglite-1" },
+      body: JSON.stringify({ ...payload, enabled: true, status: "connected" })
+    });
+    assert.equal(conflict.status, 409);
+
+    const overview = await app.request("/cc/v1/overview?workspaceId=eeee-mu", {
+      headers: authHeaders()
+    });
+    assert.equal(overview.status, 200);
+    const overviewJson = (await overview.json()) as {
+      readonly integrations: readonly { readonly id: string; readonly status: string; readonly action: string }[];
+    };
+    const mcb = overviewJson.integrations.find((integration) => integration.id === "mcb");
+    assert.notEqual(mcb, undefined);
+    assert.equal(mcb.status, "idle");
+    assert.equal(mcb.action, "Enable");
+  } finally {
+    await pglite.close();
+  }
+});
+
 test("read routes enforce server-side workspace authorization, not just the UI", async () => {
   const app = createDisabledFixtureApiService();
   const officeRead = "/eof/v1/dashboard?workspaceId=eeee-mu&period=2026-02";
@@ -3666,6 +3812,40 @@ async function createPgliteWriteTables(pglite: PGlite): Promise<void> {
       matched_transaction_id text,
       raw_data jsonb not null default '{}'::jsonb,
       created_at timestamp with time zone default now() not null
+    );
+
+    create table command_center_settings (
+      workspace_id text not null,
+      key text not null,
+      value_json jsonb not null,
+      status text not null,
+      updated_by_user_id text not null,
+      created_at timestamp with time zone default now() not null,
+      updated_at timestamp with time zone default now() not null,
+      primary key (workspace_id, key)
+    );
+
+    create table command_center_integration_states (
+      workspace_id text not null,
+      integration_id text not null,
+      enabled boolean not null,
+      status text not null,
+      updated_by_user_id text not null,
+      created_at timestamp with time zone default now() not null,
+      updated_at timestamp with time zone default now() not null,
+      primary key (workspace_id, integration_id)
+    );
+
+    create table command_center_user_permissions (
+      workspace_id text not null,
+      user_id text not null,
+      email text not null,
+      role text not null,
+      permissions_json jsonb not null,
+      updated_by_user_id text not null,
+      created_at timestamp with time zone default now() not null,
+      updated_at timestamp with time zone default now() not null,
+      primary key (workspace_id, user_id)
     );
   `);
 }

@@ -1232,7 +1232,7 @@
         { idempotencyKey: createIdempotencyKey("transaction-cancel") }
       );
       actionReceipt = receipt;
-      await loadTransactions();
+      await Promise.all([loadTransactions(), loadPendingTransactions(), loadDashboard(), loadDashboardAnalytics()]);
     } catch (error: unknown) {
       transactionsState = createErrorState<PageResult<OfficeTransaction>>(error);
     }
@@ -1309,7 +1309,7 @@
       );
       actionReceipt = receipt;
       editingTransaction = null;
-      await loadTransactions();
+      await Promise.all([loadTransactions(), loadPendingTransactions(), loadDashboard(), refreshReconciliationViews()]);
     } catch (error: unknown) {
       transactionsState = createErrorState<PageResult<OfficeTransaction>>(error);
     }
@@ -1329,7 +1329,7 @@
       );
       actionReceipt = receipt;
       editingTransaction = null;
-      await loadTransactions();
+      await Promise.all([loadTransactions(), loadPendingTransactions(), loadDashboard(), refreshReconciliationViews()]);
     } catch (error: unknown) {
       transactionsState = createErrorState<PageResult<OfficeTransaction>>(error);
     }
@@ -1396,7 +1396,7 @@
         { idempotencyKey: createIdempotencyKey("reconcile-accept") }
       );
       actionReceipt = receipt;
-      await refreshReconciliationViews();
+      await Promise.all([refreshReconciliationViews(), loadDashboard(), loadDashboardAnalytics(), loadTransactions()]);
     } catch (error: unknown) {
       reconciliationState = createErrorState<PageResult<OfficeReconciliationCandidate>>(error);
     }
@@ -1447,7 +1447,7 @@
       );
       actionReceipt = receipt;
       reconcileDrawerLineId = null;
-      await refreshReconciliationViews();
+      await Promise.all([refreshReconciliationViews(), loadDashboard(), loadDashboardAnalytics(), loadTransactions()]);
     } catch (error: unknown) {
       reconciliationState = createErrorState<PageResult<OfficeReconciliationCandidate>>(error);
     }
@@ -1488,7 +1488,7 @@
         { idempotencyKey: createIdempotencyKey("reconcile-unmatch") }
       );
       actionReceipt = receipt;
-      await refreshReconciliationViews();
+      await Promise.all([refreshReconciliationViews(), loadDashboard(), loadDashboardAnalytics(), loadTransactions()]);
     } catch (error: unknown) {
       reconciliationState = createErrorState<PageResult<OfficeReconciliationCandidate>>(error);
     }
@@ -1505,7 +1505,7 @@
         { idempotencyKey: createIdempotencyKey("reconcile-reject") }
       );
       actionReceipt = receipt;
-      await refreshReconciliationViews();
+      await Promise.all([refreshReconciliationViews(), loadDashboard(), loadDashboardAnalytics(), loadTransactions()]);
     } catch (error: unknown) {
       reconciliationState = createErrorState<PageResult<OfficeReconciliationCandidate>>(error);
     }
@@ -1559,7 +1559,7 @@
         { idempotencyKey: createIdempotencyKey("import-reverse") }
       );
       actionReceipt = receipt;
-      await Promise.all([loadDashboard(), loadDashboardAnalytics(), loadTransactions()]);
+      await Promise.all([loadDashboard(), loadDashboardAnalytics(), loadTransactions(), loadPendingTransactions(), refreshReconciliationViews()]);
     } catch (error: unknown) {
       dashboardState = createErrorState<OfficeDashboardResponse>(error);
     }
@@ -1588,7 +1588,7 @@
         { idempotencyKey: createIdempotencyKey("import-delete") }
       );
       actionReceipt = receipt;
-      await Promise.all([loadDashboard(), loadDashboardAnalytics(), loadTransactions()]);
+      await Promise.all([loadDashboard(), loadDashboardAnalytics(), loadTransactions(), loadPendingTransactions(), refreshReconciliationViews()]);
     } catch (error: unknown) {
       dashboardState = createErrorState<OfficeDashboardResponse>(error);
     }
@@ -1747,7 +1747,7 @@
       actionReceipt = receipt;
       cashflowImportRecords = [];
       cashflowImportMessage = "Cashflow imported.";
-      await loadCashflow();
+      await Promise.all([loadCashflow(), loadDashboard(), loadDashboardAnalytics()]);
     } catch (error: unknown) {
       cashflowImportMessage = getErrorMessage(error);
     }
@@ -2731,7 +2731,7 @@
       });
       actionReceipt = receipt;
       creatingTransaction = false;
-      await loadTransactions();
+      await Promise.all([loadTransactions(), loadPendingTransactions(), loadDashboard(), loadDashboardAnalytics()]);
     } catch (error: unknown) {
       transactionsState = createErrorState<PageResult<OfficeTransaction>>(error);
     }
@@ -2758,7 +2758,7 @@
         }
       );
       actionReceipt = receipt;
-      await refreshReconciliationViews();
+      await Promise.all([refreshReconciliationViews(), loadDashboard(), loadDashboardAnalytics(), loadTransactions()]);
     } catch (error: unknown) {
       reconciliationState = createErrorState<PageResult<OfficeReconciliationCandidate>>(error);
     }
