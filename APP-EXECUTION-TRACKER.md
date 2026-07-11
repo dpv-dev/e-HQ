@@ -14,7 +14,7 @@ Current head: 18f730c
 ## Program Phases
 
 ### Phase 1 - Product Completion Baseline
-Status: in-progress
+Status: complete
 Owner: engineering
 Goal: one truth board for what is done vs not done for each app route/action.
 
@@ -28,13 +28,15 @@ Done:
 - Initial prioritized execution backlog created in PHASE1-2-EXECUTION-BACKLOG.md.
 - Route/action truth matrix created in PHASE1-ROUTE-ACTION-MATRIX.md.
 - Must-have vs later scope lock created in RELEASE-SCOPE-LOCK.md.
+- Route/action matrix expanded to full visible action coverage with handler/API references.
+- Explicit out-of-scope rows added for intentionally locked/disabled controls.
 
 Exit criteria:
 - Every visible user action has one of: implemented, intentionally hidden, or explicitly out-of-scope.
 - No ambiguous "maybe done" items remain.
 
 ### Phase 2 - Backend Truth and Functional Completeness
-Status: in-progress
+Status: complete
 Owner: engineering
 Goal: every business action is backend-truth, auditable, and reloaded from API state.
 
@@ -47,6 +49,8 @@ Done:
 - Added backend endpoint GET cc/v1/overview for readiness/integrations/settings aggregate.
 - Added typed client contract and method in packages/api-client/src/command-center.ts.
 - Command Center app now loads readiness/integrations/settings from backend overview payload.
+- Command Center app now consumes cc/v1/notifications and surfaces unread alert count in dashboard KPIs.
+- Added focused UI regression tests for high-risk post-mutation refresh plans (Office, Distribution, Command Center).
 
 Exit criteria:
 - No fake success states.
@@ -104,6 +108,5 @@ Done:
 - Deployment evidence logged in DEPLOY-LOG-2026-07-11.md.
 
 ## Immediate Next Window (Now -> Next Commit Wave)
-1. Expand PHASE1-ROUTE-ACTION-MATRIX.md from high-traffic rows to full visible action coverage.
-2. Add focused UI tests for multi-surface post-mutation refresh expectations on the highest-risk handlers.
-3. Decide/implement cross-surface refresh policy for plan-comptable writes if product requires immediate non-plan view propagation.
+1. Execute Phase 3 parser ownership migration from frontend parser to API parser endpoints.
+2. Keep running canonical gate + deploy after each scoped phase slice.

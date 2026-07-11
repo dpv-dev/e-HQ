@@ -2825,7 +2825,7 @@
       );
       runReceiptPageId = activePageId;
       closeUnpostPanel();
-      await Promise.all([loadAllocationRuns(), loadStatements(), loadPayments(), loadRevenue(), loadReconciliation()]);
+      await Promise.all([loadAllocationRuns(), loadStatements(), loadPayments(), loadRevenue(), loadReconciliation(), loadAuditLog()]);
     } catch (error: unknown) {
       reportActionError(error);
     }

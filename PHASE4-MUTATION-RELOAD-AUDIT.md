@@ -38,12 +38,24 @@ Scope: Office + Distribution critical mutations and post-write reload consistenc
   - File: apps/hq/src/app/canonical/distribution/App.svelte
 - editPayment, reconcilePayment, and voidPayment now all refresh audit log after mutation.
   - File: apps/hq/src/app/canonical/distribution/App.svelte
+- unpostAllocationRun now refreshes audit log in addition to allocation/payment/reconciliation surfaces.
+  - File: apps/hq/src/app/canonical/distribution/App.svelte
+
+### Focused regression tests
+- Added source-level refresh-plan tests for Office key handlers.
+  - File: apps/hq/src/app/canonical/office/mutation-refresh-plan.test.ts
+- Added source-level refresh-plan tests for Distribution key handlers.
+  - File: apps/hq/src/app/canonical/distribution/mutation-refresh-plan.test.ts
+
+### Plan-comptable refresh policy decision
+- Decision: keep plan-comptable writes scoped to reloading the plan tree only (no automatic cross-surface dashboard/ledger refresh on create/update/delete of plan nodes).
+- Rationale: these writes occur on the dedicated plan page, and broad cross-surface invalidation adds noise and latency without immediate user value; non-plan views naturally reload on navigation or explicit refresh.
+- Scope: createPlanNode, deactivateFirstCategory, togglePlanNodeActive, deletePlanNode.
 
 ## Verification
 - API compile: passed
-- HQ tests: 17/17 passed
+- HQ tests: 26/26 passed
 - HQ build: passed
 
 ## Remaining audit work
-- Add focused tests for multi-surface refresh expectations on key mutation handlers.
-- Decide if plan-comptable write handlers should trigger additional cross-surface reloads (currently intentionally scoped to plan tree only).
+- None for Phase 4 mutation reload scope.

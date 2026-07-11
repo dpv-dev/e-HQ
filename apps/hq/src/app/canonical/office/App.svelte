@@ -1471,7 +1471,13 @@
       );
       actionReceipt = receipt;
       reconcileDrawerLineId = null;
-      await Promise.all([refreshReconciliationViews(), loadTransactions(), loadPendingTransactions()]);
+      await Promise.all([
+        refreshReconciliationViews(),
+        loadTransactions(),
+        loadPendingTransactions(),
+        loadDashboard(),
+        loadDashboardAnalytics()
+      ]);
     } catch (error: unknown) {
       reconciliationState = createErrorState<PageResult<OfficeReconciliationCandidate>>(error);
     }

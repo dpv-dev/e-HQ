@@ -11,6 +11,7 @@
     createLoadingState,
     createSuccessState,
     type ApiRequestState,
+    type CommandCenterNotificationsResponse,
     type CommandCenterOverviewResponse
   } from "@ehq/api-client";
   import {
@@ -257,6 +258,7 @@
   let inviteEmail = $state("");
   let workspaceName = $state("ë • Entreprise");
   let lastSavedWorkspaceName = $state("ë • Entreprise");
+  let unreadNotifications = $state(0);
   let commandNotice = $state("");
   let commandNoticeTone = $state<AlertTone>("info");
 
@@ -276,7 +278,7 @@
   const readinessPercent = $derived(readinessItems.length === 0 ? 0 : Math.round((readinessOkCount / readinessItems.length) * 100));
   const integrations = $derived(createIntegrations(overviewState));
   const settingRows = $derived(createSettings(overviewState));
-  const dashboardKpis = $derived(createDashboardKpis(readinessItems, permissionUsers, integrations));
+  const dashboardKpis = $derived(createDashboardKpis(readinessItems, permissionUsers, integrations, unreadNotifications));
   const usersKpis = $derived(createUsersKpis(permissionUsers));
   const integrationKpis = $derived(createIntegrationKpis(integrations, writesEnabled, writeGateMessage));
   const settingsKpis = $derived(createSettingsKpis(settingRows));
@@ -295,6 +297,7 @@
     window.addEventListener("popstate", syncPageFromLocation);
     void loadWriteGate();
     void loadCommandOverview();
+    void loadNotifications();
 
     return (): void => {
       window.removeEventListener("popstate", syncPageFromLocation);
@@ -328,6 +331,17 @@
     }
   }
 
+  async function loadNotifications(): Promise<void> {
+    try {
+      const notifications: CommandCenterNotificationsResponse = await client.commandCenter.listNotifications({
+        workspaceId
+      });
+      unreadNotifications = notifications.unreadCount;
+    } catch {
+      unreadNotifications = 0;
+    }
+  }
+
   function selectDashboardToolbarFilter(filter: ToolbarFilter): void {
     if (filter.actionId === "scope") {
       selectPage("dashboard");
@@ -342,7 +356,7 @@
     }
 
     if (filter.actionId === "period") {
-      void loadCommandOverview();
+      void Promise.all([loadCommandOverview(), loadNotifications()]);
       setCommandNotice("info", `Readiness refresh requested for ${periodLabel(period)}.`);
       return;
     }
@@ -581,11 +595,11 @@
   function createDashboardKpis(
     checks: readonly ReadinessItem[],
     users: readonly CommandPermissionUser[],
-    rows: readonly IntegrationRow[]
+    rows: readonly IntegrationRow[],
+    unreadCount: number
   ): readonly CommandKpi[] {
     const readyCount = countReadyChecks(checks);
     const readyPercent = Math.round((readyCount / checks.length) * 100);
-    const deniedCount = countDeniedAccess(users);
     const connectedCount = rows.filter((row: IntegrationRow): boolean => row.status === "connected").length;
 
     return [
@@ -597,7 +611,7 @@
         accent: true
       },
       { label: "Permission profiles", value: String(users.length), detail: "from @ehq/auth", tone: "info", accent: false },
-      { label: "Denied cards", value: String(deniedCount), detail: "locked, never hidden", tone: "error", accent: false },
+      { label: "Alerts", value: String(unreadCount), detail: "cc notifications", tone: unreadCount === 0 ? "success" : "warning", accent: false },
       { label: "Connectors", value: `${String(connectedCount)}/${String(rows.length)}`, detail: "healthy", tone: "success", accent: false }
     ];
   }
@@ -918,6 +932,7 @@
         }
       );
       setCommandNotice("success", `Permission review persisted · audit ${receipt.auditEventId ?? "missing"}.`);
+      await Promise.all([loadCommandOverview(), loadNotifications()]);
     } catch (error: unknown) {
       setCommandNotice("error", `Permission write failed · ${errorMessage(error)}.`);
     } finally {
@@ -944,6 +959,7 @@
       } else {
         setCommandNotice("success", `${key} setting persisted · audit ${receipt.auditEventId}.`);
       }
+      await Promise.all([loadCommandOverview(), loadNotifications()]);
       return true;
     } catch (error: unknown) {
       setCommandNotice("error", `${key} setting write failed · ${errorMessage(error)}.`);
@@ -1006,7 +1022,7 @@
         }
       );
       setCommandNotice("success", `Integration updated · audit ${receipt.auditEventId ?? "missing"}.`);
-      await loadCommandOverview();
+      await Promise.all([loadCommandOverview(), loadNotifications()]);
     } catch (error: unknown) {
       setCommandNotice("error", `Integration update failed · ${errorMessage(error)}.`);
     } finally {
