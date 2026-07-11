@@ -35,7 +35,8 @@
   } from "@ehq/api-client";
   import {
     apiRequestStateLabel as stateLabel,
-    isApiRequestLoading as isLoadingState
+    isApiRequestLoading as isLoadingState,
+    type CanonicalRequestStatus
   } from "../request-state.js";
   import { formatDateOnly } from "../../date-format.js";
   import { formatMoneyValue, moneyToneForValue } from "../../money-format.js";
@@ -59,7 +60,7 @@
     readonly accent: boolean;
   }
 
-  type RequestStatus = "idle" | "loading" | "success" | "error";
+  type RequestStatus = CanonicalRequestStatus;
 
   const props: Props = $props();
   const currency: CurrencyCode = "MUR";

@@ -77,7 +77,8 @@
   import { createPeriodOptions, getLatestDataPeriod, periodLabel, rangeForScope, rangeLabel, todayIso, type DateRange, type PeriodScope } from "../../period-controls.js";
   import {
     apiRequestStateLabel as stateLabel,
-    isApiRequestLoading as isLoadingState
+    isApiRequestLoading as isLoadingState,
+    type CanonicalRequestStatus
   } from "../request-state.js";
   import { normalizeRoutePath } from "../../route-utils.js";
   import { sortOptionsAlphabetically } from "../../select-options.js";
@@ -111,7 +112,7 @@
     | "settings";
   type SelectFilterValue = string;
   type ImportSource = "mcb" | "sbi" | "csv" | "cashflow" | "pdf";
-  type RequestStatus = "idle" | "loading" | "success" | "error";
+  type RequestStatus = CanonicalRequestStatus;
   type OfficePagedTableId = "divisionPnl" | "pnlCategory" | "planComptable" | "transactions" | "pending" | "reconciliation" | "audit";
 
   interface Props {
