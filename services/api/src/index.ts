@@ -118,6 +118,7 @@ import type {
   DistributionImportConfirmResponse,
   DistributionImportPreviewRequest,
   DistributionImportPreviewResponse,
+  DistributionImportPreviewRowResult,
   DistributionAlias,
   DistributionDuplicate,
   DistributionMappingApplyRulesRequest,
@@ -193,6 +194,7 @@ import {
   type SupabaseJwtVerifier
 } from "./auth.js";
 import { parseOfficeBankImportText } from "./office-bank-parser.js";
+import { parseDistributionImportPreview } from "./distribution-import-parser.js";
 import { createSupabaseRouter } from "./supabase-server.js";
 import { createFixtureStore, type ApiDistributionRoyaltyRuleInput, type ApiFixtureStore } from "./fixtures.js";
 import {
@@ -6633,7 +6635,8 @@ async function distributionImportPreviewResponse(context: ApiContext, dependenci
   const request = await readJsonBody<DistributionImportPreviewRequest>(context);
   assertDistributionImportPreviewRequest(context, request);
   requirePermissionForWorkspace(context.get("authUser"), "distribution_import_preview", request.workspaceId);
-  const previewRows = previewRowsFromRecords(request.rows);
+  const parsedPreview = parseDistributionImportPreview(request.source, request.rows);
+  const previewRows = parsedPreview.rows;
   const idempotencyFingerprint = `${request.source}:${request.checksum}:${hashRequestBody(request.rows)}`;
   const previewId = previewIdFor("distribution", idempotencyFingerprint);
   const preview: DistributionImportPreviewRecord = {
@@ -6647,24 +6650,27 @@ async function distributionImportPreviewResponse(context: ApiContext, dependenci
     createdAtIso: dependencies.nowIso()
   };
   await dependencies.persistence.storeDistributionImportPreview(preview);
-  // Keep only currencies explicitly present in the imported file rows.
-  // Do not infer a source-based fallback (Kontor=EUR / RouteNote=USD).
-  const currencyCodes = currencyCodesFromRows(request.rows, null);
+  const currencyCodes = parsedPreview.currencyCodes.length === 0
+    ? currencyCodesFromRows(request.rows, null)
+    : parsedPreview.currencyCodes;
+  const joinKeys = parsedPreview.joinKeys.length === 0
+    ? joinKeysFromRows(request.rows)
+    : parsedPreview.joinKeys;
+  const rowResults: readonly DistributionImportPreviewRowResult[] = parsedPreview.rowResults;
   const response: DistributionImportPreviewResponse = {
     previewId,
     source: request.source,
     statementReference: `preview:${request.checksum}`,
     accountReference: request.source,
-    acceptedRowCount: previewRows.length,
-    rejectedRowCount: 0,
-    unmappedRowCount: previewRows.length,
-    payableMicro: erhMoney.format(0n),
+    acceptedRowCount: parsedPreview.acceptedRowCount,
+    rejectedRowCount: parsedPreview.rejectedRowCount,
+    unmappedRowCount: parsedPreview.acceptedRowCount,
+    payableMicro: parsedPreview.payableMicro,
     currencyCodes,
-    joinKeys: joinKeysFromRows(request.rows),
+    joinKeys,
     idempotencyFingerprint,
-    warnings: [
-      "Distribution runtime parsers are not enabled in services/api yet; confirm will persist raw rows and import issues without fabricating normalized earnings."
-    ]
+    warnings: parsedPreview.warnings,
+    rowResults
   };
   return context.json(response);
 }

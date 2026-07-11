@@ -1140,6 +1140,13 @@ export interface DistributionImportPreviewRequest {
   readonly rows: readonly Readonly<Record<string, string>>[];
 }
 
+export interface DistributionImportPreviewRowResult {
+  readonly id: EntityId;
+  readonly rowNumber: number;
+  readonly status: "accepted" | "rejected";
+  readonly issues: readonly string[];
+}
+
 export interface DistributionImportPreviewResponse {
   readonly previewId: EntityId;
   readonly source: "kontor" | "routenote";
@@ -1153,6 +1160,7 @@ export interface DistributionImportPreviewResponse {
   readonly joinKeys: readonly string[];
   readonly idempotencyFingerprint: string;
   readonly warnings: readonly string[];
+  readonly rowResults: readonly DistributionImportPreviewRowResult[];
 }
 
 export interface DistributionImportConfirmRequest {

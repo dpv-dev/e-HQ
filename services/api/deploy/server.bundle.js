@@ -25672,6 +25672,262 @@ function pad2(value) {
   return String(value).padStart(2, "0");
 }
 
+// src/distribution-import-parser.ts
+var GENERAL_AMOUNT_KEYS = [
+  "amount",
+  "gross amount",
+  "gross",
+  "earnings",
+  "net earnings",
+  "royalty",
+  "revenue"
+];
+var GENERAL_CURRENCY_KEYS = [
+  "currency",
+  "currency code",
+  "currency_code"
+];
+var GENERAL_TITLE_KEYS = [
+  "title",
+  "song title",
+  "track title",
+  "track"
+];
+var GENERAL_ARTIST_KEYS = [
+  "artist",
+  "artist name",
+  "performer"
+];
+var GENERAL_ISRC_KEYS = ["isrc"];
+var GENERAL_UPC_KEYS = ["upc", "ean"];
+var GENERAL_QUANTITY_KEYS = ["quantity", "units", "streams", "downloads"];
+var KONTOR_PROFILE = {
+  amountKeys: ["amount eur", "amount usd", "gross payout", ...GENERAL_AMOUNT_KEYS],
+  currencyKeys: ["currency", "curr", ...GENERAL_CURRENCY_KEYS],
+  titleKeys: ["title", "song", "track", ...GENERAL_TITLE_KEYS],
+  artistKeys: ["artist", "main artist", ...GENERAL_ARTIST_KEYS],
+  isrcKeys: [...GENERAL_ISRC_KEYS],
+  upcKeys: [...GENERAL_UPC_KEYS],
+  quantityKeys: [...GENERAL_QUANTITY_KEYS]
+};
+var ROUTENOTE_PROFILE = {
+  amountKeys: ["earnings", "net earnings", "royalty", "royalty amount", ...GENERAL_AMOUNT_KEYS],
+  currencyKeys: ["currency", "currency code", ...GENERAL_CURRENCY_KEYS],
+  titleKeys: ["track name", "title", ...GENERAL_TITLE_KEYS],
+  artistKeys: ["artist name", "artist", ...GENERAL_ARTIST_KEYS],
+  isrcKeys: [...GENERAL_ISRC_KEYS],
+  upcKeys: [...GENERAL_UPC_KEYS],
+  quantityKeys: [...GENERAL_QUANTITY_KEYS]
+};
+function parseDistributionImportPreview(source, rows) {
+  const previewRows = toPreviewRows(rows);
+  const profile = source === "kontor" ? KONTOR_PROFILE : ROUTENOTE_PROFILE;
+  const acceptedRows = [];
+  const rowResults = [];
+  const joinKeySourceRows = [];
+  const currencyCodes = /* @__PURE__ */ new Set();
+  for (const previewRow of previewRows) {
+    const parsed = parseRow(profile, previewRow);
+    if (parsed === null) {
+      rowResults.push({
+        id: previewRow.id,
+        rowNumber: previewRow.rowNumber,
+        status: "rejected",
+        issues: [
+          "amount_or_currency_missing",
+          "title_or_identifier_missing"
+        ]
+      });
+      continue;
+    }
+    acceptedRows.push(parsed);
+    joinKeySourceRows.push(previewRow.rawData);
+    currencyCodes.add(parsed.currency);
+    rowResults.push({
+      id: previewRow.id,
+      rowNumber: previewRow.rowNumber,
+      status: "accepted",
+      issues: []
+    });
+  }
+  const rejectedRowCount = previewRows.length - acceptedRows.length;
+  const warnings = buildWarnings(source, rejectedRowCount, previewRows.length);
+  const payableMicro = erhMoney.format(
+    acceptedRows.reduce(
+      (sum, parsed) => erhMoney.add(sum, erhMoney.parse(parsed.grossAmount)),
+      0n
+    )
+  );
+  return {
+    rows: previewRows,
+    acceptedRowCount: acceptedRows.length,
+    rejectedRowCount,
+    rowResults,
+    currencyCodes: [...currencyCodes],
+    joinKeys: joinKeysFromRows(joinKeySourceRows),
+    payableMicro,
+    warnings
+  };
+}
+function toPreviewRows(rows) {
+  return rows.map(
+    (row, index) => ({
+      id: `row_${String(index + 1)}`,
+      rowNumber: index + 1,
+      rawData: row
+    })
+  );
+}
+function parseRow(profile, row) {
+  const amountValue = rowValue(row.rawData, profile.amountKeys);
+  const currency = normalizedCurrency(rowValue(row.rawData, profile.currencyKeys));
+  const isrc = normalizeIdentifier(rowValue(row.rawData, profile.isrcKeys));
+  const upc = normalizeIdentifier(rowValue(row.rawData, profile.upcKeys));
+  const title = nonEmptyValue(rowValue(row.rawData, profile.titleKeys));
+  const artist = nonEmptyValue(rowValue(row.rawData, profile.artistKeys));
+  const hasTrackIdentity = title !== null || artist !== null || isrc !== null || upc !== null;
+  if (!hasTrackIdentity) {
+    return null;
+  }
+  if (currency === null) {
+    return null;
+  }
+  const grossAmount = parseErhAmount4(amountValue);
+  if (grossAmount === null) {
+    return null;
+  }
+  const quantityValue = rowValue(row.rawData, profile.quantityKeys);
+  const quantity = parseQuantity(quantityValue);
+  if (quantity === null) {
+    return null;
+  }
+  void quantity;
+  return {
+    row,
+    currency,
+    grossAmount
+  };
+}
+function parseErhAmount4(value) {
+  if (value === null) {
+    return null;
+  }
+  const normalized = normalizeDecimalText(value);
+  if (normalized === null) {
+    return null;
+  }
+  try {
+    return erhMoney.format(erhMoney.parse(normalized));
+  } catch {
+    return null;
+  }
+}
+function parseQuantity(value) {
+  if (value === null) {
+    return "1.000000";
+  }
+  const normalized = normalizeDecimalText(value);
+  if (normalized === null) {
+    return null;
+  }
+  try {
+    const units = parse(normalized, 6, "TRUNCATE");
+    if (units < 0n) {
+      return null;
+    }
+    return format(units, 6);
+  } catch {
+    return null;
+  }
+}
+function normalizeDecimalText(value) {
+  const compact = value.trim().replace(/,/gu, "");
+  if (compact.length === 0) {
+    return null;
+  }
+  if (!/^[+-]?\d+(?:\.\d+)?$/u.test(compact)) {
+    return null;
+  }
+  return compact;
+}
+function rowValue(row, candidateKeys) {
+  const normalizedCandidates = new Set(candidateKeys.map(normalizeColumnKey));
+  for (const [key, value] of Object.entries(row)) {
+    if (!normalizedCandidates.has(normalizeColumnKey(key))) {
+      continue;
+    }
+    const trimmed = value.trim();
+    if (trimmed.length > 0) {
+      return trimmed;
+    }
+  }
+  return null;
+}
+function normalizeColumnKey(value) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]/gu, "");
+}
+function normalizedCurrency(value) {
+  if (value === null) {
+    return null;
+  }
+  const normalized = value.trim().toUpperCase();
+  if (/^[A-Z]{3}$/u.test(normalized)) {
+    return normalized;
+  }
+  return null;
+}
+function normalizeIdentifier(value) {
+  if (value === null) {
+    return null;
+  }
+  const normalized = value.trim().toUpperCase().replace(/[^A-Z0-9]/gu, "");
+  if (normalized.length === 0) {
+    return null;
+  }
+  return normalized;
+}
+function nonEmptyValue(value) {
+  if (value === null) {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? null : trimmed;
+}
+function joinKeysFromRows(rows) {
+  const normalizedKeys = /* @__PURE__ */ new Set();
+  for (const row of rows) {
+    for (const key of Object.keys(row)) {
+      normalizedKeys.add(normalizeColumnKey(key));
+    }
+  }
+  const keys = [];
+  if (normalizedKeys.has("isrc")) {
+    keys.push("ISRC");
+  }
+  if (normalizedKeys.has("upc") || normalizedKeys.has("ean")) {
+    keys.push("UPC/EAN");
+  }
+  if (normalizedKeys.has("title") || normalizedKeys.has("tracktitle") || normalizedKeys.has("trackname")) {
+    keys.push("title");
+  }
+  if (normalizedKeys.has("artist") || normalizedKeys.has("artistname")) {
+    keys.push("artist");
+  }
+  return keys.length === 0 ? ["raw_row"] : keys;
+}
+function buildWarnings(source, rejectedRowCount, totalRowCount) {
+  const warnings = [];
+  if (rejectedRowCount > 0) {
+    warnings.push(
+      `${String(rejectedRowCount)} row(s) were rejected during ${source} parser preflight because required amount/currency/identity fields were missing or invalid.`
+    );
+  }
+  if (rejectedRowCount === totalRowCount && totalRowCount > 0) {
+    warnings.push("No parseable rows were found. Verify file columns before confirming import.");
+  }
+  return warnings;
+}
+
 // ../../node_modules/.pnpm/@supabase+supabase-js@2.108.2/node_modules/@supabase/supabase-js/dist/index.mjs
 var dist_exports = {};
 __export(dist_exports, {
@@ -42613,9 +42869,9 @@ function normalizeCashflowMonth(value) {
   return null;
 }
 function parseCashflowImportRow(record) {
-  const periodRaw = rowValue(record, ["periodMonth", "period_month", "period", "month", "Month", "PERIOD", "Mois"]);
+  const periodRaw = rowValue2(record, ["periodMonth", "period_month", "period", "month", "Month", "PERIOD", "Mois"]);
   const periodMonth = periodRaw !== null ? normalizeCashflowMonth(periodRaw) : null;
-  const currency = normalizedCurrency(rowValue(record, ["currency", "currency_code", "Currency", "CURRENCY"])) ?? "MUR";
+  const currency = normalizedCurrency2(rowValue2(record, ["currency", "currency_code", "Currency", "CURRENCY"])) ?? "MUR";
   const inflow = moneyValue(record, ["inflow", "Inflow", "expectedInflow", "expected_inflow", "inflowMinor", "entrees"]);
   const outflow = moneyValue(record, ["outflow", "Outflow", "expectedOutflow", "expected_outflow", "outflowMinor", "sorties"]);
   const closing = moneyValue(record, ["closingBalance", "closing_balance", "ClosingBalance", "balance", "Balance", "solde"]);
@@ -45188,7 +45444,8 @@ async function distributionImportPreviewResponse(context, dependencies) {
   const request = await readJsonBody(context);
   assertDistributionImportPreviewRequest(context, request);
   requirePermissionForWorkspace(context.get("authUser"), "distribution_import_preview", request.workspaceId);
-  const previewRows = previewRowsFromRecords(request.rows);
+  const parsedPreview = parseDistributionImportPreview(request.source, request.rows);
+  const previewRows = parsedPreview.rows;
   const idempotencyFingerprint = `${request.source}:${request.checksum}:${hashRequestBody(request.rows)}`;
   const previewId = previewIdFor("distribution", idempotencyFingerprint);
   const preview = {
@@ -45202,22 +45459,23 @@ async function distributionImportPreviewResponse(context, dependencies) {
     createdAtIso: dependencies.nowIso()
   };
   await dependencies.persistence.storeDistributionImportPreview(preview);
-  const currencyCodes = currencyCodesFromRows(request.rows, null);
+  const currencyCodes = parsedPreview.currencyCodes.length === 0 ? currencyCodesFromRows(request.rows, null) : parsedPreview.currencyCodes;
+  const joinKeys = parsedPreview.joinKeys.length === 0 ? joinKeysFromRows2(request.rows) : parsedPreview.joinKeys;
+  const rowResults = parsedPreview.rowResults;
   const response = {
     previewId,
     source: request.source,
     statementReference: `preview:${request.checksum}`,
     accountReference: request.source,
-    acceptedRowCount: previewRows.length,
-    rejectedRowCount: 0,
-    unmappedRowCount: previewRows.length,
-    payableMicro: erhMoney.format(0n),
+    acceptedRowCount: parsedPreview.acceptedRowCount,
+    rejectedRowCount: parsedPreview.rejectedRowCount,
+    unmappedRowCount: parsedPreview.acceptedRowCount,
+    payableMicro: parsedPreview.payableMicro,
     currencyCodes,
-    joinKeys: joinKeysFromRows(request.rows),
+    joinKeys,
     idempotencyFingerprint,
-    warnings: [
-      "Distribution runtime parsers are not enabled in services/api yet; confirm will persist raw rows and import issues without fabricating normalized earnings."
-    ]
+    warnings: parsedPreview.warnings,
+    rowResults
   };
   return context.json(response);
 }
@@ -45415,7 +45673,7 @@ function bankImportAccountMismatchWarnings(rows, accounts) {
   if (firstRow === void 0) {
     return [];
   }
-  const selectedAccountId = rowValue(firstRow, ["accountId", "account_id"]);
+  const selectedAccountId = rowValue2(firstRow, ["accountId", "account_id"]);
   if (selectedAccountId === null) {
     return [];
   }
@@ -46381,25 +46639,25 @@ function previewIdFor(scope, fingerprint) {
 }
 function currencyCodesFromRows(rows, fallback) {
   const codes = uniqueStrings(
-    rows.map((row) => normalizedCurrency(rowValue(row, ["currency", "currency_code", "Currency", "CURRENCY"]))).filter((currency) => currency !== null)
+    rows.map((row) => normalizedCurrency2(rowValue2(row, ["currency", "currency_code", "Currency", "CURRENCY"]))).filter((currency) => currency !== null)
   );
   if (codes.length > 0) {
     return codes;
   }
   return fallback === null ? [] : [fallback];
 }
-function normalizedCurrency(value) {
+function normalizedCurrency2(value) {
   if (value === null) {
     return null;
   }
   const normalized = value.trim().toUpperCase();
   return /^[A-Z]{3}$/u.test(normalized) ? normalized : null;
 }
-function joinKeysFromRows(rows) {
+function joinKeysFromRows2(rows) {
   const normalizedKeys = /* @__PURE__ */ new Set();
   for (const row of rows) {
     for (const key of Object.keys(row)) {
-      normalizedKeys.add(normalizeColumnKey(key));
+      normalizedKeys.add(normalizeColumnKey2(key));
     }
   }
   const keys = [];
@@ -46435,10 +46693,10 @@ function previewRowResult(parsed) {
   };
 }
 function parseOfficeBankPreviewRow(row, workspaceId, accounts, exchangeRates) {
-  const currency = normalizedCurrency(rowValue(row.rawData, ["currency", "currency_code", "Currency", "CURRENCY"])) ?? "MUR";
+  const currency = normalizedCurrency2(rowValue2(row.rawData, ["currency", "currency_code", "Currency", "CURRENCY"])) ?? "MUR";
   const account = accountForRow(row.rawData, workspaceId, currency, accounts);
   const occurredOn = isoDateValue(row.rawData, ["occurredOn", "occurred_on", "transactionDate", "transaction_date", "date", "DATE", "Date", "paid_on", "paidOn"]);
-  const description = rowValue(row.rawData, ["description", "label", "particulars", "details", "narrative", "memo"]);
+  const description = rowValue2(row.rawData, ["description", "label", "particulars", "details", "narrative", "memo"]);
   const amount = amountForBankRow(row.rawData);
   const amountMurMinor = amount === null ? null : amount.amountMurMinor !== null ? amount.amountMurMinor : occurredOn !== null ? convertMinorToMurViaFinanceKernel(amount.amountMinor, amount.currency, occurredOn, exchangeRates) : null;
   const issues = [
@@ -46463,7 +46721,7 @@ function parseOfficeBankPreviewRow(row, workspaceId, accounts, exchangeRates) {
       occurredOn,
       valueOn: isoDateValue(row.rawData, ["valueOn", "value_on", "valueDate", "value_date"]),
       description,
-      reference: rowValue(row.rawData, ["reference", "ref", "transactionId", "transaction_id", "invoice_ref"]),
+      reference: rowValue2(row.rawData, ["reference", "ref", "transactionId", "transaction_id", "invoice_ref"]),
       direction: amount.direction,
       amountMinor: amount.amountMinor,
       balanceMinor: moneyValue(row.rawData, ["balance", "balanceMinor", "closingBalance", "closing_balance"]),
@@ -46661,14 +46919,14 @@ function absoluteIsoDayDistance(leftDate, rightDate) {
   return Math.floor(Math.abs(left - right) / 864e5);
 }
 function accountForRow(row, workspaceId, currency, accounts) {
-  const accountId = rowValue(row, ["accountId", "account_id"]);
+  const accountId = rowValue2(row, ["accountId", "account_id"]);
   if (accountId !== null) {
     return accounts.find((account) => account.id === accountId) ?? null;
   }
   return accounts.find((account) => account.workspaceId === workspaceId && account.currency === currency && account.isActive) ?? null;
 }
 function amountForBankRow(row) {
-  const currency = normalizedCurrency(rowValue(row, ["currency", "currency_code", "Currency", "CURRENCY"])) ?? "MUR";
+  const currency = normalizedCurrency2(rowValue2(row, ["currency", "currency_code", "Currency", "CURRENCY"])) ?? "MUR";
   const credit = moneyValue(row, ["credit", "Credit", "amountCredit", "amount_credit"]);
   const debit = moneyValue(row, ["debit", "Debit", "amountDebit", "amount_debit"]);
   if (credit !== null && debit !== null) {
@@ -46739,7 +46997,7 @@ function decimalFromE10(rateE10) {
   return `${sign}${integer}.${fraction}`;
 }
 function moneyValue(row, aliases) {
-  const value = rowValue(row, aliases);
+  const value = rowValue2(row, aliases);
   if (value === null) {
     return null;
   }
@@ -46793,7 +47051,7 @@ function cleanMoneyText2(value) {
   return `${sign}${compacted.replace(/,/gu, "")}`;
 }
 function isoDateValue(row, aliases) {
-  const value = rowValue(row, aliases);
+  const value = rowValue2(row, aliases);
   if (value === null) {
     return null;
   }
@@ -46815,16 +47073,16 @@ function isoDateValue(row, aliases) {
   }
   return null;
 }
-function rowValue(row, aliases) {
-  const normalizedAliases = new Set(aliases.map((alias) => normalizeColumnKey(alias)));
+function rowValue2(row, aliases) {
+  const normalizedAliases = new Set(aliases.map((alias) => normalizeColumnKey2(alias)));
   for (const [key, value] of Object.entries(row)) {
-    if (normalizedAliases.has(normalizeColumnKey(key)) && value.trim().length > 0) {
+    if (normalizedAliases.has(normalizeColumnKey2(key)) && value.trim().length > 0) {
       return value;
     }
   }
   return null;
 }
-function normalizeColumnKey(key) {
+function normalizeColumnKey2(key) {
   return key.trim().toLowerCase().replace(/[^a-z0-9]+/gu, "");
 }
 function uniqueStrings(values) {

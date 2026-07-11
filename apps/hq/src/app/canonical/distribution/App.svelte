@@ -2333,17 +2333,20 @@
     };
 
     try {
-      // The preview endpoint enumerates the submitted rows as row_1..row_N (in submission
-      // order) and reports how many it accepted; rebuild those ids from the response.
-      const acceptedRowIds = Array.from(
+      const acceptedRowIds = preview.rowResults
+        .filter((row): boolean => row.status === "accepted")
+        .map((row): string => row.id);
+
+      const fallbackAcceptedRowIds = Array.from(
         { length: preview.acceptedRowCount },
         (_: unknown, index: number): string => `row_${String(index + 1)}`
       );
+
       const confirm = await client.distribution.confirmImport(
         {
           workspaceId: distributionWorkspaceId,
           previewId: preview.previewId,
-          acceptedRowIds,
+          acceptedRowIds: acceptedRowIds.length > 0 ? acceptedRowIds : fallbackAcceptedRowIds,
           rejectedRowIds: []
         },
         {
