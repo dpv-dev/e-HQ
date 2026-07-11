@@ -2803,6 +2803,64 @@ test("classification files a transaction without flipping its income/expense typ
   assert.equal(classified.type, "income", `classification flipped the type to ${classified.type}`);
 });
 
+test("transaction create without explicit type uses fixed fallback independent of category", async () => {
+  const app = createWriteEnabledFixtureApiService();
+
+  const firstCreate = await app.request("/eof/v1/transactions", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "type-missing-create-1" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      occurredOn: "2026-02-22",
+      accountId: "bank_mur",
+      categoryId: "cat_rental_expense",
+      projectId: null,
+      description: "Missing explicit type",
+      amountMicro: "150.00",
+      currency: "MUR"
+    })
+  });
+  assert.equal(firstCreate.status, 200);
+  const firstReceipt = (await firstCreate.json()) as { readonly id: string };
+
+  const secondCreate = await app.request("/eof/v1/transactions", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "type-missing-create-2" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      occurredOn: "2026-02-23",
+      accountId: "bank_mur",
+      categoryId: "cat_live_income",
+      projectId: null,
+      description: "Missing explicit type with income category",
+      amountMicro: "42.00",
+      currency: "MUR"
+    })
+  });
+  assert.equal(secondCreate.status, 200);
+  const secondReceipt = (await secondCreate.json()) as { readonly id: string };
+
+  const page = await app.request("/eof/v1/transactions?workspaceId=workspace_1&limit=200", { headers: authHeaders() });
+  assert.equal(page.status, 200);
+  const transactions = (await page.json()) as {
+    readonly items: readonly {
+      readonly id: string;
+      readonly type: string;
+      readonly categoryId: string | null;
+    }[];
+  };
+
+  const first = transactions.items.find((item) => item.id === firstReceipt.id);
+  assert.ok(first !== undefined);
+  assert.equal(first.type, "expense");
+  assert.equal(first.categoryId, "cat_rental_expense");
+
+  const second = transactions.items.find((item) => item.id === secondReceipt.id);
+  assert.ok(second !== undefined);
+  assert.equal(second.type, "expense");
+  assert.equal(second.categoryId, "cat_live_income");
+});
+
 test("reconciliation candidates sign bank amounts by direction", async () => {
   const app = createFixtureApiService();
   const response = await app.request("/eof/v1/reconciliations?workspaceId=workspace_1", { headers: authHeaders() });
