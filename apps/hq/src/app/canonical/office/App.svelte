@@ -28,6 +28,7 @@
     type WorkspaceNavGroup,
     type WorkspaceNavItem
   } from "@ehq/ui";
+  import "../../../office-orbital-scope.css";
   import {
     beginReload,
     createErrorState,
@@ -62,6 +63,7 @@
     type OfficeCategoryType
   } from "@ehq/api-client";
   import { createShellApiClient } from "../../app-shell-data.js";
+  import "./orbital-office.css";
   import { extractPdfText } from "../../pdf-extract.js";
   import { parseBankStatement, parseBankCsv, parseCsvRecords, detectBankFormat, detectStatementCurrency, detectCsvCurrency, type ParsedBankRow } from "../../bank-parser.js";
   import { formatDateOnly } from "../../date-format.js";
@@ -1714,6 +1716,12 @@
       return "imports";
     }
 
+    // Legacy Office route: render the imports workflow instead of falling
+    // through to dashboard.
+    if (normalizedPath.endsWith("/console/wave-invoices")) {
+      return "imports";
+    }
+
     if (normalizedPath.endsWith("/console/pl")) {
       return "pnl";
     }
@@ -1859,6 +1867,10 @@
     }
 
     if (normalizedPath.endsWith("/console/office/imports")) {
+      return "imports";
+    }
+
+    if (normalizedPath.endsWith("/console/office/wave-invoices")) {
       return "imports";
     }
 
@@ -2796,24 +2808,29 @@
   function createDashboardStats(state: ApiRequestState<OfficeDashboardResponse>): readonly DashboardStat[] {
     if (state.status !== "success") {
       return [
-        { label: "Cash", value: "—", trendDirection: "none", trendValue: "—", trendDetail: "under review" },
+        { label: "Cash", value: "—", trendDirection: "none", trendValue: "—", trendDetail: "projection" },
         { label: "Receivables", value: "—", trendDirection: "none", trendValue: "—", trendDetail: "projection" },
         { label: "Payables", value: "—", trendDirection: "none", trendValue: "—", trendDetail: "projection" },
-        { label: "To reconcile", value: "—", trendDirection: "none", trendValue: "—", trendDetail: "under review" }
+        { label: "To reconcile", value: "—", trendDirection: "none", trendValue: "—", trendDetail: "projection" }
       ];
     }
 
     const previous = state.data.previous ?? null;
     const trendDetail = previous === null ? "no previous period" : `vs ${previous.dateFrom} → ${previous.dateTo}`;
+    const cashTrend = computeStatTrend(Number(state.data.cashBalanceMicro), previous === null ? null : Number(previous.cashBalanceMicro));
     const receivablesTrend = computeStatTrend(Number(state.data.receivablesMicro), previous === null ? null : Number(previous.receivablesMicro));
     const payablesTrend = computeStatTrend(Number(state.data.payablesMicro), previous === null ? null : Number(previous.payablesMicro));
+    const toReconcileTrend = computeStatTrend(
+      state.data.unreconciledTransactionCount,
+      previous === null ? null : previous.unreconciledTransactionCount
+    );
     return [
       {
         label: "Cash",
-        value: "—",
-        trendDirection: "none",
-        trendValue: "—",
-        trendDetail: "under review"
+        value: formatMicro(state.data.cashBalanceMicro),
+        trendDirection: cashTrend.direction,
+        trendValue: cashTrend.value,
+        trendDetail
       },
       {
         label: "Receivables",
@@ -2831,10 +2848,10 @@
       },
       {
         label: "To reconcile",
-        value: "—",
-        trendDirection: "none",
-        trendValue: "—",
-        trendDetail: "under review"
+        value: String(state.data.unreconciledTransactionCount),
+        trendDirection: toReconcileTrend.direction,
+        trendValue: toReconcileTrend.value,
+        trendDetail
       }
     ];
   }
@@ -4035,7 +4052,7 @@
   onNavigate={handleShellNavigate}
   onSignOut={onLogout}
 >
-    <div class="content">
+    <div class={`content office-page-${activePageId}`}>
       <PageHeader
         workspace="office"
         eyebrow="Office"

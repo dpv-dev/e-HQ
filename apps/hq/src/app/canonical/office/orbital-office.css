@@ -1,0 +1,570 @@
+/* Orbital Office port (style-only): Office-scoped overrides for @ehq/ui + Office pages. */
+
+.ehq-workspace-shell.ehq-workspace-office {
+  background:
+    radial-gradient(circle at 10% 4%, rgba(255, 184, 0, 0.14), transparent 26%),
+    radial-gradient(circle at 78% 10%, rgba(59, 130, 246, 0.12), transparent 22%),
+    var(--ehq-bg-main);
+}
+
+.ehq-workspace-shell.ehq-workspace-office::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 18% 12%, rgba(255, 184, 0, 0.07), transparent 38%),
+    radial-gradient(circle at 86% 14%, rgba(59, 130, 246, 0.08), transparent 34%);
+}
+
+.ehq-workspace-office .shell-main {
+  background: transparent;
+}
+
+.ehq-workspace-shell.ehq-workspace-office aside {
+  padding: 22px 18px 22px 24px;
+  background: transparent;
+}
+
+.ehq-workspace-shell.ehq-workspace-office nav {
+  padding: 18px 14px;
+  border: 1px solid var(--ehq-border);
+  border-radius: var(--ehq-radius-lg);
+  background: var(--ehq-surface);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.36);
+}
+
+.ehq-workspace-shell.ehq-workspace-office .nav-group {
+  margin: var(--ehq-space-3) 0 var(--ehq-space-2);
+}
+
+.ehq-workspace-shell.ehq-workspace-office .shell-mark {
+  display: none;
+}
+
+.ehq-workspace-shell.ehq-workspace-office .shell-topbar {
+  position: relative;
+  min-height: 76px;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--ehq-border-soft);
+  grid-template-columns: auto minmax(280px, 1fr) auto;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 82%);
+}
+
+.ehq-workspace-shell.ehq-workspace-office .shell-topbar::after {
+  content: "";
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--ehq-border), transparent);
+}
+
+.ehq-workspace-shell.ehq-workspace-office .shell-title {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.ehq-workspace-shell.ehq-workspace-office .shell-title::after {
+  content: ". ORBITAL";
+  color: var(--ehq-yellow);
+  font-family: var(--ehq-mono);
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.ehq-workspace-shell.ehq-workspace-office .shell-search {
+  min-height: 46px;
+  padding: 0 14px;
+  border-radius: var(--ehq-radius-pill);
+  border-color: var(--ehq-border);
+  background:
+    linear-gradient(90deg, rgba(255, 184, 0, 0.08), transparent 32%),
+    var(--ehq-surface);
+  color: var(--ehq-text-muted);
+}
+
+.ehq-workspace-shell.ehq-workspace-office .shell-search span {
+  color: var(--ehq-text-soft);
+  font-family: var(--ehq-mono);
+  font-size: var(--ehq-type-label-size);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ehq-workspace-shell.ehq-workspace-office .shell-search kbd {
+  border-color: var(--ehq-yellow-border);
+  background: var(--ehq-yellow-muted);
+  color: var(--ehq-yellow);
+}
+
+.ehq-workspace-shell.ehq-workspace-office .shell-user {
+  border-color: var(--ehq-yellow-border);
+  background: linear-gradient(180deg, rgba(255, 184, 0, 0.1), rgba(255, 184, 0, 0.03));
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.28);
+}
+
+.ehq-workspace-shell.ehq-workspace-office .shell-user b {
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--ehq-yellow-border);
+  background: rgba(255, 184, 0, 0.12);
+  color: var(--ehq-yellow);
+}
+
+.ehq-workspace-shell.ehq-workspace-office .shell-user strong {
+  color: var(--ehq-text);
+}
+
+.ehq-workspace-shell.ehq-workspace-office .shell-user small {
+  letter-spacing: 0.16em;
+}
+
+.ehq-workspace-office .content {
+  gap: var(--ehq-space-5);
+}
+
+.ehq-workspace-office .shell-mark {
+  border-color: var(--ehq-yellow-border);
+  color: var(--ehq-yellow);
+  box-shadow: 0 0 10px rgba(255, 184, 0, 0.22);
+}
+
+.ehq-workspace-office .shell-status {
+  background: var(--ehq-surface);
+  border-color: var(--ehq-border-soft);
+}
+
+.ehq-workspace-office .ehq-page-header {
+  min-height: 0;
+  padding: 2px 0 0;
+  border-bottom: 0;
+  align-items: start;
+}
+
+.ehq-workspace-office .ehq-page-header p {
+  color: var(--ehq-yellow);
+}
+
+.ehq-workspace-office .ehq-page-header h1 {
+  color: var(--ehq-yellow);
+  font-size: clamp(2.05rem, 1.75rem + 1.1vw, 3rem);
+}
+
+.ehq-workspace-office .ehq-page-header span {
+  color: var(--ehq-text-soft);
+  max-width: 76ch;
+}
+
+.ehq-workspace-office .period-control {
+  margin-top: -2px;
+  margin-left: auto;
+  width: fit-content;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--ehq-space-2);
+}
+
+.ehq-workspace-office .period-control .ehq-select-field {
+  width: fit-content;
+  min-width: 0;
+}
+
+.ehq-workspace-office .period-control .ehq-select-field > span {
+  display: none;
+}
+
+.ehq-workspace-office .period-control .ehq-select-field select {
+  min-height: 48px;
+  width: auto;
+  min-width: 182px;
+  border-radius: var(--ehq-radius-pill);
+  background: var(--ehq-surface);
+  border-color: var(--ehq-border);
+  font-size: 1.08rem;
+  font-weight: 600;
+}
+
+.ehq-workspace-office .period-control p {
+  margin: 0;
+  padding: 0 var(--ehq-space-2);
+  color: var(--ehq-text-muted);
+}
+
+.ehq-workspace-office .nav-item.active {
+  background: linear-gradient(90deg, var(--ehq-yellow-muted), transparent 78%);
+}
+
+.ehq-workspace-office .nav-item {
+  border: 1px solid transparent;
+  transition: background var(--ehq-transition-fast), border-color var(--ehq-transition-fast);
+}
+
+.ehq-workspace-office .nav-item.active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--ehq-yellow);
+  box-shadow: 0 0 10px rgba(255, 184, 0, 0.5);
+}
+
+.ehq-workspace-office .ehq-edge-surface {
+  --ehq-edge-fill: var(--ehq-surface);
+  --ehq-edge-border-color: var(--ehq-border);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 12px 28px rgba(0, 0, 0, 0.34);
+}
+
+.ehq-workspace-office .panel-card.ehq-edge-surface {
+  background: var(--ehq-surface);
+}
+
+.ehq-workspace-office .ehq-edge-surface:hover {
+  --ehq-edge-border-color: var(--ehq-yellow-border);
+}
+
+.ehq-workspace-office .period-control,
+.ehq-workspace-office .filter-strip,
+.ehq-workspace-office .filter-grid,
+.ehq-workspace-office .form-panel,
+.ehq-workspace-office .pending-actions,
+.ehq-workspace-office .office-edit-panel,
+.ehq-workspace-office .statement-import-panel,
+.ehq-workspace-office .bank-account-form,
+.ehq-workspace-office .monitoring-panel,
+.ehq-workspace-office .partners-head,
+.ehq-workspace-office .partners-toolbar,
+.ehq-workspace-office .project-list,
+.ehq-workspace-office .project-form,
+.ehq-workspace-office .project-detail,
+.ehq-workspace-office .config-grid {
+  border: 1px solid var(--ehq-border-soft);
+  background: var(--ehq-surface);
+}
+
+.ehq-workspace-office .ehq-section-template header p,
+.ehq-workspace-office .panel-title,
+.ehq-workspace-office .ehq-type-label-mono {
+  color: var(--ehq-text-muted);
+}
+
+.ehq-workspace-office .ehq-section-template header h2 {
+  color: var(--ehq-text);
+}
+
+.ehq-workspace-office .ehq-section-template header p {
+  padding-left: 12px;
+  position: relative;
+}
+
+.ehq-workspace-office .ehq-section-template header p::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 13px;
+  border-radius: 2px;
+  background: var(--ehq-yellow);
+  box-shadow: 0 0 8px rgba(255, 184, 0, 0.4);
+}
+
+/* KPI cards: 3-zone card, left accent rail, lead first card. */
+.ehq-workspace-office .ehq-stat-card,
+.ehq-workspace-office .ehq-kpi {
+  position: relative;
+  overflow: hidden;
+  gap: 0;
+  background: var(--ehq-surface);
+  border-radius: var(--ehq-radius-md);
+}
+
+.ehq-workspace-office .ehq-stat-card::before,
+.ehq-workspace-office .ehq-kpi::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: linear-gradient(180deg, var(--ehq-yellow), rgba(255, 184, 0, 0.2));
+}
+
+.ehq-workspace-office .ehq-stat-card .label,
+.ehq-workspace-office .ehq-kpi p {
+  width: 100%;
+  margin: 0;
+  padding: 12px 16px 10px 18px;
+  border-bottom: 1px solid var(--ehq-border-soft);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent);
+}
+
+.ehq-workspace-office .ehq-stat-card .value,
+.ehq-workspace-office .ehq-kpi strong {
+  width: 100%;
+  margin: 0;
+  padding: 14px 18px 4px;
+  line-height: 1.1;
+}
+
+.ehq-workspace-office .ehq-stat-card .trend,
+.ehq-workspace-office .ehq-kpi span {
+  width: 100%;
+  margin: 0;
+  padding: 4px 18px 14px;
+}
+
+.ehq-workspace-office .ehq-stat-card .icon {
+  background: var(--ehq-surface-high);
+  border: 1px solid var(--ehq-border);
+}
+
+.ehq-workspace-office .kpi-grid > :first-child {
+  --ehq-edge-border-color: var(--ehq-yellow-border);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.05) inset,
+    0 16px 34px rgba(0, 0, 0, 0.45),
+    0 0 16px rgba(255, 184, 0, 0.14);
+}
+
+.ehq-workspace-office .kpi-grid > :first-child::before {
+  box-shadow: 0 0 10px rgba(255, 184, 0, 0.5);
+}
+
+/* Tables and badges. */
+.ehq-workspace-office .ehq-table-shell {
+  border-radius: var(--ehq-radius-md);
+  overflow: hidden;
+}
+
+.ehq-workspace-office .ehq-table-shell thead th {
+  background: var(--ehq-surface-high);
+  border-bottom: 1px solid var(--ehq-border);
+  color: var(--ehq-text-soft);
+}
+
+.ehq-workspace-office .ehq-table-shell tbody tr:hover {
+  background: var(--ehq-yellow-muted);
+}
+
+.ehq-workspace-office .ehq-table-shell .sort-header:hover {
+  color: var(--ehq-yellow);
+}
+
+.ehq-workspace-office .ehq-badge {
+  border-color: var(--ehq-border);
+}
+
+.ehq-workspace-office .ehq-badge.warning,
+.ehq-workspace-office .ehq-badge.active {
+  border-color: var(--ehq-yellow-border);
+  background: var(--ehq-yellow-muted);
+  color: var(--ehq-yellow);
+}
+
+/* Alerts with luminous left rail. */
+.ehq-workspace-office .ehq-alert {
+  position: relative;
+  overflow: hidden;
+}
+
+.ehq-workspace-office .ehq-alert::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--ehq-yellow);
+  box-shadow: 0 0 10px rgba(255, 184, 0, 0.45);
+}
+
+/* Inputs, strips, and action panels. */
+.ehq-workspace-office .period-control,
+.ehq-workspace-office .filter-strip,
+.ehq-workspace-office .filter-grid,
+.ehq-workspace-office .form-panel,
+.ehq-workspace-office .pending-actions,
+.ehq-workspace-office .office-edit-panel,
+.ehq-workspace-office .statement-import-panel,
+.ehq-workspace-office .bank-account-form,
+.ehq-workspace-office .monitoring-panel,
+.ehq-workspace-office .partners-head,
+.ehq-workspace-office .partners-toolbar,
+.ehq-workspace-office .project-list,
+.ehq-workspace-office .project-form,
+.ehq-workspace-office .project-detail,
+.ehq-workspace-office .config-grid,
+.ehq-workspace-office .vat-view .dashboard-grid,
+.ehq-workspace-office .ceo-view .dashboard-grid,
+.ehq-workspace-office .bank-view .dashboard-grid {
+  border-radius: var(--ehq-radius-md);
+}
+
+.ehq-workspace-office .panel-card,
+.ehq-workspace-office .dashboard-grid > .ehq-edge-surface,
+.ehq-workspace-office .dashboard-grid > .ehq-chart,
+.ehq-workspace-office .dashboard-grid > .ehq-table-shell {
+  border-radius: var(--ehq-radius-md);
+}
+
+.ehq-workspace-office .panel-card .ehq-section-template > header p {
+  color: var(--ehq-text-muted);
+}
+
+.ehq-workspace-office input:focus,
+.ehq-workspace-office .ehq-field input:focus,
+.ehq-workspace-office .ehq-select-field select:focus {
+  border-color: var(--ehq-yellow-border);
+  box-shadow: 0 0 0 3px var(--ehq-yellow-muted);
+}
+
+/* Imports page visual parity: progress cards + highlighted drop area. */
+.ehq-workspace-office .import-steps article.complete {
+  border-color: var(--ehq-yellow-border);
+  box-shadow: inset 3px 0 0 var(--ehq-yellow);
+}
+
+.ehq-workspace-office .import-row--rejected {
+  background: var(--ehq-yellow-muted);
+  color: var(--ehq-yellow);
+}
+
+.ehq-workspace-office .import-row-flag {
+  box-shadow: 0 0 10px rgba(255, 184, 0, 0.4);
+}
+
+.ehq-workspace-office .import-rows-table {
+  border-color: var(--ehq-border);
+  background: var(--ehq-surface);
+}
+
+.ehq-workspace-office .import-row--header {
+  background: var(--ehq-surface-high);
+}
+
+/* Pending page cards. */
+.ehq-workspace-office .pending-list button.selected {
+  border-color: var(--ehq-yellow-border);
+  box-shadow: inset 3px 0 0 var(--ehq-yellow);
+}
+
+.ehq-workspace-office .pending-list button {
+  border: 1px solid var(--ehq-border-soft);
+  background: var(--ehq-surface);
+}
+
+/* PnL / CoA / grid-heavy pages. */
+.ehq-workspace-office .dashboard-grid {
+  align-items: start;
+}
+
+.ehq-workspace-office .panel-card {
+  border-radius: var(--ehq-radius-md);
+}
+
+/* Page-specific alignments against Orbital office mockups. */
+.ehq-workspace-office .office-page-dashboard .dashboard-wide-panel {
+  background:
+    radial-gradient(circle at 8% 14%, rgba(255, 184, 0, 0.08), transparent 32%),
+    var(--ehq-surface);
+}
+
+.ehq-workspace-office .office-page-reconciliation .kpi-grid > article {
+  min-height: 126px;
+}
+
+.ehq-workspace-office .office-page-pnl .filter-strip,
+.ehq-workspace-office .office-page-cashflow .filter-strip {
+  border-color: var(--ehq-border);
+}
+
+.ehq-workspace-office .office-page-coa .form-panel,
+.ehq-workspace-office .office-page-transactions .filter-grid,
+.ehq-workspace-office .office-page-transactions .office-edit-panel {
+  background: var(--ehq-surface);
+}
+
+.ehq-workspace-office .partners-layout,
+.ehq-workspace-office .projects-layout,
+.ehq-workspace-office .monitoring-layout {
+  align-items: start;
+}
+
+.ehq-workspace-office .partner-drawer,
+.ehq-workspace-office .project-detail {
+  border: 1px solid var(--ehq-border-soft);
+  border-radius: var(--ehq-radius-md);
+  background: var(--ehq-surface);
+}
+
+.ehq-workspace-office .suggestions,
+.ehq-workspace-office .link-panel,
+.ehq-workspace-office .drawer-mock,
+.ehq-workspace-office .project-buttons button,
+.ehq-workspace-office .monitoring-panel header {
+  border: 1px solid var(--ehq-border-soft);
+  border-radius: var(--ehq-radius-sm);
+  background: var(--ehq-surface-high);
+}
+
+.ehq-workspace-office .project-buttons button.selected {
+  border-color: var(--ehq-yellow-border);
+  box-shadow: inset 3px 0 0 var(--ehq-yellow);
+}
+
+.ehq-workspace-office .office-page-bank .bank-account-actions,
+.ehq-workspace-office .office-page-projects .project-form-actions,
+.ehq-workspace-office .office-page-projects .project-detail-actions,
+.ehq-workspace-office .office-page-clients .drawer-actions,
+.ehq-workspace-office .office-page-suppliers .drawer-actions {
+  flex-wrap: wrap;
+}
+
+.ehq-workspace-office .office-page-settings .config-grid > article {
+  border: 1px solid var(--ehq-border-soft);
+  border-radius: var(--ehq-radius-sm);
+  background: var(--ehq-surface-high);
+  padding: var(--ehq-space-3);
+}
+
+.ehq-workspace-office .office-page-vat .kpi-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+/* Responsive guardrails aligned with mockup one-column fallback. */
+@media (max-width: 1100px) {
+  .ehq-workspace-office .kpi-grid,
+  .ehq-workspace-office .dashboard-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .ehq-workspace-office .config-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .ehq-workspace-office .kpi-grid,
+  .ehq-workspace-office .dashboard-grid,
+  .ehq-workspace-office .filter-grid,
+  .ehq-workspace-office .import-steps,
+  .ehq-workspace-office .pending-list {
+    grid-template-columns: 1fr;
+  }
+
+  .ehq-workspace-office .office-page-vat .kpi-grid {
+    grid-template-columns: 1fr;
+  }
+}

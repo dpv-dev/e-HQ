@@ -1,0 +1,80 @@
+@import "@ehq/ui/tokens/visual-tokens.css";
+@import "../../../design/theme-orbital/tokens/orbital-tokens.css";
+
+/* Office-only Orbital bridge: keep global tokens for HQ/Distribution/Command Center,
+   and remap --ehq-* only under the Office workspace shell. */
+.ehq-workspace-shell.ehq-workspace-office {
+  /* Theme Orbital Office skin calibration (yellow-forward, neutral surfaces). */
+  --orb-void: #0A0C10;
+  --orb-bg: #0D0F14;
+  --orb-surface: #171B22;
+  --orb-surface-high: #212933;
+  --orb-surface-raised: #2A3440;
+
+  --orb-text: #F6F7F9;
+  --orb-text-soft: rgba(255, 255, 255, 0.74);
+  --orb-text-muted: rgba(255, 255, 255, 0.48);
+  --orb-text-disabled: rgba(255, 255, 255, 0.30);
+
+  --orb-border: rgba(255, 255, 255, 0.10);
+  --orb-border-soft: rgba(255, 255, 255, 0.06);
+
+  --orb-success: #22C55E;
+  --orb-success-bg: rgba(34, 197, 94, 0.12);
+  --orb-success-border: rgba(34, 197, 94, 0.35);
+  --orb-info: #3B82F6;
+  --orb-info-bg: rgba(59, 130, 246, 0.12);
+  --orb-info-border: rgba(59, 130, 246, 0.35);
+  --orb-glow-cyan-soft: 0 0 14px rgba(255, 184, 0, 0.14);
+
+  --ehq-yellow: var(--orb-amber);
+  --ehq-yellow-hover: var(--orb-amber-hover);
+  --ehq-yellow-active: var(--orb-amber-active);
+  --ehq-yellow-muted: var(--orb-amber-muted);
+  --ehq-yellow-border: var(--orb-amber-border);
+
+  --ehq-black: var(--orb-void);
+  --ehq-bg-main: var(--orb-bg);
+  --ehq-surface: var(--orb-surface);
+  --ehq-surface-high: var(--orb-surface-high);
+  --ehq-surface-raised: var(--orb-surface-raised);
+
+  --ehq-text: var(--orb-text);
+  --ehq-text-white: rgba(255, 255, 255, 1);
+  --ehq-text-muted: var(--orb-text-muted);
+  --ehq-text-soft: var(--orb-text-soft);
+  --ehq-text-secondary: var(--orb-text-soft);
+  --ehq-text-disabled: var(--orb-text-disabled);
+  --ehq-text-on-yellow: var(--orb-text-on-amber);
+
+  --ehq-border: var(--orb-border);
+  --ehq-border-soft: var(--orb-border-soft);
+  --ehq-border-strong: var(--orb-amber-border);
+
+  --ehq-success: var(--orb-success);
+  --ehq-success-bg: var(--orb-success-bg);
+  --ehq-success-border: var(--orb-success-border);
+  --ehq-info: var(--orb-info);
+  --ehq-info-bg: var(--orb-info-bg);
+  --ehq-info-border: var(--orb-info-border);
+  --ehq-warning: var(--orb-warning);
+  --ehq-warning-bg: var(--orb-warning-bg);
+  --ehq-error: var(--orb-error);
+  --ehq-error-bg: var(--orb-error-bg);
+  --ehq-error-border: var(--orb-error-border);
+  --ehq-error-hover: rgba(239, 68, 68, 0.20);
+
+  --ehq-shadow-sm: var(--orb-shadow-sm);
+  --ehq-shadow-md: var(--orb-shadow-md);
+  --ehq-shadow-lg: var(--orb-shadow-lg);
+  --ehq-glow-yellow: var(--orb-glow-amber);
+
+  --ehq-radius-sm: var(--orb-radius-sm);
+  --ehq-radius-md: var(--orb-radius-md);
+  --ehq-radius-lg: var(--orb-radius-lg);
+  --ehq-radius-xl: var(--orb-radius-xl);
+  --ehq-radius-pill: var(--orb-radius-pill);
+
+  --ehq-workspace-office: var(--orb-cyan);
+  --ehq-workspace-office-bg: var(--orb-cyan-muted);
+}
