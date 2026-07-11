@@ -71,6 +71,12 @@ Status: shipped (hidden flag `VITE_OFFICE_BACKEND_PARSER`, fallback preserved).
 - Run same sample statements through both paths.
 - Diff accepted/rejected rows and key fields.
 - Close parity gaps before default flip.
+Status: started.
+Completed in this slice:
+- Added automated parity harness in services/api/test/office-bank-parser-parity.test.ts.
+- Baseline parity now validated for CSV, MCB extracted text, and SBI extracted text normalization.
+Remaining:
+- Extend from synthetic baseline samples to production-like fixture corpus and attach machine-readable diff artifacts in CI.
 
 ### Stage D - Default flip
 - Enable backend parser path by default in production.
