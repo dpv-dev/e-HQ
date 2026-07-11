@@ -72,7 +72,7 @@
     recentImportDeleteDisabledReasonFor
   } from "./recent-import-actions.js";
   import { extractPdfText } from "../../pdf-extract.js";
-  import { parseBankStatement, parseBankCsv, parseCsvRecords, detectBankFormat, detectStatementCurrency, detectCsvCurrency, type ParsedBankRow } from "../../bank-parser.js";
+  import { parseCsvRecords } from "../../bank-parser.js";
   import { formatDateOnly } from "../../date-format.js";
   import { apiMoneyToMicroUnits, formatMoneyValue, formatSignedMoneyValue, moneyToneForValue } from "../../money-format.js";
   import { createPeriodOptions, getLatestDataPeriod, periodLabel, rangeForScope, rangeLabel, todayIso, type DateRange, type PeriodScope } from "../../period-controls.js";
@@ -364,11 +364,6 @@
   ];
   const bankStatementSourceOptions: readonly SelectOption[] = importSourceOptions.filter(
     (option: SelectOption): boolean => option.value === "mcb" || option.value === "sbi"
-  );
-  // Stage D default flip: backend parser is primary unless explicitly disabled.
-  const officeUseBackendParser = parseBooleanEnvValue(
-    import.meta.env.VITE_OFFICE_BACKEND_PARSER,
-    true
   );
   const planKindOptions: readonly SelectOption[] = [
     { label: "Department", value: "department" },
@@ -2278,22 +2273,6 @@
     await Promise.all(followUps);
   }
 
-  function bankRowToRecord(row: ParsedBankRow, currency: string): Readonly<Record<string, string>> {
-    const record: Record<string, string> = {
-      transactionDate: row.date,
-      description: row.description,
-      currency,
-      [row.direction]: row.amount.toFixed(2)
-    };
-    if (row.balance !== null) {
-      record.balance = row.balance.toFixed(2);
-    }
-    if (row.reference !== null) {
-      record.reference = row.reference;
-    }
-    return record;
-  }
-
   // Join the API's per-row verdict (accepted/rejected + issues) with the locally parsed rows so the
   // import table shows date/amount/description alongside the reason. Rejected rows are listed first.
   function buildImportPreviewTableRows(state: ImportUiState): readonly ImportPreviewTableRow[] {
@@ -2365,20 +2344,6 @@
     editingImportRowNumber = null;
   }
 
-  function parseBooleanEnvValue(value: unknown, fallback: boolean): boolean {
-    if (typeof value !== "string") {
-      return fallback;
-    }
-    const normalized = value.trim().toLowerCase();
-    if (normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on") {
-      return true;
-    }
-    if (normalized === "0" || normalized === "false" || normalized === "no" || normalized === "off") {
-      return false;
-    }
-    return fallback;
-  }
-
   // Apply a manual fix to one rejected row, then re-run the preview so the API re-validates it.
   async function applyImportRowEdit(): Promise<void> {
     const rowNumber = editingImportRowNumber;
@@ -2425,62 +2390,17 @@
 
     try {
       const isCsv = file.name.toLowerCase().endsWith(".csv") || file.type === "text/csv" || file.type === "application/vnd.ms-excel";
+      const text = isCsv ? await file.text() : await extractPdfText(file);
+      const parsed = await client.office.parseBankImportPreview({
+        workspaceId: officeWorkspaceId,
+        fileName: file.name,
+        sourceHint: isCsv ? "csv" : null,
+        contentText: text
+      }, {
+        idempotencyKey: createIdempotencyKey("import-parse-preview")
+      });
 
-      if (officeUseBackendParser) {
-        const text = isCsv ? await file.text() : await extractPdfText(file);
-        const parsed = await client.office.parseBankImportPreview({
-          workspaceId: officeWorkspaceId,
-          fileName: file.name,
-          sourceHint: isCsv ? "csv" : null,
-          contentText: text
-        }, {
-          idempotencyKey: createIdempotencyKey("import-parse-preview")
-        });
-
-        await applyBackendParsedImportRows(file.name, parsed);
-        return;
-      }
-
-      let parsed: readonly ParsedBankRow[];
-      let currency: string;
-      let source: ImportSource;
-      if (isCsv) {
-        const text = await file.text();
-        parsed = parseBankCsv(text);
-        currency = detectCsvCurrency(text) ?? "MUR";
-        source = "csv";
-      } else {
-        const text = await extractPdfText(file);
-        parsed = parseBankStatement(text);
-        currency = detectStatementCurrency(text);
-        source = detectBankFormat(text) === "mcb" ? "mcb" : "sbi";
-      }
-      if (importAccounts.length === 0) {
-        await loadImportAccounts();
-      }
-      if (selectedImportAccountId.length === 0) {
-        selectedImportAccountId = defaultImportAccountId(importAccounts, currency);
-      }
-      const rows = parsed.map((row: ParsedBankRow): Readonly<Record<string, string>> => bankRowToRecord(row, currency));
-      if (parsed.length === 0) {
-        importState = {
-          ...importState,
-          status: "error",
-          source,
-          rows: [],
-          message: isCsv ? "No readable transaction in this CSV." : "No readable transaction in this PDF."
-        };
-        return;
-      }
-
-      importState = {
-        ...importState,
-        status: "loading",
-        source,
-        rows,
-        message: `${parsed.length} rows detected (${sourceLabel(source)}, ${currency}). Running API analysis.`
-      };
-      await previewImportRows(rows, source, file.name);
+      await applyBackendParsedImportRows(file.name, parsed);
     } catch (error: unknown) {
       importState = { ...importState, status: "error", rows: [], message: getErrorMessage(error) };
     }

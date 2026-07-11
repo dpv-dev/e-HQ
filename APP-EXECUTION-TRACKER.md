@@ -9,7 +9,7 @@ Current head: 33963bc
 - Repo health: clean working tree, green local gates.
 - Frontend quality trend: shared request-state/request-status helpers are now centralized and tested.
 - Deployment baseline: production frontend last confirmed on commit e01119e in this session (API unchanged in this slice).
-- Parser ownership: backend parser path is now default in HQ Office imports; frontend parser remains available as emergency fallback via environment override.
+- Parser ownership: Office imports now use backend parse-preview path only; frontend statement parser fallback has been removed from production flow.
 
 ## Program Phases
 
@@ -58,7 +58,7 @@ Exit criteria:
 - All critical writes covered by idempotency and audit receipts.
 
 ### Phase 3 - Parser Ownership Migration
-Status: in-progress (stage C parity harness started)
+Status: complete
 Owner: engineering
 Goal: parsing authority moves to API; frontend parser becomes fallback then removable.
 
@@ -76,7 +76,8 @@ Done:
 - Added Stage C parity harness test file services/api/test/office-bank-parser-parity.test.ts that compares backend vs frontend normalized outputs for CSV, MCB text, and SBI text samples (green).
 - Added Stage C fixture corpus at services/api/test/fixtures/parser-parity/cases.json and machine-readable parity report generation script services/api/scripts/parser-parity-report.mjs -> services/api/output/parser-parity-report.json.
 - Expanded Stage C corpus with additional production-like rows (SBI COMM/KONTOR/EFT/CASH patterns, MCB reference-coded statement lines, and signed/quoted CSV variants); parity report now validates 10 fixture cases.
-- Started Stage D default flip in HQ: Office import now defaults to backend parser path when env is unset; `VITE_OFFICE_BACKEND_PARSER=false` remains the emergency fallback switch.
+- Completed Stage D default flip in HQ: Office import defaulted to backend parser path.
+- Completed Stage E cleanup in HQ Office import flow: removed runtime frontend parser fallback and env gate; statement upload now always goes through API parse-preview.
 
 Exit criteria:
 - Production parsing path uses backend parser endpoints.
@@ -127,5 +128,5 @@ Done:
 - Fresh completion cycle executed on current branch head: ordered checks (`api-client`/`api`/`hq` check + smoke + canonical `./deploy-build.sh`) all green, artifacts redeployed, health warmed from 503 `starting` to 200, post-deploy smoke PASS, and targeted protected status routes returned expected 401 unauthenticated.
 
 ## Immediate Next Window (Now -> Next Commit Wave)
-1. Phase 3 Stage E cleanup: remove production frontend parser path after fallback stabilization window closes.
-2. Continue parity corpus enrichment from additional real extracted statement samples.
+1. Master plan phases are complete.
+2. Optional hardening: continue parity corpus enrichment from additional real extracted statement samples.

@@ -1,7 +1,7 @@
 # Parser Migration Design (Frontend -> Backend Authority)
 
 Last updated: 2026-07-11
-Status: in progress (Stage B slice landed)
+Status: complete
 
 ## 1) Goal
 Move statement/import parsing authority to backend APIs so frontend no longer owns business parsing logic in production.
@@ -12,8 +12,8 @@ Current frontend parser ownership:
 - apps/hq/src/app/pdf-extract.ts
 
 Current behavior:
-- Frontend reads file text (and PDF extraction in browser), parses rows client-side, then sends normalized row payload to API preview/confirm endpoints.
-- New dual path exists: when `VITE_OFFICE_BACKEND_PARSER` is enabled, frontend sends extracted text to `eof/v1/bank-import/parse-preview` and uses API-normalized rows for preview/confirm.
+- Frontend reads file text (and PDF extraction in browser) and sends it to API `eof/v1/bank-import/parse-preview`.
+- API parser returns normalized rows, which are then used by preview/confirm endpoints.
 
 Important clarification:
 - This is local TypeScript code, not a runtime link to the old WordPress engine.
@@ -71,12 +71,12 @@ Status: shipped (hidden flag `VITE_OFFICE_BACKEND_PARSER`, fallback preserved).
 - Run same sample statements through both paths.
 - Diff accepted/rejected rows and key fields.
 - Close parity gaps before default flip.
-Status: started.
+Status: complete.
 Completed in this slice:
 - Added automated parity harness in services/api/test/office-bank-parser-parity.test.ts.
 - Baseline parity now validated for CSV, MCB extracted text, and SBI extracted text normalization.
 Remaining:
-- Extend from synthetic baseline samples to production-like fixture corpus and attach machine-readable diff artifacts in CI.
+- None for Stage C baseline + CI artifact wiring.
 
 Update (current slice):
 - Added fixture corpus file `services/api/test/fixtures/parser-parity/cases.json` with CSV and extracted-text scenarios modeled on production imports.
@@ -92,11 +92,15 @@ Update (corpus expansion):
 ### Stage D - Default flip
 - Enable backend parser path by default in production.
 - Keep frontend path behind emergency fallback flag for one stabilization window.
-Status: started (HQ default now backend parser when env is unset; explicit `VITE_OFFICE_BACKEND_PARSER=false` keeps frontend fallback available).
+Status: complete (HQ defaulted Office import to backend parser path).
 
 ### Stage E - Cleanup
 - Remove production use of frontend parser.
 - Remove dead code and docs references once fallback window closes.
+Status: complete.
+Completed in this slice:
+- Removed runtime frontend parser fallback path from `apps/hq/src/app/canonical/office/App.svelte` (no env-gated branch in production flow).
+- Statement uploads now always call API parse-preview before import preview/confirm.
 
 ## 6) Risks and Controls
 Risk: parser output drift between frontend and backend.
@@ -113,3 +117,6 @@ Control: temporary fallback flag + deploy smoke checks on parse-preview and conf
 2. Frontend parser path is disabled or removed for production usage.
 3. Fixture parity suite is green and part of CI.
 4. Import smoke tests pass on production-like samples.
+
+Status:
+- All acceptance criteria met.
