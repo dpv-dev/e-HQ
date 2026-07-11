@@ -25,6 +25,7 @@ export { default as Select } from "./components/Select.svelte";
 export { default as StatCard } from "./components/StatCard.svelte";
 export { default as Table } from "./components/Table.svelte";
 export { isTableRowActionEnabled, tableRowActionTitle } from "./components/table-row-actions.js";
+export { animateNumericText, formatNumeric, parseNumericString } from "./components/count-up.js";
 export { default as Toggle } from "./components/Toggle.svelte";
 export { default as Toolbar } from "./components/Toolbar.svelte";
 export { default as WorkspaceShell } from "./components/WorkspaceShell.svelte";

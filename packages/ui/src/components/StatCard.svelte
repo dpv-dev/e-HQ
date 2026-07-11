@@ -2,6 +2,7 @@
   import Icon from "./Icon.svelte";
   import type { Snippet } from "svelte";
   import type { StatTrendDirection } from "./types.js";
+  import { animateNumericText } from "./count-up.js";
 
   interface Props {
     readonly label: string;
@@ -20,7 +21,7 @@
     <span class="icon" aria-hidden="true">{@render props.icon()}</span>
   {/if}
   <p class="label">{props.label}</p>
-  <strong class="value">{props.value}</strong>
+  <strong class="value" use:animateNumericText={props.value}></strong>
   {#if props.trendDirection !== "none"}
     <span class={`trend ${props.trendDirection}`}>
       {#if props.trendDirection === "up"}

@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { SurfaceState, Tone } from "./types.js";
   import Loader from "./Loader.svelte";
+  import { animateNumericText } from "./count-up.js";
 
   interface Props {
     readonly label: string;
@@ -12,6 +13,7 @@
   }
 
   const props: Props = $props();
+  const displayValue = $derived(`${props.state === "locked" ? "× " : ""}${props.value}`);
 </script>
 
 <article class={`ehq-kpi ehq-edge-surface ${props.state}`} class:accent={props.accent}>
@@ -19,7 +21,7 @@
     <Loader label="Loading KPI" detail="" size="small" />
   {:else}
     <p>{props.label}</p>
-    <strong>{props.state === "locked" ? "× " : ""}{props.value}</strong>
+    <strong use:animateNumericText={displayValue}></strong>
     <span class={`tone-${props.tone}`}>{props.detail}</span>
   {/if}
 </article>
