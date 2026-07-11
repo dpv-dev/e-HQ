@@ -97,8 +97,12 @@ Done:
 - Residual mutation consistency pass extended to low-frequency handlers (import reverse/confirm, mapping apply, allocation run start, payment actions) with suspense/revenue/reconciliation/audit refreshes.
 
 ### Phase 6 - Command Center Completion
-Status: in-progress
+Status: complete
 Goal: real operational control tower fed by live API state.
+
+Done:
+- Removed remaining hardcoded integration/settings KPI literals on Command Center pages; KPI cards now derive from `cc/v1/overview` integration/setting rows in `apps/hq/src/app/canonical/command-center/App.svelte`.
+- Added focused regression coverage in `apps/hq/src/app/canonical/command-center/kpi-derivation.test.ts` to prevent reintroduction of static KPI values for integrations/settings.
 
 ### Phase 7 - E2E Quality Gate
 Status: in-progress

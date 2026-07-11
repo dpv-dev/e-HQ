@@ -45,6 +45,10 @@ Definition of done:
 - No frontend hardcoded operational arrays for readiness/integration/settings.
 - Command Center integrations actions are operational or explicitly marked read-only.
 
+Completion update (current slice):
+- Command Center integration/settings KPI cards are now backend-derived (no static operational literals for connector or setting status values).
+- Added KPI derivation regression test coverage in `apps/hq/src/app/canonical/command-center/kpi-derivation.test.ts`.
+
 ## Phase 7 - E2E Quality Gate
 
 Objective:

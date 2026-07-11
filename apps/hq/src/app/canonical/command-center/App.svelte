@@ -630,10 +630,32 @@
     remoteWritesEnabled: boolean,
     remoteWriteGateMessage: string
   ): readonly CommandKpi[] {
+    const connectedCount = rows.filter((row: IntegrationRow): boolean => row.status === "connected").length;
+    const bankConnectorCount = rows.filter((row: IntegrationRow): boolean =>
+      row.kind.toLowerCase().includes("bank") ||
+      row.connector.toLowerCase().includes("bank")
+    ).length;
+    const supabaseIntegration = rows.find((row: IntegrationRow): boolean =>
+      row.id === "supabase-runtime" || row.connector.toLowerCase().includes("supabase")
+    );
+    const supabaseConnected = supabaseIntegration?.status === "connected";
+
     return [
       { label: "Connectors", value: String(rows.length), detail: "status only", tone: "info", accent: true },
-      { label: "Supabase", value: "Live", detail: "Auth + Postgres", tone: "success", accent: false },
-      { label: "Banks", value: "2", detail: "Office import scope", tone: "info", accent: false },
+      {
+        label: "Supabase",
+        value: supabaseConnected ? "Connected" : "Review",
+        detail: supabaseIntegration === undefined ? "missing connector" : "Auth + Postgres",
+        tone: supabaseConnected ? "success" : "warning",
+        accent: false
+      },
+      {
+        label: "Banks",
+        value: String(bankConnectorCount),
+        detail: `${String(connectedCount)}/${String(rows.length)} connectors connected`,
+        tone: bankConnectorCount > 0 ? "info" : "warning",
+        accent: false
+      },
       {
         label: "Remote writes",
         value: remoteWritesEnabled ? "On" : "Off",
@@ -645,11 +667,42 @@
   }
 
   function createSettingsKpis(rows: readonly SettingRow[]): readonly CommandKpi[] {
+    const reviewedCount = rows.filter((row: SettingRow): boolean => row.tone === "success").length;
+    const warningCount = rows.filter((row: SettingRow): boolean => row.tone === "warning").length;
+    const lockedCount = rows.filter((row: SettingRow): boolean => row.tone === "active").length;
+    const workspaceConfigured = rows.some((row: SettingRow): boolean =>
+      row.id === "workspace_name" || row.key.toLowerCase().includes("workspace")
+    );
+
     return [
-      { label: "Workspace", value: "Admin", detail: "own app shell", tone: "active", accent: true },
-      { label: "Settings", value: String(rows.length), detail: "local review", tone: "info", accent: false },
-      { label: "Menu scope", value: "Clean", detail: "no cross-app menu", tone: "success", accent: false },
-      { label: "Release gate", value: "Manual", detail: "approval required", tone: "warning", accent: false }
+      {
+        label: "Workspace",
+        value: workspaceConfigured ? "Configured" : "Default",
+        detail: workspaceConfigured ? "persisted in API settings" : "using default workspace label",
+        tone: workspaceConfigured ? "active" : "info",
+        accent: true
+      },
+      {
+        label: "Settings",
+        value: String(rows.length),
+        detail: `${String(reviewedCount)} reviewed`,
+        tone: "info",
+        accent: false
+      },
+      {
+        label: "Locked",
+        value: String(lockedCount),
+        detail: "view-only command center controls",
+        tone: lockedCount > 0 ? "success" : "info",
+        accent: false
+      },
+      {
+        label: "Needs review",
+        value: String(warningCount),
+        detail: warningCount === 0 ? "no pending settings" : "pending setting reviews",
+        tone: warningCount === 0 ? "success" : "warning",
+        accent: false
+      }
     ];
   }
 
