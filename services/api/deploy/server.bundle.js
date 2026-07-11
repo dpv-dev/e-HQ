@@ -41904,6 +41904,7 @@ async function officeReconciliationCreateTransactionResponse(context, dependenci
   const request = await readZodBody(context, officeReconciliationCreateTransactionSchema);
   const line = requireOfficeBankLine(dependencies.fixtures.office, request.statementLineId);
   const transactionId = randomUUID2();
+  const reconciliationCurrency = line.amountMurMinor === null ? line.currency : "MUR";
   const writeRequest = {
     workspaceId: request.workspaceId,
     occurredOn: line.occurredOn,
@@ -41912,12 +41913,12 @@ async function officeReconciliationCreateTransactionResponse(context, dependenci
     projectId: request.projectId,
     description: line.description ?? line.reference ?? "Ligne bancaire",
     amountMicro: bankLineAmountText(line),
-    currency: line.currency
+    currency: reconciliationCurrency
   };
   const amountMinor = normalizeEofAmountField(context, writeRequest.amountMicro, "amountMicro");
   const transactionType = line.direction === "credit" ? "income" : "expense";
   const transactionStatus = request.categoryId === null ? "draft" : "validated";
-  assertOfficeReconciliationKernelCreate(context, line, transactionId, amountMinor, line.amountMurMinor === null ? line.currency : "MUR");
+  assertOfficeReconciliationKernelCreate(context, line, transactionId, amountMinor, reconciliationCurrency);
   const idempotencyKey = requireIdempotencyKey(context);
   const actor = context.get("authUser");
   const result = await runIdempotentMutation({
@@ -46670,8 +46671,9 @@ function amountForBankRow(row) {
   const currency = normalizedCurrency(rowValue(row, ["currency", "currency_code", "Currency", "CURRENCY"])) ?? "MUR";
   const credit = moneyValue(row, ["credit", "Credit", "amountCredit", "amount_credit"]);
   const debit = moneyValue(row, ["debit", "Debit", "amountDebit", "amount_debit"]);
-  const amount = moneyValue(row, ["amount", "Amount", "amountMinor", "amount_minor", "amountMicro", "amount_micro", "amount_mur", "AMOUNT MUR"]);
-  const signedAmount = signedMoneyValue(row, ["signedAmount", "signed_amount", "net", "Net"]);
+  if (credit !== null && debit !== null) {
+    return null;
+  }
   if (credit !== null) {
     return {
       amountMinor: absBigInt3(credit),
@@ -46688,24 +46690,7 @@ function amountForBankRow(row) {
       direction: "debit"
     };
   }
-  if (signedAmount !== null) {
-    return {
-      amountMinor: absBigInt3(signedAmount),
-      amountMurMinor: currency === "MUR" ? absBigInt3(signedAmount) : moneyValue(row, ["amountMur", "amount_mur", "amountMurMinor", "amount_mur_minor"]),
-      currency,
-      direction: signedAmount < 0n ? "debit" : "credit"
-    };
-  }
-  if (amount === null) {
-    return null;
-  }
-  const direction = directionValue(row) ?? "credit";
-  return {
-    amountMinor: absBigInt3(amount),
-    amountMurMinor: currency === "MUR" ? absBigInt3(amount) : moneyValue(row, ["amountMur", "amount_mur", "amountMurMinor", "amount_mur_minor"]),
-    currency,
-    direction
-  };
+  return null;
 }
 function convertMinorToMurViaFinanceKernel(amountMinor, fromCurrency, occurredOn, exchangeRates) {
   if (fromCurrency === "MUR") {
@@ -46753,20 +46738,6 @@ function decimalFromE10(rateE10) {
   const fraction = digits.slice(-10);
   return `${sign}${integer}.${fraction}`;
 }
-function directionValue(row) {
-  const value = rowValue(row, ["direction", "type", "debitCredit", "debit_credit"]);
-  if (value === null) {
-    return null;
-  }
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "credit" || normalized === "cr" || normalized === "income") {
-    return "credit";
-  }
-  if (normalized === "debit" || normalized === "dr" || normalized === "expense") {
-    return "debit";
-  }
-  return null;
-}
 function moneyValue(row, aliases) {
   const value = rowValue(row, aliases);
   if (value === null) {
@@ -46777,9 +46748,6 @@ function moneyValue(row, aliases) {
   } catch (_error) {
     return null;
   }
-}
-function signedMoneyValue(row, aliases) {
-  return moneyValue(row, aliases);
 }
 function cleanMoneyText2(value) {
   const original = value.trim();
