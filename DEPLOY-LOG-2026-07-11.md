@@ -130,3 +130,96 @@
 
 ### Notes
 - Warm-up 503 behavior remains consistent with startup-loading design; recovery observed without intervention beyond restart wait window.
+
+## Release Closure Cycle - 2026-07-12 (Phase 0 -> 11 execution)
+
+### Scope
+- Release head: `4515b53`
+- Delta included in release: UI count-up animation for KPI/stat cards + tests.
+
+### Ordered validation sequence
+- Ran `./deploy-build.sh` -> success
+  - API tests: 98/98 pass
+  - HQ check/build: pass
+  - Regression gate: pass
+  - SQL column check: pass
+- Ran `corepack pnpm smoke:critical` (pre-deploy) -> PASS
+- Ran targeted auth guard checks (unauth expected):
+  - `/eof/v1/status?workspaceId=eeee-mu` -> 401
+  - `/cc/v1/status?workspaceId=eeee-mu` -> 401
+  - `/auth/me` -> 401
+
+### Runtime observability snapshot
+- Supabase advisors fetched (`security`, `performance`): informational findings in current snapshot.
+- Supabase postgres logs snapshot: routine LOG-level entries in sampled output.
+- Supabase auth logs include recurring `400: Invalid Refresh Token: Refresh Token Not Found` events (tracked as non-blocking client/session hygiene item).
+
+### Rollout
+- Uploaded `app-eeee-api-hostinger.zip` + `app-eeee-frontend.zip` to `~/ehq-deploy-upload/` via `scp`.
+- Unzipped API artifact to `~/domains/api.eeee.mu/nodejs/`.
+- Unzipped frontend artifact to `~/domains/app.eeee.mu/public_html/`.
+- Restarted API via `touch ~/domains/api.eeee.mu/nodejs/tmp/restart.txt`.
+
+### Post-deploy verification
+- Initial health checks remained in startup window: `/healthz` -> `503 {"status":"starting"}`.
+- Follow-up direct check: `curl -i https://api.eeee.mu/healthz` -> 200 with DB status `ok`.
+- Final post-warmup `corepack pnpm smoke:critical` -> PASS
+  - `https://api.eeee.mu/healthz` -> 200
+  - `https://app.eeee.mu/` -> 200
+  - `https://app.eeee.mu/console/office/bank` -> 200
+  - `https://app.eeee.mu/console/distribution/settings` -> 200
+  - `https://app.eeee.mu/console/command-center/settings` -> 200
+- Targeted auth guard checks after deploy:
+  - `https://api.eeee.mu/eof/v1/status?workspaceId=eeee-mu` -> 401
+  - `https://api.eeee.mu/cc/v1/status?workspaceId=eeee-mu` -> 401
+
+## Count-up Showcase + CORS Stabilization - 2026-07-12
+
+### Scope
+- Include remaining count-up design showcase artifact in git history and remove live preflight blockers observed during connected Office verification.
+
+### Commits
+- `afe14c2` — `feat(ui): add animated Office dashboard showcase`
+- `5cc869c` — `fix(api): allow Cache-Control in CORS preflight headers`
+- `30cceb1` — `fix(api): allow Pragma in CORS preflight headers`
+
+### Ordered validation sequence
+- Ran explicit package checks requested for the count-up lot:
+  - `corepack pnpm --filter @ehq/ui check` -> pass
+  - `corepack pnpm --filter @ehq/hq check` -> pass
+  - `corepack pnpm --filter @ehq/hq build` -> pass
+  - `corepack pnpm --filter @ehq/hq test` -> pass (38/38)
+- Ran canonical `./deploy-build.sh` after hotfixes -> success
+  - API tests: 98/98 pass
+  - HQ check/build: pass
+  - Regression gate: pass
+  - SQL column check: pass
+
+### Runtime issue and resolution
+- Observed connected browser failures on Office dashboard:
+  - preflight blocked for request header `cache-control`
+  - after first fix, preflight blocked for request header `pragma`
+- Resolved by expanding CORS `allowHeaders` in both:
+  - startup 503 stub (`services/api/src/server.ts`)
+  - main Hono cors middleware (`services/api/src/index.ts`)
+
+### Rollout
+- Uploaded rebuilt `app-eeee-api-hostinger.zip` + `app-eeee-frontend.zip` via `scp` to `~/ehq-deploy-upload/`.
+- Unzipped artifacts into Hostinger API/frontend roots.
+- Restarted API (`touch ~/domains/api.eeee.mu/nodejs/tmp/restart.txt`).
+
+### Post-deploy verification
+- Warm-up window observed (`503 {"status":"starting"}`), then `healthz` recovered to `200`.
+- `corepack pnpm smoke:critical` -> PASS.
+- Auth guard checks preserved:
+  - `/eof/v1/status?workspaceId=eeee-mu` -> 401
+  - `/cc/v1/status?workspaceId=eeee-mu` -> 401
+  - `/auth/me` -> 401
+
+### Connected UI verification (authenticated)
+- Session confirmed as `David administrator`.
+- Office dashboard KPI data loaded successfully after CORS fixes.
+- Count-up observed during period changes with stable landing values:
+  - final stable example: `Receivables 2,403,889.38 Rs`
+  - final stable example: `Payables 14,033,987.78 Rs`
+- Non-numeric ratio check: `4/4` remained exact and stable over repeated samples (no animation drift).

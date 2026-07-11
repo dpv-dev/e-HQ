@@ -1,16 +1,18 @@
 # Full App Execution Tracker (Office, Distribution, Command Center)
 
-Last updated: 2026-07-11
+Last updated: 2026-07-12
 Branch: theme/distribution-command
 Main baseline: 146e25b
-Current head: 2d264ce
+Current head: 30cceb1
 
 ## Current Snapshot
-- Repo health: clean working tree, green local gates.
+- Repo health: canonical gate green on HEAD (API tests 98/98, HQ check/build, regression, SQL guard).
 - Frontend quality trend: shared request-state/request-status helpers are now centralized and tested.
 - Deployment baseline: production API + frontend confirmed on commit b1200b9 in this session.
 - Parser ownership: Office imports now use backend parse-preview path only; frontend statement parser fallback has been removed from production flow.
 - Financial correctness hardening: deployed commit pair `4d5697d` + `2d264ce` to lock EUR reconciliation currency normalization and debit/credit-only direction ingestion.
+- Latest rollout: commit set `4515b53` + `afe14c2` deployed on 2026-07-12 with post-warmup smoke PASS.
+- Follow-up production hotfixes deployed on 2026-07-12: `5cc869c` (allow Cache-Control in CORS preflight headers) and `30cceb1` (allow Pragma in CORS preflight headers).
 
 ## Program Phases
 
@@ -142,3 +144,104 @@ Done:
 ## Immediate Next Window (Now -> Next Commit Wave)
 1. Master plan phases and urgent financial correctness hardening are complete.
 2. Optional: continue parser parity corpus enrichment from additional real extracted statement samples.
+
+## Closed Execution Run - 2026-07-12 (Phase 0 -> 11)
+
+### Phase 0 - Scope Freeze and Baseline
+Status: complete
+Evidence:
+- Release scope frozen to current HEAD `4515b53` + previously shipped backend truth path.
+- Baseline captured from canonical tracker + deployment logs before execution.
+
+### Phase 1 - Technical Foundation Stability
+Status: complete
+Evidence:
+- `./deploy-build.sh` passed on HEAD.
+- Output gate summary: API tests `98/98` pass, HQ check/build pass, regression gate pass, SQL column check pass, artifacts regenerated.
+
+### Phase 2 - Auth, Roles, Permission Guardrails
+Status: complete
+Evidence:
+- Unauthenticated guard checks returned expected `401`:
+	- `GET /eof/v1/status?workspaceId=eeee-mu`
+	- `GET /cc/v1/status?workspaceId=eeee-mu`
+	- `GET /auth/me`
+
+### Phase 3 - API/UI Contract Connectivity
+Status: complete
+Evidence:
+- Full gate + app build green on HEAD.
+- Critical route smoke pre-deploy PASS (`/`, Office bank, Distribution settings, Command Center settings).
+
+### Phase 4 - Data Integrity and Financial Invariants
+Status: complete
+Evidence:
+- API suite `98/98` green including import/reconciliation/parity tests and FX-related regression paths.
+- Anti-regression float-money + SQL-column guards PASS.
+
+### Phase 5 - Office End-to-End Readiness
+Status: complete
+Evidence:
+- Office critical route smoke PASS.
+- Office protected API status remains auth-guarded (401 unauth), consistent with expected runtime posture.
+
+### Phase 6 - Distribution End-to-End Readiness
+Status: complete
+Evidence:
+- Distribution settings route smoke PASS.
+- Distribution write-path coverage remains included in API suite (aliases/duplicates/reconciliation actions).
+
+### Phase 7 - HQ Shell and Cross-App Navigation
+Status: complete
+Evidence:
+- Frontend build PASS.
+- HQ app root + app workspace routes available in smoke checks.
+
+### Phase 8 - Command Center Operational Readiness
+Status: complete
+Evidence:
+- Command Center settings route smoke PASS.
+- Status endpoint remains auth-protected (401 unauth).
+
+### Phase 9 - Long-Running Workflow and Concurrency Safety
+Status: complete
+Evidence:
+- Existing lock/idempotency regression coverage remained green in canonical API suite.
+- No new regression surfaced during full gate run.
+
+### Phase 10 - Security, Performance, Observability
+Status: complete
+Evidence:
+- Supabase advisors fetched (security/performance): informational findings only in current snapshot.
+- Supabase postgres logs snapshot showed routine `LOG` entries only in sampled output (no release-blocking database ERROR in the sampled window).
+- Auth logs include recurring `400: Invalid Refresh Token: Refresh Token Not Found` events (client/session hygiene item, non-blocking for current release).
+
+### Phase 11 - Rollout and Verification
+Status: complete
+Evidence:
+- Deployed `app-eeee-api-hostinger.zip` + `app-eeee-frontend.zip` built from HEAD `4515b53` to Hostinger targets.
+- Restarted API via `tmp/restart.txt`.
+- Warm-up window observed (`503 {"status":"starting"}`), then health recovered to `200`.
+- Post-warmup `corepack pnpm smoke:critical` PASS and protected status routes still `401` unauth.
+
+## Follow-up Stabilization - 2026-07-12 (Connected Live Validation)
+
+### Scope
+- Capture post-release live verification while authenticated and close residual cross-origin runtime blockers.
+
+### Changes
+- Commit `afe14c2`: added animated Office dashboard showcase artifact (`design/theme-orbital/showcase/office/dashboard-animated.html`).
+- Commit `5cc869c`: added `Cache-Control` to CORS allow headers in both startup stub (`services/api/src/server.ts`) and main API middleware (`services/api/src/index.ts`).
+- Commit `30cceb1`: added `Pragma` to CORS allow headers in both startup stub (`services/api/src/server.ts`) and main API middleware (`services/api/src/index.ts`).
+
+### Validation
+- Canonical gate green after each hotfix cycle: API tests `98/98`, HQ check/build, regression gate, SQL column check.
+- Post-deploy critical smoke: PASS.
+- Protected endpoints preserved: `/eof/v1/status`, `/cc/v1/status`, `/auth/me` returned `401` unauthenticated.
+
+### Connected UI verification (app.eeee.mu)
+- Authenticated session confirmed (`David administrator`).
+- Office dashboard now loads KPI data without CORS preflight failures.
+- Count-up behavior observed on period change (intermediate animated values, then stable final values):
+	- Example final stable values observed after animation: `Receivables 2,403,889.38 Rs`, `Payables 14,033,987.78 Rs`.
+- Non-numeric ratio value check: `4/4` in Command Center KPI remained exact across repeated time samples (no unintended animation/parsing).
