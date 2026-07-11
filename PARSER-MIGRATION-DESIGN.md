@@ -82,6 +82,9 @@ Update (current slice):
 - Added fixture corpus file `services/api/test/fixtures/parser-parity/cases.json` with CSV and extracted-text scenarios modeled on production imports.
 - Added machine-readable report script `services/api/scripts/parser-parity-report.mjs` and npm script `pnpm --filter @ehq/api parser:parity-report` writing `services/api/output/parser-parity-report.json`.
 
+Update (CI wiring):
+- Added GitHub Actions workflow `.github/workflows/ci.yml` to run `./deploy-build.sh`, generate parser parity report, and upload `services/api/output/parser-parity-report.json` as an artifact.
+
 ### Stage D - Default flip
 - Enable backend parser path by default in production.
 - Keep frontend path behind emergency fallback flag for one stabilization window.

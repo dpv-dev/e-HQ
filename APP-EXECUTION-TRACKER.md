@@ -3,7 +3,7 @@
 Last updated: 2026-07-11
 Branch: theme/distribution-command
 Main baseline: 146e25b
-Current head: 218f539
+Current head: 2e65a95
 
 ## Current Snapshot
 - Repo health: clean working tree, green local gates.
@@ -117,5 +117,5 @@ Done:
 - Deployment evidence logged in DEPLOY-LOG-2026-07-11.md.
 
 ## Immediate Next Window (Now -> Next Commit Wave)
-1. Integrate parser parity report artifact publishing in CI and keep extending corpus from real imported statement extracts.
+1. Keep extending parser parity corpus from real imported statement extracts.
 2. Keep running canonical gate + deploy after each scoped phase slice.
