@@ -737,7 +737,7 @@ test("Bank import preview warns when file profile mismatches selected account ba
           accountId: "bank_sbi",
           occurredOn: "2026-02-11",
           description: "IB Own Account Transfer FT26107LWQWP",
-          amount: "100.00",
+          debit: "100.00",
           currency: "MUR",
           transactionDetails: "TRANS DATE VALUE DATE TRANSACTION DETAILS Mauritius Commercial Bank"
         }
@@ -2619,7 +2619,7 @@ test("import previews are permission-checked but not gated by WRITES_ENABLED", a
       source: "csv",
       fileName: "bank.csv",
       checksum: "checksum-bank-preview-viewer",
-      rows: [{ date: "2026-02-20", description: "Viewer row", amount: "1.00", currency: "MUR", accountId: "bank_mur" }]
+      rows: [{ date: "2026-02-20", description: "Viewer row", debit: "1.00", currency: "MUR", accountId: "bank_mur" }]
     })
   });
   assert.equal(viewerPreview.status, 403);
@@ -2634,7 +2634,7 @@ test("import previews are permission-checked but not gated by WRITES_ENABLED", a
       source: "csv",
       fileName: "bank.csv",
       checksum: "checksum-bank-preview-office",
-      rows: [{ date: "2026-02-20", description: "Office row", amount: "1.00", currency: "MUR", accountId: "bank_mur" }]
+      rows: [{ date: "2026-02-20", description: "Office row", debit: "1.00", currency: "MUR", accountId: "bank_mur" }]
     })
   });
   assert.equal(officePreview.status, 200);
@@ -2647,7 +2647,7 @@ test("import previews are permission-checked but not gated by WRITES_ENABLED", a
       source: "csv",
       fileName: "bank.csv",
       checksum: "checksum-bank-preview-admin",
-      rows: [{ date: "2026-02-20", description: "Admin row", amount: "1.00", currency: "MUR", accountId: "bank_mur" }]
+      rows: [{ date: "2026-02-20", description: "Admin row", debit: "1.00", currency: "MUR", accountId: "bank_mur" }]
     })
   });
   assert.equal(preview.status, 200);
@@ -3321,7 +3321,7 @@ test("office bank import confirm persists lines once and replays idempotent resp
       source: "csv",
       fileName: "bank.csv",
       checksum: "checksum-bank-confirm-real",
-      rows: [{ date: "2026-02-20", description: "Imported bank line", amount: "12.34", currency: "MUR", accountId: "bank_mur", reference: "IMP-1" }]
+      rows: [{ date: "2026-02-20", description: "Imported bank line", debit: "12.34", currency: "MUR", accountId: "bank_mur", reference: "IMP-1" }]
     })
   });
   assert.equal(preview.status, 200);
@@ -3381,7 +3381,7 @@ test("office bank import confirm creates suggested reconciliation propositions i
         {
           date: "2026-02-15",
           description: "Awaiting category",
-          signedAmount: "-85.00",
+          debit: "85.00",
           currency: "MUR",
           accountId: "bank_mur",
           reference: "SUG-1"
@@ -3572,7 +3572,7 @@ test("office bank import confirm skips ambiguous reconciliation suggestions", as
         {
           date: "2026-02-15",
           description: "Awaiting category",
-          signedAmount: "-85.00",
+          debit: "85.00",
           currency: "MUR",
           accountId: "bank_mur",
           reference: "SUG-AMB-1"
@@ -3778,7 +3778,7 @@ test("office bank import confirm writes idempotency, audit, batch, and lines in 
         source: "csv",
         fileName: "pglite-bank.csv",
         checksum: "checksum-bank-pglite",
-        rows: [{ date: "2026-02-21", description: "PGlite line", amount: "23.45", currency: "MUR", accountId: "bank_mur", reference: "PGL-1" }]
+        rows: [{ date: "2026-02-21", description: "PGlite line", debit: "23.45", currency: "MUR", accountId: "bank_mur", reference: "PGL-1" }]
       })
     });
     assert.equal(preview.status, 200);

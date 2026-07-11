@@ -8477,8 +8477,12 @@ function amountForBankRow(row: Readonly<Record<string, string>>): {
   const currency = normalizedCurrency(rowValue(row, ["currency", "currency_code", "Currency", "CURRENCY"])) ?? "MUR";
   const credit = moneyValue(row, ["credit", "Credit", "amountCredit", "amount_credit"]);
   const debit = moneyValue(row, ["debit", "Debit", "amountDebit", "amount_debit"]);
-  const amount = moneyValue(row, ["amount", "Amount", "amountMinor", "amount_minor", "amountMicro", "amount_micro", "amount_mur", "AMOUNT MUR"]);
-  const signedAmount = signedMoneyValue(row, ["signedAmount", "signed_amount", "net", "Net"]);
+
+  // Direction for statement ingestion is authoritative from debit/credit columns
+  // only. Generic amount/signed fallbacks are intentionally rejected.
+  if (credit !== null && debit !== null) {
+    return null;
+  }
 
   if (credit !== null) {
     return {
@@ -8498,26 +8502,7 @@ function amountForBankRow(row: Readonly<Record<string, string>>): {
     };
   }
 
-  if (signedAmount !== null) {
-    return {
-      amountMinor: absBigInt(signedAmount),
-      amountMurMinor: currency === "MUR" ? absBigInt(signedAmount) : moneyValue(row, ["amountMur", "amount_mur", "amountMurMinor", "amount_mur_minor"]),
-      currency,
-      direction: signedAmount < 0n ? "debit" : "credit"
-    };
-  }
-
-  if (amount === null) {
-    return null;
-  }
-
-  const direction = directionValue(row) ?? "credit";
-  return {
-    amountMinor: absBigInt(amount),
-    amountMurMinor: currency === "MUR" ? absBigInt(amount) : moneyValue(row, ["amountMur", "amount_mur", "amountMurMinor", "amount_mur_minor"]),
-    currency,
-    direction
-  };
+  return null;
 }
 
 function convertMinorToMurViaFinanceKernel(
