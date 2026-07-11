@@ -13,6 +13,7 @@
     type AuditLogEntry,
     type CurrencyCode,
     type DistributionAlias,
+    type DistributionAliasTargetType,
     type DistributionContract,
     type DistributionContractExpense,
     type DistributionDashboardResponse,
@@ -21,6 +22,7 @@
     type DistributionImportConfirmResponse,
     type DistributionImportPreviewRequest,
     type DistributionImportPreviewResponse,
+    type DistributionFxRate,
     type DistributionMappingRow,
     type DistributionReconciliationAction,
     type DistributionReconciliationResponse,
@@ -190,7 +192,7 @@
       label: "Administration",
       items: [
         { id: "audit-log", label: "Journal d'audit", title: "Journal d'audit", subtitle: "Traçabilité Distribution des actions enregistrées." },
-        { id: "settings", label: "Paramètres", title: "Paramètres", subtitle: "Configuration Distribution en lecture seule." }
+        { id: "settings", label: "Paramètres", title: "Paramètres", subtitle: "Configuration Distribution et taux FX." }
       ]
     }
   ];
@@ -247,6 +249,14 @@
     { label: "Track", value: "track" },
     { label: "Devise", value: "currency" },
     { label: "Période", value: "period" }
+  ];
+  const aliasTargetTypeOptions: readonly SelectOption[] = [
+    { label: "Non assigné", value: "unassigned" },
+    { label: "Payee", value: "payee" },
+    { label: "Release", value: "release" },
+    { label: "Track", value: "track" },
+    { label: "Artist", value: "artist" },
+    { label: "Label", value: "label" }
   ];
   const dashboardColumns: readonly TableColumn[] = [
     { label: "Action", align: "left", sortable: true },
@@ -383,6 +393,12 @@
     { label: "Action", align: "left", sortable: true },
     { label: "Entité", align: "left", sortable: true }
   ];
+  const fxRateColumns: readonly TableColumn[] = [
+    { label: "De", align: "left", sortable: true },
+    { label: "Vers", align: "left", sortable: true },
+    { label: "Date", align: "left", sortable: true },
+    { label: "Taux", align: "right", sortable: true }
+  ];
 
   let activePageId = $state<DistributionPageId>("dashboard");
   const navIcons: Readonly<Record<DistributionPageId, IconName>> = {
@@ -467,6 +483,9 @@
   let settingsState = $state<ApiRequestState<DistributionSettingsResponse>>(
     createIdleState<DistributionSettingsResponse>()
   );
+  let fxRatesState = $state<ApiRequestState<PageResult<DistributionFxRate>>>(
+    createIdleState<PageResult<DistributionFxRate>>()
+  );
   let importSourceFilter = $state<ImportSourceFilter>(allValue);
   let importStatusFilter = $state<ImportBatchStatusFilter>(allValue);
   let mappingStatusFilter = $state<MappingStatusFilter>("unmapped");
@@ -536,6 +555,16 @@
   let expenseDateInput = $state("");
   let printingStatementId = $state<string | null>(null);
   let statementPrintError = $state<string | null>(null);
+  let fxFromCurrencyInput = $state("EUR");
+  let fxToCurrencyInput = $state("MUR");
+  let fxEffectiveDateInput = $state(today);
+  let fxRateInput = $state("");
+  let aliasEditorId = $state<string | null>(null);
+  let aliasTextInput = $state("");
+  let aliasTargetTypeInput = $state<DistributionAliasTargetType>("unassigned");
+  let aliasTargetIdInput = $state("");
+  let fxRateSaveStatus = $state<RequestStatus>("idle");
+  let fxRateSaveMessage = $state<string | null>(null);
   // Write failures land here (per page) so a transient mutation error never
   // clobbers the loaded list states rendered by the tables.
   let actionError = $state<string | null>(null);
@@ -580,9 +609,11 @@
   const aliases = $derived(readPageItems(aliasesState));
   const duplicates = $derived(readPageItems(duplicatesState));
   const auditEntries = $derived(readPageItems(auditLogState));
+  const fxRates = $derived(readPageItems(fxRatesState));
   const aliasRows = $derived(createAliasRows(aliases));
   const duplicateRows = $derived(createDuplicateRows(duplicates));
   const auditRows = $derived(createAuditRows(auditEntries));
+  const fxRateRows = $derived(createFxRateRows(fxRates));
   const importPagination = $derived<TablePagination | null>(
     createTablePagination(importBatchesState, tablePaginationLoading === "importBatches", tablePaginationError("importBatches"), loadMoreImportBatches, loadAllImportBatches)
   );
@@ -621,6 +652,25 @@
     createTablePagination(auditLogState, tablePaginationLoading === "auditLog", tablePaginationError("auditLog"), loadMoreAuditLog, loadAllAuditLog)
   );
   const settings = $derived(settingsState.status === "success" ? settingsState.data : null);
+  const fxFromCurrencyNormalized = $derived(normalizeCurrencyCode(fxFromCurrencyInput));
+  const fxToCurrencyNormalized = $derived(normalizeCurrencyCode(fxToCurrencyInput));
+  const fxEffectiveDateNormalized = $derived(normalizeIsoDate(fxEffectiveDateInput));
+  const fxRateNormalized = $derived(normalizeFxRateValue(fxRateInput));
+  const fxRateFormValid = $derived(
+    fxFromCurrencyNormalized !== null &&
+    fxToCurrencyNormalized !== null &&
+    fxEffectiveDateNormalized !== null &&
+    fxRateNormalized !== null
+  );
+  const aliasTargetRequiresId = $derived(aliasTargetTypeInput !== "unassigned");
+  const aliasTargetIsSelect = $derived(
+    aliasTargetTypeInput === "payee" || aliasTargetTypeInput === "release" || aliasTargetTypeInput === "track"
+  );
+  const aliasTargetSelectOptions = $derived<readonly SelectOption[]>(createAliasTargetOptions(aliasTargetTypeInput, payees, releases, tracks));
+  const aliasFormValid = $derived(
+    aliasTextInput.trim().length > 0 &&
+    (!aliasTargetRequiresId || aliasTargetIdInput.trim().length > 0)
+  );
   const importToolbarFilters = $derived(createImportToolbarFilters(importState));
   const mappingBatchFilterOptions = $derived<readonly SelectOption[]>([
     { label: "Tous les batches", value: allValue },
@@ -725,6 +775,12 @@
   const allocationRowActions: readonly TableRowAction[] = [
     { label: "Demander annulation", onAction: selectRunForUnpost, danger: true }
   ];
+  const aliasRowActions: readonly TableRowAction[] = [
+    { label: "Modifier", onAction: openAliasEditor }
+  ];
+  const duplicateRowActions: readonly TableRowAction[] = [
+    { label: "Résoudre", onAction: resolveDuplicateRow }
+  ];
 
   onMount((): (() => void) => {
     syncPageFromLocation();
@@ -746,6 +802,12 @@
 
     if (kept.length !== selectedMappingRowIds.length) {
       selectedMappingRowIds = kept;
+    }
+  });
+
+  $effect((): void => {
+    if (activePageId === "settings" && fxRatesState.status === "idle") {
+      void loadFxRates();
     }
   });
 
@@ -782,7 +844,8 @@
         loadAliases(),
         loadDuplicates(),
         loadAuditLog(),
-        loadSettings()
+        loadSettings(),
+        loadFxRates()
       ]);
     }
   }
@@ -1624,6 +1687,110 @@
       );
     } catch (error: unknown) {
       settingsState = createErrorState<DistributionSettingsResponse>(error);
+    }
+  }
+
+  async function loadFxRates(): Promise<void> {
+    fxRatesState = beginReload<PageResult<DistributionFxRate>>(fxRatesState);
+
+    try {
+      fxRatesState = createSuccessState<PageResult<DistributionFxRate>>(
+        await client.distribution.listFxRates({
+          workspaceId: distributionWorkspaceId,
+          fromCurrency: null,
+          toCurrency: null,
+          effectiveDate: null,
+          cursor: null,
+          limit: TABLE_PAGE_SIZE
+        })
+      );
+    } catch (error: unknown) {
+      fxRatesState = createErrorState<PageResult<DistributionFxRate>>(error);
+    }
+  }
+
+  async function reloadSettingsPage(): Promise<void> {
+    await Promise.all([loadSettings(), loadFxRates()]);
+  }
+
+  function resetFxRateSaveMessage(): void {
+    if (fxRateSaveStatus === "loading") {
+      return;
+    }
+
+    fxRateSaveStatus = "idle";
+    fxRateSaveMessage = null;
+  }
+
+  function updateFxFromCurrencyInput(value: string): void {
+    fxFromCurrencyInput = value;
+    resetFxRateSaveMessage();
+  }
+
+  function updateFxToCurrencyInput(value: string): void {
+    fxToCurrencyInput = value;
+    resetFxRateSaveMessage();
+  }
+
+  function updateFxEffectiveDateInput(value: string): void {
+    fxEffectiveDateInput = value;
+    resetFxRateSaveMessage();
+  }
+
+  function updateFxRateInput(value: string): void {
+    fxRateInput = value;
+    resetFxRateSaveMessage();
+  }
+
+  async function saveFxRate(): Promise<void> {
+    if (fxRateSaveStatus === "loading") {
+      return;
+    }
+
+    if (!writesEnabled) {
+      fxRateSaveStatus = "error";
+      fxRateSaveMessage = "Activez l'écriture pour enregistrer un taux FX.";
+      return;
+    }
+
+    const fromCurrency = fxFromCurrencyNormalized;
+    const toCurrency = fxToCurrencyNormalized;
+    const effectiveDate = fxEffectiveDateNormalized;
+    const rate = fxRateNormalized;
+
+    if (fromCurrency === null || toCurrency === null || effectiveDate === null || rate === null) {
+      fxRateSaveStatus = "error";
+      fxRateSaveMessage = "Vérifiez les champs FX (codes ISO, date YYYY-MM-DD, taux > 0).";
+      return;
+    }
+
+    fxRateSaveStatus = "loading";
+    fxRateSaveMessage = null;
+
+    try {
+      await client.distribution.saveFxRates(
+        {
+          workspaceId: distributionWorkspaceId,
+          rates: [
+            {
+              fromCurrency,
+              toCurrency,
+              effectiveDate,
+              rate
+            }
+          ]
+        },
+        {
+          idempotencyKey: createIdempotencyKey("settings-fx-rate")
+        }
+      );
+      fxRateSaveStatus = "success";
+      fxRateSaveMessage = "Taux FX enregistré.";
+      fxRateInput = "";
+      await Promise.all([loadSettings(), loadFxRates(), loadAuditLog()]);
+    } catch (error: unknown) {
+      fxRateSaveStatus = "error";
+      fxRateSaveMessage = getErrorMessage(error);
     }
   }
 
@@ -3243,11 +3410,25 @@
   }
 
   async function runReconciliationAction(action: DistributionReconciliationAction): Promise<void> {
+    clearActionReceipts();
+
     if (action.maintenance) {
+      try {
+        mutationReceipt = await client.distribution.runFinancialReconciliationAction(
+          action.id,
+          {
+            workspaceId: distributionWorkspaceId,
+            reason: `Triggered from Distribution reconciliation panel: ${action.id}`
+          },
+          { idempotencyKey: createIdempotencyKey(`recon-action-${action.id}`) }
+        );
+        mutationReceiptPageId = activePageId;
+        await Promise.all([loadReconciliation(), loadAuditLog()]);
+      } catch (error: unknown) {
+        reportActionError(error);
+      }
       return;
     }
-
-    clearActionReceipts();
 
     if (action.id === "link-statement-payment") {
       const statementGap = reconciliation?.statementsWithoutPaymentLinks[0];
@@ -3317,6 +3498,113 @@
       } catch (error: unknown) {
         reportActionError(error);
       }
+    }
+  }
+
+  function openAliasCreatePanel(): void {
+    aliasEditorId = null;
+    aliasTextInput = "";
+    aliasTargetTypeInput = "unassigned";
+    aliasTargetIdInput = "";
+  }
+
+  function openAliasEditor(aliasId: string): void {
+    const alias = aliases.find((candidate: DistributionAlias): boolean => candidate.id === aliasId);
+
+    if (alias === undefined) {
+      return;
+    }
+
+    aliasEditorId = alias.id;
+    aliasTextInput = alias.aliasText;
+    aliasTargetTypeInput = alias.targetType;
+    aliasTargetIdInput = alias.targetId ?? "";
+  }
+
+  function closeAliasEditor(): void {
+    aliasEditorId = null;
+    aliasTextInput = "";
+    aliasTargetTypeInput = "unassigned";
+    aliasTargetIdInput = "";
+  }
+
+  function updateAliasTextInput(value: string): void {
+    aliasTextInput = value;
+  }
+
+  function updateAliasTargetType(value: string): void {
+    aliasTargetTypeInput = value as DistributionAliasTargetType;
+    aliasTargetIdInput = "";
+  }
+
+  function updateAliasTargetId(value: string): void {
+    aliasTargetIdInput = value;
+  }
+
+  async function saveAlias(): Promise<void> {
+    if (!aliasFormValid) {
+      return;
+    }
+
+    const normalizedAliasText = aliasTextInput.trim();
+    const normalizedTargetId = aliasTargetTypeInput === "unassigned" ? null : aliasTargetIdInput.trim();
+    clearRunReceipt();
+
+    try {
+      if (aliasEditorId === null) {
+        mutationReceipt = await client.distribution.createAlias(
+          {
+            workspaceId: distributionWorkspaceId,
+            aliasText: normalizedAliasText,
+            targetType: aliasTargetTypeInput,
+            targetId: normalizedTargetId
+          },
+          {
+            idempotencyKey: createIdempotencyKey("alias-create")
+          }
+        );
+      } else {
+        mutationReceipt = await client.distribution.updateAlias(
+          aliasEditorId,
+          {
+            workspaceId: distributionWorkspaceId,
+            aliasText: normalizedAliasText,
+            targetType: aliasTargetTypeInput,
+            targetId: normalizedTargetId
+          },
+          {
+            idempotencyKey: createIdempotencyKey("alias-update")
+          }
+        );
+      }
+
+      mutationReceiptPageId = activePageId;
+      closeAliasEditor();
+      await Promise.all([loadAliases(), loadDuplicates(), loadAuditLog()]);
+    } catch (error: unknown) {
+      reportActionError(error);
+    }
+  }
+
+  async function resolveDuplicateRow(duplicateId: string): Promise<void> {
+    clearRunReceipt();
+
+    try {
+      mutationReceipt = await client.distribution.resolveDuplicate(
+        duplicateId,
+        {
+          workspaceId: distributionWorkspaceId,
+          keepEarningId: null,
+          reason: "Operator duplicate resolution from Distribution UI"
+        },
+        {
+          idempotencyKey: createIdempotencyKey(`duplicate-resolve-${duplicateId}`)
+        }
+      );
+      mutationReceiptPageId = activePageId;
+      await Promise.all([loadDuplicates(), loadReconciliation(), loadAuditLog()]);
+    } catch (error: unknown) {
+      reportActionError(error);
     }
   }
 
@@ -3696,6 +3984,36 @@
     }));
   }
 
+  function createAliasTargetOptions(
+    targetType: DistributionAliasTargetType,
+    payeeItems: readonly PayeeSummary[],
+    releaseItems: readonly ReleaseSummary[],
+    trackItems: readonly TrackSummary[]
+  ): readonly SelectOption[] {
+    if (targetType === "payee") {
+      return sortOptionsAlphabetically([
+        { label: "Sélectionner un payee", value: "" },
+        ...payeeItems.map((payee: PayeeSummary): SelectOption => ({ label: `${payee.displayName} · ${payee.defaultCurrency}`, value: payee.id }))
+      ], 1);
+    }
+
+    if (targetType === "release") {
+      return sortOptionsAlphabetically([
+        { label: "Sélectionner une release", value: "" },
+        ...releaseItems.map((release: ReleaseSummary): SelectOption => ({ label: `${release.title} · ${release.artistName}`, value: release.id }))
+      ], 1);
+    }
+
+    if (targetType === "track") {
+      return sortOptionsAlphabetically([
+        { label: "Sélectionner un track", value: "" },
+        ...trackItems.map((track: TrackSummary): SelectOption => ({ label: `${track.title} · ${track.artistName}`, value: track.id }))
+      ], 1);
+    }
+
+    return [{ label: "Aucune sélection", value: "" }];
+  }
+
   function createAuditRows(items: readonly AuditLogEntry[]): readonly TableRow[] {
     return items.map((entry: AuditLogEntry): TableRow => ({
       id: entry.id,
@@ -3704,6 +4022,30 @@
         { kind: "text", value: auditActorLabel(entry), strong: false },
         { kind: "badge", value: entry.action, tone: "info" },
         { kind: "text", value: `${entry.entityType} · ${entry.entityReference}`, strong: false }
+      ]
+    }));
+  }
+
+  function createFxRateRows(items: readonly DistributionFxRate[]): readonly TableRow[] {
+    const sorted = [...items].sort((left: DistributionFxRate, right: DistributionFxRate): number => {
+      if (left.effectiveDate !== right.effectiveDate) {
+        return right.effectiveDate.localeCompare(left.effectiveDate);
+      }
+
+      if (left.fromCurrency !== right.fromCurrency) {
+        return left.fromCurrency.localeCompare(right.fromCurrency);
+      }
+
+      return left.toCurrency.localeCompare(right.toCurrency);
+    });
+
+    return sorted.map((rate: DistributionFxRate, index: number): TableRow => ({
+      id: `${rate.fromCurrency}-${rate.toCurrency}-${rate.effectiveDate}-${String(index)}`,
+      cells: [
+        { kind: "badge", value: rate.fromCurrency, tone: "muted" },
+        { kind: "badge", value: rate.toCurrency, tone: "muted" },
+        { kind: "text", value: rate.effectiveDate, strong: false },
+        { kind: "text", value: rate.rate, strong: true }
       ]
     }));
   }
@@ -3728,6 +4070,30 @@
 
   function isLoadingStatus(status: RequestStatus): boolean {
     return isRequestStatusLoading(status);
+  }
+
+  function normalizeCurrencyCode(value: string): CurrencyCode | null {
+    const normalized = value.trim().toUpperCase();
+    return /^[A-Z]{3}$/u.test(normalized) ? normalized : null;
+  }
+
+  function normalizeIsoDate(value: string): string | null {
+    const normalized = value.trim();
+    return /^\d{4}-\d{2}-\d{2}$/u.test(normalized) ? normalized : null;
+  }
+
+  function normalizeFxRateValue(value: string): string | null {
+    const normalized = value.trim().replace(/,/gu, ".");
+
+    if (!/^\d+(?:\.\d{1,10})?$/u.test(normalized)) {
+      return null;
+    }
+
+    if (/^0(?:\.0+)?$/u.test(normalized)) {
+      return null;
+    }
+
+    return normalized;
   }
 
   function tableStateFor(status: RequestStatus, count: number): "loading" | "error" | "empty" | "default" {
@@ -4405,19 +4771,19 @@
                   <strong>{action.label}</strong>
                   <p>{action.description}</p>
                   {#if action.maintenance}
-                    <span class="recon-action-flag">Maintenance ponctuelle · à revoir</span>
+                    <span class="recon-action-flag">Maintenance ponctuelle · exécution sécurisée</span>
                   {/if}
                   <Button
-                    label={action.maintenance ? "Maintenance uniquement" : "Exécuter l'action sécurisée"}
+                    label={action.maintenance ? "Exécuter maintenance" : "Exécuter l'action sécurisée"}
                     variant="secondary"
                     size="medium"
                     type="button"
-                    disabled={action.maintenance || !writesEnabled}
+                    disabled={!writesEnabled}
                     loading={false}
                     locked={false}
                     focus={false}
-                    ariaLabel={action.maintenance ? "Maintenance uniquement" : `Exécuter l'action sécurisée: ${action.label}`}
-                    title={action.maintenance ? "maintenance uniquement" : writeDisabledTitle()}
+                    ariaLabel={action.maintenance ? `Exécuter la maintenance: ${action.label}` : `Exécuter l'action sécurisée: ${action.label}`}
+                    title={writeDisabledTitle()}
                     onclick={() => runReconciliationAction(action)}
                   />
                 </div>
@@ -4427,20 +4793,109 @@
           </section>
         {/if}
       {:else if activePageId === "aliases"}
+        <section class="form-panel ehq-edge-surface" aria-label="Éditeur d'alias">
+          <header class="settings-editor-head">
+            <strong>{aliasEditorId === null ? "Créer un alias" : "Modifier un alias"}</strong>
+            <span>Route les noms importés vers les entités canoniques.</span>
+          </header>
+          <div class="settings-editor-grid">
+            <Input
+              id="distribution-alias-text"
+              label="Alias"
+              value={aliasTextInput}
+              placeholder="Nom source exact"
+              type="text"
+              state={aliasTextInput.trim().length > 0 ? "default" : "error"}
+              message={aliasTextInput.trim().length > 0 ? "" : "Alias requis."}
+              oninput={updateAliasTextInput}
+            />
+            <Select
+              id="distribution-alias-target-type"
+              label="Type cible"
+              value={aliasTargetTypeInput}
+              options={aliasTargetTypeOptions}
+              state="default"
+              message=""
+              onchange={updateAliasTargetType}
+            />
+            {#if aliasTargetRequiresId && aliasTargetIsSelect}
+              <Select
+                id="distribution-alias-target-id"
+                label="Cible"
+                value={aliasTargetIdInput}
+                options={aliasTargetSelectOptions}
+                state="default"
+                message=""
+                onchange={updateAliasTargetId}
+              />
+            {:else if aliasTargetRequiresId}
+              <Input
+                id="distribution-alias-target-id-free"
+                label="ID cible"
+                value={aliasTargetIdInput}
+                placeholder="ID canonique"
+                type="text"
+                state={aliasTargetIdInput.trim().length > 0 ? "default" : "error"}
+                message={aliasTargetIdInput.trim().length > 0 ? "" : "ID cible requis."}
+                oninput={updateAliasTargetId}
+              />
+            {/if}
+          </div>
+          <div class="settings-editor-actions">
+            <Button
+              label={aliasEditorId === null ? "Créer alias" : "Mettre à jour alias"}
+              variant="primary"
+              size="medium"
+              type="button"
+              disabled={!writesEnabled || !aliasFormValid}
+              loading={false}
+              locked={false}
+              focus={false}
+              ariaLabel={aliasEditorId === null ? "Créer alias" : "Mettre à jour alias"}
+              title={writesEnabled ? (!aliasFormValid ? "Complétez les champs requis." : "") : writeGateMessage}
+              onclick={saveAlias}
+            />
+            <Button
+              label="Nouveau"
+              variant="secondary"
+              size="medium"
+              type="button"
+              disabled={false}
+              loading={false}
+              locked={false}
+              focus={false}
+              ariaLabel="Préparer un nouvel alias"
+              onclick={openAliasCreatePanel}
+            />
+            <Button
+              label="Réinitialiser"
+              variant="secondary"
+              size="medium"
+              type="button"
+              disabled={false}
+              loading={false}
+              locked={false}
+              focus={false}
+              ariaLabel="Réinitialiser l'éditeur d'alias"
+              onclick={closeAliasEditor}
+            />
+          </div>
+        </section>
         {#if aliases.length === 0 && aliasesState.status === "success"}
           <section class="empty-state ehq-edge-surface">
             <strong>Aucun alias catalogue</strong>
             <span>Aucun alias n'est disponible pour ce workspace. Les alias routent les noms importés vers les entités canoniques une fois configurés.</span>
           </section>
         {:else}
-          <Table title="Alias catalogue" columns={aliasColumns} rows={aliasRows} state={tableStateFor(aliasesState.status, aliases.length)} actionLabel="" pagination={aliasesPagination} />
+          <Table title="Alias catalogue" columns={aliasColumns} rows={aliasRows} state={tableStateFor(aliasesState.status, aliases.length)} actionLabel="" rowActions={aliasRowActions} pagination={aliasesPagination} />
         {/if}
       {:else if activePageId === "duplicates"}
         <section class="recon-actions ehq-edge-surface" aria-label="Note doublons">
           <SectionTemplate
             eyebrow="duplicates"
             title="Détection des doublons"
-            detail="Les enregistrements potentiellement dupliqués sont listés avec des libellés lisibles; la fusion reste une maintenance revue."
+            detail="Les enregistrements potentiellement dupliqués sont listés avec des libellés lisibles; utilisez l'action de résolution pour exclure les doublons.
+"
             state="ready"
           />
         </section>
@@ -4450,7 +4905,7 @@
             <span>Aucun enregistrement potentiellement dupliqué n'a été trouvé dans le catalogue.</span>
           </section>
         {:else}
-          <Table title="Doublons potentiels" columns={duplicateColumns} rows={duplicateRows} state={tableStateFor(duplicatesState.status, duplicates.length)} actionLabel="" pagination={duplicatesPagination} />
+          <Table title="Doublons potentiels" columns={duplicateColumns} rows={duplicateRows} state={tableStateFor(duplicatesState.status, duplicates.length)} actionLabel="" rowActions={duplicateRowActions} pagination={duplicatesPagination} />
         {/if}
       {:else if activePageId === "audit-log"}
         {#if auditEntries.length === 0 && auditLogState.status === "success"}
@@ -4468,21 +4923,94 @@
           <section class="empty-state error ehq-edge-surface">
             <strong>Paramètres indisponibles</strong>
             <span>La configuration du workspace n'a pas pu être chargée.</span>
-            <Button label="Réessayer" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Réessayer le chargement des paramètres" onclick={loadSettings} />
+            <Button label="Réessayer" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Réessayer le chargement des paramètres" onclick={reloadSettingsPage} />
           </section>
         {:else if settings !== null}
-          <section class="settings-panel ehq-edge-surface" aria-label="Paramètres Distribution">
-            <dl>
-              <div><dt>Workspace</dt><dd>{settings.workspaceId}</dd></div>
-              <div><dt>Namespace API</dt><dd>{settings.namespace}</dd></div>
-              <div><dt>Lectures</dt><dd>{settings.reads}</dd></div>
-              <div><dt>Ayants droit</dt><dd>{settings.payeeCount}</dd></div>
-              <div><dt>Contrats</dt><dd>{settings.contractCount}</dd></div>
-              <div><dt>Devises</dt><dd>{settings.currencies.length === 0 ? "—" : settings.currencies.join(", ")}</dd></div>
-              <div><dt>Taux FX</dt><dd>{settings.fxRateCount}</dd></div>
-              <div><dt>Mutations</dt><dd>{settings.mutationsEnabled ? "activées" : "lecture seule"}</dd></div>
-            </dl>
-          </section>
+          <div class="settings-grid">
+            <section class="settings-panel ehq-edge-surface" aria-label="Paramètres Distribution">
+              <dl>
+                <div><dt>Workspace</dt><dd>{settings.workspaceId}</dd></div>
+                <div><dt>Namespace API</dt><dd>{settings.namespace}</dd></div>
+                <div><dt>Lectures</dt><dd>{settings.reads}</dd></div>
+                <div><dt>Ayants droit</dt><dd>{settings.payeeCount}</dd></div>
+                <div><dt>Contrats</dt><dd>{settings.contractCount}</dd></div>
+                <div><dt>Devises</dt><dd>{settings.currencies.length === 0 ? "—" : settings.currencies.join(", ")}</dd></div>
+                <div><dt>Taux FX</dt><dd>{settings.fxRateCount}</dd></div>
+                <div><dt>Mutations</dt><dd>{settings.mutationsEnabled ? "activées" : "lecture seule"}</dd></div>
+              </dl>
+            </section>
+
+            <section class="settings-panel ehq-edge-surface" aria-label="Enregistrer un taux FX">
+              <header class="settings-editor-head">
+                <strong>Enregistrer un taux FX</strong>
+                <span>Ajoute ou met à jour une paire devise + date effective.</span>
+              </header>
+
+              <div class="settings-editor-grid">
+                <Input
+                  id="distribution-fx-from"
+                  label="Devise source"
+                  value={fxFromCurrencyInput}
+                  placeholder="EUR"
+                  type="text"
+                  state={fxFromCurrencyInput.trim().length > 0 && fxFromCurrencyNormalized === null ? "error" : "default"}
+                  message={fxFromCurrencyInput.trim().length > 0 && fxFromCurrencyNormalized === null ? "Code ISO attendu (EUR, USD...)." : ""}
+                  oninput={updateFxFromCurrencyInput}
+                />
+                <Input
+                  id="distribution-fx-to"
+                  label="Devise cible"
+                  value={fxToCurrencyInput}
+                  placeholder="MUR"
+                  type="text"
+                  state={fxToCurrencyInput.trim().length > 0 && fxToCurrencyNormalized === null ? "error" : "default"}
+                  message={fxToCurrencyInput.trim().length > 0 && fxToCurrencyNormalized === null ? "Code ISO attendu (MUR, EUR...)." : ""}
+                  oninput={updateFxToCurrencyInput}
+                />
+                <Input
+                  id="distribution-fx-date"
+                  label="Date effective"
+                  value={fxEffectiveDateInput}
+                  placeholder="YYYY-MM-DD"
+                  type="text"
+                  state={fxEffectiveDateInput.trim().length > 0 && fxEffectiveDateNormalized === null ? "error" : "default"}
+                  message={fxEffectiveDateInput.trim().length > 0 && fxEffectiveDateNormalized === null ? "Format attendu : YYYY-MM-DD." : ""}
+                  oninput={updateFxEffectiveDateInput}
+                />
+                <Input
+                  id="distribution-fx-rate"
+                  label="Taux"
+                  value={fxRateInput}
+                  placeholder="53.941005"
+                  type="text"
+                  state={fxRateInput.trim().length > 0 && fxRateNormalized === null ? "error" : "default"}
+                  message={fxRateInput.trim().length > 0 && fxRateNormalized === null ? "Nombre positif, 10 décimales max." : ""}
+                  oninput={updateFxRateInput}
+                />
+              </div>
+
+              <div class="settings-editor-actions">
+                <Button
+                  label="Enregistrer le taux"
+                  variant="primary"
+                  size="medium"
+                  type="button"
+                  disabled={fxRateSaveStatus === "loading" || !writesEnabled || !fxRateFormValid}
+                  loading={fxRateSaveStatus === "loading"}
+                  locked={false}
+                  focus={false}
+                  ariaLabel="Enregistrer le taux FX"
+                  onclick={saveFxRate}
+                />
+              </div>
+
+              {#if fxRateSaveMessage !== null}
+                <p class={`settings-save-message ${fxRateSaveStatus === "error" ? "error" : "success"}`}>{fxRateSaveMessage}</p>
+              {/if}
+            </section>
+          </div>
+
+          <Table title="Historique FX" columns={fxRateColumns} rows={fxRateRows} state={tableStateFor(fxRatesState.status, fxRateRows.length)} actionLabel="" />
         {/if}
       {/if}
     </div>
@@ -4815,6 +5343,52 @@
     border: 0;
     border-radius: var(--ehq-radius-sm);
     background: transparent;
+  }
+
+  .settings-grid {
+    display: grid;
+    gap: var(--ehq-space-4);
+  }
+
+  .settings-editor-head {
+    display: grid;
+    gap: var(--ehq-space-1);
+    margin-bottom: var(--ehq-space-3);
+  }
+
+  .settings-editor-head strong {
+    font-size: var(--ehq-type-ui-size);
+    font-weight: var(--ehq-type-heading-weight);
+  }
+
+  .settings-editor-head span {
+    color: var(--ehq-text-soft);
+    font-size: var(--ehq-type-caption-size);
+  }
+
+  .settings-editor-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: var(--ehq-space-3);
+    margin-bottom: var(--ehq-space-3);
+  }
+
+  .settings-editor-actions {
+    display: flex;
+    justify-content: flex-start;
+  }
+
+  .settings-save-message {
+    margin: var(--ehq-space-2) 0 0;
+    font-size: var(--ehq-type-caption-size);
+  }
+
+  .settings-save-message.error {
+    color: var(--ehq-error);
+  }
+
+  .settings-save-message.success {
+    color: var(--ehq-success);
   }
 
   .settings-panel dl {

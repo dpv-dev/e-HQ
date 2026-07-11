@@ -848,6 +848,183 @@ test("Distribution reads migrated royalty results as fixture checksums, not reca
   assert.equal(statements.items[0].netPayableMicro, "44.9000000000");
 });
 
+test("distribution aliases create persists a new alias and exposes it in the read list", async () => {
+  const app = createWriteEnabledFixtureApiService();
+
+  const create = await app.request("/erh/v1/aliases", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "distribution-alias-create-1" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      aliasText: "Alma Legacy",
+      targetType: "payee",
+      targetId: "payee_alma"
+    })
+  });
+  assert.equal(create.status, 200);
+  const receipt = (await create.json()) as {
+    readonly id: string;
+    readonly auditEventId: string | null;
+    readonly alias: {
+      readonly id: string;
+      readonly aliasText: string;
+      readonly targetType: "artist" | "payee" | "label" | "release" | "track" | "unassigned";
+      readonly target: string;
+      readonly targetId: string | null;
+    };
+  };
+  assert.ok(receipt.id.length > 0);
+  assert.ok(receipt.auditEventId !== null);
+  assert.equal(receipt.alias.aliasText, "Alma Legacy");
+  assert.equal(receipt.alias.targetType, "payee");
+  assert.equal(receipt.alias.targetId, "payee_alma");
+  assert.equal(receipt.alias.target, "Alma");
+
+  const listed = await app.request("/erh/v1/aliases?workspaceId=workspace_1&limit=100", {
+    headers: authHeaders()
+  });
+  assert.equal(listed.status, 200);
+  const page = (await listed.json()) as {
+    readonly items: readonly {
+      readonly id: string;
+      readonly aliasText: string;
+      readonly targetType: string;
+      readonly targetId: string | null;
+    }[];
+  };
+  const createdAlias = page.items.find((item) => item.id === receipt.id);
+  assert.ok(createdAlias !== undefined);
+  assert.equal(createdAlias?.aliasText, "Alma Legacy");
+  assert.equal(createdAlias?.targetType, "payee");
+  assert.equal(createdAlias?.targetId, "payee_alma");
+});
+
+test("distribution aliases patch updates an existing alias target", async () => {
+  const app = createWriteEnabledFixtureApiService();
+
+  const created = await app.request("/erh/v1/aliases", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "distribution-alias-patch-create-1" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      aliasText: "Legacy Seggae",
+      targetType: "unassigned",
+      targetId: null
+    })
+  });
+  assert.equal(created.status, 200);
+  const createdReceipt = (await created.json()) as {
+    readonly id: string;
+  };
+
+  const updated = await app.request(`/erh/v1/aliases/${createdReceipt.id}`, {
+    method: "PATCH",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "distribution-alias-patch-update-1" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      aliasText: "Legacy Seggae",
+      targetType: "track",
+      targetId: "track_1"
+    })
+  });
+  assert.equal(updated.status, 200);
+  const updatedReceipt = (await updated.json()) as {
+    readonly id: string;
+    readonly auditEventId: string | null;
+    readonly alias: {
+      readonly targetType: string;
+      readonly targetId: string | null;
+      readonly target: string;
+    };
+  };
+  assert.equal(updatedReceipt.id, createdReceipt.id);
+  assert.ok(updatedReceipt.auditEventId !== null);
+  assert.equal(updatedReceipt.alias.targetType, "track");
+  assert.equal(updatedReceipt.alias.targetId, "track_1");
+  assert.equal(updatedReceipt.alias.target, "Seggae light");
+});
+
+test("distribution duplicate resolve excludes duplicate earning rows", async () => {
+  const app = createWriteEnabledFixtureApiService();
+
+  const before = await app.request("/erh/v1/duplicates?workspaceId=workspace_1&limit=100", {
+    headers: authHeaders()
+  });
+  assert.equal(before.status, 200);
+  const beforePage = (await before.json()) as {
+    readonly items: readonly { readonly id: string }[];
+  };
+  assert.ok(beforePage.items.some((item) => item.id === "MUAAA2600001"));
+
+  const resolve = await app.request("/erh/v1/duplicates/MUAAA2600001/resolve", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "distribution-duplicate-resolve-1" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      keepEarningId: "earning_matched",
+      reason: "manual_duplicate_review"
+    })
+  });
+  assert.equal(resolve.status, 200);
+  const receipt = (await resolve.json()) as {
+    readonly duplicateId: string;
+    readonly keepEarningId: string;
+    readonly resolvedEarningIds: readonly string[];
+    readonly auditEventId: string | null;
+  };
+  assert.equal(receipt.duplicateId, "MUAAA2600001");
+  assert.equal(receipt.keepEarningId, "earning_matched");
+  assert.ok(receipt.resolvedEarningIds.includes("earning_pending"));
+  assert.ok(receipt.auditEventId !== null);
+
+  const after = await app.request("/erh/v1/duplicates?workspaceId=workspace_1&limit=100", {
+    headers: authHeaders()
+  });
+  assert.equal(after.status, 200);
+  const afterPage = (await after.json()) as {
+    readonly items: readonly { readonly id: string }[];
+  };
+  assert.equal(afterPage.items.some((item) => item.id === "MUAAA2600001"), false);
+});
+
+test("distribution reconciliation maintenance actions execute only through maintenance ids", async () => {
+  const app = createWriteEnabledFixtureApiService();
+
+  const maintenanceAction = await app.request("/erh/v1/financial-reconciliation/actions/recompute-payee-balance", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "distribution-reconciliation-maintenance-1" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      reason: "sync_payee_ledger"
+    })
+  });
+  assert.equal(maintenanceAction.status, 200);
+  const maintenanceReceipt = (await maintenanceAction.json()) as {
+    readonly actionId: string;
+    readonly auditEventId: string | null;
+    readonly details: {
+      readonly executed: boolean;
+      readonly maintenance: boolean;
+      readonly adjustmentCount?: number;
+    };
+  };
+  assert.equal(maintenanceReceipt.actionId, "recompute-payee-balance");
+  assert.ok(maintenanceReceipt.auditEventId !== null);
+  assert.equal(maintenanceReceipt.details.executed, true);
+  assert.equal(maintenanceReceipt.details.maintenance, true);
+  assert.ok((maintenanceReceipt.details.adjustmentCount ?? 0) >= 1);
+
+  const nonMaintenanceAction = await app.request("/erh/v1/financial-reconciliation/actions/link-statement-payment", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "distribution-reconciliation-maintenance-2" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      reason: null
+    })
+  });
+  assert.equal(nonMaintenanceAction.status, 409);
+});
+
 test("Bank accounts expose source labels and workspace fallback resolves eeee-mu", async () => {
   const fixture = createFixtureStore();
   const app = createApiService({

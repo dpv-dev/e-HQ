@@ -120,6 +120,8 @@ import type {
   DistributionImportPreviewResponse,
   DistributionImportPreviewRowResult,
   DistributionAlias,
+  DistributionAliasUpsertRequest,
+  DistributionDuplicateResolveRequest,
   DistributionDuplicate,
   DistributionMappingApplyRulesRequest,
   DistributionMappingRow,
@@ -128,6 +130,7 @@ import type {
   DistributionReconciliationKpi,
   DistributionReconciliationMatchedUnallocated,
   DistributionReconciliationPayeeBalance,
+  DistributionReconciliationActionRequest,
   DistributionReconciliationResponse,
   DistributionScreenResponse,
   DistributionReconciliationStatementGap,
@@ -209,6 +212,8 @@ import {
   markDistributionImportBatchVoid,
   markOfficeBankImportBatchVoid,
   persistDistributionAllocationRun,
+  persistDistributionAliasUpsert,
+  persistDistributionDuplicateResolve,
   persistDistributionFxRates,
   persistDistributionImportConfirmation,
   persistDistributionPaymentReconcile,
@@ -218,6 +223,7 @@ import {
   persistDistributionRoyaltyRules,
   persistDistributionStatements,
   persistDistributionStatementVoid,
+  persistDistributionPayeeBalanceAdjustments,
   persistIdentityLink,
   persistOfficeBankImportConfirmation,
   isBotApiUser,
@@ -232,7 +238,10 @@ import {
   type OfficeBankImportPreviewRecord,
   type OfficeBankStatementLineInsert,
   type PersistDistributionAllocationRunInput,
+  type PersistDistributionAliasUpsertInput,
+  type PersistDistributionDuplicateResolveInput,
   type PersistDistributionFxRatesInput,
+  type PersistDistributionPayeeBalanceAdjustmentsInput,
   type PersistDistributionPaymentReconcileInput,
   type PersistDistributionPaymentRecordInput,
   type PersistDistributionPaymentUpdateInput,
@@ -443,6 +452,21 @@ interface IdentityLinkMutationResponse extends ApiMutationReceipt, ApiMutationRe
   readonly payeeId: string;
   readonly officeLink: OfficePartnerPayeeLink;
   readonly distributionLink: DistributionPayeePartnerLinkResponse;
+}
+
+interface DistributionAliasMutationResponse extends ApiMutationReceipt, ApiMutationResponse {
+  readonly alias: DistributionAlias;
+}
+
+interface DistributionDuplicateResolveMutationResponse extends ApiMutationReceipt, ApiMutationResponse {
+  readonly duplicateId: string;
+  readonly keepEarningId: string;
+  readonly resolvedEarningIds: readonly string[];
+}
+
+interface DistributionReconciliationActionMutationResponse extends ApiMutationReceipt, ApiMutationResponse {
+  readonly actionId: string;
+  readonly details: JsonRecord;
 }
 
 interface AllocationExecutionPlan {
@@ -800,6 +824,36 @@ const suspenseResolveSchema = workspaceBodySchema.extend({
   resolution: z.enum(["map_to_release", "map_to_track", "hold"]),
   targetId: nullableStringSchema,
   note: z.string().min(1)
+});
+const distributionAliasTargetTypeSchema = z.enum(["artist", "payee", "label", "release", "track", "unassigned"]);
+const distributionAliasUpsertSchema = workspaceBodySchema.extend({
+  aliasText: z.string().min(1),
+  targetType: distributionAliasTargetTypeSchema,
+  targetId: nullableStringSchema
+}).superRefine((value, refinementContext) => {
+  const requiresTarget = value.targetType !== "unassigned";
+  if (requiresTarget && value.targetId === null) {
+    refinementContext.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["targetId"],
+      message: "targetId is required when targetType is assigned."
+    });
+  }
+
+  if (!requiresTarget && value.targetId !== null) {
+    refinementContext.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["targetId"],
+      message: "targetId must be null when targetType is unassigned."
+    });
+  }
+});
+const distributionDuplicateResolveSchema = workspaceBodySchema.extend({
+  keepEarningId: nullableStringSchema,
+  reason: nullableStringSchema
+});
+const distributionReconciliationActionSchema = workspaceBodySchema.extend({
+  reason: nullableStringSchema
 });
 
 type DistributionContractUpsertRequest = z.infer<typeof distributionContractUpsertSchema>;
@@ -1941,14 +1995,31 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
     return context.json(toDistributionReconciliation(dependencies.fixtures));
   });
 
+  app.post("/erh/v1/financial-reconciliation/actions/:actionId", async (context) => {
+    return distributionReconciliationActionResponse(context, dependencies);
+  });
+
   app.get("/erh/v1/aliases", (context) => {
     requireQuery(context, "workspaceId");
     return context.json(pageItems(context, toDistributionAliases(dependencies.fixtures)));
   });
 
+  app.post("/erh/v1/aliases", async (context) => {
+    return distributionAliasUpsertResponse(context, dependencies, null);
+  });
+
+  app.patch("/erh/v1/aliases/:aliasId", async (context) => {
+    const aliasId = requirePathParam(context, "aliasId");
+    return distributionAliasUpsertResponse(context, dependencies, aliasId);
+  });
+
   app.get("/erh/v1/duplicates", (context) => {
     requireQuery(context, "workspaceId");
     return context.json(pageItems(context, toDistributionDuplicates(dependencies.fixtures)));
+  });
+
+  app.post("/erh/v1/duplicates/:duplicateId/resolve", async (context) => {
+    return distributionDuplicateResolveResponse(context, dependencies);
   });
 
   app.get("/erh/v1/audit-log", (context) => {
@@ -4399,6 +4470,246 @@ async function distributionTrackUpsertResponse(context: ApiContext, dependencies
       });
       upsertDistributionTrackFixture(dependencies.fixtures, after);
       return mutationReceipt(trackId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function distributionAliasUpsertResponse(
+  context: ApiContext,
+  dependencies: ApiServiceDependencies,
+  routeAliasId: string | null
+): Promise<Response> {
+  const request = await readZodBody<DistributionAliasUpsertRequest>(context, distributionAliasUpsertSchema);
+  requirePermissionForWorkspace(context.get("authUser"), "distribution_alias_upsert", request.workspaceId);
+  const aliasId = routeAliasId ?? randomUUID();
+  const normalizedAliasText = request.aliasText.trim();
+  requireDistributionAliasTarget(dependencies.fixtures, request.targetType, request.targetId);
+
+  const before = dependencies.fixtures.distributionAliases.find((alias) =>
+    alias.id === aliasId || alias.aliasText.trim().toLowerCase() === normalizedAliasText.toLowerCase()
+  ) ?? null;
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<DistributionAliasMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "distribution_alias_upsert",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<DistributionAliasMutationResponse> => {
+      await acquireAdvisoryLock(tx, `distribution:alias:${aliasId}`);
+      const persistInput: PersistDistributionAliasUpsertInput = {
+        aliasId,
+        aliasText: normalizedAliasText,
+        targetType: request.targetType,
+        targetId: request.targetId
+      };
+      await persistDistributionAliasUpsert(tx, persistInput);
+      const after = distributionAliasFromUpsertRequest(dependencies.fixtures, aliasId, {
+        ...request,
+        aliasText: normalizedAliasText
+      });
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_alias_upsert",
+        targetType: "catalog_alias",
+        targetId: aliasId,
+        before: {
+          alias: before
+        },
+        after: {
+          alias: after
+        },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      upsertDistributionAliasFixture(dependencies.fixtures, after);
+      return {
+        ...mutationReceipt(aliasId, auditEventId),
+        alias: after
+      };
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function distributionDuplicateResolveResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const duplicateId = requirePathParam(context, "duplicateId");
+  const request = await readZodBody<DistributionDuplicateResolveRequest>(context, distributionDuplicateResolveSchema);
+  requirePermissionForWorkspace(context.get("authUser"), "distribution_duplicate_resolve", request.workspaceId);
+  const duplicateEarningIds = duplicateGroupEarningIds(dependencies.fixtures, duplicateId);
+
+  if (duplicateEarningIds.length < 2) {
+    throw new ApiRouteError(404, "distribution_duplicate_not_found", "Distribution duplicate group was not found.", [`duplicateId=${duplicateId}`]);
+  }
+
+  const keepEarningId = request.keepEarningId ?? duplicateEarningIds[0] ?? null;
+  if (keepEarningId === null || !duplicateEarningIds.includes(keepEarningId)) {
+    throw new ApiRouteError(422, "distribution_duplicate_keep_invalid", "keepEarningId must be part of the duplicate group.", [
+      `duplicateId=${duplicateId}`,
+      `keepEarningId=${request.keepEarningId ?? "null"}`
+    ]);
+  }
+
+  const resolvedEarningIds = duplicateEarningIds.filter((earningId) => earningId !== keepEarningId);
+  if (resolvedEarningIds.length === 0) {
+    throw new ApiRouteError(409, "distribution_duplicate_no_resolution", "Duplicate resolution requires at least one row to exclude.", [
+      `duplicateId=${duplicateId}`,
+      `keepEarningId=${keepEarningId}`
+    ]);
+  }
+
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<DistributionDuplicateResolveMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "distribution_duplicate_resolve",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<DistributionDuplicateResolveMutationResponse> => {
+      await acquireAdvisoryLock(tx, `distribution:duplicate:${duplicateId}`);
+      const persistInput: PersistDistributionDuplicateResolveInput = {
+        earningIds: resolvedEarningIds
+      };
+      await persistDistributionDuplicateResolve(tx, persistInput);
+      applyDistributionDuplicateResolutionFixture(dependencies.fixtures, resolvedEarningIds);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_duplicate_resolve",
+        targetType: "normalized_earning_duplicate",
+        targetId: duplicateId,
+        before: {
+          duplicateId,
+          keepEarningId,
+          groupEarningIds: duplicateEarningIds
+        },
+        after: {
+          duplicateId,
+          keepEarningId,
+          resolvedEarningIds,
+          reason: request.reason
+        },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      return {
+        ...mutationReceipt(duplicateId, auditEventId),
+        duplicateId,
+        keepEarningId,
+        resolvedEarningIds
+      };
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function distributionReconciliationActionResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const actionId = requirePathParam(context, "actionId");
+  const request = await readZodBody<DistributionReconciliationActionRequest>(context, distributionReconciliationActionSchema);
+  requirePermissionForWorkspace(context.get("authUser"), "distribution_financial_reconciliation_action", request.workspaceId);
+
+  const action = toDistributionReconciliation(dependencies.fixtures).actions.find((candidate) => candidate.id === actionId);
+  if (action === undefined) {
+    throw new ApiRouteError(404, "distribution_reconciliation_action_not_found", "Distribution reconciliation action was not found.", [`actionId=${actionId}`]);
+  }
+
+  if (!action.maintenance) {
+    throw new ApiRouteError(409, "distribution_reconciliation_action_not_maintenance", "This action is not marked as maintenance and should run through its dedicated workflow.", [
+      `actionId=${actionId}`
+    ]);
+  }
+
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<DistributionReconciliationActionMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "distribution_financial_reconciliation_action",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<DistributionReconciliationActionMutationResponse> => {
+      await acquireAdvisoryLock(tx, `distribution:reconciliation:maintenance:${actionId}`);
+      let details: JsonRecord = {
+        executed: true,
+        reason: request.reason,
+        maintenance: true
+      };
+
+      if (actionId === "recompute-payee-balance") {
+        const adjustmentRows = buildDistributionPayeeBalanceAdjustments(dependencies.fixtures, dependencies.nowIso());
+        const persistInput: PersistDistributionPayeeBalanceAdjustmentsInput = {
+          rows: adjustmentRows
+        };
+        await persistDistributionPayeeBalanceAdjustments(tx, persistInput);
+        applyDistributionPayeeBalanceAdjustmentsFixture(dependencies.fixtures, adjustmentRows);
+        details = {
+          ...details,
+          adjustmentCount: adjustmentRows.length,
+          payeeCurrencyCount: adjustmentRows.map((row) => `${row.payeeId}:${row.currency}`).filter((value, index, values) => values.indexOf(value) === index).length
+        };
+      } else if (actionId === "repair-identity-link") {
+        const candidate = findIdentityRepairCandidate(dependencies.fixtures);
+        if (candidate === null) {
+          details = {
+            ...details,
+            repaired: false,
+            message: "No eligible office partner/payee pair found."
+          };
+        } else {
+          const persistInput: PersistIdentityLinkInput = {
+            id: randomUUID(),
+            payeeId: candidate.payee.id,
+            officePartnerId: candidate.partner.id,
+            confidence: "100.000000",
+            status: "linked"
+          };
+          await persistIdentityLink(tx, persistInput);
+          const officeLink = identityOfficeLink(candidate.partner, candidate.payee, persistInput.confidence);
+          applyIdentityLinkFixture(dependencies.fixtures, officeLink);
+          details = {
+            ...details,
+            repaired: true,
+            officePartnerId: candidate.partner.id,
+            payeeId: candidate.payee.id,
+            officePartnerName: candidate.partner.name,
+            payeeName: candidate.payee.name
+          };
+        }
+      } else if (actionId === "refresh-derived-summary") {
+        const refreshed = toDistributionReconciliation(dependencies.fixtures);
+        details = {
+          ...details,
+          refreshedAt: dependencies.nowIso(),
+          kpiCount: refreshed.kpis.length,
+          aliasCount: dependencies.fixtures.distributionAliases.length,
+          duplicateCount: toDistributionDuplicates(dependencies.fixtures).length
+        };
+      } else {
+        throw new ApiRouteError(409, "distribution_reconciliation_action_not_supported", "This maintenance action is not supported yet.", [`actionId=${actionId}`]);
+      }
+
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_financial_reconciliation_action",
+        targetType: "reconciliation_action",
+        targetId: actionId,
+        before: {
+          action
+        },
+        after: {
+          actionId,
+          details
+        },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      return {
+        ...mutationReceipt(actionId, auditEventId),
+        actionId,
+        details
+      };
     }
   });
   return context.json(result.body, result.status);
@@ -11799,12 +12110,12 @@ function toDistributionReconciliation(store: ApiFixtureStore): DistributionRecon
 
   const actions: readonly DistributionReconciliationAction[] = [
     { id: "link-statement-payment", label: "Link statement payment", description: "Records and links a payment to the first open statement gap.", maintenance: false },
-    { id: "recompute-payee-balance", label: "Recompute payee balance", description: "Temporarily disabled until a dedicated recompute endpoint is implemented.", maintenance: true },
+    { id: "recompute-payee-balance", label: "Recompute payee balance", description: "Rebuilds payee balance ledger closings via guarded adjustment rows.", maintenance: true },
     { id: "assign-expense-payee", label: "Assign expense payee", description: "Creates a guarded contract expense with an explicit payee.", maintenance: false },
     { id: "allocate-matched-row", label: "Allocate matched row", description: "Runs the locked allocation engine for matched rows.", maintenance: false },
     { id: "void-statement", label: "Void statement", description: "Voids a statement and appends the reversal balance row.", maintenance: false },
-    { id: "repair-identity-link", label: "Repair identity link", description: "One-off backfill; kept as flagged maintenance.", maintenance: true },
-    { id: "refresh-derived-summary", label: "Refresh derived summary", description: "One-off derived summary rebuild; kept as flagged maintenance.", maintenance: true }
+    { id: "repair-identity-link", label: "Repair identity link", description: "Attempts a guarded partner/payee relink from canonical name matches.", maintenance: true },
+    { id: "refresh-derived-summary", label: "Refresh derived summary", description: "Refreshes reconciliation-derived counters and diagnostics snapshot.", maintenance: true }
   ];
 
   return {
@@ -11818,16 +12129,17 @@ function toDistributionReconciliation(store: ApiFixtureStore): DistributionRecon
 }
 
 function toDistributionAliases(store: ApiFixtureStore): readonly DistributionAlias[] {
-  void store;
-  // catalog_aliases is not surfaced through the read dataset, so this returns an empty,
-  // typed result that drives the empty-state UI rather than fabricating alias data.
-  return [];
+  return store.distributionAliases;
 }
 
 function toDistributionDuplicates(store: ApiFixtureStore): readonly DistributionDuplicate[] {
   const dataset = store.distribution;
   const groups = new Map<string, { readonly title: string; ids: string[]; labels: string[] }>();
   for (const earning of dataset.normalizedEarnings) {
+    if (earning.calculationStatus === "excluded") {
+      continue;
+    }
+
     if (earning.isrc === null) {
       continue;
     }
@@ -11852,6 +12164,219 @@ function toDistributionDuplicates(store: ApiFixtureStore): readonly Distribution
       sampleIds: group.ids.slice(0, distributionReconciliationSampleLimit),
       sampleLabels: group.labels.slice(0, distributionReconciliationSampleLimit)
     }));
+}
+
+function distributionAliasFromUpsertRequest(
+  fixtures: ApiFixtureStore,
+  aliasId: string,
+  request: DistributionAliasUpsertRequest
+): DistributionAlias {
+  const targetType = request.targetType;
+  const targetId = request.targetId;
+  const target = resolveDistributionAliasTargetLabel(fixtures, targetType, targetId);
+  return {
+    id: aliasId,
+    aliasText: request.aliasText.trim(),
+    targetType,
+    target,
+    targetId
+  };
+}
+
+function resolveDistributionAliasTargetLabel(
+  fixtures: ApiFixtureStore,
+  targetType: DistributionAlias["targetType"],
+  targetId: string | null
+): string {
+  if (targetType === "unassigned" || targetId === null) {
+    return "unassigned";
+  }
+
+  if (targetType === "payee") {
+    const payee = fixtures.distribution.payees.find((candidate) => candidate.id === targetId);
+    return payee?.name ?? targetId;
+  }
+
+  if (targetType === "release") {
+    const release = toReleaseSummaries(fixtures.distribution).find((candidate) => candidate.id === targetId);
+    return release?.title ?? targetId;
+  }
+
+  if (targetType === "track") {
+    const track = fixtures.distribution.tracks.find((candidate) => candidate.id === targetId);
+    return track?.title ?? targetId;
+  }
+
+  return targetId;
+}
+
+function upsertDistributionAliasFixture(fixtures: ApiFixtureStore, alias: DistributionAlias): void {
+  const mutableFixtures = fixtures as Mutable<ApiFixtureStore>;
+  const withoutAlias = fixtures.distributionAliases
+    .filter((candidate) => candidate.id !== alias.id)
+    .filter((candidate) => candidate.aliasText.trim().toLowerCase() !== alias.aliasText.trim().toLowerCase());
+  mutableFixtures.distributionAliases = [...withoutAlias, alias].sort((left, right) =>
+    left.aliasText.localeCompare(right.aliasText, undefined, { sensitivity: "base" })
+  );
+}
+
+function applyDistributionDuplicateResolutionFixture(fixtures: ApiFixtureStore, resolvedEarningIds: readonly string[]): void {
+  if (resolvedEarningIds.length === 0) {
+    return;
+  }
+
+  const resolvedSet = new Set(resolvedEarningIds);
+  const mutableDistribution = fixtures.distribution as Mutable<DistributionReadDataset>;
+  mutableDistribution.normalizedEarnings = fixtures.distribution.normalizedEarnings.map((earning) =>
+    resolvedSet.has(earning.id)
+      ? { ...earning, calculationStatus: "excluded" }
+      : earning
+  );
+}
+
+function requireDistributionAliasTarget(
+  fixtures: ApiFixtureStore,
+  targetType: DistributionAlias["targetType"],
+  targetId: string | null
+): void {
+  if (targetType === "unassigned") {
+    return;
+  }
+
+  if (targetId === null) {
+    throw new ApiRouteError(422, "distribution_alias_target_required", "Alias targetId is required for assigned targets.", [`targetType=${targetType}`]);
+  }
+
+  if (targetType === "payee") {
+    requireDistributionPayee(fixtures.distribution, targetId);
+    return;
+  }
+
+  if (targetType === "release") {
+    const exists = toReleaseSummaries(fixtures.distribution).some((release) => release.id === targetId);
+    if (!exists) {
+      throw new ApiRouteError(404, "distribution_alias_release_not_found", "Distribution release target was not found.", [`targetId=${targetId}`]);
+    }
+    return;
+  }
+
+  if (targetType === "track") {
+    const exists = fixtures.distribution.tracks.some((track) => track.id === targetId);
+    if (!exists) {
+      throw new ApiRouteError(404, "distribution_alias_track_not_found", "Distribution track target was not found.", [`targetId=${targetId}`]);
+    }
+  }
+}
+
+function duplicateGroupEarningIds(fixtures: ApiFixtureStore, duplicateId: string): readonly string[] {
+  return fixtures.distribution.normalizedEarnings
+    .filter((earning) => earning.isrc === duplicateId)
+    .filter((earning) => earning.calculationStatus !== "excluded")
+    .map((earning) => earning.id);
+}
+
+function applyDistributionPayeeBalanceAdjustmentsFixture(
+  fixtures: ApiFixtureStore,
+  rows: readonly PayeeBalanceLedgerInput[]
+): void {
+  if (rows.length === 0) {
+    return;
+  }
+
+  const mutableFixtures = fixtures as Mutable<ApiFixtureStore>;
+  mutableFixtures.distributionPayeeBalances = [...fixtures.distributionPayeeBalances, ...rows];
+}
+
+function buildDistributionPayeeBalanceAdjustments(
+  fixtures: ApiFixtureStore,
+  createdAt: string
+): readonly PayeeBalanceLedgerInput[] {
+  const targetByKey = new Map<string, bigint>();
+  for (const statement of fixtures.distribution.statements) {
+    if (statement.status === "void") {
+      continue;
+    }
+
+    const key = `${statement.payeeId}:${statement.currency}`;
+    const current = targetByKey.get(key) ?? 0n;
+    targetByKey.set(key, current + erhMoney.parse(statement.amountDue));
+  }
+
+  const knownKeys = new Set<string>([
+    ...[...targetByKey.keys()],
+    ...fixtures.distributionPayeeBalances.map((row) => `${row.payeeId}:${row.currency}`)
+  ]);
+
+  const adjustments: PayeeBalanceLedgerInput[] = [];
+  for (const key of [...knownKeys].sort()) {
+    const [payeeId, currency] = key.split(":");
+    if (payeeId === undefined || currency === undefined) {
+      continue;
+    }
+
+    const openingUnits = erhMoney.parse(lastPayeeClosing(fixtures.distributionPayeeBalances, payeeId, currency));
+    const targetUnits = targetByKey.get(key) ?? 0n;
+    const deltaUnits = targetUnits - openingUnits;
+
+    if (deltaUnits === 0n) {
+      continue;
+    }
+
+    adjustments.push({
+      id: randomUUID(),
+      payeeId,
+      statementId: null,
+      currency,
+      openingBalance: erhMoney.format(openingUnits),
+      periodNet: erhMoney.format(deltaUnits),
+      closingBalance: erhMoney.format(targetUnits),
+      movementType: "adjustment",
+      createdAt
+    });
+  }
+
+  return adjustments;
+}
+
+function findIdentityRepairCandidate(
+  fixtures: ApiFixtureStore
+): { readonly partner: OfficePartnerRow; readonly payee: DistributionReadDataset["payees"][number] } | null {
+  const linkedPayeeIds = new Set(
+    Object.values(fixtures.officePartnerPayeeLinks)
+      .filter((link) => link.status === "active")
+      .map((link) => link.payeeId)
+  );
+  const linkedPartnerIds = new Set(
+    Object.values(fixtures.officePartnerPayeeLinks)
+      .filter((link) => link.status === "active")
+      .map((link) => link.partnerId)
+  );
+
+  const partnerByKey = new Map<string, OfficePartnerRow>();
+  for (const partner of fixtures.office.partners) {
+    if (linkedPartnerIds.has(partner.id)) {
+      continue;
+    }
+
+    partnerByKey.set(normalizeIdentityName(partner.name), partner);
+  }
+
+  for (const payee of fixtures.distribution.payees) {
+    if (linkedPayeeIds.has(payee.id)) {
+      continue;
+    }
+
+    const partner = partnerByKey.get(normalizeIdentityName(payee.name));
+    if (partner !== undefined) {
+      return { partner, payee };
+    }
+  }
+
+  return null;
+}
+
+function normalizeIdentityName(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/gu, " ").replace(/\s+/gu, " ");
 }
 
 function toDistributionAuditLog(store: ApiFixtureStore): readonly AuditLogEntry[] {

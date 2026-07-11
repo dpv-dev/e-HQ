@@ -1,4 +1,5 @@
 import type {
+  DistributionAlias,
   AuditLogEntry,
   DistributionContract,
   DistributionContractExpense,
@@ -40,6 +41,7 @@ export interface ApiFixtureStore {
   readonly distributionExpenseApplications: readonly DistributionExistingExpenseApplication[];
   readonly distributionFxRates: readonly DistributionFxRateInput[];
   readonly distributionPayeeBalances: readonly PayeeBalanceLedgerInput[];
+  readonly distributionAliases: readonly DistributionAlias[];
 }
 
 export function createFixtureStore(): ApiFixtureStore {
@@ -57,7 +59,8 @@ export function createFixtureStore(): ApiFixtureStore {
     distributionCostTerms: createDistributionCostTermsFixture(),
     distributionExpenseApplications: createDistributionExpenseApplicationsFixture(),
     distributionFxRates: [],
-    distributionPayeeBalances: createDistributionPayeeBalancesFixture()
+    distributionPayeeBalances: createDistributionPayeeBalancesFixture(),
+    distributionAliases: []
   };
 }
 

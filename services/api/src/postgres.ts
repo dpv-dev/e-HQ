@@ -1,6 +1,7 @@
 import { Pool } from "pg";
 import type {
   CurrencyCode,
+  DistributionAlias,
   DistributionContract,
   DistributionContractExpense,
   DistributionMappingRow,
@@ -124,6 +125,7 @@ export async function readApiFixtureStoreFromPostgres(pool: Pool): Promise<ApiFi
     distributionExpenseApplications,
     distributionFxRates,
     distributionPayeeBalances,
+    distributionAliases,
     officePartnerPayeeLinks
   ] = await Promise.all([
     readOfficeDataset(pool),
@@ -136,6 +138,7 @@ export async function readApiFixtureStoreFromPostgres(pool: Pool): Promise<ApiFi
     readDistributionExistingExpenseApplications(pool),
     readDistributionFxRates(pool),
     readDistributionPayeeBalances(pool),
+    readDistributionAliases(pool),
     readOfficePartnerPayeeLinks(pool)
   ]);
   return {
@@ -152,7 +155,8 @@ export async function readApiFixtureStoreFromPostgres(pool: Pool): Promise<ApiFi
     distributionCostTerms,
     distributionExpenseApplications,
     distributionFxRates,
-    distributionPayeeBalances
+    distributionPayeeBalances,
+    distributionAliases
   };
 }
 
@@ -503,6 +507,39 @@ async function readDistributionPayeeBalances(pool: Pool): Promise<readonly Payee
     closingBalance: stringCell(row, "closing_balance"),
     movementType: enumCell(row, "movement_type", ["opening", "period", "statement", "void_reversal", "adjustment", "carry_forward"]),
     createdAt: timestampCell(row, "created_at")
+  }));
+}
+
+async function readDistributionAliases(pool: Pool): Promise<readonly DistributionAlias[]> {
+  const rows = await queryRows(
+    pool,
+    `select ca.id::text, ca.alias_text,
+      case
+        when ca.track_id is not null then 'track'
+        when ca.release_id is not null then 'release'
+        when ca.label_id is not null then 'label'
+        when ca.artist_id is not null then 'artist'
+        when ca.payee_id is not null then 'payee'
+        else 'unassigned'
+      end as target_type,
+      coalesce(ca.track_id::text, ca.release_id::text, ca.label_id::text, ca.artist_id::text, ca.payee_id::text) as target_id,
+      coalesce(t.title, r.title, l.name, a.name, p.name, ca.alias_text) as target
+     from catalog_aliases ca
+     left join tracks t on t.id = ca.track_id
+     left join releases r on r.id = ca.release_id
+     left join labels l on l.id = ca.label_id
+     left join artists a on a.id = ca.artist_id
+     left join payees p on p.id = ca.payee_id
+     order by ca.alias_text, ca.id`,
+    []
+  );
+
+  return rows.map((row) => ({
+    id: stringCell(row, "id"),
+    aliasText: stringCell(row, "alias_text"),
+    target: stringCell(row, "target"),
+    targetType: enumCell(row, "target_type", ["artist", "payee", "label", "release", "track", "unassigned"]),
+    targetId: nullableStringCell(row, "target_id")
   }));
 }
 

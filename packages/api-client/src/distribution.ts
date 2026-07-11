@@ -35,7 +35,10 @@ import type {
   DistributionMappingRow,
   DistributionMappingRowsQuery,
   DistributionAlias,
+  DistributionAliasUpsertRequest,
   DistributionDuplicate,
+  DistributionDuplicateResolveRequest,
+  DistributionReconciliationActionRequest,
   DistributionReconciliationResponse,
   DistributionReleaseUpsertRequest,
   DistributionRevenueQuery,
@@ -202,7 +205,26 @@ export interface DistributionApiClient {
     query: DistributionWorkspaceQuery
   ) => Promise<DistributionReconciliationResponse>;
   readonly listAliases: (query: DistributionWorkspacePageQuery) => Promise<PageResult<DistributionAlias>>;
+  readonly createAlias: (
+    request: DistributionAliasUpsertRequest,
+    options: WriteRequestOptions
+  ) => Promise<ApiMutationReceipt>;
+  readonly updateAlias: (
+    aliasId: EntityId,
+    request: DistributionAliasUpsertRequest,
+    options: WriteRequestOptions
+  ) => Promise<ApiMutationReceipt>;
   readonly listDuplicates: (query: DistributionWorkspacePageQuery) => Promise<PageResult<DistributionDuplicate>>;
+  readonly resolveDuplicate: (
+    duplicateId: EntityId,
+    request: DistributionDuplicateResolveRequest,
+    options: WriteRequestOptions
+  ) => Promise<ApiMutationReceipt>;
+  readonly runFinancialReconciliationAction: (
+    actionId: string,
+    request: DistributionReconciliationActionRequest,
+    options: WriteRequestOptions
+  ) => Promise<ApiMutationReceipt>;
   readonly listAuditLog: (query: AuditLogQuery) => Promise<PageResult<AuditLogEntry>>;
   readonly getSettings: (query: DistributionWorkspaceQuery) => Promise<DistributionSettingsResponse>;
 }
@@ -547,12 +569,47 @@ export function createDistributionApiClient(config: ApiClientConfig): Distributi
         cursor: query.cursor,
         limit: query.limit
       }),
+    createAlias: (
+      request: DistributionAliasUpsertRequest,
+      options: WriteRequestOptions
+    ): Promise<ApiMutationReceipt> =>
+      transport.post<ApiMutationReceipt>("aliases", request, options.idempotencyKey),
+    updateAlias: (
+      aliasId: EntityId,
+      request: DistributionAliasUpsertRequest,
+      options: WriteRequestOptions
+    ): Promise<ApiMutationReceipt> =>
+      transport.patch<ApiMutationReceipt>(
+        `aliases/${encodePathSegment(aliasId)}`,
+        request,
+        options.idempotencyKey
+      ),
     listDuplicates: (query: DistributionWorkspacePageQuery): Promise<PageResult<DistributionDuplicate>> =>
       transport.get<PageResult<DistributionDuplicate>>("duplicates", {
         workspaceId: query.workspaceId,
         cursor: query.cursor,
         limit: query.limit
       }),
+    resolveDuplicate: (
+      duplicateId: EntityId,
+      request: DistributionDuplicateResolveRequest,
+      options: WriteRequestOptions
+    ): Promise<ApiMutationReceipt> =>
+      transport.post<ApiMutationReceipt>(
+        `duplicates/${encodePathSegment(duplicateId)}/resolve`,
+        request,
+        options.idempotencyKey
+      ),
+    runFinancialReconciliationAction: (
+      actionId: string,
+      request: DistributionReconciliationActionRequest,
+      options: WriteRequestOptions
+    ): Promise<ApiMutationReceipt> =>
+      transport.post<ApiMutationReceipt>(
+        `financial-reconciliation/actions/${encodePathSegment(actionId)}`,
+        request,
+        options.idempotencyKey
+      ),
     listAuditLog: (query: AuditLogQuery): Promise<PageResult<AuditLogEntry>> =>
       transport.get<PageResult<AuditLogEntry>>("audit-log", {
         workspaceId: query.workspaceId,

@@ -1688,6 +1688,11 @@ export interface DistributionReconciliationAction {
   readonly maintenance: boolean;
 }
 
+export interface DistributionReconciliationActionRequest {
+  readonly workspaceId: EntityId;
+  readonly reason: string | null;
+}
+
 export interface DistributionReconciliationResponse {
   readonly kpis: readonly DistributionReconciliationKpi[];
   readonly statementsWithoutPaymentLinks: readonly DistributionReconciliationStatementGap[];
@@ -1697,11 +1702,21 @@ export interface DistributionReconciliationResponse {
   readonly actions: readonly DistributionReconciliationAction[];
 }
 
+export type DistributionAliasTargetType = "artist" | "payee" | "label" | "release" | "track" | "unassigned";
+
 export interface DistributionAlias {
   readonly id: EntityId;
   readonly aliasText: string;
   readonly target: string;
-  readonly targetType: "artist" | "payee" | "label" | "release" | "track" | "unassigned";
+  readonly targetType: DistributionAliasTargetType;
+  readonly targetId: EntityId | null;
+}
+
+export interface DistributionAliasUpsertRequest {
+  readonly workspaceId: EntityId;
+  readonly aliasText: string;
+  readonly targetType: DistributionAliasTargetType;
+  readonly targetId: EntityId | null;
 }
 
 export interface DistributionDuplicate {
@@ -1711,6 +1726,12 @@ export interface DistributionDuplicate {
   readonly count: number;
   readonly sampleIds: readonly EntityId[];
   readonly sampleLabels: readonly string[];
+}
+
+export interface DistributionDuplicateResolveRequest {
+  readonly workspaceId: EntityId;
+  readonly keepEarningId: EntityId | null;
+  readonly reason: string | null;
 }
 
 export interface DistributionSettingsResponse {

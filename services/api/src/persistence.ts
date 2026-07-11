@@ -8,6 +8,7 @@ import type {
   DistributionSuspenseItemInsert,
   EarningAllocationInsert,
   ExpenseApplicationInsert,
+  PayeeBalanceLedgerInput,
   PayeeBalanceInsertPlan,
   StatementInsertPlan,
   StatementLineInsertPlan
@@ -248,6 +249,21 @@ export interface PersistDistributionFxRatesInput {
   readonly rates: readonly DistributionFxRateInput[];
 }
 
+export interface PersistDistributionAliasUpsertInput {
+  readonly aliasId: string;
+  readonly aliasText: string;
+  readonly targetType: "artist" | "payee" | "label" | "release" | "track" | "unassigned";
+  readonly targetId: string | null;
+}
+
+export interface PersistDistributionDuplicateResolveInput {
+  readonly earningIds: readonly string[];
+}
+
+export interface PersistDistributionPayeeBalanceAdjustmentsInput {
+  readonly rows: readonly PayeeBalanceLedgerInput[];
+}
+
 export interface PersistIdentityLinkInput {
   readonly id: string;
   readonly payeeId: string;
@@ -313,6 +329,7 @@ const SENSITIVE_ACTIONS = new Set<string>([
   "command_center_integration_toggle",
   "command_center_settings_update",
   "command_center_user_permission_update",
+  "distribution_alias_upsert",
   "distribution_allocations_preview",
   "distribution_allocations_run",
   "distribution_allocations_unpost",
@@ -320,7 +337,9 @@ const SENSITIVE_ACTIONS = new Set<string>([
   "distribution_contract_expense_update",
   "distribution_contract_rules_update",
   "distribution_contract_upsert",
+  "distribution_duplicate_resolve",
   "distribution_fx_rates_save",
+  "distribution_financial_reconciliation_action",
   "distribution_identity_link",
   "distribution_import_confirm",
   "distribution_import_preview",
@@ -1345,6 +1364,100 @@ export async function persistDistributionFxRates(tx: ApiWriteTransaction, input:
       )
       on conflict (from_currency, to_currency, effective_date) do update
       set rate = excluded.rate
+    `);
+  }
+}
+
+export async function persistDistributionAliasUpsert(tx: ApiWriteTransaction, input: PersistDistributionAliasUpsertInput): Promise<void> {
+  if (tx.kind === "memory") {
+    return;
+  }
+
+  const artistId = input.targetType === "artist" ? input.targetId : null;
+  const payeeId = input.targetType === "payee" ? input.targetId : null;
+  const labelId = input.targetType === "label" ? input.targetId : null;
+  const releaseId = input.targetType === "release" ? input.targetId : null;
+  const trackId = input.targetType === "track" ? input.targetId : null;
+
+  await tx.executor.execute(sql`
+    delete from catalog_aliases
+    where id = ${input.aliasId}
+      or lower(alias_text) = lower(${input.aliasText})
+  `);
+
+  await tx.executor.execute(sql`
+    insert into catalog_aliases (
+      id,
+      alias_text,
+      artist_id,
+      payee_id,
+      label_id,
+      release_id,
+      track_id
+    )
+    values (
+      ${input.aliasId},
+      ${input.aliasText},
+      ${artistId},
+      ${payeeId},
+      ${labelId},
+      ${releaseId},
+      ${trackId}
+    )
+  `);
+}
+
+export async function persistDistributionDuplicateResolve(tx: ApiWriteTransaction, input: PersistDistributionDuplicateResolveInput): Promise<void> {
+  if (tx.kind === "memory") {
+    return;
+  }
+
+  if (input.earningIds.length === 0) {
+    return;
+  }
+
+  const earningIds = sql.join(input.earningIds.map((earningId: string) => sql`${earningId}`), sql`, `);
+  await tx.executor.execute(sql`
+    update normalized_earnings
+    set
+      calculation_status = 'excluded',
+      updated_at = now()
+    where id in (${earningIds})
+  `);
+}
+
+export async function persistDistributionPayeeBalanceAdjustments(
+  tx: ApiWriteTransaction,
+  input: PersistDistributionPayeeBalanceAdjustmentsInput
+): Promise<void> {
+  if (tx.kind === "memory") {
+    return;
+  }
+
+  for (const row of input.rows) {
+    await tx.executor.execute(sql`
+      insert into payee_balances (
+        id,
+        payee_id,
+        statement_id,
+        currency,
+        opening_balance,
+        period_net,
+        closing_balance,
+        movement_type,
+        created_at
+      )
+      values (
+        ${row.id},
+        ${row.payeeId},
+        ${row.statementId},
+        ${row.currency},
+        ${row.openingBalance},
+        ${row.periodNet},
+        ${row.closingBalance},
+        ${row.movementType},
+        ${row.createdAt}
+      )
     `);
   }
 }
