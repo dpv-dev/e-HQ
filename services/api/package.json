@@ -7,6 +7,7 @@
     "build": "tsc -b --pretty false",
     "check": "tsc -b --pretty false",
     "build:deploy": "esbuild src/server.ts --bundle --platform=node --format=esm --target=node20 --external:pg --external:pg-pool --external:pg-protocol --outfile=deploy/server.bundle.js",
+    "parser:parity-report": "node --loader ./test/ts-source-loader.mjs scripts/parser-parity-report.mjs",
     "phase-e:parity": "node dist/phase-e-parity.js",
     "start": "node dist/server.js",
     "smoke": "node dist/smoke.js",

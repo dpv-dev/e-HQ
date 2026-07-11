@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   detectCsvCurrency,
@@ -8,6 +9,14 @@ import {
   type ParsedBankRow
 } from "../../../apps/hq/src/app/bank-parser.ts";
 import { parseOfficeBankImportText } from "../src/office-bank-parser.ts";
+
+interface ParityCase {
+  readonly id: string;
+  readonly kind: "csv" | "pdf-text";
+  readonly fileName: string;
+  readonly sourceHint: "sbi" | "mcb" | "csv" | "pdf" | null;
+  readonly text: string;
+}
 
 function frontendRowToRecord(row: ParsedBankRow, currency: string): Readonly<Record<string, string>> {
   const record: Record<string, string> = {
@@ -103,4 +112,31 @@ test("backend parser parity: SBI extracted text normalization matches frontend p
   assert.equal(backend.currency, frontendCurrency);
   assert.equal(backend.parsedRowCount, frontendRows.length);
   assert.deepEqual(backend.rows, frontendRows);
+});
+
+test("backend parser parity corpus: production-like fixture cases remain aligned", async () => {
+  const raw = await readFile(new URL("./fixtures/parser-parity/cases.json", import.meta.url), "utf8");
+  const cases = JSON.parse(raw) as readonly ParityCase[];
+
+  for (const entry of cases) {
+    const frontendCurrency = entry.kind === "csv"
+      ? (detectCsvCurrency(entry.text) ?? "MUR")
+      : detectStatementCurrency(entry.text);
+    const frontendParsed = entry.kind === "csv"
+      ? parseBankCsv(entry.text)
+      : parseBankStatement(entry.text);
+    const frontendRows = frontendParsed.map((row: ParsedBankRow): Readonly<Record<string, string>> =>
+      frontendRowToRecord(row, frontendCurrency)
+    );
+
+    const backend = parseOfficeBankImportText({
+      text: entry.text,
+      fileName: entry.fileName,
+      sourceHint: entry.sourceHint
+    });
+
+    assert.equal(backend.currency, frontendCurrency, `${entry.id}: currency drift`);
+    assert.equal(backend.parsedRowCount, frontendRows.length, `${entry.id}: parsed row count drift`);
+    assert.deepEqual(backend.rows, frontendRows, `${entry.id}: normalized row drift`);
+  }
 });

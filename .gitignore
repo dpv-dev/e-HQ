@@ -10,6 +10,7 @@ build/
 coverage/
 *.tsbuildinfo
 reports/
+services/api/output/parser-parity-report.json
 data/dumps/*.sql
 *.zip
 app-eeee-frontend/

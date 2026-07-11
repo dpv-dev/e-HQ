@@ -1,0 +1,37 @@
+[
+  {
+    "id": "csv_sbi_mur_export_like",
+    "kind": "csv",
+    "fileName": "bankStatement_1Oct2024_to_28Jan2025.csv",
+    "sourceHint": "csv",
+    "text": "Date,Description,Debit,Credit,Currency,Reference\n05/27/2026,CHARGES FOR BILL I,40.00,,MUR,15625RT001376\n05/28/2026,PAYMENT RECEIVED,,125.00,MUR,INV-BED-1\n05/29/2026,ATM CASH WITHDRAWAL,350.00,,MUR,ATM-8891"
+  },
+  {
+    "id": "csv_mcb_eur_export_like",
+    "kind": "csv",
+    "fileName": "Euro MCB Current Account statement (5).csv",
+    "sourceHint": "csv",
+    "text": "Transaction Date,Transaction Details,Debit,Credit,Currency,Reference\n11/02/2026,SEPA TRANSFER OUT,95.00,,EUR,MCB-001\n12/02/2026,CARD SETTLEMENT,,220.50,EUR,MCB-002\n13/02/2026,MONTHLY CHARGES,12.35,,EUR,MCB-003"
+  },
+  {
+    "id": "mcb_pdf_text_multiline_description",
+    "kind": "pdf-text",
+    "fileName": "Euro MCB Current Account statement (5).pdf",
+    "sourceHint": null,
+    "text": "Current Account Statement\nCurrency : EUR\nOpening Balance 2,000.00\n11/02/2026 11/02/2026 CARD SETTLEMENT - POS TERMINAL 125.00 1,875.00\nMerchant fee adjustment\n12/02/2026 12/02/2026 CLIENT TRANSFER IN 500.00 2,375.00\nInvoice INV-2026-22\nClosing Balance 2,375.00"
+  },
+  {
+    "id": "sbi_pdf_text_block_style",
+    "kind": "pdf-text",
+    "fileName": "bankStatement_1Oct2024 to 28Jan2025.pdf",
+    "sourceHint": null,
+    "text": "Transactions List\nCurrency : MUR\n\n23,Jan,2025 IB-PC For Car Remittance 10,000.00 901,766.55\nID: 15625RT001376\n\n24,Jan,2025 IB-SJLUCAS Remittance 12,800.00 936,846.55\nID: 15625RT001374\n\n25,Jan,2025 CREDIT TRANSFER 25,000.00 961,846.55\nID: 15625CR000001"
+  },
+  {
+    "id": "sbi_pdf_text_with_explicit_sbi_hint",
+    "kind": "pdf-text",
+    "fileName": "hinted-source-test.pdf",
+    "sourceHint": "sbi",
+    "text": "Transactions List\nCurrency : MUR\n\n23,Jan,2025 LOCAL TRANSFER 100.00 2,900.00\nID: HINT-SBI-1"
+  }
+]

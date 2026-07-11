@@ -74,6 +74,7 @@ Done:
 - Added HQ hidden switch VITE_OFFICE_BACKEND_PARSER for dual path (backend parse when enabled, frontend parser fallback when disabled).
 - Added API regression test for parse-preview permissions and CSV parsing; canonical gate green.
 - Added Stage C parity harness test file services/api/test/office-bank-parser-parity.test.ts that compares backend vs frontend normalized outputs for CSV, MCB text, and SBI text samples (green).
+- Added Stage C fixture corpus at services/api/test/fixtures/parser-parity/cases.json and machine-readable parity report generation script services/api/scripts/parser-parity-report.mjs -> services/api/output/parser-parity-report.json.
 
 Exit criteria:
 - Production parsing path uses backend parser endpoints.
@@ -116,5 +117,5 @@ Done:
 - Deployment evidence logged in DEPLOY-LOG-2026-07-11.md.
 
 ## Immediate Next Window (Now -> Next Commit Wave)
-1. Expand Stage C parity set from baseline synthetic samples to production-like fixture corpus and persist diff report in CI artifacts.
+1. Integrate parser parity report artifact publishing in CI and keep extending corpus from real imported statement extracts.
 2. Keep running canonical gate + deploy after each scoped phase slice.

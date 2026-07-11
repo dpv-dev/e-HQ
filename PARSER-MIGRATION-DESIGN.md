@@ -78,6 +78,10 @@ Completed in this slice:
 Remaining:
 - Extend from synthetic baseline samples to production-like fixture corpus and attach machine-readable diff artifacts in CI.
 
+Update (current slice):
+- Added fixture corpus file `services/api/test/fixtures/parser-parity/cases.json` with CSV and extracted-text scenarios modeled on production imports.
+- Added machine-readable report script `services/api/scripts/parser-parity-report.mjs` and npm script `pnpm --filter @ehq/api parser:parity-report` writing `services/api/output/parser-parity-report.json`.
+
 ### Stage D - Default flip
 - Enable backend parser path by default in production.
 - Keep frontend path behind emergency fallback flag for one stabilization window.

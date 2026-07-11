@@ -40064,7 +40064,7 @@ var officeTransactionWriteSchema = workspaceBodySchema.extend({
   currency: external_exports.string().regex(currencyCodePattern),
   // Income/expense is the transaction's own attribute; the category only files it
   // under division/department. Optional for backward compatibility: absent on
-  // create falls back to the legacy category-type derivation, absent on update
+  // create defaults to "expense" (never category-derived), absent on update
   // preserves the stored type.
   type: external_exports.enum(["income", "expense"]).nullable().optional()
 });
@@ -41293,7 +41293,7 @@ async function officeTransactionCreateResponse(context, dependencies) {
   const request = await readZodBody(context, officeTransactionWriteSchema);
   const amountMinor = normalizeEofAmountField(context, request.amountMicro, "amountMicro");
   const transactionId = randomUUID2();
-  const transactionType = request.type ?? officeTransactionType(dependencies.fixtures.office, request.categoryId, request.amountMicro);
+  const transactionType = request.type ?? "expense";
   const transactionStatus = request.categoryId === null ? "draft" : "validated";
   const idempotencyKey = requireIdempotencyKey(context);
   const actor = context.get("authUser");
@@ -43578,13 +43578,6 @@ function normalizeEofAmountField(context, value, field) {
       `error=${error instanceof Error ? error.message : "unknown"}`
     ]);
   }
-}
-function officeTransactionType(dataset, categoryId, amount) {
-  void amount;
-  if (categoryId === null) {
-    return "expense";
-  }
-  return resolveCategoryPath(dataset, categoryId).category.type;
 }
 function requireOfficeTransaction(dataset, transactionId) {
   const transaction = dataset.transactions.find((candidate) => candidate.id === transactionId);
