@@ -75,6 +75,7 @@ Done:
 - Added API regression test for parse-preview permissions and CSV parsing; canonical gate green.
 - Added Stage C parity harness test file services/api/test/office-bank-parser-parity.test.ts that compares backend vs frontend normalized outputs for CSV, MCB text, and SBI text samples (green).
 - Added Stage C fixture corpus at services/api/test/fixtures/parser-parity/cases.json and machine-readable parity report generation script services/api/scripts/parser-parity-report.mjs -> services/api/output/parser-parity-report.json.
+- Expanded Stage C corpus with additional production-like rows (SBI COMM/KONTOR/EFT/CASH patterns, MCB reference-coded statement lines, and signed/quoted CSV variants); parity report now validates 10 fixture cases.
 
 Exit criteria:
 - Production parsing path uses backend parser endpoints.

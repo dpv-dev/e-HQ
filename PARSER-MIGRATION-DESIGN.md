@@ -85,6 +85,10 @@ Update (current slice):
 Update (CI wiring):
 - Added GitHub Actions workflow `.github/workflows/ci.yml` to run `./deploy-build.sh`, generate parser parity report, and upload `services/api/output/parser-parity-report.json` as an artifact.
 
+Update (corpus expansion):
+- Extended `services/api/test/fixtures/parser-parity/cases.json` with production-like transaction patterns taken from backup metadata (COMM/KONTOR references, EFT/CASH labels, MCBLMUMU-style references, signed-amount CSV and quoted-comma CSV fields).
+- Parity report now validates 10 fixture cases.
+
 ### Stage D - Default flip
 - Enable backend parser path by default in production.
 - Keep frontend path behind emergency fallback flag for one stabilization window.

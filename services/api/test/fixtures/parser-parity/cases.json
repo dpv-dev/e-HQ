@@ -33,5 +33,40 @@
     "fileName": "hinted-source-test.pdf",
     "sourceHint": "sbi",
     "text": "Transactions List\nCurrency : MUR\n\n23,Jan,2025 LOCAL TRANSFER 100.00 2,900.00\nID: HINT-SBI-1"
+  },
+  {
+    "id": "sbi_pdf_text_commission_and_kontor_reference",
+    "kind": "pdf-text",
+    "fileName": "bankStatement_1Oct2024 to 28Jan2025.pdf",
+    "sourceHint": "sbi",
+    "text": "Transactions List\nCurrency : MUR\n\n14,Dec,2024 COMM FOR 17024TP004636 40.00 850,120.32\nID: 17024TP004636\n\n15,Dec,2024 17024TP004636:BOILER ROOM (UK) LIMITED 12,500.00 862,620.32\nID: MCBLMUMU2024121463"
+  },
+  {
+    "id": "sbi_pdf_text_cash_paid_and_eft",
+    "kind": "pdf-text",
+    "fileName": "bankStatement_1Oct2024 to 28Jan2025.pdf",
+    "sourceHint": "sbi",
+    "text": "Transactions List\nCurrency : MUR\n\n27,Nov,2024 96799477 CASH PAID BNI MR JIMMY VEERAPIN 8,000.00 700,000.00\nID: 96799477\n\n28,Nov,2024 EFT BO HERMES HOSPITALITY L 24,500.00 724,500.00\nID: EFTBO2811"
+  },
+  {
+    "id": "mcb_pdf_text_mcb_reference_codes",
+    "kind": "pdf-text",
+    "fileName": "Euro MCB Current Account statement (5).pdf",
+    "sourceHint": "mcb",
+    "text": "Current Account Statement\nCurrency : EUR\nOpening Balance 1,500.00\n29/12/2024 29/12/2024 MCBLMUMU2024122915 2094O 75.00 1,425.00\nCARD CHARGES ADJUSTMENT\n30/12/2024 30/12/2024 SEPA CREDIT 600.00 2,025.00\nIncoming transfer ref 17025TP000213\nClosing Balance 2,025.00"
+  },
+  {
+    "id": "csv_signed_amount_column",
+    "kind": "csv",
+    "fileName": "Euro MCB Current Account statement signed amount.csv",
+    "sourceHint": "csv",
+    "text": "Date,Description,Amount,Balance,Currency,Reference\n31/12/2024,Year-end adjustment,-250.00,1750.00,EUR,YE-001\n01/01/2025,Client settlement,340.00,2090.00,EUR,YE-002"
+  },
+  {
+    "id": "csv_quoted_description_with_comma",
+    "kind": "csv",
+    "fileName": "bankStatement_quoted_fields.csv",
+    "sourceHint": "csv",
+    "text": "Date,Transaction Details,Debit,Credit,Currency,Reference\n03/01/2025,\"EFT BO HERMES, HOSPITALITY L\",40.00,,MUR,17025TP000273\n04/01/2025,\"17025TP000273:KONTOR NEW MEDIA GMBH\",,12500.00,MUR,KONTOR-273"
   }
 ]
