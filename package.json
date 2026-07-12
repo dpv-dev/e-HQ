@@ -10,6 +10,8 @@
   "scripts": {
     "check": "tsc -b --pretty false",
     "perf:frontend": "node scripts/check-frontend-performance.mjs",
+    "perf:production": "node scripts/perf-production-smoke.mjs",
+    "test:api-client-cache": "corepack pnpm --filter @ehq/api-client typecheck && node scripts/check-api-client-cache.mjs",
     "typecheck": "tsc -b --pretty false",
     "smoke:critical": "node scripts/smoke-critical-routes.mjs"
   },

@@ -91,11 +91,12 @@ export function startCoreWebVitalsMonitoring(): () => void {
       }
 
       reported.add(name);
+      const navigation = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
       publishMetric({
         name,
         value,
         path: window.location.pathname,
-        navigationType: performance.getEntriesByType("navigation")[0]?.name ?? "unknown",
+        navigationType: navigation?.type ?? "unknown",
         recordedAt: new Date().toISOString()
       });
     }

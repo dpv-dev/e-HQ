@@ -21,6 +21,7 @@ cp services/api/scripts/normalize-database-url.cjs services/api/deploy/normalize
 echo "==> API: gate checks"
 corepack pnpm --filter @ehq/api check
 corepack pnpm --filter @ehq/api test
+corepack pnpm test:api-client-cache
 
 echo "==> Frontend (apps/hq): typecheck + build"
 corepack pnpm --filter @ehq/hq check

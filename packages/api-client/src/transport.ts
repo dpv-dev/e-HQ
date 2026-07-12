@@ -46,9 +46,11 @@ export function createRestTransport(config: ApiClientConfig, namespace: LegacyNa
   const readCacheTtlMs = config.readCacheTtlMs ?? 2_000;
   const readCache = new Map<string, { readonly expiresAt: number; readonly value: unknown }>();
   const pendingReads = new Map<string, Promise<unknown>>();
+  let cacheEpoch = 0;
 
   const clearCache = (): void => {
     readCache.clear();
+    cacheEpoch += 1;
   };
 
   const get = async <TResult>(path: string, query: QueryParams): Promise<TResult> => {
@@ -65,6 +67,7 @@ export function createRestTransport(config: ApiClientConfig, namespace: LegacyNa
       return pending as Promise<TResult>;
     }
 
+    const requestEpoch = cacheEpoch;
     const request = requestJson<TResult>(config, {
       method: "GET",
       namespace,
@@ -74,7 +77,7 @@ export function createRestTransport(config: ApiClientConfig, namespace: LegacyNa
       idempotencyKey: null
     })
       .then((value: TResult): TResult => {
-        if (readCacheTtlMs > 0) {
+        if (readCacheTtlMs > 0 && cacheEpoch === requestEpoch) {
           readCache.set(cacheKey, { expiresAt: Date.now() + readCacheTtlMs, value });
         }
         return value;
