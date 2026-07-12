@@ -2,7 +2,6 @@
   RewriteEngine On
   RewriteBase /
   DirectoryIndex index.html
-  RewriteRule ^$ /index.html [L]
   RewriteRule ^index\.html$ - [L]
   RewriteCond %{REQUEST_FILENAME} -f [OR]
   RewriteCond %{REQUEST_FILENAME} -d

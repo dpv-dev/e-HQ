@@ -46,6 +46,13 @@ export default defineConfig({
           }
 
           return undefined;
+        },
+        assetFileNames(assetInfo): string {
+          if (assetInfo.name === "hq-landing-command-room.webp") {
+            return "assets/hq-landing-command-room.webp";
+          }
+
+          return "assets/[name]-[hash][extname]";
         }
       }
     }

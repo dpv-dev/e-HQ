@@ -43,7 +43,7 @@ const initialJsAssets = referencedAssets(indexHtml, /(?:src|href)="([^"]+\.js)"/
 const initialCssAssets = referencedAssets(indexHtml, /href="([^"]+\.css)"/gu);
 const initialJsBytes = initialJsAssets.reduce((total, fileName) => total + bytesFor(fileName), 0);
 const initialCssBytes = initialCssAssets.reduce((total, fileName) => total + bytesFor(fileName), 0);
-const landingImage = fs.readdirSync(assetsDirectory).find((fileName) => /^hq-landing-command-room-[^/]+\.webp$/u.test(fileName));
+const landingImage = fs.readdirSync(assetsDirectory).find((fileName) => /^hq-landing-command-room(?:-[^/]+)?\.webp$/u.test(fileName));
 const officeJs = fs.readdirSync(assetsDirectory).find((fileName) => /^workspace-office-[^/]+\.js$/u.test(fileName));
 
 if (landingImage === undefined || officeJs === undefined) {

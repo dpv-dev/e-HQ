@@ -6,6 +6,7 @@ const paths = [
   "/console/distribution/settings",
   "/console/command-center/settings"
 ];
+const sampleCount = Number.parseInt(process.env.PERF_SAMPLES ?? "10", 10);
 
 async function measure(path) {
   const startedAt = performance.now();
@@ -20,8 +21,28 @@ async function measure(path) {
   return { path, response, body: new TextDecoder().decode(body), durationMs };
 }
 
+async function measureSamples(path) {
+  const durations = [];
+  for (let index = 0; index < sampleCount; index += 1) {
+    const result = await measure(path);
+    durations.push(result.durationMs);
+  }
+
+  const sorted = [...durations].sort((left, right) => left - right);
+  const median = sorted[Math.floor(sorted.length / 2)] ?? 0;
+  const p95 = sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.95) - 1)] ?? 0;
+  console.log(`SUMMARY ${path}: median ${median} ms, p95 ${p95} ms, samples ${sampleCount}`);
+}
+
 const results = [];
-for (const path of paths) {
+for (const path of paths.slice(2)) {
+  results.push(await measure(path));
+}
+
+await measureSamples("/");
+await measureSamples("/index.html");
+
+for (const path of paths.slice(0, 2)) {
   results.push(await measure(path));
 }
 
