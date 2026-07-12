@@ -8,6 +8,7 @@
   }
 
   const props: Props = $props();
+  const hasPositivePoint = $derived(props.points.some((point: ChartPoint): boolean => point.value > 0));
 
   function barStyle(point: ChartPoint): string {
     return `--ehq-chart-level:${String(point.value)}%;`;
@@ -19,16 +20,20 @@
     <p class="eyebrow ehq-type-label-mono">Chart</p>
     <h3 class="ehq-type-heading">{props.title}</h3>
   </div>
-  <div class="bars-frame">
-    {#each props.points as point, index (`${point.label}-${String(index)}`)}
-      <span style={barStyle(point)} aria-label={`${point.label}: ${String(point.value)}`}></span>
-    {/each}
-  </div>
-  <div class="labels">
-    {#each props.points as point, index (`${point.label}-${String(index)}`)}
-      <small>{point.label}</small>
-    {/each}
-  </div>
+  {#if hasPositivePoint}
+    <div class="bars-frame">
+      {#each props.points as point, index (`${point.label}-${String(index)}`)}
+        <span style={barStyle(point)} aria-label={`${point.label}: ${String(point.value)}`}></span>
+      {/each}
+    </div>
+    <div class="labels">
+      {#each props.points as point, index (`${point.label}-${String(index)}`)}
+        <small>{point.label}</small>
+      {/each}
+    </div>
+  {:else}
+    <p class="chart-empty" aria-label="No data">No data to chart.</p>
+  {/if}
 </section>
 
 <style>
@@ -101,6 +106,18 @@
     display: grid;
     grid-template-columns: repeat(6, minmax(0, 1fr));
     gap: var(--ehq-space-2);
+  }
+
+  .chart-empty {
+    min-height: var(--ehq-chart-frame-height);
+    margin: 0;
+    color: var(--ehq-text-muted);
+    font-family: var(--ehq-mono);
+    font-size: var(--ehq-type-label-size);
+    display: grid;
+    place-items: center;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
   }
 
   small {
