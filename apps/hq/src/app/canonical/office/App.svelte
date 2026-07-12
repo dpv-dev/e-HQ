@@ -358,8 +358,8 @@
     { label: "Ignored", value: "ignored" }
   ];
   const importSourceOptions: readonly SelectOption[] = [
-    { label: "MCB EUR PDF", value: "mcb" },
-    { label: "MUR bank PDF", value: "sbi" },
+    { label: "MCB statement PDF", value: "mcb" },
+    { label: "SBI statement PDF", value: "sbi" },
     { label: "Bank CSV", value: "csv" },
     { label: "Cashflow XLSX", value: "cashflow" },
     { label: "Receipt / invoice PDF", value: "pdf" }
