@@ -23,7 +23,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Tests resolve TypeScript sources through Node's native type stripping.
+          node-version: 24.15.0
           cache: pnpm
 
       - name: Install dependencies

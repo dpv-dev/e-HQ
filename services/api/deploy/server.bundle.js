@@ -40724,6 +40724,13 @@ function registerOfficeRoutes(app, dependencies) {
       cashBalanceMicro: dashboard.cashRunway.cashBalanceMur,
       receivablesMicro: dashboard.pnl.income,
       payablesMicro: dashboard.pnl.expense,
+      ledgerIncomeMicro: dashboard.pnl.income,
+      ledgerExpenseMicro: dashboard.pnl.expense,
+      netProfitMicro: dashboard.pnl.profit,
+      validatedTransactionCount: dashboard.pnl.tx_count,
+      pendingTransactionCount: dataset.transactions.filter(
+        (transaction) => transaction.isActive && transaction.status === "draft" && dateInFilters(transaction.transactionDate, filters)
+      ).length,
       unreconciledTransactionCount: dashboard.bankQuality.unmatchedLineCount,
       previous: readOfficeDashboardPrevious(dataset, filters),
       lastAuditEventId: dependencies.fixtures.officeAuditLog[0]?.id ?? null,
@@ -41164,7 +41171,7 @@ function registerDistributionRoutes(app, dependencies) {
     );
     const response = {
       status: { writesEnabled: dependencies.persistence.writesEnabled },
-      dashboard: toDistributionDashboard(dependencies.fixtures.distribution, period),
+      dashboard: toDistributionDashboard(dependencies.fixtures, period),
       importBatches: pageItems(context, importBatches),
       mappingRows: pageItems(context, mappingRows),
       payees: {
@@ -41191,7 +41198,7 @@ function registerDistributionRoutes(app, dependencies) {
   app.get("/erh/v1/dashboard", (context) => {
     const period = requireQuery(context, "period");
     requireQuery(context, "workspaceId");
-    return context.json(toDistributionDashboard(dependencies.fixtures.distribution, period));
+    return context.json(toDistributionDashboard(dependencies.fixtures, period));
   });
   app.get("/erh/v1/imports/batches", (context) => {
     requireQuery(context, "workspaceId");
@@ -49547,18 +49554,80 @@ function requireDepartment2(dataset, departmentId) {
   }
   return department;
 }
-function toDistributionDashboard(dataset, period) {
+function toDistributionDashboard(store, period) {
+  const dataset = store.distribution;
   const totals = readAllocationTotals(dataset, { calculationRunId: null, payeeId: null, status: "posted" });
   const total = totals[0];
+  const releaseIds = new Set(dataset.tracks.flatMap((track) => track.releaseId === null ? [] : [track.releaseId]));
+  const matchedIsrcs = new Set(
+    dataset.normalizedEarnings.filter((earning) => earning.mappingStatus === "matched" && earning.isrc !== null).map((earning) => earning.isrc)
+  );
+  const coveredReleaseIds = new Set(
+    dataset.tracks.flatMap(
+      (track) => track.releaseId !== null && track.isrc !== null && matchedIsrcs.has(track.isrc) ? [track.releaseId] : []
+    )
+  );
+  const totalReleaseCount = releaseIds.size;
+  const coveredReleaseCount = coveredReleaseIds.size;
+  const coverageBp = createBasisPoints(
+    totalReleaseCount === 0 ? 0 : Number((BigInt(coveredReleaseCount) * 10000n + BigInt(totalReleaseCount) / 2n) / BigInt(totalReleaseCount))
+  );
+  const importedRevenue = distributionCurrencyTotals(
+    dataset.normalizedEarnings.map((earning) => ({ currency: earning.currency, amount: earning.grossAmount }))
+  );
+  const paidRoyalties = distributionCurrencyTotals(
+    dataset.payments.filter((payment) => payment.status !== "void" && payment.paidAt !== null).map((payment) => ({ currency: payment.currency, amount: payment.amount }))
+  );
+  const openRecoupableExpenses = distributionCurrencyTotals(
+    store.distributionContractExpenses.filter((expense) => expense.status === "open").map((expense) => ({ currency: expense.currency, amount: expense.openAmountMicro }))
+  );
+  const latestFxRates = [...store.distributionFxRates].sort((left, right) => right.effectiveDate.localeCompare(left.effectiveDate)).filter(
+    (rate, index, rates) => rates.findIndex(
+      (candidate) => candidate.fromCurrency === rate.fromCurrency && candidate.toCurrency === rate.toCurrency
+    ) === index
+  ).map((rate) => ({
+    fromCurrency: createCurrencyCode(rate.fromCurrency),
+    toCurrency: createCurrencyCode(rate.toCurrency),
+    effectiveDate: rate.effectiveDate,
+    rate: rate.rate
+  }));
   return {
     period,
     grossRoyaltyMicro: total?.grossShare ?? "0.0000000000",
     recoupedMicro: total?.recoupmentApplied ?? "0.0000000000",
     netPayableMicro: total?.netPayable ?? "0.0000000000",
+    importedRevenue,
+    paidRoyalties,
+    openRecoupableExpenses,
+    contractCoverage: { coveredReleaseCount, totalReleaseCount, coverageBp },
+    readiness: {
+      mappingBlockerCount: dataset.normalizedEarnings.filter(
+        (earning) => earning.mappingStatus !== "matched" && earning.mappingStatus !== "ignored"
+      ).length,
+      catalogQueueCount: dataset.tracks.filter((track) => track.isrc === null || track.releaseId === null).length,
+      missingSplitContractCount: store.distributionContracts.filter((contract) => contract.splitBp === 0).length,
+      missingExpensePayeeCount: store.distributionCostTerms.filter((term) => term.payeeId === null).length,
+      pendingAllocationCount: dataset.normalizedEarnings.filter(
+        (earning) => earning.calculationStatus === "pending" || earning.calculationStatus === "running"
+      ).length,
+      openSuspenseCount: countOpenSuspense(dataset, { status: "open", reasonCode: null })
+    },
+    fxRates: latestFxRates,
     suspenseCount: countOpenSuspense(dataset, { status: "open", reasonCode: null }),
     openStatementCount: countOpenStatements(dataset, period),
     lastAuditEventId: null
   };
+}
+function distributionCurrencyTotals(rows) {
+  const totals = /* @__PURE__ */ new Map();
+  for (const row of rows) {
+    const previous = totals.get(row.currency) ?? 0n;
+    totals.set(row.currency, erhMoney.add(previous, erhMoney.parse(row.amount)));
+  }
+  return [...totals.entries()].filter(([, amount]) => amount !== 0n).sort(([left], [right]) => left.localeCompare(right)).map(([currency, amount]) => ({
+    currency: createCurrencyCode(currency),
+    amountMicro: erhMoney.format(amount)
+  }));
 }
 function toDistributionImportBatch(dataset, batchId) {
   const batch = dataset.importBatches.find((candidate) => candidate.id === batchId);

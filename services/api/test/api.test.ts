@@ -72,6 +72,10 @@ test("Office dashboard and global P&L are served from the domain read layer", as
   assert.equal(dashboardResponse.status, 200);
   const dashboard = await dashboardResponse.json();
   assert.equal(dashboard.cashBalanceMicro, "3000.00");
+  assert.equal(dashboard.ledgerIncomeMicro, dashboard.receivablesMicro);
+  assert.equal(dashboard.ledgerExpenseMicro, dashboard.payablesMicro);
+  assert.equal(dashboard.validatedTransactionCount, 3);
+  assert.equal(dashboard.pendingTransactionCount, 1);
   assert.equal(dashboard.unreconciledTransactionCount, 1);
   assert.notEqual(dashboard.previous, null);
   assert.equal(dashboard.previous.dateFrom, "2026-01-01");
@@ -1067,6 +1071,18 @@ test("Distribution reads migrated royalty results as fixture checksums, not reca
   assert.equal(dashboard.recoupedMicro, "10.0000000000");
   assert.equal(dashboard.netPayableMicro, "90.0000000000");
   assert.equal(dashboard.suspenseCount, 1);
+  assert.deepEqual(dashboard.importedRevenue, [{ currency: "USD", amountMicro: "250.0000000000" }]);
+  assert.deepEqual(dashboard.paidRoyalties, [{ currency: "USD", amountMicro: "15.1000000000" }]);
+  assert.deepEqual(dashboard.openRecoupableExpenses, [{ currency: "USD", amountMicro: "10.0000000000" }]);
+  assert.deepEqual(dashboard.contractCoverage, { coveredReleaseCount: 1, totalReleaseCount: 1, coverageBp: 10000 });
+  assert.deepEqual(dashboard.readiness, {
+    mappingBlockerCount: 1,
+    catalogQueueCount: 0,
+    missingSplitContractCount: 0,
+    missingExpensePayeeCount: 0,
+    pendingAllocationCount: 1,
+    openSuspenseCount: 1
+  });
 
   const statementsResponse = await app.request("/erh/v1/statements?workspaceId=workspace_1&period=2026-04&limit=10", {
     headers: authHeaders()

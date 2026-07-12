@@ -11,6 +11,8 @@ coverage/
 *.tsbuildinfo
 reports/
 services/api/output/parser-parity-report.json
+# Production reset backups stay local and must never be published.
+services/api/output/*backup*.json
 data/dumps/*.sql
 *.zip
 app-eeee-frontend/

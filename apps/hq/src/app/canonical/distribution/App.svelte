@@ -18,6 +18,7 @@
     type DistributionAliasTargetType,
     type DistributionContract,
     type DistributionContractExpense,
+    type DistributionDashboardCurrencyTotal,
     type DistributionDashboardResponse,
     type DistributionDuplicate,
     type DistributionImportBatch,
@@ -46,7 +47,7 @@
   import { createShellApiClient } from "../../app-shell-data.js";
   import { parseCsvRecords } from "../../bank-parser.js";
   import { formatDateOnly, formatDateRange } from "../../date-format.js";
-  import { formatMoneyValue, moneyToneForValue } from "../../money-format.js";
+  import { apiMoneyToMicroUnits, formatMoneyValue, moneyToneForValue } from "../../money-format.js";
   import "../../../office-orbital-scope.css";
   import "../office/orbital-office.css";
   import "./distribution-command.css";
@@ -459,6 +460,7 @@
       }))
     }))
   );
+  const distributionTabItems = $derived<readonly DistributionNavItem[]>(navItems);
   const handleShellNavigate = (href: string): void => {
     selectPage(href as DistributionPageId);
   };
@@ -620,6 +622,7 @@
   const periodControlVisible = $derived(pageUsesPeriodControl(activePageId));
   const allocationLockKey = $derived(`distribution:allocations:${distributionPeriod}`);
   const dashboardKpis = $derived(createDashboardKpis(dashboardState));
+  const dashboardReadinessKpis = $derived(createDashboardReadinessKpis(dashboardState));
   const importBatches = $derived(readPageItems(importBatchesState));
   const mappingRows = $derived(readPageItems(mappingState));
   const payees = $derived(readPageItems(payeesState));
@@ -3860,19 +3863,77 @@
   function createDashboardKpis(state: ApiRequestState<DistributionDashboardResponse>): readonly DistributionKpi[] {
     if (state.status !== "success") {
       return [
-        { label: "Brut", value: "—", detail: stateLabel(state), tone: "muted", accent: true },
-        { label: "Recoupé", value: "—", detail: "moteur", tone: "muted", accent: false },
-        { label: "Net à payer", value: "—", detail: "statements", tone: "muted", accent: false },
-        { label: "Suspens", value: "—", detail: "blocages", tone: "muted", accent: false }
+        { label: "Revenus importés", value: "—", detail: stateLabel(state), tone: "muted", accent: true },
+        { label: "Royalties payées", value: "—", detail: "paiements rapprochés", tone: "muted", accent: false },
+        { label: "Avances recoupables", value: "—", detail: "solde ouvert", tone: "muted", accent: false },
+        { label: "Taux FX du jour", value: "—", detail: "aucun taux disponible", tone: "muted", accent: false }
       ];
     }
 
     return [
-      { label: "Royalties brutes", value: formatMicro(state.data.grossRoyaltyMicro), detail: state.data.period, tone: "info", accent: true },
-      { label: "Recoupé", value: formatMicro(state.data.recoupedMicro), detail: "sources auditées", tone: "warning", accent: false },
-      { label: "Net à payer", value: formatMicro(state.data.netPayableMicro), detail: `${String(state.data.openStatementCount)} statements`, tone: "success", accent: false },
-      { label: "Suspens", value: String(state.data.suspenseCount), detail: "regroupé par motif", tone: "warning", accent: false }
+      { label: "Revenus importés", value: formatCurrencyTotals(state.data.importedRevenue), detail: state.data.period, tone: "info", accent: true },
+      { label: "Royalties payées", value: formatCurrencyTotals(state.data.paidRoyalties, "€ 0.00"), detail: "paiements rapprochés", tone: "success", accent: false },
+      { label: "Avances recoupables", value: formatCurrencyTotals(state.data.openRecoupableExpenses), detail: "solde ouvert", tone: "warning", accent: false },
+      createFxKpi(state.data)
     ];
+  }
+
+  function createDashboardReadinessKpis(state: ApiRequestState<DistributionDashboardResponse>): readonly DistributionKpi[] {
+    if (state.status !== "success") {
+      return [];
+    }
+
+    const readiness = state.data.readiness;
+    return [
+      {
+        label: "Couverture contrats",
+        value: formatCoverage(state.data.contractCoverage.coverageBp),
+        detail: `${String(state.data.contractCoverage.coveredReleaseCount)} / ${String(state.data.contractCoverage.totalReleaseCount)} sorties`,
+        tone: state.data.contractCoverage.coverageBp >= 9000 ? "success" : "warning",
+        accent: false
+      },
+      { label: "Blocages mapping", value: String(readiness.mappingBlockerCount), detail: "lignes à mapper", tone: readiness.mappingBlockerCount > 0 ? "warning" : "success", accent: false },
+      { label: "Qualité catalogue", value: String(readiness.catalogQueueCount), detail: "identités à corriger", tone: readiness.catalogQueueCount > 0 ? "warning" : "success", accent: false },
+      { label: "Contrats sans split", value: String(readiness.missingSplitContractCount), detail: "contrats à compléter", tone: readiness.missingSplitContractCount > 0 ? "warning" : "success", accent: false },
+      { label: "Dépenses sans bénéficiaire", value: String(readiness.missingExpensePayeeCount), detail: "termes ouverts", tone: readiness.missingExpensePayeeCount > 0 ? "warning" : "success", accent: false },
+      { label: "Allocations en attente", value: String(readiness.pendingAllocationCount), detail: "revenus normalisés", tone: readiness.pendingAllocationCount > 0 ? "warning" : "success", accent: false },
+      { label: "Suspens ouverts", value: String(readiness.openSuspenseCount), detail: "exceptions à traiter", tone: readiness.openSuspenseCount > 0 ? "warning" : "success", accent: false }
+    ];
+  }
+
+  function createFxKpi(data: DistributionDashboardResponse): DistributionKpi {
+    const murRates = data.fxRates.filter((rate) => rate.toCurrency === "MUR");
+    const primary = murRates.find((rate) => rate.fromCurrency === "EUR") ?? murRates[0] ?? null;
+    const secondary = murRates
+      .filter((rate) => rate !== primary)
+      .slice(0, 2)
+      .map((rate) => `1 ${rate.fromCurrency} = ${formatFxRate(rate.rate)} MUR`)
+      .join(" · ");
+    return {
+      label: "Taux FX du jour",
+      value: primary === null ? "—" : `1 ${primary.fromCurrency} = ${formatFxRate(primary.rate)} MUR`,
+      detail: secondary.length === 0 ? "aucun autre taux" : secondary,
+      tone: primary === null ? "warning" : "info",
+      accent: false
+    };
+  }
+
+  function formatFxRate(rate: string): string {
+    const [whole = "0", fraction = ""] = rate.split(".");
+    return `${whole}.${fraction.padEnd(2, "0").slice(0, 2)}`;
+  }
+
+  function formatCurrencyTotals(totals: readonly DistributionDashboardCurrencyTotal[], emptyLabel = "—"): string {
+    const visibleTotals = totals.filter((total) => apiMoneyToMicroUnits(total.amountMicro) !== 0n);
+    return visibleTotals.length === 0
+      ? emptyLabel
+      : visibleTotals.map((total) => formatMoney(total.amountMicro, total.currency)).join(" · ");
+  }
+
+  function formatCoverage(coverageBp: number): string {
+    const whole = Math.trunc(coverageBp / 100);
+    const decimal = Math.trunc((coverageBp % 100) / 10);
+    return `${String(whole)}.${String(decimal)}%`;
   }
 
   // Client-side CSV export keeps Distribution revenue extractable without adding
@@ -4687,6 +4748,19 @@
   onNavigate={handleShellNavigate}
 >
   <div class={`content distribution-page-${activePageId}`}>
+      <nav class="workspace-tab-bar ehq-edge-surface" aria-label="Sections Distribution">
+        {#each distributionTabItems as item (item.id)}
+          <a
+            class="workspace-tab"
+            class:active={activePageId === item.id}
+            href={item.id}
+            onclick={(event: MouseEvent): void => {
+              event.preventDefault();
+              selectPage(item.id);
+            }}
+          >{item.label}</a>
+        {/each}
+      </nav>
       <PageHeader
         workspace="distribution"
         eyebrow="Distribution"
@@ -4735,10 +4809,33 @@
       {/if}
 
       {#if activePageId === "dashboard"}
+        <section class="distribution-workflow-hero" aria-labelledby="distribution-workflow-title">
+          <div>
+            <p>Workflow royalties</p>
+            <h2 id="distribution-workflow-title">Upload, exceptions, validation</h2>
+            <span>Un seul parcours audité, de l’import source au paiement rapproché.</span>
+          </div>
+          <ol>
+            <li><strong>1</strong><span>Importer et normaliser</span></li>
+            <li><strong>2</strong><span>Résoudre les exceptions</span></li>
+            <li><strong>3</strong><span>Allouer et valider</span></li>
+          </ol>
+        </section>
         <section class="kpi-grid" aria-label="KPI Distribution">
           {#each dashboardKpis as kpi (kpi.label)}
             <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state={isLoadingStatus(dashboardState.status) ? "loading" : "default"} accent={kpi.accent} />
           {/each}
+        </section>
+        <section class="readiness-section" aria-labelledby="readiness-title">
+          <div class="section-heading">
+            <p>Contrôle opérationnel</p>
+            <h2 id="readiness-title">Cockpit de préparation</h2>
+          </div>
+          <div class="readiness-grid">
+            {#each dashboardReadinessKpis as kpi (kpi.label)}
+              <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state="default" accent={kpi.accent} />
+            {/each}
+          </div>
         </section>
         <section class="dashboard-grid">
           <BarsChart title="Revenus par source" points={revenueChartPoints} tone="active" />
@@ -5347,6 +5444,88 @@
     overflow-x: auto;
   }
 
+  .distribution-workflow-hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(420px, 0.9fr);
+    gap: var(--ehq-space-5);
+    align-items: center;
+    padding: clamp(22px, 3vw, 38px);
+    border-radius: var(--ehq-radius-lg);
+    background: var(--ehq-text);
+    color: var(--ehq-bg-main);
+  }
+
+  .distribution-workflow-hero p,
+  .section-heading p {
+    margin: 0 0 var(--ehq-space-2);
+    font-family: var(--ehq-mono);
+    font-size: var(--ehq-type-label-size);
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .distribution-workflow-hero h2,
+  .section-heading h2 {
+    margin: 0;
+    font-family: var(--ehq-display);
+    font-size: clamp(1.45rem, 1.1rem + 1vw, 2.2rem);
+  }
+
+  .distribution-workflow-hero > div > span {
+    display: block;
+    margin-top: var(--ehq-space-2);
+    line-height: 1.5;
+  }
+
+  .distribution-workflow-hero ol {
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    list-style: none;
+  }
+
+  .distribution-workflow-hero li {
+    min-width: 0;
+    padding: 0 var(--ehq-space-3);
+    border-left: 1px solid color-mix(in srgb, var(--ehq-bg-main) 18%, transparent);
+    display: grid;
+    gap: var(--ehq-space-2);
+  }
+
+  .distribution-workflow-hero li strong {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: var(--ehq-bg-main);
+    color: var(--ehq-text);
+    font-family: var(--ehq-mono);
+  }
+
+  .distribution-workflow-hero li span {
+    font-size: var(--ehq-type-caption-size);
+    font-weight: 700;
+    line-height: 1.35;
+  }
+
+  .readiness-section {
+    display: grid;
+    gap: var(--ehq-space-3);
+  }
+
+  .section-heading p {
+    color: var(--ehq-yellow);
+  }
+
+  .readiness-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--ehq-space-3);
+  }
+
 
   .import-result {
     margin: 0;
@@ -5752,8 +5931,13 @@
   }
 
   @media (max-width: 1100px) {
+    .distribution-workflow-hero {
+      grid-template-columns: 1fr;
+    }
+
     .kpi-grid,
-    .dashboard-grid {
+    .dashboard-grid,
+    .readiness-grid {
       grid-template-columns: 1fr 1fr;
     }
 
@@ -5769,8 +5953,14 @@
 
     .kpi-grid,
     .dashboard-grid,
+    .readiness-grid,
     .statement-summary dl {
       grid-template-columns: 1fr;
+    }
+
+    .distribution-workflow-hero ol {
+      grid-template-columns: 1fr;
+      gap: var(--ehq-space-3);
     }
   }
 </style>

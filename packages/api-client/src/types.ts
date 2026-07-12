@@ -303,6 +303,12 @@ export interface OfficeDashboardResponse {
   readonly cashBalanceMicro: MoneyMicroString;
   readonly receivablesMicro: MoneyMicroString;
   readonly payablesMicro: MoneyMicroString;
+  /** Validated ledger totals for the selected range. */
+  readonly ledgerIncomeMicro: MoneyMicroString;
+  readonly ledgerExpenseMicro: MoneyMicroString;
+  readonly netProfitMicro: MoneyMicroString;
+  readonly validatedTransactionCount: number;
+  readonly pendingTransactionCount: number;
   readonly unreconciledTransactionCount: number;
   readonly lastAuditEventId: EntityId | null;
   readonly recentImports?: readonly OfficeRecentImport[];
@@ -1074,11 +1080,37 @@ export interface OfficeVatReport {
 
 export interface DistributionDashboardQuery extends PeriodQuery {}
 
+export interface DistributionDashboardCurrencyTotal {
+  readonly currency: CurrencyCode;
+  readonly amountMicro: MoneyMicroString;
+}
+
+export interface DistributionDashboardContractCoverage {
+  readonly coveredReleaseCount: number;
+  readonly totalReleaseCount: number;
+  readonly coverageBp: BasisPoints;
+}
+
+export interface DistributionDashboardReadiness {
+  readonly mappingBlockerCount: number;
+  readonly catalogQueueCount: number;
+  readonly missingSplitContractCount: number;
+  readonly missingExpensePayeeCount: number;
+  readonly pendingAllocationCount: number;
+  readonly openSuspenseCount: number;
+}
+
 export interface DistributionDashboardResponse {
   readonly period: IsoMonthString;
   readonly grossRoyaltyMicro: MoneyMicroString;
   readonly recoupedMicro: MoneyMicroString;
   readonly netPayableMicro: MoneyMicroString;
+  readonly importedRevenue: readonly DistributionDashboardCurrencyTotal[];
+  readonly paidRoyalties: readonly DistributionDashboardCurrencyTotal[];
+  readonly openRecoupableExpenses: readonly DistributionDashboardCurrencyTotal[];
+  readonly contractCoverage: DistributionDashboardContractCoverage;
+  readonly readiness: DistributionDashboardReadiness;
+  readonly fxRates: readonly DistributionFxRate[];
   readonly suspenseCount: number;
   readonly openStatementCount: number;
   readonly lastAuditEventId: EntityId | null;

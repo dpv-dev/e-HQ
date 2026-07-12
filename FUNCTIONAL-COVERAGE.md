@@ -37,7 +37,7 @@ flowchart TD
 
 | Menu page | UI owner | API surface | Domain/data owner | Status | Next work |
 | --- | --- | --- | --- | --- | --- |
-| Dashboard | `apps/hq/src/app/canonical/office/App.svelte` | `GET /eof/v1/dashboard`, `GET /eof/v1/screen/office` | `packages/domain-office/src/analytics.ts`, `pl.ts` | OK | Verify live data freshness page-by-page. |
+| Dashboard | `apps/hq/src/app/canonical/office/App.svelte` | `GET /eof/v1/dashboard`, `GET /eof/v1/screen/office` | `packages/domain-office/src/analytics.ts`, `pl.ts` | OK | Ledger income, expense, net, validated count, and pending count are API-owned; remaining parity gap is source-data validation state. |
 | CEO view | `CeoView.svelte` | Dashboard/P&L aggregate calls through Office client | `domain-office` analytics/P&L | Partial | Confirm all KPI cards trace to API values, not UI recompute. |
 | P&L | `App.svelte` | `GET /eof/v1/pl/global`, `/pl/department/:id`, `/pl/division` | `domain-office/src/pl.ts` | OK | Add explicit category endpoint or document category derivation. |
 | Chart of accounts | `App.svelte` | `GET/POST/PATCH /eof/v1/plan-comptable` | Office categories/departments/divisions | OK | Confirm writes persist to Postgres and audit event. |
@@ -55,12 +55,13 @@ flowchart TD
 | VAT | `VatView.svelte` | `GET /eof/v1/vat` | Office VAT report + `domain-finance/src/vat.ts` | Partial | API report uses the finance VAT primitive; next check is rate/source configuration and live report parity. |
 | Settings | `SettingsView.svelte` | Office status/config calls | API status/config | Partial | Confirm settings are not only read-only diagnostics. |
 | Wave invoices | Removed from visible menu | none | none | Hidden | Add only when API, data model, and UI workflow exist. |
+| PDF invoice import | Removed from visible menu | none | none | Hidden | Add only with an audited document model, extraction pipeline, correction workflow, and reversible commit. |
 
 ## Distribution Coverage
 
 | Menu page | UI owner | API surface | Domain/data owner | Status | Next work |
 | --- | --- | --- | --- | --- | --- |
-| Dashboard | `apps/hq/src/app/canonical/distribution/App.svelte` | `GET /erh/v1/dashboard` | `domain-distribution` reads | OK | Verify live KPIs against statements/allocation data. |
+| Dashboard | `apps/hq/src/app/canonical/distribution/App.svelte` | `GET /erh/v1/dashboard` | `domain-distribution` reads | OK | Imports, payments, recoupable balances, FX, coverage, and readiness queues are aggregated by the API from Supabase-backed read models. |
 | Imports | `App.svelte` | `/erh/v1/imports/batches`, preview/confirm/reverse | Distribution imports | OK | Confirm RouteNote/Kontor formats in live browser flow. |
 | Mapping | `App.svelte` | `/erh/v1/mapping/rows`, `/mapping/apply-rules` | Distribution import mapping | OK | Verify reusable rules persist and audit. |
 | Aliases | `App.svelte` | `GET/POST/PATCH /erh/v1/aliases` | Distribution aliases | OK | Validate alias governance rules per workspace in production. |

@@ -422,6 +422,9 @@
         }))
     }))
   );
+  const officeTabItems = $derived<readonly OfficeNavItem[]>(
+    officeNavGroups.flatMap((group: OfficeNavGroup) => group.items).filter((item) => item.id !== "waveInvoices")
+  );
   const handleShellNavigate = (href: string): void => {
     selectPage(href as OfficePageId);
   };
@@ -3260,50 +3263,47 @@
   function createDashboardStats(state: ApiRequestState<OfficeDashboardResponse>): readonly DashboardStat[] {
     if (state.status !== "success") {
       return [
-        { label: "Cash", value: "—", trendDirection: "none", trendValue: "—", trendDetail: "projection" },
-        { label: "Receivables", value: "—", trendDirection: "none", trendValue: "—", trendDetail: "projection" },
-        { label: "Payables", value: "—", trendDirection: "none", trendValue: "—", trendDetail: "projection" },
-        { label: "To reconcile", value: "—", trendDirection: "none", trendValue: "—", trendDetail: "projection" }
+        { label: "Revenus comptables", value: "—", trendDirection: "none", trendValue: "—", trendDetail: "écritures validées" },
+        { label: "Dépenses comptables", value: "—", trendDirection: "none", trendValue: "—", trendDetail: "écritures validées" },
+        { label: "Résultat net", value: "—", trendDirection: "none", trendValue: "—", trendDetail: "écritures validées" },
+        { label: "Transactions", value: "—", trendDirection: "none", trendValue: "—", trendDetail: "validées" }
       ];
     }
 
     const previous = state.data.previous ?? null;
     const trendDetail = previous === null ? "no previous period" : `vs ${previous.dateFrom} → ${previous.dateTo}`;
-    const cashTrend = computeStatTrend(Number(state.data.cashBalanceMicro), previous === null ? null : Number(previous.cashBalanceMicro));
-    const receivablesTrend = computeStatTrend(Number(state.data.receivablesMicro), previous === null ? null : Number(previous.receivablesMicro));
-    const payablesTrend = computeStatTrend(Number(state.data.payablesMicro), previous === null ? null : Number(previous.payablesMicro));
-    const toReconcileTrend = computeStatTrend(
-      state.data.unreconciledTransactionCount,
-      previous === null ? null : previous.unreconciledTransactionCount
-    );
+    const incomeTrend = computeStatTrend(Number(state.data.ledgerIncomeMicro), previous === null ? null : Number(previous.receivablesMicro));
+    const expenseTrend = computeStatTrend(Number(state.data.ledgerExpenseMicro), previous === null ? null : Number(previous.payablesMicro));
+    const previousNet = previous === null ? null : Number(previous.receivablesMicro) - Number(previous.payablesMicro);
+    const netTrend = computeStatTrend(Number(state.data.netProfitMicro), previousNet);
     return [
       {
-        label: "Cash",
-        value: formatMicro(state.data.cashBalanceMicro),
-        trendDirection: cashTrend.direction,
-        trendValue: cashTrend.value,
+        label: "Revenus comptables",
+        value: formatMicro(state.data.ledgerIncomeMicro),
+        trendDirection: incomeTrend.direction,
+        trendValue: incomeTrend.value,
         trendDetail
       },
       {
-        label: "Receivables",
-        value: formatMicro(state.data.receivablesMicro),
-        trendDirection: receivablesTrend.direction,
-        trendValue: receivablesTrend.value,
+        label: "Dépenses comptables",
+        value: formatMicro(state.data.ledgerExpenseMicro),
+        trendDirection: expenseTrend.direction,
+        trendValue: expenseTrend.value,
         trendDetail
       },
       {
-        label: "Payables",
-        value: formatMicro(state.data.payablesMicro),
-        trendDirection: payablesTrend.direction,
-        trendValue: payablesTrend.value,
+        label: "Résultat net",
+        value: formatMicro(state.data.netProfitMicro),
+        trendDirection: netTrend.direction,
+        trendValue: netTrend.value,
         trendDetail
       },
       {
-        label: "To reconcile",
-        value: String(state.data.unreconciledTransactionCount),
-        trendDirection: toReconcileTrend.direction,
-        trendValue: toReconcileTrend.value,
-        trendDetail
+        label: "Transactions",
+        value: String(state.data.validatedTransactionCount),
+        trendDirection: "none",
+        trendValue: `${String(state.data.pendingTransactionCount)} en attente`,
+        trendDetail: `${String(state.data.unreconciledTransactionCount)} lignes à rapprocher`
       }
     ];
   }
@@ -4491,40 +4491,55 @@
   onNavigate={handleShellNavigate}
 >
     <div class={`content office-page-${activePageId}`}>
-      <PageHeader
-        workspace="office"
-        eyebrow="Office"
-        title={activePage.title}
-        description={activePage.subtitle}
-        meta=""
-        statusLabel=""
-        statusTone="muted"
-      />
+      <nav class="office-tab-bar ehq-edge-surface" aria-label="Sections Office">
+        {#each officeTabItems as item (item.id)}
+          <a
+            class="office-tab"
+            class:active={activePageId === item.id}
+            href={item.id}
+            onclick={(event: MouseEvent): void => {
+              event.preventDefault();
+              selectPage(item.id);
+            }}
+          >{item.label}</a>
+        {/each}
+      </nav>
+      <section class:office-dashboard-hero={activePageId === "dashboard"} class="office-page-intro">
+        <PageHeader
+          workspace="office"
+          eyebrow="Office"
+          title={activePage.title}
+          description={activePage.subtitle}
+          meta=""
+          statusLabel=""
+          statusTone="muted"
+        />
 
-      {#if periodControlVisible}
-        <section class="period-control ehq-edge-surface" aria-label="Period control">
-          <Select
-            id="office-period-scope"
-            label="Period"
-            value={periodScope}
-            options={periodOptions}
-            state="default"
-            message=""
-            onchange={updatePeriodScope}
-          />
-          {#if periodScope === "custom"}
-            <label>
-              <span class="ehq-type-label-mono">From</span>
-              <input type="date" value={activeRange.from} max={activeRange.to} onchange={updateCustomFrom} />
-            </label>
-            <label>
-              <span class="ehq-type-label-mono">To</span>
-              <input type="date" value={activeRange.to} min={activeRange.from} onchange={updateCustomTo} />
-            </label>
-          {/if}
-          <p class="ehq-type-label-mono">{rangeLabel(activeRange)}</p>
-        </section>
-      {/if}
+        {#if periodControlVisible}
+          <section class="period-control ehq-edge-surface" aria-label="Period control">
+            <Select
+              id="office-period-scope"
+              label="Period"
+              value={periodScope}
+              options={periodOptions}
+              state="default"
+              message=""
+              onchange={updatePeriodScope}
+            />
+            {#if periodScope === "custom"}
+              <label>
+                <span class="ehq-type-label-mono">From</span>
+                <input type="date" value={activeRange.from} max={activeRange.to} onchange={updateCustomFrom} />
+              </label>
+              <label>
+                <span class="ehq-type-label-mono">To</span>
+                <input type="date" value={activeRange.to} min={activeRange.from} onchange={updateCustomTo} />
+              </label>
+            {/if}
+            <p class="ehq-type-label-mono">{rangeLabel(activeRange)}</p>
+          </section>
+        {/if}
+      </section>
 
       {#if actionReceipt !== null}
         <Alert tone="success" title="Action accepted" message="Audit recorded." dismissible={false} />
