@@ -246,6 +246,12 @@ function toRow(row: StatementDraftRow, direction: BankDirection, confidence: "hi
 
 const MCB_LINE = /^\s*(\d{2}\/\d{2}\/\d{4})\s+\d{2}\/\d{2}\/\d{4}\s+(.+?)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s*$/u;
 
+const MCB_NOISE_LINE =
+  /^(The Mauritius Commercial Bank Ltd\.?|9-15 Sir William Newton Street|Port-Louis|Republic of Mauritius|T:\s*\+?\d|SWIFT Code|MCBLMUMU|BRN:|www\.mcb\.mu|Page\s+\d+\s+of\s+\d+|Current Account(?: Statement)?|Account Name:|IBAN:|Date Range:|Transaction Value Date|Credit Transaction reference|Balance date|\d{8,}\s+Currency:)/iu;
+
+const MCB_DESCRIPTION_CUTOFF =
+  /\b(The Mauritius Commercial Bank Ltd\.?|SWIFT Code|www\.mcb\.mu|Page\s+\d+\s+of\s+\d+|Current Account(?: Statement)?|Account Name:|IBAN:|Date Range:|Transaction Value Date|Credit Transaction reference|Balance date)\b/iu;
+
 // Parse an MCB (Mauritius) Euro current-account statement (pdftotext -layout output).
 // Each transaction line carries a single amount (debit or credit) + running balance;
 // the direction is recovered from the sequential balance movement.
@@ -275,6 +281,10 @@ export function parseMcbStatementText(text: string): readonly ParsedBankRow[] {
       continue;
     }
 
+    if (isMcbNoiseLine(line)) {
+      continue;
+    }
+
     const match = line.match(MCB_LINE);
     if (match !== null && match[1] !== undefined && match[3] !== undefined && match[4] !== undefined) {
       if (current !== null) {
@@ -290,14 +300,15 @@ export function parseMcbStatementText(text: string): readonly ParsedBankRow[] {
         date,
         amount,
         balance: parseAmount(match[4]),
-        description: (match[2] ?? "").trim(),
+        description: sanitizeMcbDescription((match[2] ?? "").trim()),
         reference: null
       };
       continue;
     }
 
     if (current !== null) {
-      current.description = `${current.description} ${line}`.replace(/\s+/gu, " ").trim();
+      const appended = sanitizeMcbDescription(`${current.description} ${line}`.replace(/\s+/gu, " ").trim());
+      current.description = appended.length > 0 ? appended : current.description;
     }
   }
 
@@ -306,6 +317,20 @@ export function parseMcbStatementText(text: string): readonly ParsedBankRow[] {
   }
 
   return assignDirectionsSequential(drafts, openingBalance);
+}
+
+function isMcbNoiseLine(line: string): boolean {
+  return MCB_NOISE_LINE.test(line.trim());
+}
+
+function sanitizeMcbDescription(value: string): string {
+  const collapsed = value.replace(/\s+/gu, " ").trim();
+  const cutoffMatch = collapsed.match(MCB_DESCRIPTION_CUTOFF);
+  if (cutoffMatch?.index === undefined) {
+    return collapsed;
+  }
+
+  return collapsed.slice(0, cutoffMatch.index).trim();
 }
 
 // Direction from the running balance: a balance lower than the previous one is a debit,
