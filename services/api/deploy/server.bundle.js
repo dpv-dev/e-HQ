@@ -25147,6 +25147,8 @@ var MONTHS = {
 };
 var SBI_DATE_LINE = /^\s*(\d{1,2},[A-Za-z]{3,9},\d{4})\s+(.+?)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s*$/u;
 var MCB_LINE = /^\s*(\d{2}\/\d{2}\/\d{4})\s+\d{2}\/\d{2}\/\d{4}\s+(.+?)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s*$/u;
+var MCB_NOISE_LINE = /^(The Mauritius Commercial Bank Ltd\.?|9-15 Sir William Newton Street|Port-Louis|Republic of Mauritius|T:\s*\+?\d|SWIFT Code|MCBLMUMU|BRN:|www\.mcb\.mu|Page\s+\d+\s+of\s+\d+|Current Account(?: Statement)?|Account Name:|IBAN:|Date Range:|Transaction Value Date|Credit Transaction reference|Balance date|\d{8,}\s+Currency:)/iu;
+var MCB_DESCRIPTION_CUTOFF = /\b(The Mauritius Commercial Bank Ltd\.?|SWIFT Code|www\.mcb\.mu|Page\s+\d+\s+of\s+\d+|Current Account(?: Statement)?|Account Name:|IBAN:|Date Range:|Transaction Value Date|Credit Transaction reference|Balance date)\b/iu;
 function parseOfficeBankImportText(input) {
   const parseAsCsv = input.sourceHint === "csv" || input.fileName.trim().toLowerCase().endsWith(".csv");
   if (parseAsCsv) {
@@ -25359,6 +25361,9 @@ function parseMcbStatementText(text) {
       }
       continue;
     }
+    if (isMcbNoiseLine(line)) {
+      continue;
+    }
     const match2 = line.match(MCB_LINE);
     if (match2 !== null && match2[1] !== void 0 && match2[3] !== void 0 && match2[4] !== void 0) {
       if (current !== null) {
@@ -25374,15 +25379,16 @@ function parseMcbStatementText(text) {
         date,
         amountMinor: absBigInt2(amountMinor),
         balanceMinor: parseAmountUnits(match2[4]),
-        description: (match2[2] ?? "").trim(),
+        description: sanitizeMcbDescription((match2[2] ?? "").trim()),
         reference: null
       };
       continue;
     }
     if (current !== null) {
+      const appended = sanitizeMcbDescription(`${current.description} ${line}`.replace(/\s+/gu, " ").trim());
       current = {
         ...current,
-        description: `${current.description} ${line}`.replace(/\s+/gu, " ").trim()
+        description: appended.length > 0 ? appended : current.description
       };
     }
   }
@@ -25390,6 +25396,17 @@ function parseMcbStatementText(text) {
     drafts.push(current);
   }
   return assignDirectionsSequential(drafts, openingBalanceMinor);
+}
+function isMcbNoiseLine(line) {
+  return MCB_NOISE_LINE.test(line.trim());
+}
+function sanitizeMcbDescription(value) {
+  const collapsed = value.replace(/\s+/gu, " ").trim();
+  const cutoffMatch = collapsed.match(MCB_DESCRIPTION_CUTOFF);
+  if (cutoffMatch?.index === void 0) {
+    return collapsed;
+  }
+  return collapsed.slice(0, cutoffMatch.index).trim();
 }
 function assignDirectionsSequential(drafts, openingBalanceMinor) {
   let previousBalanceMinor = openingBalanceMinor;
@@ -40730,7 +40747,7 @@ function registerOfficeRoutes(app, dependencies) {
       recentImports: recentImports.map((batch) => ({
         id: batch.id,
         source: batch.source,
-        fileName: `${batch.source}-${batch.id}.csv`,
+        fileName: batch.fileName,
         importedAt: batch.importedAt ?? dependencies.nowIso(),
         periodLabel: formatPeriodLabel(batch.periodStart, batch.periodEnd),
         acceptedRowCount: batch.acceptedRowCount,
@@ -40782,6 +40799,12 @@ function registerOfficeRoutes(app, dependencies) {
     const workspaceId = resolveWorkspaceId(context);
     const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
     const transactions = dataset.transactions.map((transaction) => toOfficeTransaction(dataset, transaction)).filter((transaction) => matchesOfficeTransactionQuery(context, transaction));
+    return context.json(pageItems(context, transactions));
+  });
+  app.get("/eof/v1/transactions/pending", (context) => {
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
+    const transactions = dataset.transactions.map((transaction) => toOfficeTransaction(dataset, transaction)).filter((transaction) => transaction.status === "pending").filter((transaction) => matchesOfficeTransactionQuery(context, transaction));
     return context.json(pageItems(context, transactions));
   });
   app.post("/eof/v1/transactions", async (context) => {
@@ -40925,7 +40948,7 @@ function registerOfficeRoutes(app, dependencies) {
       divisionPnl: `/eof/v1/pl/division?${scoped}&limit=100`,
       planComptable: `/eof/v1/plan-comptable?${base}&includeInactive=true`,
       transactions: `/eof/v1/transactions?${scoped}&limit=100`,
-      pendingTransactions: `/eof/v1/transactions?${scoped}&status=pending&limit=100`,
+      pendingTransactions: `/eof/v1/transactions/pending?${scoped}&limit=100`,
       reconciliations: `/eof/v1/reconciliations?${scoped}&status=unmatched&limit=100`,
       cashflow: `/eof/v1/cashflow?${base}&from=${encodeURIComponent(dateFrom)}&to=${encodeURIComponent(dateTo)}`,
       auditLog: `/eof/v1/audit-log?${base}&from=${encodeURIComponent(dateFrom)}&to=${encodeURIComponent(dateTo)}&limit=100`,
@@ -45992,7 +46015,16 @@ async function officeBankImportPreviewResponse(context, dependencies) {
   assertOfficeBankImportPreviewRequest(context, request);
   requirePermissionForWorkspace(context.get("authUser"), "office_bank_import_preview", request.workspaceId);
   const previewRows = previewRowsFromRecords(request.rows);
-  const allParsedRows = previewRows.map((row) => parseOfficeBankPreviewRow(row, request.workspaceId, dependencies.fixtures.office.bankAccounts, dependencies.fixtures.office.exchangeRates));
+  const detectedBankProfile = detectBankProfileFromRows(request.rows).detectedBank;
+  const allParsedRows = previewRows.map((row) => {
+    return parseOfficeBankPreviewRow(
+      row,
+      request.workspaceId,
+      dependencies.fixtures.office.bankAccounts,
+      dependencies.fixtures.office.exchangeRates,
+      detectedBankProfile
+    );
+  });
   const parsedRows = allParsedRows.filter((row) => row.line !== null);
   const idempotencyFingerprint = `${request.source}:${request.checksum}:${hashRequestBody(request.rows)}`;
   const previewId = previewIdFor("office-bank", idempotencyFingerprint);
@@ -46008,15 +46040,17 @@ async function officeBankImportPreviewResponse(context, dependencies) {
   };
   await dependencies.persistence.storeOfficeBankImportPreview(preview);
   const dateRange = officeDateRange(parsedRows.map((row) => row.line.occurredOn));
+  const currencyCodes = parsedRows.length === 0 ? currencyCodesFromRows(request.rows, "MUR") : uniqueStrings(parsedRows.map((row) => row.line.currency));
+  const previewBalances = previewBalancesFromParsedRows(parsedRows, currencyCodes);
   const response = {
     previewId,
     source: request.source,
     detectedFormat: `${request.source}_structured_json`,
     accountReference: parsedRows[0]?.line.accountId ?? null,
     periodLabel: dateRange.label,
-    currencyCodes: parsedRows.length === 0 ? currencyCodesFromRows(request.rows, "MUR") : uniqueStrings(parsedRows.map((row) => row.line.currency)),
-    openingBalanceMicro: null,
-    closingBalanceMicro: null,
+    currencyCodes,
+    openingBalanceMicro: previewBalances.openingBalanceMicro,
+    closingBalanceMicro: previewBalances.closingBalanceMicro,
     idempotencyFingerprint,
     acceptedRowCount: parsedRows.length,
     rejectedRowCount: previewRows.length - parsedRows.length,
@@ -46171,7 +46205,16 @@ async function officeBankImportConfirmResponse(context, dependencies) {
         };
       }
       const acceptedRowIds = new Set(request.acceptedRowIds);
-      const parsedRows = preview.rows.filter((row) => acceptedRowIds.has(row.id)).map((row) => parseOfficeBankPreviewRow(row, request.workspaceId, dependencies.fixtures.office.bankAccounts, dependencies.fixtures.office.exchangeRates));
+      const detectedBankProfile = detectBankProfileFromRows(preview.rows.map((row) => row.rawData)).detectedBank;
+      const parsedRows = preview.rows.filter((row) => acceptedRowIds.has(row.id)).map((row) => {
+        return parseOfficeBankPreviewRow(
+          row,
+          request.workspaceId,
+          dependencies.fixtures.office.bankAccounts,
+          dependencies.fixtures.office.exchangeRates,
+          detectedBankProfile
+        );
+      });
       const lines = parsedRows.map((row) => row.line).filter((line) => line !== null);
       const suggestions = buildOfficeReconciliationSuggestions(dependencies.fixtures.office, request.workspaceId, lines);
       const batchId = randomUUID2();
@@ -47060,9 +47103,9 @@ function previewRowResult(parsed) {
     issues: parsed.issues
   };
 }
-function parseOfficeBankPreviewRow(row, workspaceId, accounts, exchangeRates) {
+function parseOfficeBankPreviewRow(row, workspaceId, accounts, exchangeRates, detectedBankProfile) {
   const currency = normalizedCurrency2(rowValue2(row.rawData, ["currency", "currency_code", "Currency", "CURRENCY"])) ?? "MUR";
-  const account = accountForRow(row.rawData, workspaceId, currency, accounts);
+  const account = accountForRow(row.rawData, workspaceId, currency, accounts, detectedBankProfile);
   const occurredOn = isoDateValue(row.rawData, ["occurredOn", "occurred_on", "transactionDate", "transaction_date", "date", "DATE", "Date", "paid_on", "paidOn"]);
   const description = rowValue2(row.rawData, ["description", "label", "particulars", "details", "narrative", "memo"]);
   const amount = amountForBankRow(row.rawData);
@@ -47100,6 +47143,37 @@ function parseOfficeBankPreviewRow(row, workspaceId, accounts, exchangeRates) {
       rawData: row.rawData
     },
     issues: []
+  };
+}
+function previewBalancesFromParsedRows(rows, currencyCodes) {
+  if (rows.length === 0 || currencyCodes.length !== 1) {
+    return {
+      openingBalanceMicro: null,
+      closingBalanceMicro: null
+    };
+  }
+  const withBalance = [...rows].filter((row) => {
+    return row.line.balanceMinor !== null;
+  }).sort((left, right) => {
+    const dateDiff = left.line.occurredOn.localeCompare(right.line.occurredOn);
+    if (dateDiff !== 0) {
+      return dateDiff;
+    }
+    return left.row.rowNumber - right.row.rowNumber;
+  });
+  const first = withBalance[0];
+  const last = withBalance.at(-1);
+  if (first === void 0 || last === void 0) {
+    return {
+      openingBalanceMicro: null,
+      closingBalanceMicro: null
+    };
+  }
+  const signedFirstAmount = first.line.direction === "credit" ? first.line.amountMinor : -first.line.amountMinor;
+  const openingBalanceMinor = first.line.balanceMinor - signedFirstAmount;
+  return {
+    openingBalanceMicro: eofMoney.format(openingBalanceMinor),
+    closingBalanceMicro: eofMoney.format(last.line.balanceMinor)
   };
 }
 function buildOfficeReconciliationSuggestions(dataset, workspaceId, lines) {
@@ -47286,12 +47360,26 @@ function absoluteIsoDayDistance(leftDate, rightDate) {
   }
   return Math.floor(Math.abs(left - right) / 864e5);
 }
-function accountForRow(row, workspaceId, currency, accounts) {
+function accountForRow(row, workspaceId, currency, accounts, detectedBankProfile) {
   const accountId = rowValue2(row, ["accountId", "account_id"]);
   if (accountId !== null) {
     return accounts.find((account) => account.id === accountId) ?? null;
   }
-  return accounts.find((account) => account.workspaceId === workspaceId && account.currency === currency && account.isActive) ?? null;
+  const candidates = accounts.filter(
+    (account) => account.workspaceId === workspaceId && account.currency === currency && account.isActive
+  );
+  if (candidates.length === 1) {
+    return candidates[0] ?? null;
+  }
+  if (candidates.length > 1 && detectedBankProfile !== "unknown") {
+    const matchingBank = candidates.filter(
+      (account) => normalizeBankName(account.bankName) === detectedBankProfile
+    );
+    if (matchingBank.length === 1) {
+      return matchingBank[0] ?? null;
+    }
+  }
+  return null;
 }
 function amountForBankRow(row) {
   const currency = normalizedCurrency2(rowValue2(row, ["currency", "currency_code", "Currency", "CURRENCY"])) ?? "MUR";
@@ -50076,7 +50164,9 @@ function normalizeIdentityName(value) {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/gu, " ").replace(/\s+/gu, " ");
 }
 function toDistributionAuditLog(store) {
-  return store.officeAuditLog.filter((entry) => entry.action.startsWith("distribution."));
+  return store.officeAuditLog.filter(
+    (entry) => entry.action.startsWith("distribution_") || entry.action.startsWith("distribution.")
+  );
 }
 function toDistributionSettings(context, store, writesEnabled) {
   const workspaceId = requireQuery(context, "workspaceId");

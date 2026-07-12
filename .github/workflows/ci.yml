@@ -15,23 +15,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.12.1
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: pnpm
 
-      - name: Enable Corepack
-        run: corepack enable
-
       - name: Install dependencies
-        run: corepack pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Canonical build gate
         run: ./deploy-build.sh
 
       - name: Generate parser parity report
-        run: corepack pnpm --filter @ehq/api parser:parity-report
+        run: pnpm --filter @ehq/api parser:parity-report
 
       - name: Upload parser parity report artifact
         uses: actions/upload-artifact@v4
