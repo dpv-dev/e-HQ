@@ -7186,15 +7186,19 @@ async function officeBankImportPreviewResponse(context: ApiContext, dependencies
   };
   await dependencies.persistence.storeOfficeBankImportPreview(preview);
   const dateRange = officeDateRange(parsedRows.map((row) => row.line.occurredOn));
+  const currencyCodes = parsedRows.length === 0
+    ? currencyCodesFromRows(request.rows, "MUR")
+    : uniqueStrings(parsedRows.map((row) => row.line.currency));
+  const previewBalances = previewBalancesFromParsedRows(parsedRows, currencyCodes);
   const response: BankImportPreviewResponse = {
     previewId,
     source: request.source,
     detectedFormat: `${request.source}_structured_json`,
     accountReference: parsedRows[0]?.line.accountId ?? null,
     periodLabel: dateRange.label,
-    currencyCodes: parsedRows.length === 0 ? currencyCodesFromRows(request.rows, "MUR") : uniqueStrings(parsedRows.map((row) => row.line.currency)),
-    openingBalanceMicro: null,
-    closingBalanceMicro: null,
+    currencyCodes,
+    openingBalanceMicro: previewBalances.openingBalanceMicro,
+    closingBalanceMicro: previewBalances.closingBalanceMicro,
     idempotencyFingerprint,
     acceptedRowCount: parsedRows.length,
     rejectedRowCount: previewRows.length - parsedRows.length,
@@ -8528,6 +8532,48 @@ function parseOfficeBankPreviewRow(
       rawData: row.rawData
     },
     issues: []
+  };
+}
+
+function previewBalancesFromParsedRows(
+  rows: readonly (ParsedOfficeBankPreviewRow & { readonly line: OfficeBankStatementLineInsert })[],
+  currencyCodes: readonly CurrencyCode[]
+): { readonly openingBalanceMicro: string | null; readonly closingBalanceMicro: string | null } {
+  if (rows.length === 0 || currencyCodes.length !== 1) {
+    return {
+      openingBalanceMicro: null,
+      closingBalanceMicro: null
+    };
+  }
+
+  const withBalance = [...rows]
+    .filter((row): row is ParsedOfficeBankPreviewRow & { readonly line: OfficeBankStatementLineInsert & { readonly balanceMinor: bigint } } => {
+      return row.line.balanceMinor !== null;
+    })
+    .sort((left, right): number => {
+      const dateDiff = left.line.occurredOn.localeCompare(right.line.occurredOn);
+      if (dateDiff !== 0) {
+        return dateDiff;
+      }
+      return left.row.rowNumber - right.row.rowNumber;
+    });
+
+  const first = withBalance[0];
+  const last = withBalance.at(-1);
+
+  if (first === undefined || last === undefined) {
+    return {
+      openingBalanceMicro: null,
+      closingBalanceMicro: null
+    };
+  }
+
+  const signedFirstAmount = first.line.direction === "credit" ? first.line.amountMinor : -first.line.amountMinor;
+  const openingBalanceMinor = first.line.balanceMinor - signedFirstAmount;
+
+  return {
+    openingBalanceMicro: eofMoney.format(openingBalanceMinor),
+    closingBalanceMicro: eofMoney.format(last.line.balanceMinor)
   };
 }
 

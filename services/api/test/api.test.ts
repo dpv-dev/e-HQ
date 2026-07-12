@@ -876,6 +876,49 @@ test("Bank import preview warns when file profile mismatches selected account ba
   assert.ok(preview.warnings.some((warning) => warning.includes("Bank profile mismatch")));
 });
 
+test("bank import preview returns opening and closing balances from running statement balances", async () => {
+  const app = createFixtureApiService();
+
+  const response = await app.request("/eof/v1/bank-import/preview", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      source: "csv",
+      fileName: "balances.csv",
+      checksum: "checksum-bank-preview-balances",
+      rows: [
+        {
+          accountId: "bank_mur",
+          date: "2026-02-10",
+          description: "Card payment",
+          debit: "40.00",
+          currency: "MUR",
+          balance: "960.00"
+        },
+        {
+          accountId: "bank_mur",
+          date: "2026-02-11",
+          description: "Client transfer",
+          credit: "20.00",
+          currency: "MUR",
+          balance: "980.00"
+        }
+      ]
+    })
+  });
+
+  assert.equal(response.status, 200);
+  const preview = (await response.json()) as {
+    readonly acceptedRowCount: number;
+    readonly openingBalanceMicro: string | null;
+    readonly closingBalanceMicro: string | null;
+  };
+  assert.equal(preview.acceptedRowCount, 2);
+  assert.equal(preview.openingBalanceMicro, "1000.00");
+  assert.equal(preview.closingBalanceMicro, "980.00");
+});
+
 test("Office screen bundle returns every section in one response matching the standalone endpoints", async () => {
   const app = createFixtureApiService();
   const response = await app.request(
