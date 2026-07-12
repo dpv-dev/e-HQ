@@ -3,13 +3,58 @@
 const apiBase = process.env.EHQ_SMOKE_API_BASE ?? "https://api.eeee.mu";
 const appBase = process.env.EHQ_SMOKE_APP_BASE ?? "https://app.eeee.mu";
 
+const officeRoutes = [
+  "dashboard",
+  "ceo",
+  "bank",
+  "audit",
+  "vat",
+  "settings",
+  "clients",
+  "suppliers",
+  "projects",
+  "monitoring",
+  "transactions",
+  "imports",
+  "wave-invoices",
+  "reconciliation",
+  "pending",
+  "cashflow",
+  "coa",
+  "pnl"
+];
+
+const distributionRoutes = [
+  "dashboard",
+  "imports",
+  "mapping",
+  "catalog",
+  "contracts",
+  "allocations",
+  "suspense",
+  "statements",
+  "payments",
+  "revenue",
+  "financial-reconciliation",
+  "aliases",
+  "duplicates",
+  "audit-log",
+  "settings"
+];
+
 const checks = [
   { label: "API health", url: `${apiBase}/healthz`, expected: 200 },
   { label: "App root", url: `${appBase}/`, expected: 200 },
-  { label: "Office bank", url: `${appBase}/console/office/bank`, expected: 200 },
-  { label: "Office VAT", url: `${appBase}/console/office/vat`, expected: 200 },
-  { label: "Distribution settings", url: `${appBase}/console/distribution/settings`, expected: 200 },
-  { label: "Distribution payments", url: `${appBase}/console/distribution/payments`, expected: 200 },
+  ...officeRoutes.map((route) => ({
+    label: `Office ${route}`,
+    url: `${appBase}/console/office/${route}`,
+    expected: 200
+  })),
+  ...distributionRoutes.map((route) => ({
+    label: `Distribution ${route}`,
+    url: `${appBase}/console/distribution/${route}`,
+    expected: 200
+  })),
   { label: "Command Center dashboard", url: `${appBase}/console/command-center/dashboard`, expected: 200 },
   { label: "Command Center settings", url: `${appBase}/console/command-center/settings`, expected: 200 }
 ];

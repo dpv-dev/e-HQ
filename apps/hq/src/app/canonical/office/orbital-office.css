@@ -871,3 +871,56 @@
     transform: translateY(10px);
   }
 }
+
+/* Mirror mode: remove visual ornamentation so App tracks WordPress Office/
+   Distribution information architecture with a clean, neutral shell. */
+.ehq-workspace-shell:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) {
+  background: var(--ehq-bg-main);
+}
+
+.ehq-workspace-shell:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center)::before,
+.ehq-workspace-shell:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .shell-topbar::after,
+.ehq-workspace-shell:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .shell-title::after,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-section-template header p::before,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-alert::before,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-stat-card::before,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-kpi::before,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .nav-item.active::after {
+  content: none;
+}
+
+.ehq-workspace-shell:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .shell-topbar,
+.ehq-workspace-shell:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .shell-search,
+.ehq-workspace-shell:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .shell-user,
+.ehq-workspace-shell:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) nav,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .panel-card,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-edge-surface,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-stat-card,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-kpi,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-table-shell,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-stat-card .label,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-kpi p,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-stat-card .icon,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .kpi-grid > :first-child {
+  background: var(--ehq-surface);
+  box-shadow: none;
+}
+
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-stat-card:hover,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-kpi:hover,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-edge-surface:hover,
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .kpi-grid > :first-child:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .nav-item.active {
+  background: var(--ehq-surface-high);
+  border-color: var(--ehq-workspace-accent-border);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  :is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .kpi-grid > article {
+    animation: none;
+  }
+}

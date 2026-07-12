@@ -1162,6 +1162,16 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
     return context.json(pageItems(context, transactions));
   });
 
+  app.get("/eof/v1/transactions/pending", (context) => {
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
+    const transactions = dataset.transactions
+      .map((transaction) => toOfficeTransaction(dataset, transaction))
+      .filter((transaction) => transaction.status === "pending")
+      .filter((transaction) => matchesOfficeTransactionQuery(context, transaction));
+    return context.json(pageItems(context, transactions));
+  });
+
   app.post("/eof/v1/transactions", async (context) => {
     return officeTransactionCreateResponse(context, dependencies);
   });
@@ -1345,7 +1355,7 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
       divisionPnl: `/eof/v1/pl/division?${scoped}&limit=100`,
       planComptable: `/eof/v1/plan-comptable?${base}&includeInactive=true`,
       transactions: `/eof/v1/transactions?${scoped}&limit=100`,
-      pendingTransactions: `/eof/v1/transactions?${scoped}&status=pending&limit=100`,
+      pendingTransactions: `/eof/v1/transactions/pending?${scoped}&limit=100`,
       reconciliations: `/eof/v1/reconciliations?${scoped}&status=unmatched&limit=100`,
       cashflow: `/eof/v1/cashflow?${base}&from=${encodeURIComponent(dateFrom)}&to=${encodeURIComponent(dateTo)}`,
       auditLog: `/eof/v1/audit-log?${base}&from=${encodeURIComponent(dateFrom)}&to=${encodeURIComponent(dateTo)}&limit=100`,
@@ -12437,7 +12447,10 @@ function normalizeIdentityName(value: string): string {
 function toDistributionAuditLog(store: ApiFixtureStore): readonly AuditLogEntry[] {
   // Distribution has no dedicated audit-log fixture; reuse the shared audit data when present
   // and filter to distribution-scoped entries, otherwise return a typed empty list.
-  return store.officeAuditLog.filter((entry) => entry.action.startsWith("distribution."));
+  // Keep both prefixes for backward compatibility across historical action naming.
+  return store.officeAuditLog.filter(
+    (entry) => entry.action.startsWith("distribution_") || entry.action.startsWith("distribution.")
+  );
 }
 
 function toDistributionSettings(context: ApiContext, store: ApiFixtureStore, writesEnabled: boolean): DistributionSettingsResponse {

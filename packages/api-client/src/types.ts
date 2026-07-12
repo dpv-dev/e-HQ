@@ -422,6 +422,19 @@ export interface OfficeTransactionsQuery extends PageQuery {
   readonly status: OfficeTransactionStatus | null;
 }
 
+export interface OfficePendingTransactionsQuery extends PageQuery {
+  readonly workspaceId: EntityId;
+  readonly period: IsoMonthString | null;
+  readonly dateFrom?: IsoDateString | null;
+  readonly dateTo?: IsoDateString | null;
+  readonly accountId: EntityId | null;
+  readonly departmentId: EntityId | null;
+  readonly divisionId: EntityId | null;
+  readonly categoryId: EntityId | null;
+  readonly projectId: EntityId | null;
+  readonly type: OfficeCategoryType | null;
+}
+
 export type OfficeTransactionStatus = "pending" | "draft" | "posted" | "reconciled" | "voided";
 
 export interface OfficeTransactionBase {

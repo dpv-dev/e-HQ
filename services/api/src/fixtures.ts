@@ -342,6 +342,17 @@ function createOfficeAuditLogFixture(): readonly AuditLogEntry[] {
       entityReference: "fixture-mcb-feb.csv",
       idempotencyKey: "fixture-office-import",
       context: { source: "mcb", workspaceId: "workspace_1" }
+    },
+    {
+      id: "audit_distribution_alias",
+      occurredAt: "2026-02-28T13:30:00.000Z",
+      actorId: "user_david",
+      action: "distribution_alias_upsert",
+      entityType: "catalog_alias",
+      entityId: "distribution_alias_fixture",
+      entityReference: "Fixture alias",
+      idempotencyKey: "fixture-distribution-alias",
+      context: { workspaceId: "workspace_1", targetType: "payee" }
     }
   ];
 }

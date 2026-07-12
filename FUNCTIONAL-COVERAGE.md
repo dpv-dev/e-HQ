@@ -42,9 +42,9 @@ flowchart TD
 | P&L | `App.svelte` | `GET /eof/v1/pl/global`, `/pl/department/:id`, `/pl/division` | `domain-office/src/pl.ts` | OK | Add explicit category endpoint or document category derivation. |
 | Chart of accounts | `App.svelte` | `GET/POST/PATCH /eof/v1/plan-comptable` | Office categories/departments/divisions | OK | Confirm writes persist to Postgres and audit event. |
 | Transactions / Ledger | `App.svelte` | `GET/POST/PATCH /eof/v1/transactions`, validate/cancel | Office transactions + `domain-finance/src/ledger.ts` | Partial | Ledger totals are centralized for P&L; finish replacing any remaining local transaction summary duplication. |
-| Imports | `App.svelte` | `POST /eof/v1/bank-import/preview`, `/confirm`, reverse/delete | Office bank import persistence | Partial | API only accepts structured rows; raw PDF parsing remains browser-side. Confirm production upload/parse flow. |
+| Imports | `App.svelte` | `POST /eof/v1/bank-import/preview`, `/parse-preview`, `/confirm`, reverse/delete | Office bank import persistence | OK | Keep parser parity corpus up to date with new bank export patterns. |
 | Reconciliation | `App.svelte`, `BankView.svelte` | `GET/POST /eof/v1/reconciliations/*` | Office bank matching + `domain-finance/src/reconciliation.ts` | Partial | API matching uses the finance primitive; next check is production transaction atomicity and audit coverage. |
-| Pending | `App.svelte` | `GET /transactions?status=pending`, transaction update/validate | Office transactions | Partial | Add a dedicated pending endpoint or document this as filtered transactions. |
+| Pending | `App.svelte` | `GET /eof/v1/transactions/pending`, transaction update/validate | Office transactions | OK | Keep pending queue filters aligned with transactions filtering semantics. |
 | Cashflow | `App.svelte` | `GET /eof/v1/cashflow`, preview/confirm | `domain-office/src/analytics.ts` | OK | Confirm imported CSV rows are audited and reversible. |
 | Bank | `BankView.svelte` | `GET/POST/PATCH/DELETE /eof/v1/bank/accounts`, `GET /bank/raw` | Office bank accounts/raw lines | OK | Verify delete safety and dependency counts on production data. |
 | Clients | `PartnersView.svelte` | `/eof/v1/partners`, `/pl/partner/:id`, partner payee link | Office partners + Distribution payee link | OK | Verify client facet filtering is semantically correct. |
@@ -63,17 +63,17 @@ flowchart TD
 | Dashboard | `apps/hq/src/app/canonical/distribution/App.svelte` | `GET /erh/v1/dashboard` | `domain-distribution` reads | OK | Verify live KPIs against statements/allocation data. |
 | Imports | `App.svelte` | `/erh/v1/imports/batches`, preview/confirm/reverse | Distribution imports | OK | Confirm RouteNote/Kontor formats in live browser flow. |
 | Mapping | `App.svelte` | `/erh/v1/mapping/rows`, `/mapping/apply-rules` | Distribution import mapping | OK | Verify reusable rules persist and audit. |
-| Aliases | `App.svelte` | `GET /erh/v1/aliases` | Distribution aliases | Partial | Add create/update alias actions if aliases are meant to be managed here. |
-| Duplicates | `App.svelte` | `GET /erh/v1/duplicates` | Distribution diagnostics | Partial | Merge/resolve is still a maintenance action, not product workflow. |
+| Aliases | `App.svelte` | `GET/POST/PATCH /erh/v1/aliases` | Distribution aliases | OK | Validate alias governance rules per workspace in production. |
+| Duplicates | `App.svelte` | `GET /erh/v1/duplicates`, `POST /erh/v1/duplicates/:duplicateId/resolve` | Distribution diagnostics | OK | Add operator guidance for safe keep/exclude decisions. |
 | Catalog | `App.svelte` | `/erh/v1/releases`, `/tracks`, create release/track | Distribution catalog | OK | Add edit/override workflow if source records are immutable. |
 | Contracts | `App.svelte` | `/contracts`, expenses, rules | Distribution contracts + recoupments | OK | Verify rule totals and recoupable expense audit. |
-| Financial reconciliation | `App.svelte` | `GET /erh/v1/financial-reconciliation` | Distribution reconciliation diagnostics | Partial | Guarded actions need concrete write handlers or explicit maintenance-only labels. |
+| Financial reconciliation | `App.svelte` | `GET /erh/v1/financial-reconciliation`, `POST /erh/v1/financial-reconciliation/actions/:actionId` | Distribution reconciliation diagnostics | OK | Keep maintenance action list synchronized between UI hints and API support. |
 | Allocations | `App.svelte` | `/allocations/runs`, preview/post/unpost | `domain-distribution/src/allocation.ts` + finance allocation | OK | Confirm workflow lock behavior in production. |
 | Suspense | `App.svelte` | `/suspense`, resolve | Distribution suspense | OK | Confirm resolve writes target canonical catalog records. |
 | Statements | `App.svelte` | `/statements`, generate/print/void | Distribution statements | OK | Verify A4 print route and balance ledger. |
 | Payments | `App.svelte` | `/payments`, record/update/reconcile/void | Distribution payments | OK | Verify payment reconciliation touches Office bank/ledger where expected. |
 | Revenue | `App.svelte` | `GET /erh/v1/revenue` | Distribution revenue reads | OK | Verify group-by totals match allocation/statement totals. |
-| Audit log | `App.svelte` | `GET /erh/v1/audit-log` | Shared/distribution audit events | Partial | Code notes Distribution has no dedicated audit fixture; verify production source. |
+| Audit log | `App.svelte` | `GET /erh/v1/audit-log` | Shared/distribution audit events | OK | Ensure production ingestion keeps `distribution_*` action prefixes stable. |
 | Settings | `App.svelte` | `GET /erh/v1/settings` | Distribution workspace config | OK | Confirm settings are sufficient for operations. |
 
 ## Engine Integration Debt

@@ -75,6 +75,7 @@ import type {
   OfficeReconciliationsQuery,
   OfficeScreenQuery,
   OfficeScreenResponse,
+  OfficePendingTransactionsQuery,
   OfficeTransaction,
   OfficeTransactionsQuery,
   OfficeTransactionWriteRequest,
@@ -94,6 +95,7 @@ export interface OfficeApiClient {
   readonly getDivisionPnl: (query: OfficeDivisionPnlQuery) => Promise<PageResult<OfficeDivisionPnl>>;
   readonly getCategoryPnl: (query: OfficeCategoryPnlQuery) => Promise<PageResult<OfficePnlLine>>;
   readonly listTransactions: (query: OfficeTransactionsQuery) => Promise<PageResult<OfficeTransaction>>;
+  readonly listPendingTransactions: (query: OfficePendingTransactionsQuery) => Promise<PageResult<OfficeTransaction>>;
   readonly createTransaction: (
     request: OfficeTransactionWriteRequest,
     options: WriteRequestOptions
@@ -323,6 +325,21 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
         projectId: query.projectId,
         type: query.type,
         status: query.status,
+        cursor: query.cursor,
+        limit: query.limit
+      }),
+    listPendingTransactions: (query: OfficePendingTransactionsQuery): Promise<PageResult<OfficeTransaction>> =>
+      transport.get<PageResult<OfficeTransaction>>("transactions/pending", {
+        workspaceId: query.workspaceId,
+        period: query.period,
+        dateFrom: query.dateFrom ?? null,
+        dateTo: query.dateTo ?? null,
+        accountId: query.accountId,
+        departmentId: query.departmentId,
+        divisionId: query.divisionId,
+        categoryId: query.categoryId,
+        projectId: query.projectId,
+        type: query.type,
         cursor: query.cursor,
         limit: query.limit
       }),

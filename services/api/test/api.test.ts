@@ -742,6 +742,32 @@ test("Office transactions expose category-derived path and keep project nullable
   assert.equal(otherAccountPage.items.length, 0);
 });
 
+test("Office pending transactions endpoint returns only pending rows and keeps query filters", async () => {
+  const app = createFixtureApiService();
+
+  const response = await app.request(
+    "/eof/v1/transactions/pending?workspaceId=workspace_1&period=2026-02&limit=100",
+    { headers: authHeaders() }
+  );
+  assert.equal(response.status, 200);
+  const page = await response.json() as {
+    readonly items: readonly { readonly id: string; readonly status: string }[];
+  };
+  assert.ok(page.items.length > 0);
+  assert.ok(page.items.every((item) => item.status === "pending"));
+  assert.ok(page.items.some((item) => item.id === "tx_uncategorized"));
+
+  const filteredResponse = await app.request(
+    "/eof/v1/transactions/pending?workspaceId=workspace_1&period=2026-02&accountId=bank_mur&limit=100",
+    { headers: authHeaders() }
+  );
+  assert.equal(filteredResponse.status, 200);
+  const filteredPage = await filteredResponse.json() as {
+    readonly items: readonly { readonly id: string }[];
+  };
+  assert.equal(filteredPage.items.length, 0);
+});
+
 test("Office transactions honor from/to compatibility query parameters", async () => {
   const app = createFixtureApiService();
 
@@ -997,6 +1023,19 @@ test("distribution aliases create persists a new alias and exposes it in the rea
   assert.equal(createdAlias?.aliasText, "Alma Legacy");
   assert.equal(createdAlias?.targetType, "payee");
   assert.equal(createdAlias?.targetId, "payee_alma");
+
+  const auditResponse = await app.request("/erh/v1/audit-log?workspaceId=workspace_1&limit=100", {
+    headers: authHeaders()
+  });
+  assert.equal(auditResponse.status, 200);
+  const auditPage = (await auditResponse.json()) as {
+    readonly items: readonly {
+      readonly action: string;
+    }[];
+  };
+  assert.ok(
+    auditPage.items.some((entry) => entry.action === "distribution_alias_upsert")
+  );
 });
 
 test("distribution aliases patch updates an existing alias target", async () => {

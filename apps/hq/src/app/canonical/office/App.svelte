@@ -952,7 +952,7 @@
         pendingState = state;
       },
       (cursor: string): Promise<PageResult<OfficeTransaction>> =>
-        client.office.listTransactions({
+        client.office.listPendingTransactions({
           workspaceId: officeWorkspaceId,
           period,
           dateFrom: activeRange.from,
@@ -963,7 +963,6 @@
           categoryId: null,
           projectId: null,
           type: null,
-          status: "pending",
           cursor,
           limit: TABLE_PAGE_SIZE
         }),
@@ -1645,7 +1644,7 @@
     pendingState = beginReload<PageResult<OfficeTransaction>>(pendingState);
 
     try {
-      const page = await client.office.listTransactions({
+      const page = await client.office.listPendingTransactions({
         workspaceId: officeWorkspaceId,
         period,
         dateFrom: activeRange.from,
@@ -1656,7 +1655,6 @@
         categoryId: null,
         projectId: null,
         type: null,
-        status: "pending",
         cursor: null,
         limit: TABLE_PAGE_SIZE
       });
