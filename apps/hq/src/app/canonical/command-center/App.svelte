@@ -1118,7 +1118,7 @@
 <WorkspaceShell
   workspace="command-center"
   brandLabel="ë • command"
-  homeHref="/console/command-center/dashboard"
+  homeHref="/console"
   navLabel="Command Center navigation"
   navItems={[]}
   navGroups={shellNavGroups}

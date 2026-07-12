@@ -459,7 +459,6 @@
       }))
     }))
   );
-  const distributionTabItems = $derived<readonly DistributionNavItem[]>(navItems);
   const handleShellNavigate = (href: string): void => {
     selectPage(href as DistributionPageId);
   };
@@ -4678,7 +4677,7 @@
 <WorkspaceShell
   workspace="distribution"
   brandLabel="ë • distribution"
-  homeHref="/console/distribution/dashboard"
+  homeHref="/console"
   navLabel="Navigation Distribution"
   navItems={[]}
   navGroups={shellNavGroups}
@@ -4688,23 +4687,6 @@
   onNavigate={handleShellNavigate}
 >
   <div class={`content distribution-page-${activePageId}`}>
-      <nav class="workspace-tab-bar ehq-edge-surface" aria-label="Sections Distribution">
-        {#each distributionTabItems as item (item.id)}
-          <a
-            class="workspace-tab"
-            class:active={activePageId === item.id}
-            href={item.id}
-            aria-current={activePageId === item.id ? "page" : undefined}
-            onclick={(event: MouseEvent): void => {
-              event.preventDefault();
-              selectPage(item.id);
-            }}
-          >
-            <span>{item.label}</span>
-          </a>
-        {/each}
-      </nav>
-
       <PageHeader
         workspace="distribution"
         eyebrow="Distribution"

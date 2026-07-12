@@ -60,12 +60,6 @@
   padding-bottom: var(--ehq-space-4);
 }
 
-/* Keep a single navigation system (left shell menu). */
-.workspace-tab-bar,
-.office-tab-bar {
-  display: none;
-}
-
 :is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .nav-item.active {
   background: var(--ehq-surface-high);
   border-color: var(--ehq-workspace-accent-border);
@@ -143,9 +137,3 @@
   }
 }
 
-@media (max-width: 640px) {
-  .workspace-tab-bar,
-  .office-tab-bar {
-    display: none;
-  }
-}

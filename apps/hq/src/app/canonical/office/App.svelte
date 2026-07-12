@@ -420,9 +420,6 @@
       }))
     }))
   );
-  const officeTabItems = $derived<readonly OfficeNavItem[]>(
-    officeNavItems.filter((item: OfficeNavItem): boolean => item.id !== "waveInvoices")
-  );
   const handleShellNavigate = (href: string): void => {
     selectPage(href as OfficePageId);
   };
@@ -4268,7 +4265,7 @@
 <WorkspaceShell
   workspace="office"
   brandLabel="ë • office"
-  homeHref="/console/office/dashboard"
+  homeHref="/console"
   navLabel="Office navigation"
   navItems={[]}
   navGroups={shellNavGroups}
@@ -4278,23 +4275,6 @@
   onNavigate={handleShellNavigate}
 >
     <div class={`content office-page-${activePageId}`}>
-      <nav class="office-tab-bar ehq-edge-surface" aria-label="Office sections">
-        {#each officeTabItems as item (item.id)}
-          <a
-            class="office-tab"
-            class:active={activePageId === item.id}
-            href={item.id}
-            aria-current={activePageId === item.id ? "page" : undefined}
-            onclick={(event: MouseEvent): void => {
-              event.preventDefault();
-              selectPage(item.id);
-            }}
-          >
-            <span>{item.label}</span>
-          </a>
-        {/each}
-      </nav>
-
       <PageHeader
         workspace="office"
         eyebrow="Office"
