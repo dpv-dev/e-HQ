@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import type { Snippet } from "svelte";
   import Icon from "./Icon.svelte";
   import type { IconName } from "./icons.js";
@@ -26,7 +27,9 @@
 
   const props: Props = $props();
   let sessionMenuOpen = $state(false);
+  let navCollapsed = $state(true);
   const showWorkspaceNav = $derived(props.showWorkspaceNav ?? true);
+  const collapseStorageKey = $derived(`ehq-shell-nav-collapsed:${props.workspace}`);
 
   const moduleLinks = $derived<readonly { readonly id: WorkspaceKind; readonly label: string; readonly href: string; readonly icon: IconName }[]>([
     { id: "command-center", label: "Command Center", href: "/console/command-center/dashboard", icon: "home" },
@@ -37,6 +40,18 @@
   const navGroupList = $derived<readonly WorkspaceNavGroup[]>(
     props.navGroups !== null ? props.navGroups : [{ id: "default", label: "", items: props.navItems }]
   );
+
+  onMount((): void => {
+    navCollapsed = props.workspace !== "command-center";
+    const raw = window.localStorage.getItem(collapseStorageKey);
+    if (raw === "0") {
+      navCollapsed = false;
+      return;
+    }
+    if (raw === "1") {
+      navCollapsed = true;
+    }
+  });
 
   function handleNavClick(item: WorkspaceNavItem, event: MouseEvent): void {
     if (props.onNavigate === null || item.disabled) {
@@ -60,9 +75,14 @@
 
     props.onSignOut();
   }
+
+  function toggleNavCollapse(): void {
+    navCollapsed = !navCollapsed;
+    window.localStorage.setItem(collapseStorageKey, navCollapsed ? "1" : "0");
+  }
 </script>
 
-<div class={`ehq-workspace-shell ehq-workspace-${props.workspace}`}>
+<div class={`ehq-workspace-shell ehq-workspace-${props.workspace} ${navCollapsed ? "shell-nav-collapsed" : ""}`}>
   <aside>
     <a class="shell-mark" href={props.homeHref} aria-label={`${props.brandLabel} home`}>ë</a>
 
@@ -95,6 +115,7 @@
               href={item.disabled ? undefined : item.href}
               aria-current={item.active ? "page" : undefined}
               aria-disabled={item.disabled}
+              title={item.label}
               onclick={(event: MouseEvent): void => handleNavClick(item, event)}
             >
               {#if item.icon !== ""}
@@ -125,6 +146,16 @@
 
   <div class="shell-main">
     <header class="shell-topbar">
+      <button
+        class="shell-collapse"
+        type="button"
+        aria-label={navCollapsed ? "Expand left menu" : "Collapse left menu"}
+        aria-expanded={!navCollapsed}
+        title={navCollapsed ? "Expand menu" : "Collapse menu"}
+        onclick={toggleNavCollapse}
+      >
+        <Icon name={navCollapsed ? "arrow-right" : "arrow-left"} size={16} strokeWidth={1.8} />
+      </button>
       <a class="shell-title" href={props.homeHref}>{props.brandLabel}</a>
       <div class="shell-search" aria-hidden="true">
         <span>Go to a section</span>
@@ -173,6 +204,10 @@
     color: var(--ehq-text);
     display: grid;
     grid-template-columns: var(--ehq-shell-sidebar-width) minmax(0, 1fr);
+  }
+
+  .ehq-workspace-shell.shell-nav-collapsed {
+    grid-template-columns: var(--ehq-shell-sidebar-collapsed-width) minmax(0, 1fr);
   }
 
   aside {
@@ -359,6 +394,55 @@
     grid-template-rows: var(--ehq-shell-topbar-height) 1fr;
   }
 
+  .shell-collapse {
+    width: 34px;
+    height: 34px;
+    border: 1px solid var(--ehq-border);
+    border-radius: var(--ehq-radius-pill);
+    background: var(--ehq-surface);
+    color: var(--ehq-text-muted);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .shell-collapse:hover {
+    border-color: var(--ehq-yellow-border);
+    color: var(--ehq-yellow);
+  }
+
+  .shell-nav-collapsed aside {
+    padding: var(--ehq-space-4) var(--ehq-space-2);
+    justify-items: center;
+  }
+
+  .shell-nav-collapsed .module-item {
+    grid-template-columns: 16px;
+    justify-content: center;
+    padding: 0;
+    width: 38px;
+  }
+
+  .shell-nav-collapsed .module-item small,
+  .shell-nav-collapsed .nav-label,
+  .shell-nav-collapsed .nav-item strong,
+  .shell-nav-collapsed .nav-group,
+  .shell-nav-collapsed .shell-status {
+    display: none;
+  }
+
+  .shell-nav-collapsed .nav-item {
+    grid-template-columns: 20px;
+    justify-content: center;
+    padding: 0;
+    width: 42px;
+    min-height: 42px;
+  }
+
+  .shell-nav-collapsed .shell-foot {
+    justify-items: center;
+  }
+
   .shell-topbar {
     padding: 0 var(--ehq-space-5);
     border-bottom: 1px solid var(--ehq-border-soft);
@@ -533,6 +617,14 @@
       justify-content: center;
       padding: 0;
       width: 38px;
+    }
+
+    .shell-nav-collapsed {
+      grid-template-columns: 62px minmax(0, 1fr);
+    }
+
+    .shell-nav-collapsed .nav-item {
+      width: 40px;
     }
 
     .shell-topbar {

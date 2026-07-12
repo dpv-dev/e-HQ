@@ -78,4 +78,26 @@
 
   --ehq-workspace-office: var(--orb-cyan);
   --ehq-workspace-office-bg: var(--orb-cyan-muted);
+
+  /* Console core defaults (overridden by workspace skins below). */
+  --ehq-workspace-accent: var(--ehq-yellow);
+  --ehq-workspace-accent-bg: var(--ehq-yellow-muted);
+}
+
+/* Office skin: yellow-forward finance cockpit. */
+.ehq-workspace-shell.ehq-workspace-office {
+  --ehq-workspace-accent: var(--ehq-yellow);
+  --ehq-workspace-accent-bg: var(--ehq-yellow-muted);
+}
+
+/* Distribution skin: cooler accent over the same shell core. */
+.ehq-workspace-shell.ehq-workspace-distribution {
+  --ehq-workspace-accent: var(--orb-cyan);
+  --ehq-workspace-accent-bg: var(--orb-cyan-muted);
+}
+
+/* Command Center skin: keep amber focus for admin actions. */
+.ehq-workspace-shell.ehq-workspace-command-center {
+  --ehq-workspace-accent: var(--ehq-yellow);
+  --ehq-workspace-accent-bg: var(--ehq-yellow-muted);
 }

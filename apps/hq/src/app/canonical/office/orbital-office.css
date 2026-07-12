@@ -249,16 +249,16 @@
   box-shadow: var(--orb-elev-2, 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 16px 34px rgba(0, 0, 0, 0.4));
 }
 
-.ehq-workspace-shell.ehq-workspace-office {
+.ehq-workspace-shell.shell-nav-collapsed {
   grid-template-columns: 76px minmax(0, 1fr);
 }
 
-.ehq-workspace-shell.ehq-workspace-office aside {
+.ehq-workspace-shell.shell-nav-collapsed aside {
   padding: var(--ehq-space-4) 0;
   justify-items: center;
 }
 
-.ehq-workspace-shell.ehq-workspace-office nav {
+.ehq-workspace-shell.shell-nav-collapsed nav {
   padding: 0;
   border: 0;
   border-radius: 0;
@@ -266,14 +266,14 @@
   background: transparent;
 }
 
-.ehq-workspace-shell.ehq-workspace-office .nav-group,
-.ehq-workspace-shell.ehq-workspace-office .nav-label,
-.ehq-workspace-shell.ehq-workspace-office .nav-item strong,
-.ehq-workspace-shell.ehq-workspace-office .shell-status {
+.ehq-workspace-shell.shell-nav-collapsed .nav-group,
+.ehq-workspace-shell.shell-nav-collapsed .nav-label,
+.ehq-workspace-shell.shell-nav-collapsed .nav-item strong,
+.ehq-workspace-shell.shell-nav-collapsed .shell-status {
   display: none;
 }
 
-.ehq-workspace-shell.ehq-workspace-office .nav-item {
+.ehq-workspace-shell.shell-nav-collapsed .nav-item {
   min-height: 46px;
   width: 52px;
   padding: 0;
@@ -282,7 +282,7 @@
   border-radius: var(--ehq-radius-md);
 }
 
-.ehq-workspace-shell.ehq-workspace-office .shell-foot {
+.ehq-workspace-shell.shell-nav-collapsed .shell-foot {
   justify-items: center;
 }
 
@@ -337,11 +337,11 @@
 }
 
 @media (max-width: 980px) {
-  .ehq-workspace-shell.ehq-workspace-office {
+  .ehq-workspace-shell.shell-nav-collapsed {
     grid-template-columns: 62px minmax(0, 1fr);
   }
 
-  .ehq-workspace-shell.ehq-workspace-office .nav-item {
+  .ehq-workspace-shell.shell-nav-collapsed .nav-item {
     width: 44px;
   }
 }
