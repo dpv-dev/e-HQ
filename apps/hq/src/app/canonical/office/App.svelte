@@ -45,6 +45,8 @@
     type OfficeDepartmentPnl,
     type OfficeDivisionPnl,
     type OfficeGlobalPnl,
+    type OfficeLedgerBulkRow,
+    type OfficeLedgerBulkPreviewResponse,
     type OfficePlanComptableCategoryNode,
     type OfficePlanComptableNode,
     type OfficePnlProjectionRow,
@@ -418,6 +420,9 @@
       }))
     }))
   );
+  const officeTabItems = $derived<readonly OfficeNavItem[]>(
+    officeNavItems.filter((item: OfficeNavItem): boolean => item.id !== "waveInvoices")
+  );
   const handleShellNavigate = (href: string): void => {
     selectPage(href as OfficePageId);
   };
@@ -499,6 +504,11 @@
   let createDirection = $state<"expense" | "income">("expense");
   let cashflowImportRecords = $state<readonly Readonly<Record<string, string>>[]>([]);
   let cashflowImportMessage = $state("Import a cashflow CSV (Month, Inflow, Outflow, ClosingBalance, Currency).");
+  let ledgerBulkRows = $state<readonly OfficeLedgerBulkRow[]>([]);
+  let ledgerBulkPreviewState = $state<ApiRequestState<OfficeLedgerBulkPreviewResponse>>(
+    createIdleState<OfficeLedgerBulkPreviewResponse>()
+  );
+  let ledgerBulkMessage = $state("Import classified ledger CSV (legacyId/externalId, occurredOn, type, amount, currency, description).");
   let importState = $state<ImportUiState>({
     status: "idle",
     source: "mcb",
@@ -737,6 +747,9 @@
   const reconciliationStatusPoints = $derived(createReconciliationStatusPoints(reconciliationRows));
   const reconciliationOperationsKpis = $derived(createReconciliationOperationsKpis(reconciliationOperationsState));
   const pendingStatusPoints = $derived(createPendingStatusPoints(pendingRows));
+  const ledgerBulkPreview = $derived(
+    ledgerBulkPreviewState.status === "success" ? ledgerBulkPreviewState.data : null
+  );
   const auditActionPoints = $derived(createAuditActionPoints(auditRows));
 
   onMount((): (() => void) => {
@@ -1758,6 +1771,151 @@
     } catch (error: unknown) {
       cashflowImportMessage = getErrorMessage(error);
     }
+  }
+
+  async function handleLedgerBulkFile(event: Event): Promise<void> {
+    const input = event.target instanceof HTMLInputElement ? event.target : null;
+    const file = input?.files?.item(0) ?? null;
+    if (file === null) {
+      return;
+    }
+
+    try {
+      const records = parseCsvRecords(await file.text());
+      const rows = normalizeLedgerBulkRows(records);
+      if (rows.length === 0) {
+        ledgerBulkRows = [];
+        ledgerBulkPreviewState = createIdleState<OfficeLedgerBulkPreviewResponse>();
+        ledgerBulkMessage = "No valid ledger row found. Required: legacyId/externalId, occurredOn, type, amount, currency, description.";
+        return;
+      }
+
+      ledgerBulkRows = rows;
+      await previewLedgerBulkRows(rows);
+    } catch (error: unknown) {
+      ledgerBulkRows = [];
+      ledgerBulkPreviewState = createErrorState<OfficeLedgerBulkPreviewResponse>(error);
+      ledgerBulkMessage = getErrorMessage(error);
+    }
+  }
+
+  async function previewLedgerBulkRows(rows: readonly OfficeLedgerBulkRow[]): Promise<void> {
+    ledgerBulkPreviewState = createLoadingState<OfficeLedgerBulkPreviewResponse>();
+
+    try {
+      const preview = await client.office.previewLedgerBulk(
+        { workspaceId: officeWorkspaceId, rows },
+        { idempotencyKey: createIdempotencyKey("ledger-bulk-preview") }
+      );
+      ledgerBulkPreviewState = createSuccessState<OfficeLedgerBulkPreviewResponse>(preview);
+      ledgerBulkMessage = `${preview.acceptedRowCount} accepted · ${preview.rejectedRowCount} rejected · ${preview.validatedRowCount} will validate.`;
+    } catch (error: unknown) {
+      ledgerBulkPreviewState = createErrorState<OfficeLedgerBulkPreviewResponse>(error);
+      ledgerBulkMessage = getErrorMessage(error);
+    }
+  }
+
+  async function confirmLedgerBulkImport(): Promise<void> {
+    if (ledgerBulkRows.length === 0) {
+      return;
+    }
+
+    try {
+      const receipt = await client.office.confirmLedgerBulk(
+        { workspaceId: officeWorkspaceId, rows: ledgerBulkRows },
+        { idempotencyKey: createIdempotencyKey("ledger-bulk-confirm") }
+      );
+      actionReceipt = receipt;
+      ledgerBulkRows = [];
+      ledgerBulkPreviewState = createIdleState<OfficeLedgerBulkPreviewResponse>();
+      ledgerBulkMessage = `${receipt.upsertedRowCount} ledger row(s) upserted.`;
+      await Promise.all([
+        loadTransactions(),
+        loadPendingTransactions(),
+        loadDashboard(),
+        loadDashboardAnalytics(),
+        refreshReconciliationViews()
+      ]);
+    } catch (error: unknown) {
+      ledgerBulkMessage = getErrorMessage(error);
+    }
+  }
+
+  function normalizeLedgerBulkRows(rows: readonly Readonly<Record<string, string>>[]): readonly OfficeLedgerBulkRow[] {
+    const normalized: OfficeLedgerBulkRow[] = [];
+
+    for (const raw of rows) {
+      const legacyId = parseOptionalNumber(raw.legacyId ?? raw.legacy_id ?? raw.tx_id);
+      const externalId = parseOptionalNumber(raw.externalId ?? raw.external_id);
+      const occurredOn = nullableText(raw.occurredOn ?? raw.occurred_on ?? raw.date ?? raw.transactionDate);
+      const type = normalizeLedgerType(raw.type ?? raw.direction ?? raw.sens);
+      const amount = nullableText(raw.amount ?? raw.amountMinor ?? raw.amount_minor ?? raw.value);
+      const currency = normalizeLedgerCurrency(raw.currency ?? "MUR");
+      const description = nullableText(raw.description ?? raw.label ?? raw.libelle);
+
+      if ((legacyId === undefined && externalId === undefined) || occurredOn === null || type === null || amount === null || currency === null || description === null) {
+        continue;
+      }
+
+      normalized.push({
+        ...(legacyId === undefined ? {} : { legacyId }),
+        ...(externalId === undefined ? {} : { externalId }),
+        occurredOn,
+        type,
+        amount,
+        currency,
+        description,
+        departmentId: nullableText(raw.departmentId),
+        divisionId: nullableText(raw.divisionId),
+        categoryId: nullableText(raw.categoryId),
+        departmentName: nullableText(raw.departmentName ?? raw.department),
+        divisionName: nullableText(raw.divisionName ?? raw.division),
+        categoryName: nullableText(raw.categoryName ?? raw.category),
+        partnerName: nullableText(raw.partnerName ?? raw.partner),
+        accountCode: nullableText(raw.accountCode ?? raw.account_code),
+        accountLabel: nullableText(raw.accountLabel ?? raw.account_label),
+        projectId: nullableText(raw.projectId)
+      });
+    }
+
+    return normalized;
+  }
+
+  function normalizeLedgerType(value: string | undefined): "income" | "expense" | null {
+    if (value === undefined) {
+      return null;
+    }
+
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "income" || normalized === "credit") {
+      return "income";
+    }
+    if (normalized === "expense" || normalized === "debit") {
+      return "expense";
+    }
+    return null;
+  }
+
+  function nullableText(value: string | undefined): string | null {
+    if (value === undefined) {
+      return null;
+    }
+    const trimmed = value.trim();
+    return trimmed.length === 0 ? null : trimmed;
+  }
+
+  function parseOptionalNumber(value: string | undefined): number | undefined {
+    const text = nullableText(value);
+    if (text === null) {
+      return undefined;
+    }
+    const parsed = Number.parseInt(text, 10);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+
+  function normalizeLedgerCurrency(value: string): CurrencyCode | null {
+    const normalized = value.trim().toUpperCase();
+    return /^[A-Z]{3}$/u.test(normalized) ? (normalized as CurrencyCode) : null;
   }
 
   function selectPage(pageId: OfficePageId): void {
@@ -4116,6 +4274,7 @@
   navLabel="Office navigation"
   navItems={[]}
   navGroups={shellNavGroups}
+  showWorkspaceNav={false}
   statusLabel="eof/v1"
   statusValue={writesEnabled ? "writes enabled" : "live reads"}
   userInitial={session.initials}
@@ -4126,6 +4285,23 @@
   onSignOut={onLogout}
 >
     <div class={`content office-page-${activePageId}`}>
+      <nav class="office-tab-bar ehq-edge-surface" aria-label="Office sections">
+        {#each officeTabItems as item (item.id)}
+          <a
+            class="office-tab"
+            class:active={activePageId === item.id}
+            href={item.id}
+            aria-current={activePageId === item.id ? "page" : undefined}
+            onclick={(event: MouseEvent): void => {
+              event.preventDefault();
+              selectPage(item.id);
+            }}
+          >
+            <span>{item.label}</span>
+          </a>
+        {/each}
+      </nav>
+
       <PageHeader
         workspace="office"
         eyebrow="Office"
@@ -4692,6 +4868,25 @@
           <Button label="Classify selection" variant="secondary" size="medium" type="button" disabled={!writesEnabled || selectedPendingIds.length === 0 || pendingClassifyCategoryId.length === 0} loading={false} locked={false} focus={false} ariaLabel="Classify selection" title={writeDisabledTitle()} onclick={classifySelectedPending} />
           <Button label="Validate selection" variant="primary" size="medium" type="button" disabled={!writesEnabled || selectedPendingIds.length === 0} loading={false} locked={false} focus={false} ariaLabel="Validate selection" title={writeDisabledTitle()} onclick={bulkValidatePending} />
           <span class="ehq-type-label-mono">{selectedPendingIds.length} selected</span>
+        </section>
+
+        <section class="office-edit-panel ehq-edge-surface" aria-label="Bulk ledger upsert">
+          <div class="office-edit-grid">
+            <label class="office-edit-wide">
+              <span class="ehq-type-label-mono">Bulk ledger CSV (legacyId/externalId, occurredOn, type, amount, currency, description)</span>
+              <input type="file" accept="text/csv,.csv" onchange={handleLedgerBulkFile} />
+            </label>
+          </div>
+          <div class="office-edit-actions">
+            <span class="ehq-type-label-mono">{ledgerBulkMessage}</span>
+            <Button label="Confirm ledger upsert" variant="primary" size="medium" type="button" disabled={!writesEnabled || ledgerBulkRows.length === 0 || ledgerBulkPreview === null || ledgerBulkPreview.acceptedRowCount === 0} loading={false} locked={false} focus={false} ariaLabel="Confirm ledger upsert" title={writeDisabledTitle()} onclick={confirmLedgerBulkImport} />
+          </div>
+          {#if ledgerBulkPreview !== null}
+            <div class="state-copy">
+              <strong>Preview</strong>
+              <span>{ledgerBulkPreview.acceptedRowCount} accepted · {ledgerBulkPreview.rejectedRowCount} rejected · {ledgerBulkPreview.validatedRowCount} validated.</span>
+            </div>
+          {/if}
         </section>
 
         <section class="dashboard-grid">

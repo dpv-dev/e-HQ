@@ -36,6 +36,9 @@ import type {
   OfficeGlobalPnlQuery,
   OfficeIntegrityCheckAllResponse,
   OfficeIntegrityCheckQuery,
+  OfficeLedgerBulkConfirmResponse,
+  OfficeLedgerBulkPreviewResponse,
+  OfficeLedgerBulkRequest,
   OfficePartnerClassificationSuggestion,
   OfficePartnerDetailQuery,
   OfficePartnerListItem,
@@ -110,6 +113,14 @@ export interface OfficeApiClient {
     request: { readonly workspaceId: EntityId },
     options: WriteRequestOptions
   ) => Promise<ApiMutationReceipt>;
+  readonly previewLedgerBulk: (
+    request: OfficeLedgerBulkRequest,
+    options: WriteRequestOptions
+  ) => Promise<OfficeLedgerBulkPreviewResponse>;
+  readonly confirmLedgerBulk: (
+    request: OfficeLedgerBulkRequest,
+    options: WriteRequestOptions
+  ) => Promise<OfficeLedgerBulkConfirmResponse>;
   readonly getPlanComptable: (query: OfficePlanComptableQuery) => Promise<readonly OfficePlanComptableNode[]>;
   readonly listPlanComptableNodes: (query: OfficePlanComptableNodesQuery) => Promise<PageResult<OfficePlanComptableNode>>;
   readonly createPlanComptableNode: (
@@ -350,6 +361,16 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
         request,
         options.idempotencyKey
       ),
+    previewLedgerBulk: (
+      request: OfficeLedgerBulkRequest,
+      options: WriteRequestOptions
+    ): Promise<OfficeLedgerBulkPreviewResponse> =>
+      transport.post<OfficeLedgerBulkPreviewResponse>("transactions/bulk-upsert/preview", request, options.idempotencyKey),
+    confirmLedgerBulk: (
+      request: OfficeLedgerBulkRequest,
+      options: WriteRequestOptions
+    ): Promise<OfficeLedgerBulkConfirmResponse> =>
+      transport.post<OfficeLedgerBulkConfirmResponse>("transactions/bulk-upsert/confirm", request, options.idempotencyKey),
     getPlanComptable: (query: OfficePlanComptableQuery): Promise<readonly OfficePlanComptableNode[]> =>
       transport.get<readonly OfficePlanComptableNode[]>("plan-comptable", {
         workspaceId: query.workspaceId,

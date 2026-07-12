@@ -10,6 +10,8 @@
     type ApiRequestState,
     type ApiRunReceipt,
     type AllocationRunSummary,
+    type DistributionAllocationRow,
+    type DistributionAllocationTotal,
     type AuditLogEntry,
     type CurrencyCode,
     type DistributionAlias,
@@ -243,6 +245,10 @@
     { label: "En pause", value: "paused" },
     { label: "Terminé", value: "ended" }
   ];
+  const payeeStatusOptions: readonly SelectOption[] = [
+    { label: "Actif", value: "active" },
+    { label: "Inactif", value: "inactive" }
+  ];
   const revenueGroupOptions: readonly SelectOption[] = [
     { label: "Store", value: "store" },
     { label: "Ayant droit", value: "payee" },
@@ -312,6 +318,27 @@
     { label: "Verrou", align: "left", sortable: true },
     { label: "Entrée", align: "right", sortable: true },
     { label: "Alloué", align: "right", sortable: true },
+    { label: "Statut", align: "left", sortable: true }
+  ];
+  const allocationDetailColumns: readonly TableColumn[] = [
+    { label: "Payee", align: "left", sortable: true },
+    { label: "Statement", align: "left", sortable: true },
+    { label: "Brut", align: "right", sortable: true },
+    { label: "Recoupé", align: "right", sortable: true },
+    { label: "Net", align: "right", sortable: true },
+    { label: "Statut", align: "left", sortable: true }
+  ];
+  const allocationCurrencyColumns: readonly TableColumn[] = [
+    { label: "Devise", align: "left", sortable: true },
+    { label: "Brut", align: "right", sortable: true },
+    { label: "Recoupé", align: "right", sortable: true },
+    { label: "Net", align: "right", sortable: true },
+    { label: "Lignes", align: "right", sortable: true }
+  ];
+  const payeeColumns: readonly TableColumn[] = [
+    { label: "Nom", align: "left", sortable: true },
+    { label: "Email", align: "left", sortable: true },
+    { label: "Devise", align: "left", sortable: true },
     { label: "Statut", align: "left", sortable: true }
   ];
   const suspenseColumns: readonly TableColumn[] = [
@@ -432,6 +459,7 @@
       }))
     }))
   );
+  const distributionTabItems = $derived<readonly DistributionNavItem[]>(navItems);
   const handleShellNavigate = (href: string): void => {
     selectPage(href as DistributionPageId);
   };
@@ -459,6 +487,12 @@
   );
   let allocationsState = $state<ApiRequestState<PageResult<AllocationRunSummary>>>(
     createIdleState<PageResult<AllocationRunSummary>>()
+  );
+  let allocationDetailsState = $state<ApiRequestState<PageResult<DistributionAllocationRow>>>(
+    createIdleState<PageResult<DistributionAllocationRow>>()
+  );
+  let allocationTotalsState = $state<ApiRequestState<PageResult<DistributionAllocationTotal>>>(
+    createIdleState<PageResult<DistributionAllocationTotal>>()
   );
   let suspenseState = $state<ApiRequestState<PageResult<SuspenseItem>>>(createIdleState<PageResult<SuspenseItem>>());
   let statementsState = $state<ApiRequestState<PageResult<StatementSummary>>>(
@@ -537,6 +571,14 @@
   let trackReleaseIdInput = $state("");
   let trackStatusInput = $state<CatalogEntryStatus>("draft");
   let contractPanelOpen = $state(false);
+  let payeePanelOpen = $state(false);
+  let editingPayeeId = $state<string | null>(null);
+  let payeeNameInput = $state("");
+  let payeeEmailInput = $state("");
+  let payeeCurrencyInput = $state("MUR");
+  let payeeStatusInput = $state<"active" | "inactive">("active");
+  let payeeSubmitStatus = $state<RequestStatus>("idle");
+  let payeeSubmitMessage = $state<string | null>(null);
   let contractTitleInput = $state("");
   let contractPayeeIdInput = $state("");
   let contractStatusInput = $state<ContractStatus>("draft");
@@ -563,6 +605,9 @@
   let aliasTextInput = $state("");
   let aliasTargetTypeInput = $state<DistributionAliasTargetType>("unassigned");
   let aliasTargetIdInput = $state("");
+  let duplicateResolveId = $state<string | null>(null);
+  let duplicateKeepEarningId = $state("");
+  let duplicateResolveReason = $state("Resolved from Distribution duplicate panel");
   let fxRateSaveStatus = $state<RequestStatus>("idle");
   let fxRateSaveMessage = $state<string | null>(null);
   // Write failures land here (per page) so a transient mutation error never
@@ -595,6 +640,8 @@
   const contractRows = $derived(createContractRows(contracts, payees));
   const expenseRows = $derived(createExpenseRows(expenses));
   const allocationRows = $derived(createAllocationRows(allocationRuns));
+  const allocationDetailRows = $derived(createAllocationDetailRows(readPageItems(allocationDetailsState)));
+  const allocationCurrencyRows = $derived(createAllocationCurrencyRows(readPageItems(allocationTotalsState)));
   const suspenseTableRows = $derived(createSuspenseRows(suspenseItems));
   const statementRows = $derived(createStatementRows(statements));
   const paymentRows = $derived(createPaymentRows(payments));
@@ -608,6 +655,20 @@
   const reconBalanceRows = $derived(createReconBalanceRows(reconciliation));
   const aliases = $derived(readPageItems(aliasesState));
   const duplicates = $derived(readPageItems(duplicatesState));
+  const selectedDuplicate = $derived(
+    duplicates.find((row: DistributionDuplicate): boolean => row.id === duplicateResolveId) ?? null
+  );
+  const duplicateKeepOptions = $derived<readonly SelectOption[]>(
+    selectedDuplicate === null
+      ? [{ label: "Sélectionner la ligne à conserver", value: "" }]
+      : [
+          { label: "Sélectionner la ligne à conserver", value: "" },
+          ...selectedDuplicate.sampleIds.map((earningId: string, index: number): SelectOption => ({
+            label: `${selectedDuplicate.sampleLabels[index] ?? earningId}`,
+            value: earningId
+          }))
+        ]
+  );
   const auditEntries = $derived(readPageItems(auditLogState));
   const fxRates = $derived(readPageItems(fxRatesState));
   const aliasRows = $derived(createAliasRows(aliases));
@@ -716,6 +777,7 @@
       ? "Dépenses / recoupements"
       : `Dépenses / recoupements · ${selectedExpenseFilterContract.title}`
   );
+  const payeeRows = $derived(createPayeeRows(payees));
   const payeeSelectOptions = $derived<readonly SelectOption[]>(sortOptionsAlphabetically([
     { label: "Sélectionner un ayant droit", value: "" },
     ...payees.map((payee: PayeeSummary): SelectOption => ({ label: `${payee.displayName} · ${payee.defaultCurrency}`, value: payee.id }))
@@ -748,6 +810,9 @@
   const contractRowActions: readonly TableRowAction[] = [
     { label: "Remplacer le jeu de règles", onAction: openContractRulePanel }
   ];
+  const payeeRowActions: readonly TableRowAction[] = [
+    { label: "Modifier", onAction: openPayeePanel }
+  ];
   const statementRowActions: readonly TableRowAction[] = [
     { label: "Imprimer PDF", onAction: printStatementPdf }
   ];
@@ -779,7 +844,7 @@
     { label: "Modifier", onAction: openAliasEditor }
   ];
   const duplicateRowActions: readonly TableRowAction[] = [
-    { label: "Résoudre", onAction: resolveDuplicateRow }
+    { label: "Résoudre", onAction: openDuplicateResolvePanel }
   ];
 
   onMount((): (() => void) => {
@@ -1515,8 +1580,42 @@
         })
       );
       setTablePaginationError("allocations", null);
+      if (selectedRunId !== null) {
+        await loadAllocationDetails(selectedRunId);
+      }
     } catch (error: unknown) {
       allocationsState = createErrorState<PageResult<AllocationRunSummary>>(error);
+    }
+  }
+
+  async function loadAllocationDetails(runId: string): Promise<void> {
+    allocationDetailsState = beginReload<PageResult<DistributionAllocationRow>>(allocationDetailsState);
+    allocationTotalsState = beginReload<PageResult<DistributionAllocationTotal>>(allocationTotalsState);
+
+    try {
+      const [detailsPage, totalsPage] = await Promise.all([
+        client.distribution.listAllocations({
+          workspaceId: distributionWorkspaceId,
+          runId,
+          payeeId: null,
+          status: null,
+          cursor: null,
+          limit: TABLE_PAGE_SIZE
+        }),
+        client.distribution.listAllocationsByCurrency({
+          workspaceId: distributionWorkspaceId,
+          runId,
+          payeeId: null,
+          status: null,
+          cursor: null,
+          limit: TABLE_PAGE_SIZE
+        })
+      ]);
+      allocationDetailsState = createSuccessState<PageResult<DistributionAllocationRow>>(detailsPage);
+      allocationTotalsState = createSuccessState<PageResult<DistributionAllocationTotal>>(totalsPage);
+    } catch (error: unknown) {
+      allocationDetailsState = createErrorState<PageResult<DistributionAllocationRow>>(error);
+      allocationTotalsState = createErrorState<PageResult<DistributionAllocationTotal>>(error);
     }
   }
 
@@ -2957,6 +3056,7 @@
 
     if (run === undefined) {
       return;
+    void loadAllocationDetails(runId);
     }
 
     selectedRunId = runId;
@@ -2966,6 +3066,114 @@
   function closeUnpostPanel(): void {
     selectedRunId = null;
     unpostReasonInput = "";
+    allocationDetailsState = createIdleState<PageResult<DistributionAllocationRow>>();
+    allocationTotalsState = createIdleState<PageResult<DistributionAllocationTotal>>();
+  }
+
+  function openPayeePanel(payeeId: string): void {
+    const payee = payees.find((candidate: PayeeSummary): boolean => candidate.id === payeeId) ?? null;
+
+    if (payee === null) {
+      return;
+    }
+
+    editingPayeeId = payee.id;
+    payeeNameInput = payee.displayName;
+    payeeEmailInput = payee.email ?? "";
+    payeeCurrencyInput = payee.defaultCurrency;
+    payeeStatusInput = payee.status;
+    payeeSubmitStatus = "idle";
+    payeeSubmitMessage = null;
+    payeePanelOpen = true;
+  }
+
+  function openCreatePayeePanel(): void {
+    editingPayeeId = null;
+    payeeNameInput = "";
+    payeeEmailInput = "";
+    payeeCurrencyInput = "MUR";
+    payeeStatusInput = "active";
+    payeeSubmitStatus = "idle";
+    payeeSubmitMessage = null;
+    payeePanelOpen = true;
+  }
+
+  function closePayeePanel(): void {
+    payeePanelOpen = false;
+    editingPayeeId = null;
+    payeeSubmitStatus = "idle";
+    payeeSubmitMessage = null;
+  }
+
+  async function submitPayee(): Promise<void> {
+    if (payeeSubmitStatus === "loading") {
+      return;
+    }
+
+    if (!writesEnabled) {
+      payeeSubmitStatus = "error";
+      payeeSubmitMessage = writeGateMessage;
+      return;
+    }
+
+    const displayName = payeeNameInput.trim();
+    const defaultCurrency = normalizeCurrencyCode(payeeCurrencyInput);
+    if (displayName.length === 0 || defaultCurrency === null) {
+      payeeSubmitStatus = "error";
+      payeeSubmitMessage = "Nom et devise ISO sont requis.";
+      return;
+    }
+
+    payeeSubmitStatus = "loading";
+    payeeSubmitMessage = null;
+
+    try {
+      await client.distribution.createPayee(
+        {
+          workspaceId: distributionWorkspaceId,
+          id: editingPayeeId,
+          displayName,
+          email: payeeEmailInput.trim().length > 0 ? payeeEmailInput.trim() : null,
+          status: payeeStatusInput,
+          defaultCurrency
+        },
+        {
+          idempotencyKey: createIdempotencyKey("payee-upsert")
+        }
+      );
+      payeeSubmitStatus = "success";
+      payeeSubmitMessage = editingPayeeId === null ? "Ayant droit créé." : "Ayant droit mis à jour.";
+      await Promise.all([loadPayees(), loadContracts(), loadRevenue(), loadStatements(), loadSettings(), loadAuditLog()]);
+      if (editingPayeeId === null) {
+        payeeNameInput = "";
+        payeeEmailInput = "";
+        payeeCurrencyInput = "MUR";
+        payeeStatusInput = "active";
+      }
+    } catch (error: unknown) {
+      payeeSubmitStatus = "error";
+      payeeSubmitMessage = getErrorMessage(error);
+    }
+  }
+
+  function updatePayeeName(value: string): void {
+    payeeNameInput = value;
+  }
+
+  function updatePayeeEmail(value: string): void {
+    payeeEmailInput = value;
+  }
+
+  function updatePayeeCurrency(value: string): void {
+    payeeCurrencyInput = value;
+  }
+
+  function updatePayeeStatus(value: string): void {
+    if (value === "inactive") {
+      payeeStatusInput = "inactive";
+      return;
+    }
+    payeeStatusInput = "active";
   }
 
   async function unpostAllocationRun(): Promise<void> {
@@ -3586,7 +3794,39 @@
     }
   }
 
-  async function resolveDuplicateRow(duplicateId: string): Promise<void> {
+  function openDuplicateResolvePanel(duplicateId: string): void {
+    const duplicate = duplicates.find((row: DistributionDuplicate): boolean => row.id === duplicateId) ?? null;
+
+    if (duplicate === null) {
+      return;
+    }
+
+    duplicateResolveId = duplicate.id;
+    duplicateKeepEarningId = duplicate.sampleIds[0] ?? "";
+    duplicateResolveReason = "Resolved from Distribution duplicate panel";
+  }
+
+  function closeDuplicateResolvePanel(): void {
+    duplicateResolveId = null;
+    duplicateKeepEarningId = "";
+    duplicateResolveReason = "Resolved from Distribution duplicate panel";
+  }
+
+  function updateDuplicateKeepEarning(value: string): void {
+    duplicateKeepEarningId = value;
+  }
+
+  function updateDuplicateResolveReason(value: string): void {
+    duplicateResolveReason = value;
+  }
+
+  async function resolveDuplicateRow(): Promise<void> {
+    const duplicateId = duplicateResolveId;
+
+    if (duplicateId === null || duplicateKeepEarningId.trim() === "") {
+      return;
+    }
+
     clearRunReceipt();
 
     try {
@@ -3594,14 +3834,15 @@
         duplicateId,
         {
           workspaceId: distributionWorkspaceId,
-          keepEarningId: null,
-          reason: "Operator duplicate resolution from Distribution UI"
+          keepEarningId: duplicateKeepEarningId,
+          reason: duplicateResolveReason.trim().length === 0 ? null : duplicateResolveReason.trim()
         },
         {
           idempotencyKey: createIdempotencyKey(`duplicate-resolve-${duplicateId}`)
         }
       );
       mutationReceiptPageId = activePageId;
+      closeDuplicateResolvePanel();
       await Promise.all([loadDuplicates(), loadReconciliation(), loadAuditLog()]);
     } catch (error: unknown) {
       reportActionError(error);
@@ -3813,6 +4054,45 @@
         { kind: "money", value: formatMicro(run.totalInputMicro), tone: "info" },
         { kind: "money", value: formatMicro(run.totalAllocatedMicro), tone: "success" },
         { kind: "badge", value: run.status, tone: run.status === "completed" ? "success" : "warning" }
+      ]
+    }));
+  }
+
+  function createAllocationDetailRows(items: readonly DistributionAllocationRow[]): readonly TableRow[] {
+    return items.map((row: DistributionAllocationRow): TableRow => ({
+      id: row.id,
+      cells: [
+        { kind: "text", value: row.payeeName, strong: true },
+        { kind: "text", value: row.trackTitle ?? row.trackId ?? "—", strong: false },
+        { kind: "money", value: formatMoney(row.grossShare, row.currency), tone: "info" },
+        { kind: "money", value: formatMoney(row.recoupmentApplied, row.currency), tone: "warning" },
+        { kind: "money", value: formatMoney(row.netPayable, row.currency), tone: moneyTone(row.netPayable) },
+        { kind: "badge", value: row.status, tone: row.status === "posted" || row.status === "statemented" ? "success" : row.status === "error" ? "error" : "warning" }
+      ]
+    }));
+  }
+
+  function createAllocationCurrencyRows(items: readonly DistributionAllocationTotal[]): readonly TableRow[] {
+    return items.map((row: DistributionAllocationTotal): TableRow => ({
+      id: row.currency,
+      cells: [
+        { kind: "badge", value: row.currency, tone: "muted" },
+        { kind: "money", value: formatMoney(row.grossShare, row.currency), tone: "info" },
+        { kind: "money", value: formatMoney(row.recoupmentApplied, row.currency), tone: "warning" },
+        { kind: "money", value: formatMoney(row.netPayable, row.currency), tone: moneyTone(row.netPayable) },
+        { kind: "text", value: "—", strong: false }
+      ]
+    }));
+  }
+
+  function createPayeeRows(items: readonly PayeeSummary[]): readonly TableRow[] {
+    return items.map((payee: PayeeSummary): TableRow => ({
+      id: payee.id,
+      cells: [
+        { kind: "text", value: payee.displayName, strong: true },
+        { kind: "text", value: payee.email ?? "—", strong: false },
+        { kind: "badge", value: payee.defaultCurrency, tone: "muted" },
+        { kind: "badge", value: payee.status, tone: payee.status === "active" ? "success" : "warning" }
       ]
     }));
   }
@@ -4403,6 +4683,7 @@
   navLabel="Navigation Distribution"
   navItems={[]}
   navGroups={shellNavGroups}
+  showWorkspaceNav={false}
   statusLabel="erh/v1"
   statusValue={writesEnabled ? "écriture activée" : "lecture seule"}
   userInitial={session.initials}
@@ -4413,6 +4694,23 @@
   onSignOut={onLogout}
 >
   <div class={`content distribution-page-${activePageId}`}>
+      <nav class="workspace-tab-bar ehq-edge-surface" aria-label="Sections Distribution">
+        {#each distributionTabItems as item (item.id)}
+          <a
+            class="workspace-tab"
+            class:active={activePageId === item.id}
+            href={item.id}
+            aria-current={activePageId === item.id ? "page" : undefined}
+            onclick={(event: MouseEvent): void => {
+              event.preventDefault();
+              selectPage(item.id);
+            }}
+          >
+            <span>{item.label}</span>
+          </a>
+        {/each}
+      </nav>
+
       <PageHeader
         workspace="distribution"
         eyebrow="Distribution"
@@ -4556,9 +4854,23 @@
       {:else if activePageId === "contracts"}
         <section class="contracts-actions ehq-edge-surface">
           <Button label="Nouveau contrat" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Nouveau contrat" onclick={openContractPanel} />
+          <Button label="Nouveau payee" variant="secondary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Nouveau payee" title={writeDisabledTitle()} onclick={openCreatePayeePanel} />
           <Button label="Enregistrer une dépense recoupable" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Enregistrer une dépense recoupable" title={writeDisabledTitle()} onclick={openExpensePanel} />
           <span>Les dépenses restent des données source; les corrections deviennent des overrides audités.</span>
         </section>
+        {#if payeePanelOpen}
+          <section class="form-panel ehq-edge-surface" aria-label="Créer ou éditer un payee">
+            <Input id="distribution-payee-name" label="Nom" value={payeeNameInput} placeholder="Nom complet" type="text" state="default" message="" oninput={updatePayeeName} />
+            <Input id="distribution-payee-email" label="Email" value={payeeEmailInput} placeholder="contact@example.com" type="email" state="default" message="" oninput={updatePayeeEmail} />
+            <Input id="distribution-payee-currency" label="Devise" value={payeeCurrencyInput} placeholder="MUR" type="text" state="default" message="" oninput={updatePayeeCurrency} />
+            <Select id="distribution-payee-status" label="Statut" value={payeeStatusInput} options={payeeStatusOptions} state="default" message="" onchange={updatePayeeStatus} />
+            <Button label={editingPayeeId === null ? "Créer le payee" : "Mettre à jour le payee"} variant="primary" size="medium" type="button" disabled={!writesEnabled || payeeNameInput.trim() === ""} loading={payeeSubmitStatus === "loading"} locked={false} focus={false} ariaLabel="Enregistrer le payee" title={writeDisabledTitle()} onclick={submitPayee} />
+            <Button label="Annuler" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Annuler la saisie payee" onclick={closePayeePanel} />
+            {#if payeeSubmitMessage !== null}
+              <Alert tone={payeeSubmitStatus === "error" ? "error" : "success"} title={payeeSubmitStatus === "error" ? "Erreur" : "Succès"} message={payeeSubmitMessage} dismissible={false} />
+            {/if}
+          </section>
+        {/if}
         {#if expensePanelOpen}
           <section class="form-panel ehq-edge-surface" aria-label="Enregistrer une dépense recoupable">
             <Select id="distribution-expense-contract" label="Contrat" value={expenseContractIdInput} options={expenseContractSelectOptions} state="default" message="" onchange={updateExpenseContract} />
@@ -4608,6 +4920,7 @@
           <Button label="Recharger les dépenses" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Recharger les dépenses du contrat sélectionné" onclick={loadExpenses} />
         </section>
         <section class="dashboard-grid">
+          <Table title="Ayants droit" columns={payeeColumns} rows={payeeRows} state={tableStateFor(payeesState.status, payeeRows.length)} actionLabel="" rowActions={payeeRowActions} />
           <Table title="Splits / contrats" columns={contractColumns} rows={contractRows} state={tableStateFor(contractsState.status, contracts.length)} actionLabel="" rowActions={contractRowActions} pagination={contractsPagination} />
           <Table title={expenseTableTitle} columns={expenseColumns} rows={expenseRows} state={tableStateFor(expensesState.status, expenses.length)} actionLabel="" pagination={expensesPagination} />
         </section>
@@ -4638,6 +4951,10 @@
           </section>
         {/if}
         <Table title="Runs d'allocation" columns={allocationColumns} rows={allocationRows} state={tableStateFor(allocationsState.status, allocationRuns.length)} actionLabel="" rowActions={allocationRowActions} pagination={allocationsPagination} />
+        <section class="dashboard-grid">
+          <Table title="Détail du run sélectionné" columns={allocationDetailColumns} rows={allocationDetailRows} state={tableStateFor(allocationDetailsState.status, allocationDetailRows.length)} actionLabel="" />
+          <Table title="Totaux par devise" columns={allocationCurrencyColumns} rows={allocationCurrencyRows} state={tableStateFor(allocationTotalsState.status, allocationCurrencyRows.length)} actionLabel="" />
+        </section>
       {:else if activePageId === "suspense"}
         <section class="filter-strip ehq-edge-surface" aria-label="Filtres de suspens">
           <Select id="distribution-suspense-status" label="Statut" value={suspenseStatusFilter} options={suspenseStatusOptions} state="default" message="" onchange={updateSuspenseStatus} />
@@ -4899,6 +5216,18 @@
             state="ready"
           />
         </section>
+        {#if selectedDuplicate !== null}
+          <section class="form-panel ehq-edge-surface" aria-label="Résoudre un doublon">
+            <div class="panel-context">
+              <strong>{selectedDuplicate.label}</strong>
+              <span>{selectedDuplicate.kind} · {selectedDuplicate.count} ligne(s)</span>
+            </div>
+            <Select id="distribution-duplicate-keep" label="Ligne à conserver" value={duplicateKeepEarningId} options={duplicateKeepOptions} state="default" message="" onchange={updateDuplicateKeepEarning} />
+            <Input id="distribution-duplicate-reason" label="Motif" value={duplicateResolveReason} placeholder="Motif d'exclusion" type="text" state="default" message="" oninput={updateDuplicateResolveReason} />
+            <Button label="Confirmer la résolution" variant="primary" size="medium" type="button" disabled={!writesEnabled || duplicateKeepEarningId.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Confirmer la résolution du doublon" title={writeDisabledTitle()} onclick={resolveDuplicateRow} />
+            <Button label="Annuler" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Annuler la résolution du doublon" onclick={closeDuplicateResolvePanel} />
+          </section>
+        {/if}
         {#if duplicates.length === 0 && duplicatesState.status === "success"}
           <section class="empty-state ehq-edge-surface">
             <strong>Aucun doublon détecté</strong>

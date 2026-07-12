@@ -439,6 +439,8 @@
       cells: [
         { kind: "text", value: projectReferenceLabel(project), strong: true },
         { kind: "text", value: project.ownerLabel, strong: false },
+        { kind: "text", value: project.description ?? "—", strong: false },
+        { kind: "badge", value: project.active ? "active" : "inactive", tone: project.active ? "success" : "muted" },
         { kind: "money", value: formatMoneyMicro(project.periodIncomeMicro), tone: "success" },
         { kind: "money", value: formatMoneyMicro(project.periodExpenseMicro), tone: "warning" },
         { kind: "money", value: formatMoneyMicro(project.netMicro), tone: moneyTone(project.netMicro) },
@@ -753,6 +755,8 @@
   const projectColumns: readonly TableColumn[] = [
     { label: "Project", align: "left", sortable: true },
     { label: "Owner", align: "left", sortable: true },
+    { label: "Description", align: "left", sortable: true },
+    { label: "Active", align: "left", sortable: true },
     { label: "Income", align: "right", sortable: true },
     { label: "Expense", align: "right", sortable: true },
     { label: "Net", align: "right", sortable: true },

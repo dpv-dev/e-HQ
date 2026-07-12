@@ -48,7 +48,9 @@
 }
 
 .ehq-workspace-shell:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .shell-topbar {
-  position: relative;
+  position: sticky;
+  top: 0;
+  z-index: 12;
   min-height: 76px;
   padding: 12px 24px;
   border-bottom: 1px solid var(--ehq-border-soft);
@@ -245,6 +247,161 @@
 :is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-edge-surface:hover {
   --ehq-edge-border-color: var(--ehq-yellow-border);
   box-shadow: var(--orb-elev-2, 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 16px 34px rgba(0, 0, 0, 0.4));
+}
+
+.ehq-workspace-shell.ehq-workspace-office {
+  grid-template-columns: 76px minmax(0, 1fr);
+}
+
+.ehq-workspace-shell.ehq-workspace-office aside {
+  padding: var(--ehq-space-4) 0;
+  justify-items: center;
+}
+
+.ehq-workspace-shell.ehq-workspace-office nav {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
+.ehq-workspace-shell.ehq-workspace-office .nav-group,
+.ehq-workspace-shell.ehq-workspace-office .nav-label,
+.ehq-workspace-shell.ehq-workspace-office .nav-item strong,
+.ehq-workspace-shell.ehq-workspace-office .shell-status {
+  display: none;
+}
+
+.ehq-workspace-shell.ehq-workspace-office .nav-item {
+  min-height: 46px;
+  width: 52px;
+  padding: 0;
+  grid-template-columns: 20px;
+  justify-content: center;
+  border-radius: var(--ehq-radius-md);
+}
+
+.ehq-workspace-shell.ehq-workspace-office .shell-foot {
+  justify-items: center;
+}
+
+.workspace-tab-bar,
+.office-tab-bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  padding: 0 var(--ehq-space-2);
+  border-radius: var(--ehq-radius-md);
+  background: var(--ehq-surface);
+  scroll-snap-type: x proximity;
+}
+
+.workspace-tab-bar::-webkit-scrollbar,
+.office-tab-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.workspace-tab,
+.office-tab {
+  position: relative;
+  flex: none;
+  min-height: 44px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--ehq-text-muted);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  font-family: var(--ehq-font);
+  font-size: var(--ehq-type-menu-size);
+  white-space: nowrap;
+  scroll-snap-align: start;
+}
+
+.workspace-tab:hover,
+.office-tab:hover {
+  color: var(--ehq-text);
+}
+
+.workspace-tab.active,
+.office-tab.active {
+  color: var(--ehq-yellow);
+  border-bottom-color: var(--ehq-yellow);
+}
+
+@media (max-width: 980px) {
+  .ehq-workspace-shell.ehq-workspace-office {
+    grid-template-columns: 62px minmax(0, 1fr);
+  }
+
+  .ehq-workspace-shell.ehq-workspace-office .nav-item {
+    width: 44px;
+  }
+}
+
+@media (max-width: 768px) {
+  :is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .content {
+    gap: var(--ehq-space-3);
+    padding: 0 var(--ehq-space-3) var(--ehq-space-3);
+  }
+
+  .workspace-tab,
+  .office-tab {
+    min-height: 44px;
+    padding: 0 12px;
+    font-size: 0.83rem;
+  }
+
+  :is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .ehq-page-header h1 {
+    font-size: clamp(1.5rem, 1.2rem + 1.4vw, 2rem);
+  }
+}
+
+@media (max-width: 640px) {
+  .workspace-tab-bar,
+  .office-tab-bar {
+    top: 0;
+    min-height: 48px;
+    padding: 2px var(--ehq-space-2) 0;
+    margin-bottom: var(--ehq-space-2);
+  }
+
+  .workspace-tab,
+  .office-tab {
+    min-height: 46px;
+    padding: 0 14px;
+  }
+
+  .ehq-workspace-shell:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .shell-topbar {
+    min-height: 64px;
+    padding: 8px 12px;
+  }
+}
+
+@media (max-width: 390px) {
+  .workspace-tab-bar,
+  .office-tab-bar {
+    border-radius: var(--ehq-radius-sm);
+    padding-inline: 4px;
+  }
+
+  .workspace-tab,
+  .office-tab {
+    min-height: 42px;
+    padding: 0 10px;
+    font-size: 0.78rem;
+  }
+
+  :is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .content {
+    padding-inline: var(--ehq-space-2);
+  }
 }
 
 :is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .period-control,

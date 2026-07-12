@@ -39074,6 +39074,7 @@ var SENSITIVE_ACTIONS = /* @__PURE__ */ new Set([
   "command_center_integration_toggle",
   "command_center_settings_update",
   "command_center_user_permission_update",
+  "distribution_alias_upsert",
   "distribution_allocations_preview",
   "distribution_allocations_run",
   "distribution_allocations_unpost",
@@ -39081,7 +39082,9 @@ var SENSITIVE_ACTIONS = /* @__PURE__ */ new Set([
   "distribution_contract_expense_update",
   "distribution_contract_rules_update",
   "distribution_contract_upsert",
+  "distribution_duplicate_resolve",
   "distribution_fx_rates_save",
+  "distribution_financial_reconciliation_action",
   "distribution_identity_link",
   "distribution_import_confirm",
   "distribution_import_preview",
@@ -39966,6 +39969,88 @@ async function persistDistributionFxRates(tx, input) {
     `);
   }
 }
+async function persistDistributionAliasUpsert(tx, input) {
+  if (tx.kind === "memory") {
+    return;
+  }
+  const artistId = input.targetType === "artist" ? input.targetId : null;
+  const payeeId = input.targetType === "payee" ? input.targetId : null;
+  const labelId = input.targetType === "label" ? input.targetId : null;
+  const releaseId = input.targetType === "release" ? input.targetId : null;
+  const trackId = input.targetType === "track" ? input.targetId : null;
+  await tx.executor.execute(sql`
+    delete from catalog_aliases
+    where id = ${input.aliasId}
+      or lower(alias_text) = lower(${input.aliasText})
+  `);
+  await tx.executor.execute(sql`
+    insert into catalog_aliases (
+      id,
+      alias_text,
+      artist_id,
+      payee_id,
+      label_id,
+      release_id,
+      track_id
+    )
+    values (
+      ${input.aliasId},
+      ${input.aliasText},
+      ${artistId},
+      ${payeeId},
+      ${labelId},
+      ${releaseId},
+      ${trackId}
+    )
+  `);
+}
+async function persistDistributionDuplicateResolve(tx, input) {
+  if (tx.kind === "memory") {
+    return;
+  }
+  if (input.earningIds.length === 0) {
+    return;
+  }
+  const earningIds = sql.join(input.earningIds.map((earningId) => sql`${earningId}`), sql`, `);
+  await tx.executor.execute(sql`
+    update normalized_earnings
+    set
+      calculation_status = 'excluded',
+      updated_at = now()
+    where id in (${earningIds})
+  `);
+}
+async function persistDistributionPayeeBalanceAdjustments(tx, input) {
+  if (tx.kind === "memory") {
+    return;
+  }
+  for (const row of input.rows) {
+    await tx.executor.execute(sql`
+      insert into payee_balances (
+        id,
+        payee_id,
+        statement_id,
+        currency,
+        opening_balance,
+        period_net,
+        closing_balance,
+        movement_type,
+        created_at
+      )
+      values (
+        ${row.id},
+        ${row.payeeId},
+        ${row.statementId},
+        ${row.currency},
+        ${row.openingBalance},
+        ${row.periodNet},
+        ${row.closingBalance},
+        ${row.movementType},
+        ${row.createdAt}
+      )
+    `);
+  }
+}
 async function persistIdentityLink(tx, input) {
   if (tx.kind === "memory") {
     return;
@@ -40476,6 +40561,35 @@ var suspenseResolveSchema = workspaceBodySchema.extend({
   targetId: nullableStringSchema,
   note: external_exports.string().min(1)
 });
+var distributionAliasTargetTypeSchema = external_exports.enum(["artist", "payee", "label", "release", "track", "unassigned"]);
+var distributionAliasUpsertSchema = workspaceBodySchema.extend({
+  aliasText: external_exports.string().min(1),
+  targetType: distributionAliasTargetTypeSchema,
+  targetId: nullableStringSchema
+}).superRefine((value, refinementContext) => {
+  const requiresTarget = value.targetType !== "unassigned";
+  if (requiresTarget && value.targetId === null) {
+    refinementContext.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["targetId"],
+      message: "targetId is required when targetType is assigned."
+    });
+  }
+  if (!requiresTarget && value.targetId !== null) {
+    refinementContext.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["targetId"],
+      message: "targetId must be null when targetType is unassigned."
+    });
+  }
+});
+var distributionDuplicateResolveSchema = workspaceBodySchema.extend({
+  keepEarningId: nullableStringSchema,
+  reason: nullableStringSchema
+});
+var distributionReconciliationActionSchema = workspaceBodySchema.extend({
+  reason: nullableStringSchema
+});
 var ApiRouteError = class extends Error {
   status;
   code;
@@ -40541,7 +40655,7 @@ function createApiService(dependencies) {
         "http://127.0.0.1:5173"
       ],
       allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-      allowHeaders: ["Content-Type", "Authorization", "Idempotency-Key"]
+      allowHeaders: ["Content-Type", "Authorization", "Idempotency-Key", "Cache-Control", "Pragma"]
     })
   );
   app.onError((error, context) => {
@@ -40599,18 +40713,19 @@ function registerOfficeRoutes(app, dependencies) {
   app.get("/eof/v1/dashboard", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
     const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
     const filters = rangeFiltersFromContext(context, period, null);
-    const monthlyRows = readMonthlyPnl(dependencies.fixtures.office, filters);
+    const monthlyRows = readMonthlyPnl(dataset, filters);
     const runwayWindowMonths = filterRunwayWindowMonths(monthlyRows, ["2026-02"]);
-    const dashboard = readOfficeDashboardFull(dependencies.fixtures.office, period, filters, runwayWindowMonths);
-    const recentImports = dependencies.fixtures.office.bankImportBatches.filter((batch) => batch.workspaceId === workspaceId);
+    const dashboard = readOfficeDashboardFull(dataset, period, filters, runwayWindowMonths);
+    const recentImports = dataset.bankImportBatches;
     const response = {
       period,
       cashBalanceMicro: dashboard.cashRunway.cashBalanceMur,
       receivablesMicro: dashboard.pnl.income,
       payablesMicro: dashboard.pnl.expense,
       unreconciledTransactionCount: dashboard.bankQuality.unmatchedLineCount,
-      previous: readOfficeDashboardPrevious(dependencies, filters),
+      previous: readOfficeDashboardPrevious(dataset, filters),
       lastAuditEventId: dependencies.fixtures.officeAuditLog[0]?.id ?? null,
       recentImports: recentImports.map((batch) => ({
         id: batch.id,
@@ -40629,38 +40744,44 @@ function registerOfficeRoutes(app, dependencies) {
   app.get("/eof/v1/analytics/dashboard", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
     const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
     const filters = rangeFiltersFromContext(context, period, null);
-    return context.json(readOfficeDashboardAnalytics(dependencies, workspaceId, period, filters));
+    return context.json(readOfficeDashboardAnalytics(dependencies, dataset, workspaceId, period, filters));
   });
   app.get("/eof/v1/pl/global", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
-    resolveWorkspaceId(context);
-    const response = toOfficeGlobalPnl(dependencies.fixtures.office, period, rangeFiltersFromContext(context, period, null));
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
+    const response = toOfficeGlobalPnl(dataset, period, rangeFiltersFromContext(context, period, null));
     return context.json(response);
   });
   app.get("/eof/v1/pl/department/:departmentId", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
-    resolveWorkspaceId(context);
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
     const departmentId = context.req.param("departmentId");
-    const response = toOfficeDepartmentPnl(dependencies.fixtures.office, departmentId, period, rangeFiltersFromContext(context, period, departmentId));
+    const response = toOfficeDepartmentPnl(dataset, departmentId, period, rangeFiltersFromContext(context, period, departmentId));
     return context.json(response);
   });
   app.get("/eof/v1/pl/division", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
-    resolveWorkspaceId(context);
-    const divisions = readPnlByDivision(dependencies.fixtures.office, rangeFiltersFromContext(context, period, null)).map(toApiDivisionPnl);
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
+    const divisions = readPnlByDivision(dataset, rangeFiltersFromContext(context, period, null)).map(toApiDivisionPnl);
     return context.json(pageItems(context, divisions));
   });
   app.get("/eof/v1/pl/category", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
-    resolveWorkspaceId(context);
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
     const departmentId = nullableQuery(context, "departmentId");
     const filters = rangeFiltersFromContext(context, period, departmentId);
-    return context.json(pageItems(context, toOfficeCategoryPnlLines(dependencies.fixtures.office, filters)));
+    return context.json(pageItems(context, toOfficeCategoryPnlLines(dataset, filters)));
   });
   app.get("/eof/v1/transactions", (context) => {
-    resolveWorkspaceId(context);
-    const transactions = dependencies.fixtures.office.transactions.map((transaction) => toOfficeTransaction(dependencies.fixtures.office, transaction)).filter((transaction) => matchesOfficeTransactionQuery(context, transaction));
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
+    const transactions = dataset.transactions.map((transaction) => toOfficeTransaction(dataset, transaction)).filter((transaction) => matchesOfficeTransactionQuery(context, transaction));
     return context.json(pageItems(context, transactions));
   });
   app.post("/eof/v1/transactions", async (context) => {
@@ -40761,9 +40882,10 @@ function registerOfficeRoutes(app, dependencies) {
   app.get("/eof/v1/cashflow", (context) => {
     const from = requireCompatQuery(context, ["from", "fromDate"], "from");
     const to = requireCompatQuery(context, ["to", "toDate"], "to");
-    resolveWorkspaceId(context);
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
     const accountId = nullableQuery(context, "accountId");
-    const buckets = readOfficeCashflowProjection(dependencies.fixtures.office, from, to, accountId);
+    const buckets = readOfficeCashflowProjection(dataset, from, to, accountId);
     return context.json(toCashflowBuckets(buckets));
   });
   app.post("/eof/v1/cashflow/preview", async (context) => {
@@ -40834,14 +40956,16 @@ function registerOfficeRoutes(app, dependencies) {
   app.get("/eof/v1/partners", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
     const facet = requirePartnerFacet(context);
-    resolveWorkspaceId(context);
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
     const filters = rangeFiltersFromContext(context, period, null);
-    const partners = dependencies.fixtures.office.partners.map((partner) => toPartnerListItem(dependencies.fixtures, partner, filters)).filter((partner) => hasFacetActivity(partner, facet));
+    const partners = dataset.partners.map((partner) => toPartnerListItem({ ...dependencies.fixtures, office: dataset }, partner, filters)).filter((partner) => hasFacetActivity(partner, facet));
     return context.json(pageItems(context, partners));
   });
   app.get("/eof/v1/partners/:partnerId", (context) => {
-    resolveWorkspaceId(context);
-    const partner = requirePartner2(dependencies.fixtures.office, context.req.param("partnerId"));
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
+    const partner = requirePartner2(dataset, context.req.param("partnerId"));
     return context.json({
       id: partner.id,
       name: partner.name,
@@ -40855,9 +40979,11 @@ function registerOfficeRoutes(app, dependencies) {
   });
   app.get("/eof/v1/pl/partner/:partnerId", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
-    resolveWorkspaceId(context);
-    const partner = requirePartner2(dependencies.fixtures.office, context.req.param("partnerId"));
-    const response = toPartnerDetail(dependencies.fixtures, partner, period, rangeFiltersFromContext(context, period, null));
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
+    const scopedFixtures = { ...dependencies.fixtures, office: dataset };
+    const partner = requirePartner2(dataset, context.req.param("partnerId"));
+    const response = toPartnerDetail(scopedFixtures, partner, period, rangeFiltersFromContext(context, period, null));
     return context.json(response);
   });
   app.get("/eof/v1/classification/suggestions/:partnerId", (context) => {
@@ -40865,9 +40991,11 @@ function registerOfficeRoutes(app, dependencies) {
     return context.json(dependencies.fixtures.officeClassificationSuggestions[context.req.param("partnerId")] ?? []);
   });
   app.get("/eof/v1/partners/:partnerId/payee-link", (context) => {
-    resolveWorkspaceId(context);
-    const partner = requirePartner2(dependencies.fixtures.office, context.req.param("partnerId"));
-    return context.json(toPartnerPayeeLink(dependencies.fixtures, partner));
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
+    const scopedFixtures = { ...dependencies.fixtures, office: dataset };
+    const partner = requirePartner2(dataset, context.req.param("partnerId"));
+    return context.json(toPartnerPayeeLink(scopedFixtures, partner));
   });
   app.post("/eof/v1/partners", async (context) => {
     return officePartnerCreateResponse(context, dependencies);
@@ -40923,13 +41051,14 @@ function registerOfficeRoutes(app, dependencies) {
     return officeBankRawLineReassignResponse(context, dependencies);
   });
   app.get("/eof/v1/projects", (context) => {
-    resolveWorkspaceId(context);
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
     const period = optionalCompatQuery(context, ["period", "month"]);
     const dateFrom = optionalCompatQuery(context, ["dateFrom", "date_from", "from", "fromDate", "from_date"]);
     const dateTo = optionalCompatQuery(context, ["dateTo", "date_to", "to", "toDate", "to_date"]);
     const filters = period === null && !(isIsoDate(dateFrom) && isIsoDate(dateTo)) ? { dateFrom: null, dateTo: null, departmentId: null } : rangeFiltersFromContext(context, period ?? dependencies.nowIso().slice(0, 7), null);
     const status = nullableQuery(context, "status");
-    const projects = dependencies.fixtures.office.projects.map((project) => toProjectSummary(dependencies.fixtures.office, project, filters)).filter((project) => status === null || project.status === status);
+    const projects = dataset.projects.map((project) => toProjectSummary(dataset, project, filters)).filter((project) => status === null || project.status === status);
     return context.json(pageItems(context, projects));
   });
   app.post("/eof/v1/projects", async (context) => {
@@ -40945,18 +41074,21 @@ function registerOfficeRoutes(app, dependencies) {
   });
   app.get("/eof/v1/pl/project/:projectId", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
-    resolveWorkspaceId(context);
-    return context.json(toProjectPnl(dependencies.fixtures.office, context.req.param("projectId"), period, rangeFiltersFromContext(context, period, null)));
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
+    return context.json(toProjectPnl(dataset, context.req.param("projectId"), period, rangeFiltersFromContext(context, period, null)));
   });
   app.get("/eof/v1/integrity/check-all", (context) => {
-    resolveWorkspaceId(context);
-    return context.json(toOfficeIntegrity(dependencies.fixtures.office, dependencies.nowIso()));
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
+    return context.json(toOfficeIntegrity(dataset, dependencies.nowIso()));
   });
   app.get("/eof/v1/analytics/bank-quality", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
-    resolveWorkspaceId(context);
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
     const filters = rangeFiltersFromContext(context, period, null);
-    const result = readOfficeBankQualityForFilters(dependencies.fixtures.office, period, filters);
+    const result = readOfficeBankQualityForFilters(dataset, period, filters);
     const response = {
       period: result.period,
       matchedRateBp: result.matchedRateBp,
@@ -41342,13 +41474,26 @@ function registerDistributionRoutes(app, dependencies) {
     requireQuery(context, "workspaceId");
     return context.json(toDistributionReconciliation(dependencies.fixtures));
   });
+  app.post("/erh/v1/financial-reconciliation/actions/:actionId", async (context) => {
+    return distributionReconciliationActionResponse(context, dependencies);
+  });
   app.get("/erh/v1/aliases", (context) => {
     requireQuery(context, "workspaceId");
     return context.json(pageItems(context, toDistributionAliases(dependencies.fixtures)));
   });
+  app.post("/erh/v1/aliases", async (context) => {
+    return distributionAliasUpsertResponse(context, dependencies, null);
+  });
+  app.patch("/erh/v1/aliases/:aliasId", async (context) => {
+    const aliasId = requirePathParam(context, "aliasId");
+    return distributionAliasUpsertResponse(context, dependencies, aliasId);
+  });
   app.get("/erh/v1/duplicates", (context) => {
     requireQuery(context, "workspaceId");
     return context.json(pageItems(context, toDistributionDuplicates(dependencies.fixtures)));
+  });
+  app.post("/erh/v1/duplicates/:duplicateId/resolve", async (context) => {
+    return distributionDuplicateResolveResponse(context, dependencies);
   });
   app.get("/erh/v1/audit-log", (context) => {
     requireQuery(context, "workspaceId");
@@ -43518,6 +43663,229 @@ async function distributionTrackUpsertResponse(context, dependencies) {
       });
       upsertDistributionTrackFixture(dependencies.fixtures, after);
       return mutationReceipt(trackId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+async function distributionAliasUpsertResponse(context, dependencies, routeAliasId) {
+  const request = await readZodBody(context, distributionAliasUpsertSchema);
+  requirePermissionForWorkspace(context.get("authUser"), "distribution_alias_upsert", request.workspaceId);
+  const aliasId = routeAliasId ?? randomUUID2();
+  const normalizedAliasText = request.aliasText.trim();
+  requireDistributionAliasTarget(dependencies.fixtures, request.targetType, request.targetId);
+  const before = dependencies.fixtures.distributionAliases.find(
+    (alias) => alias.id === aliasId || alias.aliasText.trim().toLowerCase() === normalizedAliasText.toLowerCase()
+  ) ?? null;
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "distribution_alias_upsert",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `distribution:alias:${aliasId}`);
+      const persistInput = {
+        aliasId,
+        aliasText: normalizedAliasText,
+        targetType: request.targetType,
+        targetId: request.targetId
+      };
+      await persistDistributionAliasUpsert(tx, persistInput);
+      const after = distributionAliasFromUpsertRequest(dependencies.fixtures, aliasId, {
+        ...request,
+        aliasText: normalizedAliasText
+      });
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_alias_upsert",
+        targetType: "catalog_alias",
+        targetId: aliasId,
+        before: {
+          alias: before
+        },
+        after: {
+          alias: after
+        },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      upsertDistributionAliasFixture(dependencies.fixtures, after);
+      return {
+        ...mutationReceipt(aliasId, auditEventId),
+        alias: after
+      };
+    }
+  });
+  return context.json(result.body, result.status);
+}
+async function distributionDuplicateResolveResponse(context, dependencies) {
+  const duplicateId = requirePathParam(context, "duplicateId");
+  const request = await readZodBody(context, distributionDuplicateResolveSchema);
+  requirePermissionForWorkspace(context.get("authUser"), "distribution_duplicate_resolve", request.workspaceId);
+  const duplicateEarningIds = duplicateGroupEarningIds(dependencies.fixtures, duplicateId);
+  if (duplicateEarningIds.length < 2) {
+    throw new ApiRouteError(404, "distribution_duplicate_not_found", "Distribution duplicate group was not found.", [`duplicateId=${duplicateId}`]);
+  }
+  const keepEarningId = request.keepEarningId ?? duplicateEarningIds[0] ?? null;
+  if (keepEarningId === null || !duplicateEarningIds.includes(keepEarningId)) {
+    throw new ApiRouteError(422, "distribution_duplicate_keep_invalid", "keepEarningId must be part of the duplicate group.", [
+      `duplicateId=${duplicateId}`,
+      `keepEarningId=${request.keepEarningId ?? "null"}`
+    ]);
+  }
+  const resolvedEarningIds = duplicateEarningIds.filter((earningId) => earningId !== keepEarningId);
+  if (resolvedEarningIds.length === 0) {
+    throw new ApiRouteError(409, "distribution_duplicate_no_resolution", "Duplicate resolution requires at least one row to exclude.", [
+      `duplicateId=${duplicateId}`,
+      `keepEarningId=${keepEarningId}`
+    ]);
+  }
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "distribution_duplicate_resolve",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `distribution:duplicate:${duplicateId}`);
+      const persistInput = {
+        earningIds: resolvedEarningIds
+      };
+      await persistDistributionDuplicateResolve(tx, persistInput);
+      applyDistributionDuplicateResolutionFixture(dependencies.fixtures, resolvedEarningIds);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_duplicate_resolve",
+        targetType: "normalized_earning_duplicate",
+        targetId: duplicateId,
+        before: {
+          duplicateId,
+          keepEarningId,
+          groupEarningIds: duplicateEarningIds
+        },
+        after: {
+          duplicateId,
+          keepEarningId,
+          resolvedEarningIds,
+          reason: request.reason
+        },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      return {
+        ...mutationReceipt(duplicateId, auditEventId),
+        duplicateId,
+        keepEarningId,
+        resolvedEarningIds
+      };
+    }
+  });
+  return context.json(result.body, result.status);
+}
+async function distributionReconciliationActionResponse(context, dependencies) {
+  const actionId = requirePathParam(context, "actionId");
+  const request = await readZodBody(context, distributionReconciliationActionSchema);
+  requirePermissionForWorkspace(context.get("authUser"), "distribution_financial_reconciliation_action", request.workspaceId);
+  const action = toDistributionReconciliation(dependencies.fixtures).actions.find((candidate) => candidate.id === actionId);
+  if (action === void 0) {
+    throw new ApiRouteError(404, "distribution_reconciliation_action_not_found", "Distribution reconciliation action was not found.", [`actionId=${actionId}`]);
+  }
+  if (!action.maintenance) {
+    throw new ApiRouteError(409, "distribution_reconciliation_action_not_maintenance", "This action is not marked as maintenance and should run through its dedicated workflow.", [
+      `actionId=${actionId}`
+    ]);
+  }
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "distribution_financial_reconciliation_action",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `distribution:reconciliation:maintenance:${actionId}`);
+      let details = {
+        executed: true,
+        reason: request.reason,
+        maintenance: true
+      };
+      if (actionId === "recompute-payee-balance") {
+        const adjustmentRows = buildDistributionPayeeBalanceAdjustments(dependencies.fixtures, dependencies.nowIso());
+        const persistInput = {
+          rows: adjustmentRows
+        };
+        await persistDistributionPayeeBalanceAdjustments(tx, persistInput);
+        applyDistributionPayeeBalanceAdjustmentsFixture(dependencies.fixtures, adjustmentRows);
+        details = {
+          ...details,
+          adjustmentCount: adjustmentRows.length,
+          payeeCurrencyCount: adjustmentRows.map((row) => `${row.payeeId}:${row.currency}`).filter((value, index, values) => values.indexOf(value) === index).length
+        };
+      } else if (actionId === "repair-identity-link") {
+        const candidate = findIdentityRepairCandidate(dependencies.fixtures);
+        if (candidate === null) {
+          details = {
+            ...details,
+            repaired: false,
+            message: "No eligible office partner/payee pair found."
+          };
+        } else {
+          const persistInput = {
+            id: randomUUID2(),
+            payeeId: candidate.payee.id,
+            officePartnerId: candidate.partner.id,
+            confidence: "100.000000",
+            status: "linked"
+          };
+          await persistIdentityLink(tx, persistInput);
+          const officeLink = identityOfficeLink(candidate.partner, candidate.payee, persistInput.confidence);
+          applyIdentityLinkFixture(dependencies.fixtures, officeLink);
+          details = {
+            ...details,
+            repaired: true,
+            officePartnerId: candidate.partner.id,
+            payeeId: candidate.payee.id,
+            officePartnerName: candidate.partner.name,
+            payeeName: candidate.payee.name
+          };
+        }
+      } else if (actionId === "refresh-derived-summary") {
+        const refreshed = toDistributionReconciliation(dependencies.fixtures);
+        details = {
+          ...details,
+          refreshedAt: dependencies.nowIso(),
+          kpiCount: refreshed.kpis.length,
+          aliasCount: dependencies.fixtures.distributionAliases.length,
+          duplicateCount: toDistributionDuplicates(dependencies.fixtures).length
+        };
+      } else {
+        throw new ApiRouteError(409, "distribution_reconciliation_action_not_supported", "This maintenance action is not supported yet.", [`actionId=${actionId}`]);
+      }
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_financial_reconciliation_action",
+        targetType: "reconciliation_action",
+        targetId: actionId,
+        before: {
+          action
+        },
+        after: {
+          actionId,
+          details
+        },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      return {
+        ...mutationReceipt(actionId, auditEventId),
+        actionId,
+        details
+      };
     }
   });
   return context.json(result.body, result.status);
@@ -48095,15 +48463,15 @@ function previousRangeFilters(filters) {
     departmentId
   };
 }
-function readOfficeDashboardPrevious(dependencies, filters) {
+function readOfficeDashboardPrevious(dataset, filters) {
   const previousFilters = previousRangeFilters(filters);
   if (previousFilters === null || !isIsoDate(previousFilters.dateFrom) || !isIsoDate(previousFilters.dateTo)) {
     return null;
   }
   const previousPeriod = previousFilters.dateTo.slice(0, 7);
-  const monthlyRows = readMonthlyPnl(dependencies.fixtures.office, previousFilters);
+  const monthlyRows = readMonthlyPnl(dataset, previousFilters);
   const runwayWindowMonths = filterRunwayWindowMonths(monthlyRows, ["2026-02"]);
-  const dashboard = readOfficeDashboardFull(dependencies.fixtures.office, previousPeriod, previousFilters, runwayWindowMonths);
+  const dashboard = readOfficeDashboardFull(dataset, previousPeriod, previousFilters, runwayWindowMonths);
   return {
     dateFrom: previousFilters.dateFrom,
     dateTo: previousFilters.dateTo,
@@ -48113,8 +48481,7 @@ function readOfficeDashboardPrevious(dependencies, filters) {
     unreconciledTransactionCount: dashboard.bankQuality.unmatchedLineCount
   };
 }
-function readOfficeDashboardAnalytics(dependencies, workspaceId, period, filters) {
-  const dataset = dependencies.fixtures.office;
+function readOfficeDashboardAnalytics(dependencies, dataset, workspaceId, period, filters) {
   const monthlyRows = readMonthlyPnl(dataset, filters);
   const runwayWindowMonths = selectRunwayWindowMonths(monthlyRows);
   const runway = readDashboardRunwayV1(dataset, period, monthlyRows, runwayWindowMonths);
@@ -48135,6 +48502,39 @@ function readOfficeDashboardAnalytics(dependencies, workspaceId, period, filters
     oldestUnmatchedDays: oldestUnmatchedDayInAccounts(reconciliationByAccount),
     expenseTrendMonths,
     expenseTrendByDepartment
+  };
+}
+function officeDatasetForWorkspace(dataset, workspaceId) {
+  const transactions = dataset.transactions.filter((transaction) => transaction.workspaceId === workspaceId);
+  const transactionIds = new Set(transactions.map((transaction) => transaction.id));
+  const financialAllocations = dataset.financialAllocations.filter((allocation) => transactionIds.has(allocation.transactionId));
+  const projects = dataset.projects;
+  const projectBudgetLines = dataset.projectBudgetLines;
+  const partners = dataset.partners;
+  const bankAccounts = dataset.bankAccounts.filter((account) => account.workspaceId === workspaceId);
+  const accountIds = new Set(bankAccounts.map((account) => account.id));
+  const bankImportBatches = dataset.bankImportBatches.filter((batch) => batch.workspaceId === workspaceId);
+  const batchIds = new Set(bankImportBatches.map((batch) => batch.id));
+  const bankStatementLines = dataset.bankStatementLines.filter(
+    (line) => accountIds.has(line.accountId) || batchIds.has(line.importBatchId)
+  );
+  const bankLineIds = new Set(bankStatementLines.map((line) => line.id));
+  const bankReconciliationMatches = dataset.bankReconciliationMatches.filter(
+    (match2) => bankLineIds.has(match2.bankStatementLineId) && transactionIds.has(match2.transactionId)
+  );
+  const cashflowProjectionRows = dataset.cashflowProjectionRows.filter((row) => row.workspaceId === workspaceId);
+  return {
+    ...dataset,
+    partners,
+    projects,
+    projectBudgetLines,
+    transactions,
+    financialAllocations,
+    bankAccounts,
+    bankImportBatches,
+    bankStatementLines,
+    bankReconciliationMatches,
+    cashflowProjectionRows
   };
 }
 function readDashboardRunwayV1(dataset, period, monthlyRows, runwayWindowMonths) {
@@ -49478,12 +49878,12 @@ function toDistributionReconciliation(store) {
   }));
   const actions = [
     { id: "link-statement-payment", label: "Link statement payment", description: "Records and links a payment to the first open statement gap.", maintenance: false },
-    { id: "recompute-payee-balance", label: "Recompute payee balance", description: "Temporarily disabled until a dedicated recompute endpoint is implemented.", maintenance: true },
+    { id: "recompute-payee-balance", label: "Recompute payee balance", description: "Rebuilds payee balance ledger closings via guarded adjustment rows.", maintenance: true },
     { id: "assign-expense-payee", label: "Assign expense payee", description: "Creates a guarded contract expense with an explicit payee.", maintenance: false },
     { id: "allocate-matched-row", label: "Allocate matched row", description: "Runs the locked allocation engine for matched rows.", maintenance: false },
     { id: "void-statement", label: "Void statement", description: "Voids a statement and appends the reversal balance row.", maintenance: false },
-    { id: "repair-identity-link", label: "Repair identity link", description: "One-off backfill; kept as flagged maintenance.", maintenance: true },
-    { id: "refresh-derived-summary", label: "Refresh derived summary", description: "One-off derived summary rebuild; kept as flagged maintenance.", maintenance: true }
+    { id: "repair-identity-link", label: "Repair identity link", description: "Attempts a guarded partner/payee relink from canonical name matches.", maintenance: true },
+    { id: "refresh-derived-summary", label: "Refresh derived summary", description: "Refreshes reconciliation-derived counters and diagnostics snapshot.", maintenance: true }
   ];
   return {
     kpis,
@@ -49495,13 +49895,15 @@ function toDistributionReconciliation(store) {
   };
 }
 function toDistributionAliases(store) {
-  void store;
-  return [];
+  return store.distributionAliases;
 }
 function toDistributionDuplicates(store) {
   const dataset = store.distribution;
   const groups = /* @__PURE__ */ new Map();
   for (const earning of dataset.normalizedEarnings) {
+    if (earning.calculationStatus === "excluded") {
+      continue;
+    }
     if (earning.isrc === null) {
       continue;
     }
@@ -49522,6 +49924,156 @@ function toDistributionDuplicates(store) {
     sampleIds: group.ids.slice(0, distributionReconciliationSampleLimit),
     sampleLabels: group.labels.slice(0, distributionReconciliationSampleLimit)
   }));
+}
+function distributionAliasFromUpsertRequest(fixtures, aliasId, request) {
+  const targetType = request.targetType;
+  const targetId = request.targetId;
+  const target = resolveDistributionAliasTargetLabel(fixtures, targetType, targetId);
+  return {
+    id: aliasId,
+    aliasText: request.aliasText.trim(),
+    targetType,
+    target,
+    targetId
+  };
+}
+function resolveDistributionAliasTargetLabel(fixtures, targetType, targetId) {
+  if (targetType === "unassigned" || targetId === null) {
+    return "unassigned";
+  }
+  if (targetType === "payee") {
+    const payee = fixtures.distribution.payees.find((candidate) => candidate.id === targetId);
+    return payee?.name ?? targetId;
+  }
+  if (targetType === "release") {
+    const release = toReleaseSummaries(fixtures.distribution).find((candidate) => candidate.id === targetId);
+    return release?.title ?? targetId;
+  }
+  if (targetType === "track") {
+    const track = fixtures.distribution.tracks.find((candidate) => candidate.id === targetId);
+    return track?.title ?? targetId;
+  }
+  return targetId;
+}
+function upsertDistributionAliasFixture(fixtures, alias) {
+  const mutableFixtures = fixtures;
+  const withoutAlias = fixtures.distributionAliases.filter((candidate) => candidate.id !== alias.id).filter((candidate) => candidate.aliasText.trim().toLowerCase() !== alias.aliasText.trim().toLowerCase());
+  mutableFixtures.distributionAliases = [...withoutAlias, alias].sort(
+    (left, right) => left.aliasText.localeCompare(right.aliasText, void 0, { sensitivity: "base" })
+  );
+}
+function applyDistributionDuplicateResolutionFixture(fixtures, resolvedEarningIds) {
+  if (resolvedEarningIds.length === 0) {
+    return;
+  }
+  const resolvedSet = new Set(resolvedEarningIds);
+  const mutableDistribution = fixtures.distribution;
+  mutableDistribution.normalizedEarnings = fixtures.distribution.normalizedEarnings.map(
+    (earning) => resolvedSet.has(earning.id) ? { ...earning, calculationStatus: "excluded" } : earning
+  );
+}
+function requireDistributionAliasTarget(fixtures, targetType, targetId) {
+  if (targetType === "unassigned") {
+    return;
+  }
+  if (targetId === null) {
+    throw new ApiRouteError(422, "distribution_alias_target_required", "Alias targetId is required for assigned targets.", [`targetType=${targetType}`]);
+  }
+  if (targetType === "payee") {
+    requireDistributionPayee(fixtures.distribution, targetId);
+    return;
+  }
+  if (targetType === "release") {
+    const exists2 = toReleaseSummaries(fixtures.distribution).some((release) => release.id === targetId);
+    if (!exists2) {
+      throw new ApiRouteError(404, "distribution_alias_release_not_found", "Distribution release target was not found.", [`targetId=${targetId}`]);
+    }
+    return;
+  }
+  if (targetType === "track") {
+    const exists2 = fixtures.distribution.tracks.some((track) => track.id === targetId);
+    if (!exists2) {
+      throw new ApiRouteError(404, "distribution_alias_track_not_found", "Distribution track target was not found.", [`targetId=${targetId}`]);
+    }
+  }
+}
+function duplicateGroupEarningIds(fixtures, duplicateId) {
+  return fixtures.distribution.normalizedEarnings.filter((earning) => earning.isrc === duplicateId).filter((earning) => earning.calculationStatus !== "excluded").map((earning) => earning.id);
+}
+function applyDistributionPayeeBalanceAdjustmentsFixture(fixtures, rows) {
+  if (rows.length === 0) {
+    return;
+  }
+  const mutableFixtures = fixtures;
+  mutableFixtures.distributionPayeeBalances = [...fixtures.distributionPayeeBalances, ...rows];
+}
+function buildDistributionPayeeBalanceAdjustments(fixtures, createdAt) {
+  const targetByKey = /* @__PURE__ */ new Map();
+  for (const statement of fixtures.distribution.statements) {
+    if (statement.status === "void") {
+      continue;
+    }
+    const key = `${statement.payeeId}:${statement.currency}`;
+    const current = targetByKey.get(key) ?? 0n;
+    targetByKey.set(key, current + erhMoney.parse(statement.amountDue));
+  }
+  const knownKeys = /* @__PURE__ */ new Set([
+    ...[...targetByKey.keys()],
+    ...fixtures.distributionPayeeBalances.map((row) => `${row.payeeId}:${row.currency}`)
+  ]);
+  const adjustments = [];
+  for (const key of [...knownKeys].sort()) {
+    const [payeeId, currency] = key.split(":");
+    if (payeeId === void 0 || currency === void 0) {
+      continue;
+    }
+    const openingUnits = erhMoney.parse(lastPayeeClosing(fixtures.distributionPayeeBalances, payeeId, currency));
+    const targetUnits = targetByKey.get(key) ?? 0n;
+    const deltaUnits = targetUnits - openingUnits;
+    if (deltaUnits === 0n) {
+      continue;
+    }
+    adjustments.push({
+      id: randomUUID2(),
+      payeeId,
+      statementId: null,
+      currency,
+      openingBalance: erhMoney.format(openingUnits),
+      periodNet: erhMoney.format(deltaUnits),
+      closingBalance: erhMoney.format(targetUnits),
+      movementType: "adjustment",
+      createdAt
+    });
+  }
+  return adjustments;
+}
+function findIdentityRepairCandidate(fixtures) {
+  const linkedPayeeIds = new Set(
+    Object.values(fixtures.officePartnerPayeeLinks).filter((link) => link.status === "active").map((link) => link.payeeId)
+  );
+  const linkedPartnerIds = new Set(
+    Object.values(fixtures.officePartnerPayeeLinks).filter((link) => link.status === "active").map((link) => link.partnerId)
+  );
+  const partnerByKey = /* @__PURE__ */ new Map();
+  for (const partner of fixtures.office.partners) {
+    if (linkedPartnerIds.has(partner.id)) {
+      continue;
+    }
+    partnerByKey.set(normalizeIdentityName(partner.name), partner);
+  }
+  for (const payee of fixtures.distribution.payees) {
+    if (linkedPayeeIds.has(payee.id)) {
+      continue;
+    }
+    const partner = partnerByKey.get(normalizeIdentityName(payee.name));
+    if (partner !== void 0) {
+      return { partner, payee };
+    }
+  }
+  return null;
+}
+function normalizeIdentityName(value) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/gu, " ").replace(/\s+/gu, " ");
 }
 function toDistributionAuditLog(store) {
   return store.officeAuditLog.filter((entry) => entry.action.startsWith("distribution."));
@@ -49987,6 +50539,7 @@ async function readApiFixtureStoreFromPostgres(pool) {
     distributionExpenseApplications,
     distributionFxRates,
     distributionPayeeBalances,
+    distributionAliases,
     officePartnerPayeeLinks
   ] = await Promise.all([
     readOfficeDataset(pool),
@@ -49999,6 +50552,7 @@ async function readApiFixtureStoreFromPostgres(pool) {
     readDistributionExistingExpenseApplications(pool),
     readDistributionFxRates(pool),
     readDistributionPayeeBalances(pool),
+    readDistributionAliases(pool),
     readOfficePartnerPayeeLinks(pool)
   ]);
   return {
@@ -50015,7 +50569,8 @@ async function readApiFixtureStoreFromPostgres(pool) {
     distributionCostTerms,
     distributionExpenseApplications,
     distributionFxRates,
-    distributionPayeeBalances
+    distributionPayeeBalances,
+    distributionAliases
   };
 }
 async function readPostgresHealth(pool) {
@@ -50351,6 +50906,37 @@ async function readDistributionPayeeBalances(pool) {
     closingBalance: stringCell(row, "closing_balance"),
     movementType: enumCell(row, "movement_type", ["opening", "period", "statement", "void_reversal", "adjustment", "carry_forward"]),
     createdAt: timestampCell(row, "created_at")
+  }));
+}
+async function readDistributionAliases(pool) {
+  const rows = await queryRows(
+    pool,
+    `select ca.id::text, ca.alias_text,
+      case
+        when ca.track_id is not null then 'track'
+        when ca.release_id is not null then 'release'
+        when ca.label_id is not null then 'label'
+        when ca.artist_id is not null then 'artist'
+        when ca.payee_id is not null then 'payee'
+        else 'unassigned'
+      end as target_type,
+      coalesce(ca.track_id::text, ca.release_id::text, ca.label_id::text, ca.artist_id::text, ca.payee_id::text) as target_id,
+      coalesce(t.title, r.title, l.name, a.name, p.name, ca.alias_text) as target
+     from catalog_aliases ca
+     left join tracks t on t.id = ca.track_id
+     left join releases r on r.id = ca.release_id
+     left join labels l on l.id = ca.label_id
+     left join artists a on a.id = ca.artist_id
+     left join payees p on p.id = ca.payee_id
+     order by ca.alias_text, ca.id`,
+    []
+  );
+  return rows.map((row) => ({
+    id: stringCell(row, "id"),
+    aliasText: stringCell(row, "alias_text"),
+    target: stringCell(row, "target"),
+    targetType: enumCell(row, "target_type", ["artist", "payee", "label", "release", "track", "unassigned"]),
+    targetId: nullableStringCell(row, "target_id")
   }));
 }
 function toOfficeDepartment(row) {
@@ -50912,7 +51498,7 @@ async function bootServer() {
       if (corsOrigin.length > 0) {
         headers["Access-Control-Allow-Origin"] = corsOrigin;
         headers["Access-Control-Allow-Methods"] = "GET,POST,PATCH,DELETE,OPTIONS";
-        headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization,Idempotency-Key";
+        headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization,Idempotency-Key,Cache-Control,Pragma";
       }
       if (request.method === "OPTIONS") {
         response.writeHead(204, headers);

@@ -5,9 +5,9 @@
   interface Props {
     readonly id: string;
     readonly label: string;
-    readonly value: string;
+    readonly value?: string;
     readonly placeholder: string;
-    readonly type: "text" | "search" | "email" | "number";
+    readonly type: "text" | "search" | "email" | "number" | "password";
     readonly state: FieldState;
     readonly message: string;
     readonly oninput?: ((value: string) => void) | null;
@@ -15,35 +15,47 @@
     readonly icon?: Snippet | null;
   }
 
-  const props: Props = $props();
+  let {
+    id,
+    label,
+    value = $bindable(""),
+    placeholder,
+    type,
+    state,
+    message,
+    oninput = null,
+    icon = null
+  }: Props = $props();
 
   function handleInput(event: Event & { readonly currentTarget: EventTarget & HTMLInputElement }): void {
-    if (props.oninput === undefined || props.oninput === null) {
+    value = event.currentTarget.value;
+
+    if (oninput === null) {
       return;
     }
 
-    props.oninput(event.currentTarget.value);
+    oninput(event.currentTarget.value);
   }
 </script>
 
-<label class={`ehq-field ${props.state}`} for={props.id}>
-  <span>{props.label}</span>
-  <div class="control" class:with-icon={props.icon}>
-    {#if props.icon}
-      <span class="icon" aria-hidden="true">{@render props.icon()}</span>
+<label class={`ehq-field ${state}`} for={id}>
+  <span>{label}</span>
+  <div class="control" class:with-icon={icon}>
+    {#if icon}
+      <span class="icon" aria-hidden="true">{@render icon()}</span>
     {/if}
     <input
-      id={props.id}
-      type={props.type}
-      value={props.value}
-      placeholder={props.placeholder}
-      disabled={props.state === "disabled"}
-      aria-invalid={props.state === "error"}
+      id={id}
+      type={type}
+      value={value}
+      placeholder={placeholder}
+      disabled={state === "disabled"}
+      aria-invalid={state === "error"}
       oninput={handleInput}
     />
   </div>
-  {#if props.message.length > 0}
-    <small>{props.message}</small>
+  {#if message.length > 0}
+    <small>{message}</small>
   {/if}
 </label>
 

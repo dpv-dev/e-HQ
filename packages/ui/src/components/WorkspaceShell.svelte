@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import Icon from "./Icon.svelte";
+  import type { IconName } from "./icons.js";
   import type { WorkspaceKind, WorkspaceNavGroup, WorkspaceNavItem } from "./types.js";
 
   interface Props {
@@ -18,12 +19,20 @@
     readonly signOutHref: string;
     readonly onNavigate: ((href: string) => void) | null;
     readonly onSignOut: (() => void) | null;
+    readonly showWorkspaceNav?: boolean;
     readonly footer?: Snippet;
     readonly children?: Snippet;
   }
 
   const props: Props = $props();
   let sessionMenuOpen = $state(false);
+  const showWorkspaceNav = $derived(props.showWorkspaceNav ?? true);
+
+  const moduleLinks = $derived<readonly { readonly id: WorkspaceKind; readonly label: string; readonly href: string; readonly icon: IconName }[]>([
+    { id: "command-center", label: "Command Center", href: "/console/command-center/dashboard", icon: "home" },
+    { id: "office", label: "Office", href: "/console/office/dashboard", icon: "bank" },
+    { id: "distribution", label: "Distribution", href: "/console/distribution/dashboard", icon: "folder" }
+  ]);
 
   const navGroupList = $derived<readonly WorkspaceNavGroup[]>(
     props.navGroups !== null ? props.navGroups : [{ id: "default", label: "", items: props.navItems }]
@@ -57,34 +66,51 @@
   <aside>
     <a class="shell-mark" href={props.homeHref} aria-label={`${props.brandLabel} home`}>ë</a>
 
-    <nav aria-label={props.navLabel}>
-      {#each navGroupList as group (group.id)}
-        {#if group.label.length > 0}
-          <h2 class="nav-group">{group.label}</h2>
-        {/if}
-        {#each group.items as item (item.href)}
-          <a
-            class="nav-item ehq-nav-fade-item ehq-edge-surface"
-            class:active={item.active}
-            class:disabled={item.disabled}
-            href={item.disabled ? undefined : item.href}
-            aria-current={item.active ? "page" : undefined}
-            aria-disabled={item.disabled}
-            onclick={(event: MouseEvent): void => handleNavClick(item, event)}
-          >
-            {#if item.icon !== ""}
-              <span class="nav-icon" aria-hidden="true"><Icon name={item.icon} size={16} strokeWidth={1.5} /></span>
-            {:else}
-              <span class="nav-icon" aria-hidden="true"></span>
-            {/if}
-            <span class="nav-label">{item.label}</span>
-            {#if item.badge !== null}
-              <strong>{item.badge}</strong>
-            {/if}
-          </a>
-        {/each}
+    <div class="shell-modules" aria-label="Workspace modules">
+      {#each moduleLinks as module (module.id)}
+        <a
+          class="module-item"
+          class:active={module.id === props.workspace}
+          href={module.href}
+          aria-current={module.id === props.workspace ? "page" : undefined}
+          title={module.label}
+        >
+          <span aria-hidden="true"><Icon name={module.icon} size={16} strokeWidth={1.7} /></span>
+          <small>{module.label}</small>
+        </a>
       {/each}
-    </nav>
+    </div>
+
+    {#if showWorkspaceNav}
+      <nav aria-label={props.navLabel}>
+        {#each navGroupList as group (group.id)}
+          {#if group.label.length > 0}
+            <h2 class="nav-group">{group.label}</h2>
+          {/if}
+          {#each group.items as item (item.href)}
+            <a
+              class="nav-item ehq-nav-fade-item ehq-edge-surface"
+              class:active={item.active}
+              class:disabled={item.disabled}
+              href={item.disabled ? undefined : item.href}
+              aria-current={item.active ? "page" : undefined}
+              aria-disabled={item.disabled}
+              onclick={(event: MouseEvent): void => handleNavClick(item, event)}
+            >
+              {#if item.icon !== ""}
+                <span class="nav-icon" aria-hidden="true"><Icon name={item.icon} size={16} strokeWidth={1.5} /></span>
+              {:else}
+                <span class="nav-icon" aria-hidden="true"></span>
+              {/if}
+              <span class="nav-label">{item.label}</span>
+              {#if item.badge !== null}
+                <strong>{item.badge}</strong>
+              {/if}
+            </a>
+          {/each}
+        {/each}
+      </nav>
+    {/if}
 
     <div class="shell-foot">
       <section class="shell-status" aria-label="Workspace status">
@@ -176,6 +202,53 @@
     font-size: 24px;
     font-weight: var(--ehq-type-display-weight);
     text-decoration: none;
+  }
+
+  .shell-modules {
+    display: grid;
+    gap: var(--ehq-space-2);
+    align-content: start;
+  }
+
+  .module-item {
+    min-height: 42px;
+    padding: 0 var(--ehq-space-2);
+    border-radius: var(--ehq-radius-sm);
+    color: var(--ehq-text-muted);
+    border: 1px solid transparent;
+    display: grid;
+    grid-template-columns: 16px minmax(0, 1fr);
+    align-items: center;
+    gap: var(--ehq-space-2);
+    text-decoration: none;
+  }
+
+  .shell-modules,
+  nav {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+  }
+
+  .shell-modules::-webkit-scrollbar,
+  nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .module-item small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--ehq-mono);
+    font-size: var(--ehq-type-label-size);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .module-item.active {
+    color: var(--ehq-yellow);
+    border-color: var(--ehq-yellow-border);
+    background: var(--ehq-yellow-muted);
   }
 
   nav {
@@ -450,8 +523,16 @@
 
     .nav-label,
     .nav-item strong,
-    .shell-status {
+    .shell-status,
+    .module-item small {
       display: none;
+    }
+
+    .module-item {
+      grid-template-columns: 16px;
+      justify-content: center;
+      padding: 0;
+      width: 38px;
     }
 
     .shell-topbar {
@@ -461,6 +542,22 @@
 
     .shell-search {
       display: none;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .ehq-workspace-shell {
+      grid-template-columns: 56px minmax(0, 1fr);
+    }
+
+    aside {
+      gap: var(--ehq-space-3);
+      padding: var(--ehq-space-2);
+    }
+
+    .shell-topbar {
+      min-height: 64px;
+      padding: 0 var(--ehq-space-3);
     }
   }
 
@@ -482,6 +579,19 @@
       grid-auto-columns: max-content;
     }
 
+    .shell-modules {
+      grid-auto-flow: column;
+      grid-auto-columns: max-content;
+      overflow-x: auto;
+      scroll-snap-type: x proximity;
+    }
+
+    .module-item,
+    .nav-item {
+      min-height: 44px;
+      scroll-snap-align: start;
+    }
+
     .nav-item {
       grid-template-columns: 20px auto;
     }
@@ -496,6 +606,39 @@
 
     .shell-topbar {
       min-height: var(--ehq-shell-topbar-height);
+      grid-template-columns: 1fr auto;
+      gap: var(--ehq-space-2);
+      padding: 0 var(--ehq-space-3);
+    }
+
+    .shell-user {
+      gap: 0;
+    }
+
+    .shell-user span {
+      display: none;
+    }
+  }
+
+  @media (max-width: 390px) {
+    .shell-topbar {
+      min-height: 58px;
+      padding: 0 var(--ehq-space-2);
+    }
+
+    .shell-title {
+      font-size: 0.9rem;
+    }
+
+    .shell-user b {
+      width: 30px;
+      height: 30px;
+      font-size: 0.8rem;
+    }
+
+    .module-item,
+    .nav-item {
+      min-height: 42px;
     }
   }
 </style>
