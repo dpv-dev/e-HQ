@@ -258,3 +258,40 @@
 ### Connected visual verification
 - Opened `https://app.eeee.mu/console/office/pnl` in authenticated session.
 - Confirmed route renders and Office P&L surfaces load under the deployed build.
+
+## Office Scoped Reads Regression Hardening - 2026-07-12
+
+### Scope
+- Release commit: `2ba08a6` (`fix(api): keep office reference entities in scoped reads`).
+- Objective: keep financial data strictly workspace-scoped while preserving reference visibility (`projects`, `partners`) for Office routes.
+
+### Ordered validation sequence
+- Ran focused API regressions after patch -> pass (including new scoped-reference coverage).
+- Ran canonical `./deploy-build.sh` -> success:
+  - API tests: `100/100` pass
+  - HQ check/build: pass
+  - Regression gate: pass
+  - SQL column check: pass
+  - Artifacts regenerated: `app-eeee-api-hostinger.zip`, `app-eeee-frontend.zip`
+
+### Rollout
+- Uploaded artifacts to `~/ehq-deploy-upload/` via `scp`.
+- Unzipped API bundle to `~/domains/api.eeee.mu/nodejs/`.
+- Unzipped frontend bundle to `~/domains/app.eeee.mu/public_html/`.
+- Restarted API via `touch ~/domains/api.eeee.mu/nodejs/tmp/restart.txt`.
+
+### Post-deploy verification
+- Direct health check: `https://api.eeee.mu/healthz` -> `200` with DB status `ok`.
+- `corepack pnpm smoke:critical` -> PASS:
+  - `https://api.eeee.mu/healthz` -> 200
+  - `https://app.eeee.mu/` -> 200
+  - `https://app.eeee.mu/console/office/bank` -> 200
+  - `https://app.eeee.mu/console/distribution/settings` -> 200
+  - `https://app.eeee.mu/console/command-center/settings` -> 200
+- Additional API sanity checks confirmed Office endpoints return expected auth guards (401 unauth, not startup 503):
+  - `/eof/v1/status?workspaceId=eeee-mu`
+  - `/eof/v1/pl/global?workspaceId=eeee-mu&period=2026-07`
+
+### Connected visual note
+- Opening `/console/office/pnl` immediately after restart can still show transient console `503` fetch errors during startup retry windows.
+- Backend was healthy (`/healthz` 200) and critical smoke remained fully green after warm-up.

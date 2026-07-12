@@ -3,7 +3,7 @@
 Last updated: 2026-07-12
 Branch: theme/distribution-command
 Main baseline: 146e25b
-Current head: 152eb4f
+Current head: 2ba08a6
 
 ## Current Snapshot
 - Repo health: canonical gate green on HEAD (API tests 98/98, HQ check/build, regression, SQL guard).
@@ -41,6 +41,35 @@ Current head: 152eb4f
 	- direct health recovered to `200`
 	- `corepack pnpm smoke:critical` final run PASS across all critical routes
 - Connected visual verification on `https://app.eeee.mu/console/office/pnl` succeeded (page renders and loads scoped P&L surfaces).
+
+## Scoped Reads Regression Hardening - 2026-07-12
+
+### Scope
+- Follow-up patch to prevent regressions on Office reference routes after workspace scoping changes.
+
+### Changes
+- Commit `2ba08a6`: keep Office reference entities visible in scoped reads while preserving transaction-bound financial scoping.
+- `officeDatasetForWorkspace(...)` now keeps:
+	- `projects`
+	- `projectBudgetLines`
+	- `partners`
+	as reference sets (current schema has no workspace_id on these rows), while still scoping:
+	- transactions
+	- allocations
+	- bank accounts/imports/lines/reconciliation matches
+	- cashflow projections
+- Added regression test coverage:
+	- `/eof/v1/projects?workspaceId=eeee-mu` still returns reference projects with zeroed scoped totals
+	- `/eof/v1/partners/:partnerId?workspaceId=eeee-mu` remains available
+
+### Validation and rollout
+- Focused API regression run: pass.
+- Canonical gate `./deploy-build.sh`: pass (API `100/100`, HQ check/build, regression, SQL guard).
+- Deployment to Hostinger completed (API + frontend artifacts) with restart via `tmp/restart.txt`.
+- Post-deploy checks:
+	- `https://api.eeee.mu/healthz` -> 200
+	- `corepack pnpm smoke:critical` -> PASS
+	- Office route auth guards return expected `401` unauth (no startup `503` on API sanity checks).
 
 ## Program Phases
 
