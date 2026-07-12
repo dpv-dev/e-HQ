@@ -28,8 +28,8 @@
   const paginationDetail = $derived(pagination === null
     ? ""
     : pagination.hasMore
-      ? `${String(pagination.loadedCount)} rows loaded. More rows are available.`
-      : `${String(pagination.loadedCount)} rows loaded. All rows are visible.`
+      ? `${String(pagination.loadedCount)} lignes chargées. D'autres lignes sont disponibles.`
+      : `${String(pagination.loadedCount)} lignes chargées. Toutes les lignes sont visibles.`
   );
 
   // Money cells follow the tone the caller assigns (usually sign-based via
@@ -76,10 +76,10 @@
   const showFooter = $derived(props.state === "default" && (showPagination || showNumberedPagination));
   const localPaginationDetail = $derived(
     virtualize
-      ? `${String(sortedRows.length)} rows.`
+      ? `${String(sortedRows.length)} lignes.`
       : showNumberedPagination
-      ? `${String((localPage - 1) * AUTO_ROWS_PER_PAGE + 1)}-${String(Math.min(localPage * AUTO_ROWS_PER_PAGE, sortedRows.length))} of ${String(sortedRows.length)} rows.`
-      : `${String(sortedRows.length)} rows.`
+      ? `${String((localPage - 1) * AUTO_ROWS_PER_PAGE + 1)}–${String(Math.min(localPage * AUTO_ROWS_PER_PAGE, sortedRows.length))} sur ${String(sortedRows.length)} lignes.`
+      : `${String(sortedRows.length)} lignes.`
   );
 
   $effect((): void => {
@@ -173,7 +173,7 @@
 <section class={`ehq-table-shell ehq-edge-surface ${props.state}`} aria-label={props.title}>
   <header>
     <div class="title-stack">
-      <p class="eyebrow ehq-type-label-mono">Table</p>
+      <p class="eyebrow ehq-type-label-mono">Liste</p>
       <h3 class="ehq-type-heading">{props.title}</h3>
     </div>
     {#if props.actionLabel.length > 0}
@@ -193,22 +193,22 @@
 
   {#if props.state === "loading"}
     <div class="state-card">
-      <Loader label="Loading table" detail="Rows are being prepared." size="medium" />
+      <Loader label="Chargement de la liste" detail="Préparation des lignes." size="medium" />
     </div>
   {:else if props.state === "empty"}
     <div class="state-card">
-      <strong>No rows</strong>
-      <span>No data matches the current filters.</span>
+      <strong>Aucune ligne</strong>
+      <span>Aucune donnée ne correspond aux filtres actuels.</span>
     </div>
   {:else if props.state === "error"}
     <div class="state-card error-copy">
-      <strong>Table unavailable</strong>
-      <span>The request failed and the current context is still visible.</span>
+      <strong>Liste indisponible</strong>
+      <span>La requête a échoué. Le contexte courant est conservé.</span>
     </div>
   {:else if props.state === "locked"}
     <div class="state-card locked-copy">
-      <strong>× Locked table</strong>
-      <span>Access can be requested without hiding the workspace.</span>
+      <strong>× Liste verrouillée</strong>
+      <span>Vous pouvez demander l'accès sans quitter cet espace.</span>
     </div>
   {:else}
     <div class:virtualized={virtualize} class="table-frame" onscroll={virtualize ? handleTableScroll : undefined}>
@@ -279,7 +279,7 @@
       </table>
     </div>
     {#if showFooter}
-      <footer class="table-pagination" aria-label="Table pagination">
+      <footer class="table-pagination" aria-label="Pagination de la liste">
         <div class="pagination-info">
           <span>{localPaginationDetail}</span>
           {#if showPagination && pagination !== null}
@@ -291,23 +291,23 @@
         </div>
         <div class="pagination-actions">
           {#if showNumberedPagination}
-            <div class="pagination-numbers" aria-label="Local table pages">
-              <button type="button" class="page-button" disabled={localPage <= 1} onclick={() => goToLocalPage(localPage - 1)} aria-label="Previous page">
-                Prev
+            <div class="pagination-numbers" aria-label="Pages de la liste">
+              <button type="button" class="page-button" disabled={localPage <= 1} onclick={() => goToLocalPage(localPage - 1)} aria-label="Page précédente">
+                Précédent
               </button>
               {#each localPageNumbers as pageNumber (pageNumber)}
                 <button type="button" class="page-button" class:active={pageNumber === localPage} onclick={() => goToLocalPage(pageNumber)} aria-label={`Page ${String(pageNumber)}`}>
                   {pageNumber}
                 </button>
               {/each}
-              <button type="button" class="page-button" disabled={localPage >= totalLocalPages} onclick={() => goToLocalPage(localPage + 1)} aria-label="Next page">
-                Next
+              <button type="button" class="page-button" disabled={localPage >= totalLocalPages} onclick={() => goToLocalPage(localPage + 1)} aria-label="Page suivante">
+                Suivant
               </button>
             </div>
           {/if}
           {#if showPagination && pagination !== null && pagination.hasMore}
             <Button
-              label={pagination.loading ? "Loading..." : "Load more"}
+              label={pagination.loading ? "Chargement…" : "Charger plus"}
               variant="secondary"
               size="small"
               type="button"
@@ -315,11 +315,11 @@
               loading={pagination.loading}
               locked={false}
               focus={false}
-              ariaLabel="Load more rows"
+              ariaLabel="Charger plus de lignes"
               onclick={pagination.onLoadMore}
             />
             <Button
-              label={pagination.loading ? "Loading..." : "Load all"}
+              label={pagination.loading ? "Chargement…" : "Tout charger"}
               variant="secondary"
               size="small"
               type="button"
@@ -327,7 +327,7 @@
               loading={pagination.loading}
               locked={false}
               focus={false}
-              ariaLabel="Load all rows"
+              ariaLabel="Charger toutes les lignes"
               onclick={pagination.onLoadAll}
             />
           {/if}

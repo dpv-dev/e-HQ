@@ -201,105 +201,105 @@
       items: [
         {
           id: "dashboard",
-          label: "Dashboard",
-          title: "Office Dashboard",
-          subtitle: "Finance, bank, monitoring, and project summary."
+          label: "Tableau de bord",
+          title: "Tableau de bord Office",
+          subtitle: "Synthèse de la finance, des banques, du suivi et des projets."
         },
         {
           id: "ceo",
-          label: "CEO view",
-          title: "CEO view",
-          subtitle: "Executive summary composed from dashboard and validated P&L."
+          label: "Vue direction",
+          title: "Vue direction",
+          subtitle: "Synthèse exécutive issue du tableau de bord et du P&L validé."
         },
         {
           id: "pnl",
           label: "P&L",
-          title: "P&L · income statement",
-          subtitle: "Validated projections · departments, divisions, and categories."
+          title: "P&L · compte de résultat",
+          subtitle: "Projections validées par département, division et catégorie."
         },
         {
           id: "cashflow",
-          label: "Cash Flow",
-          title: "Cash-flow",
-          subtitle: "Inflows, outflows, and closing balances by period."
+          label: "Trésorerie",
+          title: "Flux de trésorerie",
+          subtitle: "Entrées, sorties et soldes de clôture par période."
         },
         {
           id: "vat",
-          label: "VAT",
-          title: "VAT report",
-          subtitle: "VAT by period, derived from existing typed data."
+          label: "TVA",
+          title: "Rapport de TVA",
+          subtitle: "TVA par période, calculée à partir des données typées existantes."
         },
         {
           id: "coa",
-          label: "Charts of Account",
-          title: "Chart of accounts",
-          subtitle: "Department → Division → Category."
+          label: "Plan comptable",
+          title: "Plan comptable",
+          subtitle: "Département → division → catégorie."
         }
       ]
     },
     {
       id: "operations",
-      label: "Operations",
+      label: "Opérations",
       items: [
         {
           id: "imports",
           label: "Imports",
-          title: "Imports",
-          subtitle: "Monthly bank statements with automatic analysis then confirmed import."
+          title: "Imports bancaires",
+          subtitle: "Relevés bancaires analysés automatiquement puis importés après validation."
         },
         {
           id: "waveInvoices",
-          label: "Wave invoices",
-          title: "Wave invoices",
-          subtitle: "Dedicated lane for Wave invoice operations and follow-up."
+          label: "Factures Wave",
+          title: "Factures Wave",
+          subtitle: "Espace dédié aux opérations et au suivi des factures Wave."
         },
         {
           id: "bank",
-          label: "Bank",
-          title: "Bank",
-          subtitle: "Bank accounts, raw bank lines, and bank quality."
+          label: "Banque",
+          title: "Banque",
+          subtitle: "Comptes bancaires, lignes brutes et qualité bancaire."
         },
         {
           id: "transactions",
           label: "Transactions",
           title: "Transactions",
-          subtitle: "Ledger filtered by every Office dimension."
+          subtitle: "Grand livre filtré par dimension Office."
         },
         {
           id: "pending",
-          label: "Pending",
-          title: "Pending",
-          subtitle: "Classification and batch validation."
+          label: "À traiter",
+          title: "Éléments à traiter",
+          subtitle: "Classification et validation par lot."
         },
         {
           id: "reconciliation",
-          label: "Reconciliation",
-          title: "Reconciliation",
-          subtitle: "Bank ↔ ledger matching and batch approval."
+          label: "Rapprochement",
+          title: "Rapprochement bancaire",
+          subtitle: "Rapprocher les lignes bancaires avec le grand livre et valider les suggestions."
         }
       ]
     },
     {
       id: "reference",
-      label: "References",
+      label: "Références",
       items: [
         {
           id: "clients",
           label: "Clients",
           title: "Clients",
-          subtitle: "Income-side lens over partners with client activity."
+          subtitle: "Vue des partenaires ayant une activité client."
         },
         {
           id: "suppliers",
           label: "Suppliers",
           title: "Suppliers",
-          subtitle: "Expense-side lens over partners with supplier activity."
+          subtitle: "Vue des partenaires ayant une activité fournisseur."
         },
         {
           id: "projects",
           label: "Projects",
           title: "Projects",
-          subtitle: "Project P&L and coherence checks from Office projections."
+          subtitle: "P&L projet et contrôles de cohérence des projections Office."
         }
       ]
     },
@@ -309,21 +309,21 @@
       items: [
         {
           id: "audit",
-          label: "Audit log",
-          title: "Audit log",
-          subtitle: "Read-only trail of Office audit events."
+          label: "Journal d'audit",
+          title: "Journal d'audit",
+          subtitle: "Historique en lecture seule des événements d'audit Office."
         },
         {
           id: "monitoring",
           label: "Monitoring",
           title: "Monitoring",
-          subtitle: "Integrity checks, bank quality, pending rows, imports, and audit trail."
+          subtitle: "Contrôles d'intégrité, qualité bancaire, éléments à traiter, imports et audit."
         },
         {
           id: "settings",
-          label: "Settings",
-          title: "Settings",
-          subtitle: "Read-only Office configuration: reference currency and maintenance."
+          label: "Paramètres",
+          title: "Paramètres",
+          subtitle: "Configuration Office en lecture seule: devise de référence et maintenance."
         }
       ]
     }
@@ -346,12 +346,12 @@
   // Keep all lifecycle statuses visible in the filter so reconciliation reviewers
   // can audit both accepted and declined propositions.
   const reconciliationStatusOptions: readonly SelectOption[] = [
-    { label: "All", value: allValue },
-    { label: "Unmatched", value: "unmatched" },
-    { label: "Suggested", value: "suggested" },
-    { label: "Matched", value: "matched" },
-    { label: "Rejected", value: "rejected" },
-    { label: "Ignored", value: "ignored" }
+    { label: "Tous", value: allValue },
+    { label: "Non rapproché", value: "unmatched" },
+    { label: "Suggéré", value: "suggested" },
+    { label: "Rapproché", value: "matched" },
+    { label: "Refusé", value: "rejected" },
+    { label: "Ignoré", value: "ignored" }
   ];
   const importSourceOptions: readonly SelectOption[] = [
     { label: "MCB EUR PDF", value: "mcb" },
@@ -646,11 +646,11 @@
     { label: "Delete", onAction: deletePlanNode, danger: true }
   ]);
   const reconciliationRowActions = $derived<readonly TableRowAction[]>([
-    { label: "Accept", onAction: acceptReconciliation },
-    { label: "Match", onAction: openReconcileMatch },
-    { label: "Create entry", onAction: openReconcileCreate },
-    { label: "Unmatch", onAction: unmatchReconciliationById },
-    { label: "Reject", onAction: rejectReconciliationById, danger: true }
+    { label: "Valider", onAction: acceptReconciliation },
+    { label: "Rapprocher", onAction: openReconcileMatch },
+    { label: "Créer l'écriture", onAction: openReconcileCreate },
+    { label: "Dé-rapprocher", onAction: unmatchReconciliationById },
+    { label: "Refuser", onAction: rejectReconciliationById, danger: true }
   ]);
   const reconcileTransactionOptions = $derived(
     sortOptionsAlphabetically(
@@ -4131,11 +4131,11 @@
   workspace="office"
   brandLabel="ë • office"
   homeHref="/console/office/dashboard"
-  navLabel="Office navigation"
+  navLabel="Navigation Office"
   navItems={[]}
   navGroups={shellNavGroups}
   statusLabel="eof/v1"
-  statusValue={writesEnabled ? "writes enabled" : "live reads"}
+  statusValue={writesEnabled ? "écritures activées" : "lecture seule"}
   userInitial={session.initials}
   userName={session.displayName}
   userContext={session.roleLabel}
@@ -4155,10 +4155,10 @@
       />
 
       {#if periodControlVisible}
-        <section class="period-control ehq-edge-surface" aria-label="Period control">
+        <section class="period-control ehq-edge-surface" aria-label="Contrôle de période">
           <Select
             id="office-period-scope"
-            label="Period"
+            label="Période"
             value={periodScope}
             options={periodOptions}
             state="default"
@@ -4167,11 +4167,11 @@
           />
           {#if periodScope === "custom"}
             <label>
-              <span class="ehq-type-label-mono">From</span>
+              <span class="ehq-type-label-mono">Du</span>
               <input type="date" value={activeRange.from} max={activeRange.to} onchange={updateCustomFrom} />
             </label>
             <label>
-              <span class="ehq-type-label-mono">To</span>
+              <span class="ehq-type-label-mono">Au</span>
               <input type="date" value={activeRange.to} min={activeRange.from} onchange={updateCustomTo} />
             </label>
           {/if}
@@ -4260,69 +4260,69 @@
           </div>
         </section>
       {:else if activePageId === "pnl"}
-        <section class="kpi-grid" aria-label="P&L indicators">
+        <section class="kpi-grid" aria-label="Indicateurs du P&L">
           {#each pnlKpis as kpi (kpi.label)}
             <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state={isLoadingState(pnlState) ? "loading" : "default"} accent={kpi.accent} />
           {/each}
         </section>
 
-        <section class="filter-strip ehq-edge-surface" aria-label="P&L filters">
+        <section class="filter-strip ehq-edge-surface" aria-label="Filtres du P&L">
           <Select
             id="office-pnl-department"
-            label="Department"
+            label="Département"
             value={departmentFilter}
             options={departmentOptions}
             state="default"
             message=""
             onchange={updateDepartmentFilter}
           />
-          <Button label="Filter" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Apply P&L filters" onclick={applyPnlFilters} />
+          <Button label="Filtrer" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Appliquer les filtres du P&L" onclick={applyPnlFilters} />
         </section>
 
         {#if isLoadingState(pnlState)}
-          <Loader label="Loading P&L" detail="Reading validated projections." size="medium" />
+          <Loader label="Chargement du P&L" detail="Lecture des projections validées." size="medium" />
         {:else}
           <section class="dashboard-grid">
-            <DivergeChart title="Revenue and expenses by department" points={pnlChartPoints} />
-            <Table title="Result by department" columns={pnlColumns} rows={pnlTableRows} state={pnlState.status === "error" ? "error" : pnlTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
+            <DivergeChart title="Produits et charges par département" points={pnlChartPoints} />
+            <Table title="Résultat par département" columns={pnlColumns} rows={pnlTableRows} state={pnlState.status === "error" ? "error" : pnlTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
           </section>
           <section class="dashboard-grid">
-            <BarsChart title="Top category impact (absolute net)" points={pnlCategoryImpactPoints} tone="active" />
-            <Table title="Result by division" columns={divisionPnlColumns} rows={divisionPnlTableRows} state={isLoadingState(divisionPnlState) ? "loading" : divisionPnlState.status === "error" ? "error" : divisionPnlTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={divisionPnlPagination} />
+            <BarsChart title="Impact des catégories (net absolu)" points={pnlCategoryImpactPoints} tone="active" />
+            <Table title="Résultat par division" columns={divisionPnlColumns} rows={divisionPnlTableRows} state={isLoadingState(divisionPnlState) ? "loading" : divisionPnlState.status === "error" ? "error" : divisionPnlTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={divisionPnlPagination} />
           </section>
-          <Table title="Result by category" columns={pnlLineColumns} rows={pnlLineTableRows} state={isLoadingState(pnlCategoryState) ? "loading" : pnlCategoryState.status === "error" ? "error" : pnlLineTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={pnlCategoryPagination} />
+          <Table title="Résultat par catégorie" columns={pnlLineColumns} rows={pnlLineTableRows} state={isLoadingState(pnlCategoryState) ? "loading" : pnlCategoryState.status === "error" ? "error" : pnlLineTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={pnlCategoryPagination} />
         {/if}
       {:else if activePageId === "coa"}
-        <section class="form-panel ehq-edge-surface" aria-label="Chart of accounts editor">
+        <section class="form-panel ehq-edge-surface" aria-label="Éditeur du plan comptable">
           <Select id="office-plan-kind" label="Type" value={planForm.kind} options={planKindOptions} state="default" message="" onchange={updatePlanKind} />
           <Select id="office-plan-parent" label="Parent" value={planForm.parentId} options={parentOptions} state="default" message="" onchange={updatePlanParent} />
           <Input id="office-plan-code" label="Code" value={planForm.code} placeholder="" type="text" state="default" message="" oninput={updatePlanCode} />
-          <Input id="office-plan-label" label="Label" value={planForm.label} placeholder="" type="text" state="default" message="" oninput={updatePlanLabel} />
+          <Input id="office-plan-label" label="Libellé" value={planForm.label} placeholder="" type="text" state="default" message="" oninput={updatePlanLabel} />
           {#if planForm.kind === "category"}
-            <Select id="office-plan-type" label="Category type" value={planForm.type} options={planTypeOptions} state="default" message="" onchange={updatePlanType} />
+            <Select id="office-plan-type" label="Type de catégorie" value={planForm.type} options={planTypeOptions} state="default" message="" onchange={updatePlanType} />
           {/if}
-          <Button label="Create" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Create plan node" title={writeDisabledTitle()} onclick={createPlanNode} />
-          <Button label="Deactivate a category" variant="secondary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Deactivate a category" title={writeDisabledTitle()} onclick={deactivateFirstCategory} />
+          <Button label="Créer" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Créer un élément du plan comptable" title={writeDisabledTitle()} onclick={createPlanNode} />
+          <Button label="Désactiver une catégorie" variant="secondary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Désactiver une catégorie" title={writeDisabledTitle()} onclick={deactivateFirstCategory} />
         </section>
 
         <section class="dashboard-grid">
-          <BarsChart title="Chart of accounts node mix" points={coaStructurePoints} tone="info" />
+          <BarsChart title="Répartition des éléments du plan comptable" points={coaStructurePoints} tone="info" />
         </section>
 
         <Table title="Department → Division → Category" columns={planColumns} rows={planTableRows} state={isLoadingState(planTableState) ? "loading" : planTableState.status === "error" ? "error" : planTableRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={planRowActions} pagination={planPagination} />
       {:else if activePageId === "transactions"}
-        <section class="filter-grid ehq-edge-surface" aria-label="Transaction filters">
-          <Select id="office-filter-account" label="Account" value={accountFilter} options={accountOptions} state="default" message="" onchange={updateAccountFilter} />
-          <Select id="office-filter-department" label="Department" value={departmentFilter} options={departmentOptions} state="default" message="" onchange={updateDepartmentFilter} />
+        <section class="filter-grid ehq-edge-surface" aria-label="Filtres des transactions">
+          <Select id="office-filter-account" label="Compte" value={accountFilter} options={accountOptions} state="default" message="" onchange={updateAccountFilter} />
+          <Select id="office-filter-department" label="Département" value={departmentFilter} options={departmentOptions} state="default" message="" onchange={updateDepartmentFilter} />
           <Select id="office-filter-division" label="Division" value={divisionFilter} options={divisionOptions} state="default" message="" onchange={updateDivisionFilter} />
-          <Select id="office-filter-category" label="Category" value={categoryFilter} options={categoryOptions} state="default" message="" onchange={updateCategoryFilter} />
-          <Select id="office-filter-project" label="Project" value={projectFilter} options={projectOptions} state="default" message="" onchange={updateProjectFilter} />
+          <Select id="office-filter-category" label="Catégorie" value={categoryFilter} options={categoryOptions} state="default" message="" onchange={updateCategoryFilter} />
+          <Select id="office-filter-project" label="Projet" value={projectFilter} options={projectOptions} state="default" message="" onchange={updateProjectFilter} />
           <Select id="office-filter-type" label="Type" value={typeFilter} options={typeOptions} state="default" message="" onchange={updateTypeFilter} />
-          <Select id="office-filter-status" label="Status" value={transactionStatusFilter} options={statusOptions} state="default" message="" onchange={updateTransactionStatusFilter} />
+          <Select id="office-filter-status" label="Statut" value={transactionStatusFilter} options={statusOptions} state="default" message="" onchange={updateTransactionStatusFilter} />
           <div class="filter-actions">
-            <Button label="Filter" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Apply transaction filters" onclick={applyTransactionFilters} />
-            <Button label="New entry" variant="secondary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="New ledger entry" title={writeDisabledTitle()} onclick={openTransactionCreate} />
-            <Button label="Export CSV" variant="secondary" size="medium" type="button" disabled={transactionRows.length === 0} loading={false} locked={false} focus={false} ariaLabel="Export transactions as CSV" onclick={exportTransactionsCsv} />
+            <Button label="Filtrer" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Appliquer les filtres des transactions" onclick={applyTransactionFilters} />
+            <Button label="Nouvelle écriture" variant="secondary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Créer une nouvelle écriture" title={writeDisabledTitle()} onclick={openTransactionCreate} />
+            <Button label="Exporter CSV" variant="secondary" size="medium" type="button" disabled={transactionRows.length === 0} loading={false} locked={false} focus={false} ariaLabel="Exporter les transactions au format CSV" onclick={exportTransactionsCsv} />
           </div>
         </section>
 
@@ -4332,7 +4332,7 @@
         </section>
 
         {#if creatingTransaction}
-          <section class="office-edit-panel ehq-edge-surface" aria-label="New entry" bind:this={transactionPanelElement}>
+          <section class="office-edit-panel ehq-edge-surface" aria-label="Nouvelle écriture" bind:this={transactionPanelElement}>
             <div class="office-edit-grid">
               <label>
                 <span class="ehq-type-label-mono">Date</span>
@@ -4356,14 +4356,14 @@
               <Select id="office-create-project" label="Project" value={createProjectId} options={optionalProjectOptions} state="default" message="" onchange={(value: string): void => { createProjectId = value; }} />
             </div>
             <div class="office-edit-actions">
-              <Button label="Create entry" variant="primary" size="medium" type="button" disabled={!writesEnabled || !canSubmitTransactionCreate} loading={false} locked={false} focus={false} ariaLabel="Create entry" title={writeDisabledTitle()} onclick={submitTransactionCreate} />
-              <Button label="Close" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Close the creation form" onclick={closeTransactionCreate} />
+              <Button label="Créer l'écriture" variant="primary" size="medium" type="button" disabled={!writesEnabled || !canSubmitTransactionCreate} loading={false} locked={false} focus={false} ariaLabel="Créer l'écriture" title={writeDisabledTitle()} onclick={submitTransactionCreate} />
+              <Button label="Fermer" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Fermer le formulaire de création" onclick={closeTransactionCreate} />
             </div>
           </section>
         {/if}
 
         {#if editingTransaction !== null}
-          <section class="office-edit-panel ehq-edge-surface" aria-label="Edit transaction" bind:this={transactionPanelElement}>
+          <section class="office-edit-panel ehq-edge-surface" aria-label="Modifier la transaction" bind:this={transactionPanelElement}>
             <div class="office-edit-grid">
               <label>
                 <span class="ehq-type-label-mono">Date</span>
@@ -4386,14 +4386,14 @@
               <Select id="office-edit-project" label="Project" value={editProjectId} options={optionalProjectOptions} state="default" message="" onchange={(value: string): void => { editProjectId = value; }} />
             </div>
             <div class="office-edit-actions">
-              <Button label="Save" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Save transaction" title={writeDisabledTitle()} onclick={saveTransactionEdit} />
-              <Button label="Validate" variant="secondary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Validate transaction" title={writeDisabledTitle()} onclick={validateEditingTransaction} />
-              <Button label="Close" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Close editor" onclick={closeTransactionEditor} />
+              <Button label="Enregistrer" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Enregistrer la transaction" title={writeDisabledTitle()} onclick={saveTransactionEdit} />
+              <Button label="Valider" variant="secondary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Valider la transaction" title={writeDisabledTitle()} onclick={validateEditingTransaction} />
+              <Button label="Fermer" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Fermer l'éditeur" onclick={closeTransactionEditor} />
             </div>
           </section>
         {/if}
 
-        <Table title={`Ledger · ${rangeLabel(activeRange)}`} columns={transactionColumns} rows={transactionTableRows} state={isLoadingState(transactionsState) ? "loading" : transactionsState.status === "error" ? "error" : transactionRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={ledgerRowActions} pagination={transactionPagination} />
+        <Table title={`Grand livre · ${rangeLabel(activeRange)}`} columns={transactionColumns} rows={transactionTableRows} state={isLoadingState(transactionsState) ? "loading" : transactionsState.status === "error" ? "error" : transactionRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={ledgerRowActions} pagination={transactionPagination} />
       {:else if activePageId === "clients"}
         <PartnersView
           facet="client"
@@ -4612,14 +4612,14 @@
 
         <Table title="Bank batches known to the API" columns={importColumns} rows={recentImportRows} state={isLoadingState(dashboardState) ? "loading" : dashboardState.status === "error" ? "error" : recentImportRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={importRowActions} />
       {:else if activePageId === "reconciliation"}
-        <section class="filter-strip ehq-edge-surface" aria-label="Reconciliation filters">
-          <Select id="office-reconciliation-account" label="Account" value={accountFilter} options={accountOptions} state="default" message="" onchange={updateAccountFilter} />
-          <Select id="office-reconciliation-status" label="Status" value={reconciliationStatusFilter} options={reconciliationStatusOptions} state="default" message="" onchange={updateReconciliationStatusFilter} />
-          <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Apply reconciliation filters" onclick={applyReconciliationFilters} />
-          <Button label="Auto-approve strong suggested" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Auto-approve suggested reconciliations above confidence threshold" title={writeDisabledTitle()} onclick={approveSuggestedReconciliations} />
+        <section class="filter-strip ehq-edge-surface" aria-label="Filtres de rapprochement">
+          <Select id="office-reconciliation-account" label="Compte" value={accountFilter} options={accountOptions} state="default" message="" onchange={updateAccountFilter} />
+          <Select id="office-reconciliation-status" label="Statut" value={reconciliationStatusFilter} options={reconciliationStatusOptions} state="default" message="" onchange={updateReconciliationStatusFilter} />
+          <Button label="Filtrer" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Appliquer les filtres de rapprochement" onclick={applyReconciliationFilters} />
+          <Button label="Valider les suggestions fiables" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Valider les suggestions au-dessus du seuil de confiance" title={writeDisabledTitle()} onclick={approveSuggestedReconciliations} />
         </section>
 
-        <section class="kpi-grid" aria-label="Reconciliation operations indicators">
+        <section class="kpi-grid" aria-label="Indicateurs de rapprochement">
           {#each reconciliationOperationsKpis as kpi (kpi.label)}
             <KPI
               label={kpi.label}
@@ -4633,19 +4633,19 @@
         </section>
 
         <section class="dashboard-grid">
-          <BarsChart title="Reconciliation status mix" points={reconciliationStatusPoints} tone="info" />
+          <BarsChart title="Répartition des statuts de rapprochement" points={reconciliationStatusPoints} tone="info" />
         </section>
 
-        <Table title="Bank ↔ ledger matching" columns={reconciliationColumns} rows={reconciliationTableRows} state={isLoadingState(reconciliationState) ? "loading" : reconciliationState.status === "error" ? "error" : reconciliationRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={reconciliationRowActions} pagination={reconciliationPagination} />
+        <Table title="Rapprochement banque ↔ grand livre" columns={reconciliationColumns} rows={reconciliationTableRows} state={isLoadingState(reconciliationState) ? "loading" : reconciliationState.status === "error" ? "error" : reconciliationRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={reconciliationRowActions} pagination={reconciliationPagination} />
 
         {#if reconcileDrawerLineId !== null}
           <Drawer
             open={true}
-            title={reconcileDrawerMode === "match" ? `Match “${reconcileDrawerBankLabel}”` : `Create an entry from “${reconcileDrawerBankLabel}”`}
-            badgeLabel={reconcileDrawerMode === "match" ? "match" : "creation"}
+            title={reconcileDrawerMode === "match" ? `Rapprocher « ${reconcileDrawerBankLabel} »` : `Créer une écriture depuis « ${reconcileDrawerBankLabel} »`}
+            badgeLabel={reconcileDrawerMode === "match" ? "rapprochement" : "création"}
             badgeTone="info"
             body=""
-            primaryAction={reconcileDrawerMode === "match" ? "Match" : "Create & match"}
+            primaryAction={reconcileDrawerMode === "match" ? "Rapprocher" : "Créer et rapprocher"}
             secondaryAction="Cancel"
             state="default"
             primaryDisabled={!writesEnabled || (reconcileDrawerMode === "match" && reconcileMatchTransactionId.length === 0)}
@@ -4688,7 +4688,7 @@
           </Drawer>
         {/if}
       {:else if activePageId === "pending"}
-        <section class="pending-actions ehq-edge-surface" aria-label="Pending actions">
+        <section class="pending-actions ehq-edge-surface" aria-label="Actions sur les éléments à traiter">
           <Select
             id="office-pending-category"
             label="Category"
@@ -4707,13 +4707,13 @@
             message=""
             onchange={(value: string): void => { pendingClassifyProjectId = value; }}
           />
-          <Button label="Classify selection" variant="secondary" size="medium" type="button" disabled={!writesEnabled || selectedPendingIds.length === 0 || pendingClassifyCategoryId.length === 0} loading={false} locked={false} focus={false} ariaLabel="Classify selection" title={writeDisabledTitle()} onclick={classifySelectedPending} />
-          <Button label="Validate selection" variant="primary" size="medium" type="button" disabled={!writesEnabled || selectedPendingIds.length === 0} loading={false} locked={false} focus={false} ariaLabel="Validate selection" title={writeDisabledTitle()} onclick={bulkValidatePending} />
+          <Button label="Classer la sélection" variant="secondary" size="medium" type="button" disabled={!writesEnabled || selectedPendingIds.length === 0 || pendingClassifyCategoryId.length === 0} loading={false} locked={false} focus={false} ariaLabel="Classer la sélection" title={writeDisabledTitle()} onclick={classifySelectedPending} />
+          <Button label="Valider la sélection" variant="primary" size="medium" type="button" disabled={!writesEnabled || selectedPendingIds.length === 0} loading={false} locked={false} focus={false} ariaLabel="Valider la sélection" title={writeDisabledTitle()} onclick={bulkValidatePending} />
           <span class="ehq-type-label-mono">{selectedPendingIds.length} selected</span>
         </section>
 
         <section class="dashboard-grid">
-          <BarsChart title="Pending queue status mix" points={pendingStatusPoints} tone="warning" />
+          <BarsChart title="Répartition des statuts à traiter" points={pendingStatusPoints} tone="warning" />
         </section>
 
         <div class="pending-list">
@@ -4730,11 +4730,11 @@
           {/each}
         </div>
 
-        <Table title="Queue pending" columns={pendingColumns} rows={pendingTableRows} state={isLoadingState(pendingState) ? "loading" : pendingState.status === "error" ? "error" : pendingRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={pendingPagination} />
+        <Table title="Éléments à traiter" columns={pendingColumns} rows={pendingTableRows} state={isLoadingState(pendingState) ? "loading" : pendingState.status === "error" ? "error" : pendingRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={pendingPagination} />
       {:else if activePageId === "cashflow"}
-        <section class="filter-strip ehq-edge-surface" aria-label="Cash-flow filters">
-          <Select id="office-cashflow-account" label="Account" value={accountFilter} options={accountOptions} state="default" message="" onchange={updateAccountFilter} />
-          <Button label="Filter" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Refresh cash-flow" onclick={applyCashflowFilters} />
+        <section class="filter-strip ehq-edge-surface" aria-label="Filtres de trésorerie">
+          <Select id="office-cashflow-account" label="Compte" value={accountFilter} options={accountOptions} state="default" message="" onchange={updateAccountFilter} />
+          <Button label="Filtrer" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Actualiser la trésorerie" onclick={applyCashflowFilters} />
         </section>
 
         <section class="office-edit-panel ehq-edge-surface" aria-label="Import a cashflow">
@@ -4751,11 +4751,11 @@
         </section>
 
         <section class="dashboard-grid">
-          <BarsChart title="Inflows" points={cashflowInflowPoints} tone="success" />
-          <BarsChart title="Outflows" points={cashflowOutflowPoints} tone="error" />
+          <BarsChart title="Entrées de trésorerie" points={cashflowInflowPoints} tone="success" />
+          <BarsChart title="Sorties de trésorerie" points={cashflowOutflowPoints} tone="error" />
         </section>
 
-        <Table title="Cash-flow by month" columns={cashflowColumns} rows={cashflowTableRows} state={isLoadingState(cashflowState) ? "loading" : cashflowState.status === "error" ? "error" : cashflowTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
+        <Table title="Trésorerie par mois" columns={cashflowColumns} rows={cashflowTableRows} state={isLoadingState(cashflowState) ? "loading" : cashflowState.status === "error" ? "error" : cashflowTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
       {:else if activePageId === "ceo"}
         <CeoView client={client.office} workspaceId={officeWorkspaceId} {period} dateFrom={activeRange.from} dateTo={activeRange.to} />
       {:else if activePageId === "bank"}
@@ -4780,22 +4780,22 @@
   // sortable stays false everywhere: the shared Table renders the sort glyph but
   // implements no sorting, so advertising it would be a dead affordance.
   const pnlColumns: readonly TableColumn[] = [
-    { label: "Department", align: "left", sortable: true },
-    { label: "Revenue", align: "right", sortable: true },
-    { label: "Expenses", align: "right", sortable: true },
+    { label: "Département", align: "left", sortable: true },
+    { label: "Produits", align: "right", sortable: true },
+    { label: "Charges", align: "right", sortable: true },
     { label: "Net", align: "right", sortable: true },
-    { label: "Validated", align: "left", sortable: true }
+    { label: "Validé", align: "left", sortable: true }
   ];
   const divisionPnlColumns: readonly TableColumn[] = [
     { label: "Division", align: "left", sortable: true },
-    { label: "Revenue", align: "right", sortable: true },
-    { label: "Expenses", align: "right", sortable: true },
+    { label: "Produits", align: "right", sortable: true },
+    { label: "Charges", align: "right", sortable: true },
     { label: "Net", align: "right", sortable: true }
   ];
   const pnlLineColumns: readonly TableColumn[] = [
-    { label: "Category", align: "left", sortable: true },
-    { label: "Revenue", align: "right", sortable: true },
-    { label: "Expenses", align: "right", sortable: true },
+    { label: "Catégorie", align: "left", sortable: true },
+    { label: "Produits", align: "right", sortable: true },
+    { label: "Charges", align: "right", sortable: true },
     { label: "Net", align: "right", sortable: true }
   ];
   const planColumns: readonly TableColumn[] = [
@@ -4847,12 +4847,12 @@
     { label: "Window", align: "left", sortable: true }
   ];
   const reconciliationColumns: readonly TableColumn[] = [
-    { label: "Description", align: "left", sortable: true },
+    { label: "Libellé", align: "left", sortable: true },
     { label: "Date", align: "left", sortable: true },
-    { label: "Amount", align: "right", sortable: true },
-    { label: "Suggested match", align: "left", sortable: true },
-    { label: "Conf.", align: "left", sortable: true },
-    { label: "Status", align: "left", sortable: true }
+    { label: "Montant", align: "right", sortable: true },
+    { label: "Suggestion", align: "left", sortable: true },
+    { label: "Confiance", align: "left", sortable: true },
+    { label: "Statut", align: "left", sortable: true }
   ];
   const pendingColumns: readonly TableColumn[] = [
     { label: "Selection", align: "left", sortable: true },

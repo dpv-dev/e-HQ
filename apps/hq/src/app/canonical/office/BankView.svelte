@@ -838,31 +838,31 @@
       return error.message;
     }
 
-    return "Bank request failed.";
+    return "La requête bancaire a échoué.";
   }
 </script>
 
 <section class="bank-view">
-  <section class="kpi-grid" aria-label="Bank indicators">
+  <section class="kpi-grid" aria-label="Indicateurs bancaires">
     {#each bankKpis as kpi (kpi.label)}
       <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state={isLoadingState(accountsState) ? "loading" : "default"} accent={kpi.accent} />
     {/each}
   </section>
 
   {#if isLoadingState(accountsState)}
-    <Loader label="Loading bank" detail="Reading accounts, raw lines, and bank quality." size="medium" />
+    <Loader label="Chargement de la banque" detail="Lecture des comptes, lignes brutes et indicateurs de qualité." size="medium" />
   {:else if accountsState.status === "error"}
     <div class="state-copy error">
-      <strong class="ehq-type-heading">Bank unavailable</strong>
+      <strong class="ehq-type-heading">Banque indisponible</strong>
       <span class="ehq-type-body">{getErrorMessage(accountsState.error)}</span>
     </div>
   {:else}
     <section class="dashboard-grid">
-      <BarsChart title="Raw line direction mix" points={rawDirectionPoints} tone="active" />
-      <BarsChart title="Reconciliation status mix" points={reconciliationStatusPoints} tone="info" />
+      <BarsChart title="Répartition des mouvements bancaires" points={rawDirectionPoints} tone="active" />
+      <BarsChart title="Répartition des statuts de rapprochement" points={reconciliationStatusPoints} tone="info" />
     </section>
 
-    <section class="bank-account-form ehq-edge-surface" aria-label={editingAccountId === null ? "Add a bank account" : "Edit bank account"}>
+    <section class="bank-account-form ehq-edge-surface" aria-label={editingAccountId === null ? "Ajouter un compte bancaire" : "Modifier le compte bancaire"}>
       <Input
         id="bank-account-name"
         label="Bank"
@@ -875,7 +875,7 @@
       />
       <Input
         id="bank-account-label"
-        label="Account label"
+        label="Libellé du compte"
         value={bankFormLabel}
         placeholder="MCB EUR"
         type="text"
@@ -885,7 +885,7 @@
       />
       <Select
         id="bank-account-currency"
-        label="Currency"
+        label="Devise"
         value={bankFormCurrency}
         options={currencyOptions}
         state="default"
@@ -901,7 +901,7 @@
       />
       <div class="bank-account-actions">
         <Button
-          label={accountSubmitStatus === "loading" ? "Saving…" : editingAccountId === null ? "Add account" : "Save"}
+          label={accountSubmitStatus === "loading" ? "Enregistrement…" : editingAccountId === null ? "Ajouter le compte" : "Enregistrer"}
           variant="primary"
           size="medium"
           type="button"
@@ -909,13 +909,13 @@
           loading={accountSubmitStatus === "loading"}
           locked={false}
           focus={false}
-          ariaLabel={editingAccountId === null ? "Add bank account" : "Save bank account"}
+          ariaLabel={editingAccountId === null ? "Ajouter un compte bancaire" : "Enregistrer le compte bancaire"}
           title={accountSubmitTitle()}
           onclick={submitAccountForm}
         />
         {#if editingAccountId !== null}
           <Button
-            label="Cancel"
+            label="Annuler"
             variant="secondary"
             size="medium"
             type="button"
@@ -923,7 +923,7 @@
             loading={false}
             locked={false}
             focus={false}
-            ariaLabel="Cancel editing bank account"
+            ariaLabel="Annuler la modification du compte bancaire"
             onclick={resetAccountForm}
           />
         {/if}
@@ -931,7 +931,7 @@
       {#if accountSubmitMessage !== null}
         <Alert
           tone={accountSubmitStatus === "error" ? "error" : "success"}
-          title={accountSubmitStatus === "error" ? "Error" : "Success"}
+          title={accountSubmitStatus === "error" ? "Erreur" : "Opération réussie"}
           message={accountSubmitMessage}
           dismissible={false}
         />
@@ -940,28 +940,28 @@
     <!-- This branch only renders when accountsState is idle or success: the
          loading and error statuses are handled by the view-level Loader and
          error copy above, so the table only distinguishes empty from default. -->
-    <Table title="Bank accounts" columns={accountColumns} rows={accountTableRows} state={accountTableRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={accountRowActions} pagination={accountsPagination} />
-    <Table title="Raw bank lines" columns={rawColumns} rows={rawTableRows} state={isLoadingState(rawState) ? "loading" : rawState.status === "error" ? "error" : rawTableRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={rawRowActions} pagination={rawPagination} />
+    <Table title="Comptes bancaires" columns={accountColumns} rows={accountTableRows} state={accountTableRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={accountRowActions} pagination={accountsPagination} />
+    <Table title="Lignes bancaires brutes" columns={rawColumns} rows={rawTableRows} state={isLoadingState(rawState) ? "loading" : rawState.status === "error" ? "error" : rawTableRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={rawRowActions} pagination={rawPagination} />
     {#if movingRawLineId !== null}
-      <section class="bank-account-form ehq-edge-surface" aria-label="Move bank line to a different account">
+      <section class="bank-account-form ehq-edge-surface" aria-label="Déplacer une ligne bancaire vers un autre compte">
         <Select
           id="office-bank-raw-move-account"
-          label="Move to account"
+          label="Déplacer vers le compte"
           value={moveTargetAccountId}
           options={moveAccountOptions}
           state="default"
           message=""
           onchange={(value: string): void => { moveTargetAccountId = value; }}
         />
-        <Button label="Confirm" variant="primary" size="medium" type="button" disabled={!props.writesEnabled || moveTargetAccountId.length === 0} loading={false} locked={false} focus={false} ariaLabel="Confirm move to account" title={props.writesEnabled ? "" : "Enable writes to move bank lines between accounts."} onclick={confirmMoveRawLine} />
-        <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel moving bank line" onclick={cancelMoveRawLine} />
+        <Button label="Confirmer" variant="primary" size="medium" type="button" disabled={!props.writesEnabled || moveTargetAccountId.length === 0} loading={false} locked={false} focus={false} ariaLabel="Confirmer le déplacement vers le compte" title={props.writesEnabled ? "" : "Activez les écritures pour déplacer une ligne bancaire."} onclick={confirmMoveRawLine} />
+        <Button label="Annuler" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Annuler le déplacement de la ligne bancaire" onclick={cancelMoveRawLine} />
       </section>
     {/if}
-    <Table title="Reconciliation candidates" columns={reconciliationColumns} rows={reconciliationTableRows} state={isLoadingState(reconciliationState) ? "loading" : reconciliationState.status === "error" ? "error" : reconciliationTableRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={reconciliationRowActions} pagination={reconciliationPagination} />
+    <Table title="Candidats au rapprochement" columns={reconciliationColumns} rows={reconciliationTableRows} state={isLoadingState(reconciliationState) ? "loading" : reconciliationState.status === "error" ? "error" : reconciliationTableRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={reconciliationRowActions} pagination={reconciliationPagination} />
     {#if reconciliationActionMessage !== null}
       <Alert
         tone={reconciliationActionStatus === "error" ? "error" : "success"}
-        title={reconciliationActionStatus === "error" ? "Error" : "Success"}
+        title={reconciliationActionStatus === "error" ? "Erreur" : "Opération réussie"}
         message={reconciliationActionMessage}
         dismissible={false}
       />
