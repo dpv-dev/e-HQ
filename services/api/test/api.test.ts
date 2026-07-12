@@ -3644,7 +3644,7 @@ test("office bank import confirm persists lines once and replays idempotent resp
   assert.equal(rawPage.items.filter((item) => item.reference === "IMP-1").length, 1);
 });
 
-test("office bank import confirm uses the account selected after preview", async () => {
+test("office bank import confirm persists the account bound at preview", async () => {
   const app = createWriteEnabledFixtureApiService();
   const preview = await app.request("/eof/v1/bank-import/preview", {
     method: "POST",
@@ -3654,7 +3654,8 @@ test("office bank import confirm uses the account selected after preview", async
       source: "mcb",
       fileName: "mcb-current.txt",
       checksum: "checksum-mcb-account-override",
-      rows: [{ date: "2026-02-20", description: "MCB current line", debit: "12.34", currency: "MUR", accountId: "bank_eur", reference: "MCB-CURRENT-1" }]
+      accountId: "bank_mur",
+      rows: [{ date: "2026-02-20", description: "MCB current line", debit: "12.34", currency: "MUR", reference: "MCB-CURRENT-1" }]
     })
   });
   assert.equal(preview.status, 200);
@@ -3680,6 +3681,37 @@ test("office bank import confirm uses the account selected after preview", async
   const rawPage = (await raw.json()) as { readonly items: readonly { readonly reference: string; readonly accountId: string }[] };
   const importedLine = rawPage.items.find((item) => item.reference === "MCB-CURRENT-1");
   assert.equal(importedLine?.accountId, "bank_mur");
+});
+
+test("office bank import confirm rejects a changed account after preview", async () => {
+  const app = createWriteEnabledFixtureApiService();
+  const preview = await app.request("/eof/v1/bank-import/preview", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      source: "mcb",
+      fileName: "mcb-current-stale-preview.txt",
+      checksum: "checksum-mcb-stale-account",
+      accountId: "bank_mur",
+      rows: [{ date: "2026-02-20", description: "Stale account line", debit: "12.34", currency: "MUR", reference: "MCB-STALE-1" }]
+    })
+  });
+  assert.equal(preview.status, 200);
+  const previewJson = (await preview.json()) as { readonly previewId: string };
+
+  const confirm = await app.request("/eof/v1/bank-import/confirm", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "mcb-stale-account-1" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      previewId: previewJson.previewId,
+      accountId: "bank_eur",
+      acceptedRowIds: ["row_1"],
+      rejectedRowIds: []
+    })
+  });
+  assert.equal(confirm.status, 409);
 });
 
 test("office bank import confirm creates suggested reconciliation propositions instead of auto-matching", async () => {

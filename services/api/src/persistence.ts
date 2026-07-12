@@ -60,6 +60,7 @@ export interface DistributionImportPreviewRecord {
 export interface OfficeBankImportPreviewRecord {
   readonly previewId: string;
   readonly workspaceId: string;
+  readonly accountId?: string | null;
   readonly source: "sbi" | "mcb" | "csv" | "cashflow" | "pdf";
   readonly fileName: string;
   readonly checksum: string;

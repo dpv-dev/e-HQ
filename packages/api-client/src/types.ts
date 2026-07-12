@@ -532,6 +532,7 @@ export interface OfficePlanComptableDeleteRequest {
 
 export interface BankImportPreviewRequest {
   readonly workspaceId: EntityId;
+  readonly accountId?: EntityId;
   readonly source: "sbi" | "mcb" | "csv" | "cashflow" | "pdf";
   readonly fileName: string;
   readonly checksum: string;
@@ -555,6 +556,7 @@ export interface BankImportParsePreviewResponse {
 
 export interface BankImportPreviewResponse {
   readonly previewId: EntityId;
+  readonly accountId: EntityId | null;
   readonly source: "sbi" | "mcb" | "csv" | "cashflow" | "pdf";
   readonly detectedFormat: string;
   readonly accountReference: string | null;

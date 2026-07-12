@@ -7158,8 +7158,9 @@ async function officeBankImportPreviewResponse(context: ApiContext, dependencies
   assertOfficeBankImportPreviewRequest(context, request);
   requirePermissionForWorkspace(context.get("authUser"), "office_bank_import_preview", request.workspaceId);
   const previewRows = previewRowsFromRecords(request.rows);
+  const accountIdOverride = request.accountId ?? null;
   const allParsedRows = previewRows
-    .map((row: ApiImportPreviewRow): ParsedOfficeBankPreviewRow => parseOfficeBankPreviewRow(row, request.workspaceId, dependencies.fixtures.office.bankAccounts, dependencies.fixtures.office.exchangeRates));
+    .map((row: ApiImportPreviewRow): ParsedOfficeBankPreviewRow => parseOfficeBankPreviewRow(row, request.workspaceId, dependencies.fixtures.office.bankAccounts, dependencies.fixtures.office.exchangeRates, accountIdOverride));
   const parsedRows = allParsedRows
     .filter((row: ParsedOfficeBankPreviewRow): row is ParsedOfficeBankPreviewRow & { readonly line: OfficeBankStatementLineInsert } => row.line !== null);
   const idempotencyFingerprint = `${request.source}:${request.checksum}:${hashRequestBody(request.rows)}`;
@@ -7167,6 +7168,7 @@ async function officeBankImportPreviewResponse(context: ApiContext, dependencies
   const preview: OfficeBankImportPreviewRecord = {
     previewId,
     workspaceId: request.workspaceId,
+    accountId: accountIdOverride ?? parsedRows[0]?.line.accountId ?? null,
     source: request.source,
     fileName: request.fileName,
     checksum: request.checksum,
@@ -7178,6 +7180,7 @@ async function officeBankImportPreviewResponse(context: ApiContext, dependencies
   const dateRange = officeDateRange(parsedRows.map((row) => row.line.occurredOn));
   const response: BankImportPreviewResponse = {
     previewId,
+    accountId: accountIdOverride ?? parsedRows[0]?.line.accountId ?? null,
     source: request.source,
     detectedFormat: `${request.source}_structured_json`,
     accountReference: parsedRows[0]?.line.accountId ?? null,
@@ -7373,7 +7376,15 @@ async function officeBankImportConfirmResponse(context: ApiContext, dependencies
       }
 
       const acceptedRowIds = new Set<string>(request.acceptedRowIds);
-      const accountIdOverride = request.accountId ?? null;
+      if (request.accountId !== undefined && preview.accountId !== undefined && preview.accountId !== null && request.accountId !== preview.accountId) {
+        throw new ApiRouteError(409, "bank_import_account_changed", "The destination account changed after preview; analyze the statement again before importing.", [
+          `path=${context.req.path}`,
+          `previewId=${request.previewId}`,
+          `previewAccountId=${preview.accountId}`,
+          `confirmAccountId=${request.accountId}`
+        ]);
+      }
+      const accountIdOverride = request.accountId ?? preview.accountId ?? null;
       const parsedRows = preview.rows
         .filter((row: ApiImportPreviewRow): boolean => acceptedRowIds.has(row.id))
         .map((row: ApiImportPreviewRow): ParsedOfficeBankPreviewRow => parseOfficeBankPreviewRow(row, request.workspaceId, dependencies.fixtures.office.bankAccounts, dependencies.fixtures.office.exchangeRates, accountIdOverride));
@@ -8006,6 +8017,9 @@ function assertOfficeBankImportParsePreviewRequest(context: ApiContext, request:
 
 function assertOfficeBankImportPreviewRequest(context: ApiContext, request: BankImportPreviewRequest): void {
   assertStringField(context, request.workspaceId, "workspaceId");
+  if (request.accountId !== undefined) {
+    assertStringField(context, request.accountId, "accountId");
+  }
   assertStringField(context, request.fileName, "fileName");
   assertStringField(context, request.checksum, "checksum");
   if (request.source !== "sbi" && request.source !== "mcb" && request.source !== "csv" && request.source !== "cashflow" && request.source !== "pdf") {

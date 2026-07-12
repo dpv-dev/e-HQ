@@ -1032,6 +1032,24 @@
     }
   }
 
+  function updateImportAccount(accountId: string): void {
+    if (accountId === selectedImportAccountId) {
+      return;
+    }
+
+    selectedImportAccountId = accountId;
+    importRowSelection = {};
+    if (importState.preview !== null) {
+      importState = {
+        ...importState,
+        status: "idle",
+        preview: null,
+        confirm: null,
+        message: "Destination account changed. Analyze the statement again before importing."
+      };
+    }
+  }
+
   function bankAccountSelectOption(account: OfficeBankAccountSummary): SelectOption {
     return {
       label: `${account.bankName} · ${account.accountLabel} (${account.currency})${account.isActive ? "" : " — inactive"}`,
@@ -2516,6 +2534,7 @@
     try {
       const request: BankImportPreviewRequest = {
         workspaceId: officeWorkspaceId,
+        accountId,
         source,
         fileName,
         checksum: `checksum-${source}-${fileName}`,
@@ -2581,7 +2600,7 @@
     const request = {
       workspaceId: officeWorkspaceId,
       previewId: preview.previewId,
-      accountId: selectedImportAccountId,
+      accountId: preview.accountId ?? selectedImportAccountId,
       acceptedRowIds,
       rejectedRowIds
     };
@@ -4483,7 +4502,7 @@
                 options={importAccountSelectOptions}
                 state={importAccounts.length === 0 ? "disabled" : "default"}
                 message=""
-                onchange={(value: string): void => { selectedImportAccountId = value; }}
+                onchange={updateImportAccount}
               />
             </div>
             <label class="file-control">
