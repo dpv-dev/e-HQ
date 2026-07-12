@@ -50,6 +50,27 @@
     gap: var(--ehq-space-1);
   }
 
+  /* Entrance: staggered rise on mount, paired with the value count-up
+     (count-up.ts). Lives here rather than in a theme file so theme rewrites
+     can't drop it. Opacity/translate only — never animates layout. */
+  @media (prefers-reduced-motion: no-preference) {
+    .ehq-stat-card {
+      animation: stat-card-enter 420ms var(--ehq-ease, cubic-bezier(0.19, 1, 0.22, 1)) backwards;
+    }
+
+    .ehq-stat-card:nth-child(2) { animation-delay: 70ms; }
+    .ehq-stat-card:nth-child(3) { animation-delay: 140ms; }
+    .ehq-stat-card:nth-child(4) { animation-delay: 210ms; }
+    .ehq-stat-card:nth-child(n + 5) { animation-delay: 280ms; }
+  }
+
+  @keyframes stat-card-enter {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+  }
+
   .icon {
     width: 36px;
     height: 36px;
