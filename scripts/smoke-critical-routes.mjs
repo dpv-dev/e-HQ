@@ -2,6 +2,8 @@
 
 const apiBase = process.env.EHQ_SMOKE_API_BASE ?? "https://api.eeee.mu";
 const appBase = process.env.EHQ_SMOKE_APP_BASE ?? "https://app.eeee.mu";
+const healthRetryCount = Number.parseInt(process.env.EHQ_SMOKE_HEALTH_RETRIES ?? "4", 10);
+const healthRetryDelayMs = Number.parseInt(process.env.EHQ_SMOKE_HEALTH_RETRY_DELAY_MS ?? "1500", 10);
 
 const officeRoutes = [
   "dashboard",
@@ -60,30 +62,47 @@ const checks = [
 ];
 
 async function runCheck(check) {
-  try {
-    const response = await fetch(check.url, {
-      method: "GET",
-      redirect: "follow",
-      headers: {
-        "user-agent": "ehq-smoke-critical-routes/1.0"
-      }
-    });
+  const attempts = check.label === "API health" ? healthRetryCount : 1;
 
-    const ok = response.status === check.expected;
-    return {
-      ...check,
-      status: response.status,
-      ok,
-      error: null
-    };
-  } catch (error) {
-    return {
-      ...check,
-      status: -1,
-      ok: false,
-      error: error instanceof Error ? error.message : "unknown"
-    };
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const response = await fetch(check.url, {
+        method: "GET",
+        redirect: "follow",
+        headers: {
+          "user-agent": "ehq-smoke-critical-routes/1.0"
+        }
+      });
+
+      const ok = response.status === check.expected;
+      if (ok || attempt === attempts || response.status !== 503) {
+        return {
+          ...check,
+          status: response.status,
+          ok,
+          error: null
+        };
+      }
+    } catch (error) {
+      if (attempt === attempts) {
+        return {
+          ...check,
+          status: -1,
+          ok: false,
+          error: error instanceof Error ? error.message : "unknown"
+        };
+      }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, healthRetryDelayMs));
   }
+
+  return {
+    ...check,
+    status: -1,
+    ok: false,
+    error: "unknown"
+  };
 }
 
 async function main() {
