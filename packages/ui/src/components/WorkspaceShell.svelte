@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import type { Snippet } from "svelte";
   import Icon from "./Icon.svelte";
   import type { WorkspaceKind, WorkspaceNavGroup, WorkspaceNavItem } from "./types.js";
@@ -24,6 +25,24 @@
 
   const props: Props = $props();
   let sessionMenuOpen = $state(false);
+  let navElement = $state<HTMLElement | null>(null);
+
+  onMount((): (() => void) => {
+    const handleShortcut = (event: KeyboardEvent): void => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        navElement?.querySelector<HTMLElement>(".nav-item:not([aria-disabled='true'])")?.focus();
+        return;
+      }
+
+      if (event.key === "Escape") {
+        sessionMenuOpen = false;
+      }
+    };
+
+    window.addEventListener("keydown", handleShortcut);
+    return (): void => window.removeEventListener("keydown", handleShortcut);
+  });
 
   const navGroupList = $derived<readonly WorkspaceNavGroup[]>(
     props.navGroups !== null ? props.navGroups : [{ id: "default", label: "", items: props.navItems }]
@@ -57,7 +76,7 @@
   <aside>
     <a class="shell-mark" href={props.homeHref} aria-label={`${props.brandLabel} home`}>ë</a>
 
-    <nav aria-label={props.navLabel}>
+    <nav bind:this={navElement} aria-label={props.navLabel}>
       {#each navGroupList as group (group.id)}
         {#if group.label.length > 0}
           <h2 class="nav-group">{group.label}</h2>
@@ -100,10 +119,10 @@
   <div class="shell-main">
     <header class="shell-topbar">
       <a class="shell-title" href={props.homeHref}>{props.brandLabel}</a>
-      <div class="shell-search" aria-hidden="true">
+      <button class="shell-search" type="button" aria-label="Focus workspace navigation" onclick={() => navElement?.querySelector<HTMLElement>(".nav-item:not([aria-disabled='true'])")?.focus()}>
         <span>Go to a section</span>
         <kbd>⌘K</kbd>
-      </div>
+      </button>
       <div class="shell-user-wrap">
         <button class="shell-user" type="button" aria-haspopup="menu" aria-expanded={sessionMenuOpen} onclick={toggleSessionMenu}>
           <b>{props.userInitial}</b>
@@ -308,7 +327,9 @@
     padding: 0 var(--ehq-space-3);
     border: 1px solid var(--ehq-border);
     border-radius: var(--ehq-radius-pill);
+    background: transparent;
     color: var(--ehq-text-muted);
+    appearance: none;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -432,6 +453,27 @@
     min-width: 0;
     min-height: 0;
     overflow-y: auto;
+  }
+
+  .shell-main > main > :global(.content) {
+    width: min(100%, var(--ehq-shell-content-max));
+    margin-inline: auto;
+  }
+
+  @media (min-width: 1280px) {
+    .ehq-workspace-shell {
+      grid-template-columns: clamp(248px, 18vw, 292px) minmax(0, 1fr);
+    }
+
+    .shell-topbar {
+      padding-inline: clamp(var(--ehq-space-5), 2vw, var(--ehq-space-7));
+    }
+  }
+
+  @media (min-width: 1680px) {
+    .shell-main > main > :global(.content) {
+      padding-inline: var(--ehq-space-7);
+    }
   }
 
   @media (max-width: 980px) {

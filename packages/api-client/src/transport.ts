@@ -29,6 +29,7 @@ export interface RestTransport {
   readonly post: <TResult>(path: string, body: unknown, idempotencyKey: IdempotencyKey) => Promise<TResult>;
   readonly patch: <TResult>(path: string, body: unknown, idempotencyKey: IdempotencyKey) => Promise<TResult>;
   readonly delete: <TResult>(path: string, body: unknown, idempotencyKey: IdempotencyKey) => Promise<TResult>;
+  readonly clearCache: () => void;
 }
 
 export const standardApiRetryPolicy: RetryPolicy = {
@@ -42,43 +43,64 @@ export const standardApiRetryPolicy: RetryPolicy = {
 export function createRestTransport(config: ApiClientConfig, namespace: LegacyNamespace): RestTransport {
   validateConfig(config);
 
-  return {
-    get: <TResult>(path: string, query: QueryParams): Promise<TResult> =>
-      requestJson<TResult>(config, {
-        method: "GET",
-        namespace,
-        path,
-        query,
-        body: null,
-        idempotencyKey: null
-      }),
-    post: <TResult>(path: string, body: unknown, idempotencyKey: IdempotencyKey): Promise<TResult> =>
-      requestJson<TResult>(config, {
-        method: "POST",
-        namespace,
-        path,
-        query: {},
-        body,
-        idempotencyKey
-      }),
-    patch: <TResult>(path: string, body: unknown, idempotencyKey: IdempotencyKey): Promise<TResult> =>
-      requestJson<TResult>(config, {
-        method: "PATCH",
-        namespace,
-        path,
-        query: {},
-        body,
-        idempotencyKey
-      }),
-    delete: <TResult>(path: string, body: unknown, idempotencyKey: IdempotencyKey): Promise<TResult> =>
-      requestJson<TResult>(config, {
-        method: "DELETE",
-        namespace,
-        path,
-        query: {},
-        body,
-        idempotencyKey
+  const readCacheTtlMs = config.readCacheTtlMs ?? 2_000;
+  const readCache = new Map<string, { readonly expiresAt: number; readonly value: unknown }>();
+  const pendingReads = new Map<string, Promise<unknown>>();
+
+  const clearCache = (): void => {
+    readCache.clear();
+  };
+
+  const get = async <TResult>(path: string, query: QueryParams): Promise<TResult> => {
+    const url = buildUrl(config.baseUrl, namespace, path, query);
+    const accessToken = await config.auth.getAccessToken();
+    const cacheKey = `${url}|${accessToken ?? "anonymous"}`;
+    const cached = readCache.get(cacheKey);
+    if (cached !== undefined && cached.expiresAt > Date.now()) {
+      return cached.value as TResult;
+    }
+
+    const pending = pendingReads.get(cacheKey);
+    if (pending !== undefined) {
+      return pending as Promise<TResult>;
+    }
+
+    const request = requestJson<TResult>(config, {
+      method: "GET",
+      namespace,
+      path,
+      query,
+      body: null,
+      idempotencyKey: null
+    })
+      .then((value: TResult): TResult => {
+        if (readCacheTtlMs > 0) {
+          readCache.set(cacheKey, { expiresAt: Date.now() + readCacheTtlMs, value });
+        }
+        return value;
       })
+      .finally((): void => {
+        pendingReads.delete(cacheKey);
+      });
+    pendingReads.set(cacheKey, request);
+    return request;
+  };
+
+  return {
+    get,
+    post: <TResult>(path: string, body: unknown, idempotencyKey: IdempotencyKey): Promise<TResult> => {
+      clearCache();
+      return requestJson<TResult>(config, { method: "POST", namespace, path, query: {}, body, idempotencyKey });
+    },
+    patch: <TResult>(path: string, body: unknown, idempotencyKey: IdempotencyKey): Promise<TResult> => {
+      clearCache();
+      return requestJson<TResult>(config, { method: "PATCH", namespace, path, query: {}, body, idempotencyKey });
+    },
+    delete: <TResult>(path: string, body: unknown, idempotencyKey: IdempotencyKey): Promise<TResult> => {
+      clearCache();
+      return requestJson<TResult>(config, { method: "DELETE", namespace, path, query: {}, body, idempotencyKey });
+    },
+    clearCache
   };
 }
 

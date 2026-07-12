@@ -47,8 +47,6 @@
   import DevSessionMenu from "../../DevSessionMenu.svelte";
   import { normalizeRoutePath } from "../../route-utils.js";
   import { isApiRequestLoading as isLoadingState } from "../request-state.js";
-  import "../../../office-orbital-scope.css";
-  import "../office/orbital-office.css";
 
   type CommandCenterPageId = "dashboard" | "users" | "integrations" | "settings";
   type IntegrationStatus = "connected" | "idle" | "attention";

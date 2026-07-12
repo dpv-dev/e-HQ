@@ -28,7 +28,6 @@
     type WorkspaceNavGroup,
     type WorkspaceNavItem
   } from "@ehq/ui";
-  import "../../../office-orbital-scope.css";
   import {
     beginReload,
     createErrorState,
@@ -64,7 +63,6 @@
     type OfficeCategoryType
   } from "@ehq/api-client";
   import { createShellApiClient } from "../../app-shell-data.js";
-  import "./orbital-office.css";
   import {
     canCancelRecentImportItem,
     canDeleteRecentImportItem,

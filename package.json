@@ -9,6 +9,7 @@
   },
   "scripts": {
     "check": "tsc -b --pretty false",
+    "perf:frontend": "node scripts/check-frontend-performance.mjs",
     "typecheck": "tsc -b --pretty false",
     "smoke:critical": "node scripts/smoke-critical-routes.mjs"
   },

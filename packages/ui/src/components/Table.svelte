@@ -49,17 +49,35 @@
   let sortDirection = $state<"asc" | "desc">("asc");
 
   const sortedRows = $derived(sortRows(props.rows, sortColumnIndex, sortDirection));
-  const showNumberedPagination = $derived(props.state === "default" && sortedRows.length > AUTO_ROWS_PER_PAGE);
+  const virtualize = $derived(props.state === "default" && sortedRows.length > 50);
+  const virtualRowHeight = 44;
+  const virtualOverscan = 8;
+  let virtualScrollTop = $state(0);
+  let virtualViewportHeight = $state(520);
+  const virtualStart = $derived(
+    virtualize ? Math.max(0, Math.floor(virtualScrollTop / virtualRowHeight) - virtualOverscan) : 0
+  );
+  const virtualEnd = $derived(
+    virtualize
+      ? Math.min(sortedRows.length, Math.ceil((virtualScrollTop + virtualViewportHeight) / virtualRowHeight) + virtualOverscan)
+      : sortedRows.length
+  );
+  const virtualTopSpacer = $derived(virtualize ? virtualStart * virtualRowHeight : 0);
+  const virtualBottomSpacer = $derived(virtualize ? Math.max(0, (sortedRows.length - virtualEnd) * virtualRowHeight) : 0);
+  const showNumberedPagination = $derived(props.state === "default" && !virtualize && sortedRows.length > AUTO_ROWS_PER_PAGE);
   const totalLocalPages = $derived(Math.max(1, Math.ceil(sortedRows.length / AUTO_ROWS_PER_PAGE)));
   const localPageRows = $derived(
     showNumberedPagination
       ? sortedRows.slice((localPage - 1) * AUTO_ROWS_PER_PAGE, localPage * AUTO_ROWS_PER_PAGE)
       : sortedRows
   );
+  const visibleRows = $derived(virtualize ? sortedRows.slice(virtualStart, virtualEnd) : localPageRows);
   const localPageNumbers = $derived(Array.from({ length: totalLocalPages }, (_, index: number): number => index + 1));
   const showFooter = $derived(props.state === "default" && (showPagination || showNumberedPagination));
   const localPaginationDetail = $derived(
-    showNumberedPagination
+    virtualize
+      ? `${String(sortedRows.length)} rows.`
+      : showNumberedPagination
       ? `${String((localPage - 1) * AUTO_ROWS_PER_PAGE + 1)}-${String(Math.min(localPage * AUTO_ROWS_PER_PAGE, sortedRows.length))} of ${String(sortedRows.length)} rows.`
       : `${String(sortedRows.length)} rows.`
   );
@@ -98,6 +116,16 @@
     }
 
     localPage = page;
+  }
+
+  function handleTableScroll(event: Event): void {
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+
+    virtualScrollTop = target.scrollTop;
+    virtualViewportHeight = target.clientHeight;
   }
 
   function sortRows(rows: readonly TableRow[], columnIndex: number | null, direction: "asc" | "desc"): readonly TableRow[] {
@@ -183,7 +211,7 @@
       <span>Access can be requested without hiding the workspace.</span>
     </div>
   {:else}
-    <div class="table-frame">
+    <div class:virtualized={virtualize} class="table-frame" onscroll={virtualize ? handleTableScroll : undefined}>
       <table>
         <thead>
           <tr>
@@ -205,7 +233,10 @@
           </tr>
         </thead>
         <tbody>
-          {#each localPageRows as row, index (rowKey(row, index))}
+          {#if virtualTopSpacer > 0}
+            <tr class="virtual-spacer" aria-hidden="true"><td colspan={props.columns.length + (hasRowActions ? 1 : 0)} style={`height: ${String(virtualTopSpacer)}px`}></td></tr>
+          {/if}
+          {#each visibleRows as row, index (rowKey(row, virtualStart + index))}
             <tr>
               {#each row.cells as cell}
                 <td class:right={cell.kind === "money"}>
@@ -241,6 +272,9 @@
               {/if}
             </tr>
           {/each}
+          {#if virtualBottomSpacer > 0}
+            <tr class="virtual-spacer" aria-hidden="true"><td colspan={props.columns.length + (hasRowActions ? 1 : 0)} style={`height: ${String(virtualBottomSpacer)}px`}></td></tr>
+          {/if}
         </tbody>
       </table>
     </div>
@@ -343,6 +377,16 @@
   .table-frame {
     width: 100%;
     overflow-x: auto;
+  }
+
+  .table-frame.virtualized {
+    max-height: 520px;
+    overflow: auto;
+    contain: strict;
+  }
+
+  .table-frame.virtualized table {
+    table-layout: fixed;
   }
 
   .table-pagination {
@@ -473,6 +517,11 @@
 
   tr:last-child td {
     border-bottom: 0;
+  }
+
+  .virtual-spacer td {
+    padding: 0;
+    border: 0;
   }
 
   .right {

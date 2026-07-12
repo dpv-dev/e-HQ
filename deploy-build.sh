@@ -25,6 +25,7 @@ corepack pnpm --filter @ehq/api test
 echo "==> Frontend (apps/hq): typecheck + build"
 corepack pnpm --filter @ehq/hq check
 corepack pnpm --filter @ehq/hq build
+corepack pnpm perf:frontend
 
 echo "==> Anti-regression gate (audit lock-in)"
 bash scripts/check-regressions.sh

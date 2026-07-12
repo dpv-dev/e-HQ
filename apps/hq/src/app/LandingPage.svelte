@@ -16,7 +16,7 @@
   import { Button, Checkbox, Loader } from "@ehq/ui";
   import commandCenterPhoto from "../../../../packages/ui/assets/backgrounds/hq-card-command-center.jpg?url";
   import distributionPhoto from "../../../../packages/ui/assets/backgrounds/hq-card-distribution.jpg?url";
-  import landingBackground from "../../../../packages/ui/assets/backgrounds/hq-landing-command-room.png?url";
+  import landingBackground from "../../../../packages/ui/assets/backgrounds/hq-landing-command-room.webp?url";
   import officePhoto from "../../../../packages/ui/assets/backgrounds/hq-card-office.jpg?url";
   import { createShellApiClient } from "./app-shell-data.js";
   import type { AppRoute } from "./routes.js";
@@ -28,6 +28,7 @@
     readonly onLogout: () => void;
     readonly onNavigate: (route: AppRoute) => void;
     readonly onOpenWorkspace: (workspaceId: WorkspaceAppId) => void;
+    readonly onPrefetchWorkspace: (workspaceId: WorkspaceAppId) => void;
     readonly loginMode?: boolean;
   }
 
@@ -41,7 +42,7 @@
 
   type MessageTone = "info" | "error";
 
-  const { session, onLogin, onLogout, onNavigate, onOpenWorkspace, loginMode = false }: Props = $props();
+  const { session, onLogin, onLogout, onNavigate, onOpenWorkspace, onPrefetchWorkspace, loginMode = false }: Props = $props();
   const client = createShellApiClient();
 
   let loginOpen = $state(false);
@@ -295,7 +296,7 @@
 </svelte:head>
 
 <main class="landing-shell" class:fogged={loginOpen}>
-  <img class="landing-background" src={landingBackground} alt="" aria-hidden="true" />
+  <img class="landing-background" src={landingBackground} alt="" aria-hidden="true" fetchpriority="high" decoding="async" />
   <div class="map-sparkles" aria-hidden="true">
     <span class="sparkle s1"></span>
     <span class="sparkle s2"></span>
@@ -450,7 +451,7 @@
   <section class="workspace-grid" aria-label="Available workspaces">
     {#each cards as card (card.workspaceId)}
       {@const locked = isLocked(card.workspaceId)}
-      <article class:locked class:live={!locked} class={`workspace-card accent-${card.workspaceId}`}>
+        <article class:locked class:live={!locked} class={`workspace-card accent-${card.workspaceId}`} onmouseenter={() => onPrefetchWorkspace(card.workspaceId)} onfocusin={() => onPrefetchWorkspace(card.workspaceId)}>
         {#if locked}
           <div class="cross" aria-label="Access denied">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>

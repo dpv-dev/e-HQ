@@ -37,7 +37,8 @@ export function createShellApiClient(): EhqApiClient {
     auth: {
       getAccessToken: getSupabaseAccessToken
     },
-    retryPolicy: standardApiRetryPolicy
+    retryPolicy: standardApiRetryPolicy,
+    readCacheTtlMs: 3_000
   });
 }
 

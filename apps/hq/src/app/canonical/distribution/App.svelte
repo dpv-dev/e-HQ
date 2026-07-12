@@ -45,8 +45,6 @@
   import { parseCsvRecords } from "../../bank-parser.js";
   import { formatDateOnly, formatDateRange } from "../../date-format.js";
   import { formatMoneyValue, moneyToneForValue } from "../../money-format.js";
-  import "../../../office-orbital-scope.css";
-  import "../office/orbital-office.css";
   import "./distribution-command.css";
   import { createPeriodOptions, getLatestDataPeriod, periodLabel, rangeForScope, rangeLabel, todayIso, type DateRange, type PeriodScope } from "../../period-controls.js";
   import { normalizeRoutePath } from "../../route-utils.js";

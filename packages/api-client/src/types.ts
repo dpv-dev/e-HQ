@@ -35,6 +35,7 @@ export interface ApiClientConfig {
   readonly fetch: FetchLike;
   readonly auth: AuthTokenProvider;
   readonly retryPolicy: RetryPolicy;
+  readonly readCacheTtlMs?: number;
 }
 
 export interface WriteRequestOptions {

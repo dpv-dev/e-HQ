@@ -4,6 +4,9 @@
   import type { PlatformPageId } from "./platform-data.js";
   import { getWorkspaceForPage, workspaces, type WorkspaceDefinition } from "./platform-data.js";
   import type { AppRoute } from "./routes.js";
+  import { loadWorkspaceComponent, type WorkspaceComponentModule } from "./workspace-loader.js";
+  import officeOrbitalScopeUrl from "../office-orbital-scope.css?url";
+  import orbitalOfficeUrl from "./canonical/office/orbital-office.css?url";
 
   interface Props {
     readonly initialWorkspaceId: WorkspaceAppId;
@@ -25,10 +28,6 @@
   const lockedMessage = $derived(
     requestedAccess.status === "locked" ? requestedAccess.reason ?? "Access locked. Request access required." : ""
   );
-
-  interface WorkspaceComponentModule {
-    readonly default: any;
-  }
 
   function resolveRequestedWorkspaceId(
     workspaceId: WorkspaceAppId,
@@ -57,20 +56,11 @@
     onNavigate("/app");
   }
 
-  function loadWorkspaceComponent(workspaceId: WorkspaceAppId): Promise<WorkspaceComponentModule> {
-    if (workspaceId === "office") {
-      return import("./canonical/office/App.svelte") as unknown as Promise<WorkspaceComponentModule>;
-    }
-
-    if (workspaceId === "distribution") {
-      return import("./canonical/distribution/App.svelte") as unknown as Promise<WorkspaceComponentModule>;
-    }
-
-    return import("./canonical/command-center/App.svelte") as unknown as Promise<WorkspaceComponentModule>;
-  }
 </script>
 
 <svelte:head>
+  <link rel="stylesheet" href={officeOrbitalScopeUrl} />
+  <link rel="stylesheet" href={orbitalOfficeUrl} />
   <title>ë • HQ — console</title>
 </svelte:head>
 

@@ -1,10 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import type { AuthSession, WorkspaceAppId } from "@ehq/auth";
-  import DesignSystemPage from "./DesignSystemPage.svelte";
-  import LandingPage from "./LandingPage.svelte";
-  import PlatformShell from "./PlatformShell.svelte";
   import type { PlatformPageId } from "./platform-data.js";
+  import { prefetchWorkspaceComponent } from "./workspace-loader.js";
   import {
     buildLoginRouteWithNext,
     isProtectedRoute,
@@ -34,6 +32,14 @@
   let initialWorkspaceId = $state<WorkspaceAppId>("command-center");
   let initialPageId = $state<PlatformPageId | null>(null);
   let loginNextRoute = $state<AppRoute | null>(null);
+
+  interface LazyComponentModule {
+    readonly default: any;
+  }
+
+  const loadDesignSystemPage = (): Promise<LazyComponentModule> => import("./DesignSystemPage.svelte") as unknown as Promise<LazyComponentModule>;
+  const loadLandingPage = (): Promise<LazyComponentModule> => import("./LandingPage.svelte") as unknown as Promise<LazyComponentModule>;
+  const loadPlatformShell = (): Promise<LazyComponentModule> => import("./PlatformShell.svelte") as unknown as Promise<LazyComponentModule>;
 
   const navigate = (nextRoute: AppRoute): void => {
     window.history.pushState({}, "", nextRoute);
@@ -177,6 +183,10 @@
     navigate(nextRoute);
   };
 
+  const prefetchWorkspace = (workspaceId: WorkspaceAppId): void => {
+    prefetchWorkspaceComponent(workspaceId);
+  };
+
   const readRouteFromLocation = (): AppRoute => {
     const redirectRoute = resolveBareWorkspaceRedirect(window.location.pathname);
 
@@ -299,30 +309,39 @@
 </script>
 
 {#if route === "/login"}
-  <LandingPage
-    session={session}
-    onLogin={setSession}
-    onLogout={clearSession}
-    onNavigate={navigate}
-    onOpenWorkspace={openWorkspace}
-    loginMode={true}
-  />
+  {#await loadLandingPage() then module}
+    <module.default
+      session={session}
+      onLogin={setSession}
+      onLogout={clearSession}
+      onNavigate={navigate}
+      onOpenWorkspace={openWorkspace}
+      onPrefetchWorkspace={prefetchWorkspace}
+      loginMode={true}
+    />
+  {/await}
 {:else if session !== null && isProtectedRoute(route)}
-  <PlatformShell
-    initialWorkspaceId={initialWorkspaceId}
-    initialPageId={initialPageId}
-    session={session}
-    onNavigate={navigate}
-    onLogout={clearSession}
-  />
+  {#await loadPlatformShell() then module}
+    <module.default
+      initialWorkspaceId={initialWorkspaceId}
+      initialPageId={initialPageId}
+      session={session}
+      onNavigate={navigate}
+      onLogout={clearSession}
+    />
+  {/await}
 {:else if route === "/design"}
-  <DesignSystemPage onNavigate={navigate} />
+  {#await loadDesignSystemPage() then module}
+    <module.default onNavigate={navigate} />
+  {/await}
 {:else if isRestoringSession && isProtectedRoute(route)}
   <main class="auth-recovery">
     <p>Restoring your session…</p>
   </main>
 {:else}
-  <LandingPage session={session} onLogin={setSession} onLogout={clearSession} onNavigate={navigate} onOpenWorkspace={openWorkspace} />
+  {#await loadLandingPage() then module}
+    <module.default session={session} onLogin={setSession} onLogout={clearSession} onNavigate={navigate} onOpenWorkspace={openWorkspace} onPrefetchWorkspace={prefetchWorkspace} />
+  {/await}
 {/if}
 
 <style>
