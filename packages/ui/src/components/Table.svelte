@@ -380,9 +380,10 @@
   }
 
   .table-frame.virtualized {
+    height: 520px;
     max-height: 520px;
     overflow: auto;
-    contain: strict;
+    contain: content;
   }
 
   .table-frame.virtualized table {
