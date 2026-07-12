@@ -2,7 +2,6 @@
   import { onMount } from "svelte";
   import type { Snippet } from "svelte";
   import Icon from "./Icon.svelte";
-  import type { IconName } from "./icons.js";
   import type { WorkspaceKind, WorkspaceNavGroup, WorkspaceNavItem } from "./types.js";
 
   interface Props {
@@ -30,12 +29,6 @@
   let navCollapsed = $state(true);
   const showWorkspaceNav = $derived(props.showWorkspaceNav ?? true);
   const collapseStorageKey = $derived(`ehq-shell-nav-collapsed:${props.workspace}`);
-
-  const moduleLinks = $derived<readonly { readonly id: WorkspaceKind; readonly label: string; readonly href: string; readonly icon: IconName }[]>([
-    { id: "command-center", label: "Command Center", href: "/console/command-center/dashboard", icon: "home" },
-    { id: "office", label: "Office", href: "/console/office/dashboard", icon: "bank" },
-    { id: "distribution", label: "Distribution", href: "/console/distribution/dashboard", icon: "folder" }
-  ]);
 
   const navGroupList = $derived<readonly WorkspaceNavGroup[]>(
     props.navGroups !== null ? props.navGroups : [{ id: "default", label: "", items: props.navItems }]
@@ -85,21 +78,6 @@
 <div class={`ehq-workspace-shell ehq-workspace-${props.workspace} ${navCollapsed ? "shell-nav-collapsed" : ""}`}>
   <aside>
     <a class="shell-mark" href={props.homeHref} aria-label={`${props.brandLabel} home`}>ë</a>
-
-    <div class="shell-modules" aria-label="Workspace modules">
-      {#each moduleLinks as module (module.id)}
-        <a
-          class="module-item"
-          class:active={module.id === props.workspace}
-          href={module.href}
-          aria-current={module.id === props.workspace ? "page" : undefined}
-          title={module.label}
-        >
-          <span aria-hidden="true"><Icon name={module.icon} size={16} strokeWidth={1.7} /></span>
-          <small>{module.label}</small>
-        </a>
-      {/each}
-    </div>
 
     {#if showWorkspaceNav}
       <nav aria-label={props.navLabel}>
@@ -204,6 +182,7 @@
     color: var(--ehq-text);
     display: grid;
     grid-template-columns: var(--ehq-shell-sidebar-width) minmax(0, 1fr);
+    transition: grid-template-columns 220ms var(--ehq-ease);
   }
 
   .ehq-workspace-shell.shell-nav-collapsed {
@@ -219,10 +198,12 @@
     grid-template-rows: auto 1fr auto;
     gap: var(--ehq-space-5);
     overflow: hidden;
+    transition: padding 220ms var(--ehq-ease);
   }
 
   nav {
     overflow-y: auto;
+    transition: padding 220ms var(--ehq-ease), border-color 220ms var(--ehq-ease), background-color 220ms var(--ehq-ease);
   }
 
   .shell-mark {
@@ -239,51 +220,14 @@
     text-decoration: none;
   }
 
-  .shell-modules {
-    display: grid;
-    gap: var(--ehq-space-2);
-    align-content: start;
-  }
-
-  .module-item {
-    min-height: 42px;
-    padding: 0 var(--ehq-space-2);
-    border-radius: var(--ehq-radius-sm);
-    color: var(--ehq-text-muted);
-    border: 1px solid transparent;
-    display: grid;
-    grid-template-columns: 16px minmax(0, 1fr);
-    align-items: center;
-    gap: var(--ehq-space-2);
-    text-decoration: none;
-  }
-
-  .shell-modules,
   nav {
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
     scrollbar-width: none;
   }
 
-  .shell-modules::-webkit-scrollbar,
   nav::-webkit-scrollbar {
     display: none;
-  }
-
-  .module-item small {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-family: var(--ehq-mono);
-    font-size: var(--ehq-type-label-size);
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-  }
-
-  .module-item.active {
-    color: var(--ehq-yellow);
-    border-color: var(--ehq-yellow-border);
-    background: var(--ehq-yellow-muted);
   }
 
   nav {
@@ -301,6 +245,7 @@
     font-weight: var(--ehq-type-heading-weight);
     letter-spacing: 0.12em;
     text-transform: uppercase;
+    transition: opacity 180ms var(--ehq-ease), max-height 180ms var(--ehq-ease), margin 180ms var(--ehq-ease), transform 180ms var(--ehq-ease);
   }
 
   .nav-group:first-child {
@@ -317,6 +262,7 @@
     align-items: center;
     gap: var(--ehq-space-2);
     text-decoration: none;
+    transition: width 220ms var(--ehq-ease), padding 220ms var(--ehq-ease), gap 220ms var(--ehq-ease), border-color 180ms var(--ehq-ease), background-color 180ms var(--ehq-ease);
   }
 
   .nav-item.active {
@@ -349,12 +295,14 @@
     line-height: var(--ehq-type-ui-line);
     text-overflow: ellipsis;
     white-space: nowrap;
+    transition: opacity 180ms var(--ehq-ease), max-width 180ms var(--ehq-ease), transform 180ms var(--ehq-ease);
   }
 
   .nav-item strong {
     color: var(--ehq-text-muted);
     font-family: var(--ehq-mono);
     font-size: var(--ehq-type-label-size);
+    transition: opacity 180ms var(--ehq-ease), max-width 180ms var(--ehq-ease), transform 180ms var(--ehq-ease);
   }
 
   .shell-foot {
@@ -369,6 +317,7 @@
     background: var(--ehq-state-empty-bg);
     display: grid;
     gap: var(--ehq-space-1);
+    transition: opacity 180ms var(--ehq-ease), max-height 180ms var(--ehq-ease), padding 180ms var(--ehq-ease), border-color 180ms var(--ehq-ease);
   }
 
   .shell-status span,
@@ -416,19 +365,31 @@
     justify-items: center;
   }
 
-  .shell-nav-collapsed .module-item {
-    grid-template-columns: 16px;
-    justify-content: center;
-    padding: 0;
-    width: 38px;
+  .shell-nav-collapsed .nav-label,
+  .shell-nav-collapsed .nav-item strong {
+    opacity: 0;
+    max-width: 0;
+    overflow: hidden;
+    transform: translateX(-4px);
+    pointer-events: none;
   }
 
-  .shell-nav-collapsed .module-item small,
-  .shell-nav-collapsed .nav-label,
-  .shell-nav-collapsed .nav-item strong,
-  .shell-nav-collapsed .nav-group,
+  .shell-nav-collapsed .nav-group {
+    opacity: 0;
+    max-height: 0;
+    margin: 0;
+    overflow: hidden;
+    transform: translateX(-4px);
+    pointer-events: none;
+  }
+
   .shell-nav-collapsed .shell-status {
-    display: none;
+    opacity: 0;
+    max-height: 0;
+    padding: 0;
+    border-color: transparent;
+    overflow: hidden;
+    pointer-events: none;
   }
 
   .shell-nav-collapsed .nav-item {
@@ -607,16 +568,8 @@
 
     .nav-label,
     .nav-item strong,
-    .shell-status,
-    .module-item small {
+    .shell-status {
       display: none;
-    }
-
-    .module-item {
-      grid-template-columns: 16px;
-      justify-content: center;
-      padding: 0;
-      width: 38px;
     }
 
     .shell-nav-collapsed {
@@ -671,14 +624,6 @@
       grid-auto-columns: max-content;
     }
 
-    .shell-modules {
-      grid-auto-flow: column;
-      grid-auto-columns: max-content;
-      overflow-x: auto;
-      scroll-snap-type: x proximity;
-    }
-
-    .module-item,
     .nav-item {
       min-height: 44px;
       scroll-snap-align: start;
@@ -728,7 +673,6 @@
       font-size: 0.8rem;
     }
 
-    .module-item,
     .nav-item {
       min-height: 42px;
     }
