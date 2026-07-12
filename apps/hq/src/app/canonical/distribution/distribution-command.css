@@ -100,3 +100,191 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Parity pass v1: preserve DS components but align page rhythm and panel hierarchy
+   with the distribution reference cockpit (dense controls + wide analytical bands). */
+.ehq-workspace-distribution .distribution-page-dashboard .kpi-grid,
+.ehq-workspace-distribution .distribution-page-revenue .kpi-grid,
+.ehq-workspace-distribution .distribution-page-financial-reconciliation .kpi-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.ehq-workspace-distribution .distribution-page-dashboard .dashboard-grid,
+.ehq-workspace-distribution .distribution-page-revenue .dashboard-grid,
+.ehq-workspace-distribution .distribution-page-payments .dashboard-grid,
+.ehq-workspace-distribution .distribution-page-statements .dashboard-grid,
+.ehq-workspace-distribution .distribution-page-contracts .dashboard-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+
+.ehq-workspace-distribution .distribution-page-imports .form-panel,
+.ehq-workspace-distribution .distribution-page-mapping .filter-strip,
+.ehq-workspace-distribution .distribution-page-contracts .contracts-actions,
+.ehq-workspace-distribution .distribution-page-payments .form-panel,
+.ehq-workspace-distribution .distribution-page-settings .settings-panel {
+  position: sticky;
+  top: 0;
+  z-index: 9;
+  backdrop-filter: blur(6px);
+}
+
+.ehq-workspace-distribution .distribution-page-imports .form-panel,
+.ehq-workspace-distribution .distribution-page-mapping .filter-strip,
+.ehq-workspace-distribution .distribution-page-contracts .contracts-actions,
+.ehq-workspace-distribution .distribution-page-payments .form-panel,
+.ehq-workspace-distribution .distribution-page-settings .settings-panel,
+.ehq-workspace-distribution .distribution-page-financial-reconciliation .recon-actions {
+  box-shadow: var(--orb-elev-2, 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 16px 34px rgba(0, 0, 0, 0.4));
+}
+
+.ehq-workspace-distribution .distribution-page-statements .statement-summary,
+.ehq-workspace-distribution .distribution-page-financial-reconciliation .recon-actions,
+.ehq-workspace-distribution .distribution-page-allocations .lock-panel {
+  display: grid;
+  gap: var(--ehq-space-3);
+  padding: var(--ehq-space-3);
+}
+
+.ehq-workspace-distribution .distribution-page-statements .statement-summary dl,
+.ehq-workspace-distribution .distribution-page-settings .settings-panel dl {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(130px, 1fr));
+  gap: var(--ehq-space-3);
+}
+
+.ehq-workspace-distribution .distribution-page-statements .statement-summary dt,
+.ehq-workspace-distribution .distribution-page-settings .settings-panel dt {
+  color: var(--ehq-text-muted);
+  font-family: var(--ehq-mono);
+  font-size: var(--ehq-type-label-size);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ehq-workspace-distribution .distribution-page-statements .statement-summary dd,
+.ehq-workspace-distribution .distribution-page-settings .settings-panel dd {
+  margin: 0;
+  color: var(--ehq-text);
+  font-size: var(--ehq-type-ui-size);
+}
+
+.ehq-workspace-distribution .distribution-page-financial-reconciliation .recon-action {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--ehq-space-2);
+  align-items: center;
+  padding: var(--ehq-space-3);
+}
+
+.ehq-workspace-distribution .distribution-page-financial-reconciliation .recon-action > div {
+  min-width: 0;
+}
+
+.ehq-workspace-distribution .distribution-page-financial-reconciliation .recon-action p {
+  margin: 0;
+  color: var(--ehq-text-soft);
+}
+
+.ehq-workspace-distribution .distribution-page-financial-reconciliation .recon-action-flag {
+  color: var(--ehq-workspace-accent);
+  font-family: var(--ehq-mono);
+  font-size: var(--ehq-type-label-size);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* Parity pass v2: page-level command cadence for mapping/contracts/payments/settings. */
+.ehq-workspace-distribution .distribution-page-imports .import-actions,
+.ehq-workspace-distribution .distribution-page-mapping .filter-strip,
+.ehq-workspace-distribution .distribution-page-releases .contracts-actions,
+.ehq-workspace-distribution .distribution-page-tracks .contracts-actions,
+.ehq-workspace-distribution .distribution-page-payees .contracts-actions,
+.ehq-workspace-distribution .distribution-page-expenses .contracts-actions,
+.ehq-workspace-distribution .distribution-page-rules .contracts-actions,
+.ehq-workspace-distribution .distribution-page-contracts .contracts-actions,
+.ehq-workspace-distribution .distribution-page-payments .filter-strip,
+.ehq-workspace-distribution .distribution-page-settings .settings-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ehq-space-2);
+  align-items: center;
+}
+
+.ehq-workspace-distribution .distribution-page-releases .dashboard-grid,
+.ehq-workspace-distribution .distribution-page-tracks .dashboard-grid,
+.ehq-workspace-distribution .distribution-page-payees .dashboard-grid,
+.ehq-workspace-distribution .distribution-page-expenses .dashboard-grid,
+.ehq-workspace-distribution .distribution-page-rules .dashboard-grid,
+.ehq-workspace-distribution .distribution-page-contracts .dashboard-grid,
+.ehq-workspace-distribution .distribution-page-financial-reconciliation .dashboard-grid,
+.ehq-workspace-distribution .distribution-page-settings .settings-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ehq-workspace-distribution .distribution-page-contracts .form-panel,
+.ehq-workspace-distribution .distribution-page-releases .form-panel,
+.ehq-workspace-distribution .distribution-page-tracks .form-panel,
+.ehq-workspace-distribution .distribution-page-payees .form-panel,
+.ehq-workspace-distribution .distribution-page-expenses .form-panel,
+.ehq-workspace-distribution .distribution-page-rules .form-panel,
+.ehq-workspace-distribution .distribution-page-payments .form-panel,
+.ehq-workspace-distribution .distribution-page-duplicates .form-panel,
+.ehq-workspace-distribution .distribution-page-aliases .form-panel,
+.ehq-workspace-distribution .distribution-page-suspense .form-panel,
+.ehq-workspace-distribution .distribution-page-allocations .form-panel {
+  display: grid;
+  gap: var(--ehq-space-3);
+  padding: var(--ehq-space-3);
+}
+
+.ehq-workspace-distribution .distribution-page-financial-reconciliation .recon-action-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--ehq-space-3);
+}
+
+.ehq-workspace-distribution .distribution-page-statements .statement-summary-actions {
+  justify-content: flex-start;
+}
+
+@media (max-width: 1100px) {
+  .ehq-workspace-distribution .distribution-page-dashboard .kpi-grid,
+  .ehq-workspace-distribution .distribution-page-revenue .kpi-grid,
+  .ehq-workspace-distribution .distribution-page-financial-reconciliation .kpi-grid,
+  .ehq-workspace-distribution .distribution-page-dashboard .dashboard-grid,
+  .ehq-workspace-distribution .distribution-page-revenue .dashboard-grid,
+  .ehq-workspace-distribution .distribution-page-payments .dashboard-grid,
+  .ehq-workspace-distribution .distribution-page-statements .dashboard-grid,
+  .ehq-workspace-distribution .distribution-page-contracts .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ehq-workspace-distribution .distribution-page-statements .statement-summary dl,
+  .ehq-workspace-distribution .distribution-page-settings .settings-panel dl {
+    grid-template-columns: repeat(2, minmax(120px, 1fr));
+  }
+
+  .ehq-workspace-distribution .distribution-page-releases .dashboard-grid,
+  .ehq-workspace-distribution .distribution-page-tracks .dashboard-grid,
+  .ehq-workspace-distribution .distribution-page-payees .dashboard-grid,
+  .ehq-workspace-distribution .distribution-page-expenses .dashboard-grid,
+  .ehq-workspace-distribution .distribution-page-rules .dashboard-grid,
+  .ehq-workspace-distribution .distribution-page-contracts .dashboard-grid,
+  .ehq-workspace-distribution .distribution-page-financial-reconciliation .dashboard-grid,
+  .ehq-workspace-distribution .distribution-page-settings .settings-grid,
+  .ehq-workspace-distribution .distribution-page-financial-reconciliation .recon-action-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .ehq-workspace-distribution .distribution-page-financial-reconciliation .recon-action {
+    grid-template-columns: 1fr;
+  }
+
+  .ehq-workspace-distribution .distribution-page-statements .statement-summary dl,
+  .ehq-workspace-distribution .distribution-page-settings .settings-panel dl {
+    grid-template-columns: 1fr;
+  }
+}
