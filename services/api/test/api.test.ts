@@ -3644,6 +3644,44 @@ test("office bank import confirm persists lines once and replays idempotent resp
   assert.equal(rawPage.items.filter((item) => item.reference === "IMP-1").length, 1);
 });
 
+test("office bank import confirm uses the account selected after preview", async () => {
+  const app = createWriteEnabledFixtureApiService();
+  const preview = await app.request("/eof/v1/bank-import/preview", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      source: "mcb",
+      fileName: "mcb-current.txt",
+      checksum: "checksum-mcb-account-override",
+      rows: [{ date: "2026-02-20", description: "MCB current line", debit: "12.34", currency: "MUR", accountId: "bank_eur", reference: "MCB-CURRENT-1" }]
+    })
+  });
+  assert.equal(preview.status, 200);
+  const previewJson = (await preview.json()) as { readonly previewId: string };
+
+  const confirm = await app.request("/eof/v1/bank-import/confirm", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "mcb-account-override-1" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      previewId: previewJson.previewId,
+      accountId: "bank_mur",
+      acceptedRowIds: ["row_1"],
+      rejectedRowIds: []
+    })
+  });
+  assert.equal(confirm.status, 200);
+
+  const raw = await app.request("/eof/v1/bank/raw?workspaceId=workspace_1&period=2026-02&limit=100", {
+    headers: authHeaders()
+  });
+  assert.equal(raw.status, 200);
+  const rawPage = (await raw.json()) as { readonly items: readonly { readonly reference: string; readonly accountId: string }[] };
+  const importedLine = rawPage.items.find((item) => item.reference === "MCB-CURRENT-1");
+  assert.equal(importedLine?.accountId, "bank_mur");
+});
+
 test("office bank import confirm creates suggested reconciliation propositions instead of auto-matching", async () => {
   const app = createWriteEnabledFixtureApiService();
   const preview = await app.request("/eof/v1/bank-import/preview", {

@@ -591,6 +591,7 @@ export interface OfficeBankPreviewRowResult {
 export interface BankImportConfirmRequest {
   readonly workspaceId: EntityId;
   readonly previewId: EntityId;
+  readonly accountId?: EntityId;
   readonly acceptedRowIds: readonly EntityId[];
   readonly rejectedRowIds: readonly EntityId[];
 }

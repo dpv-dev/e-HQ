@@ -7373,9 +7373,10 @@ async function officeBankImportConfirmResponse(context: ApiContext, dependencies
       }
 
       const acceptedRowIds = new Set<string>(request.acceptedRowIds);
+      const accountIdOverride = request.accountId ?? null;
       const parsedRows = preview.rows
         .filter((row: ApiImportPreviewRow): boolean => acceptedRowIds.has(row.id))
-        .map((row: ApiImportPreviewRow): ParsedOfficeBankPreviewRow => parseOfficeBankPreviewRow(row, request.workspaceId, dependencies.fixtures.office.bankAccounts, dependencies.fixtures.office.exchangeRates));
+        .map((row: ApiImportPreviewRow): ParsedOfficeBankPreviewRow => parseOfficeBankPreviewRow(row, request.workspaceId, dependencies.fixtures.office.bankAccounts, dependencies.fixtures.office.exchangeRates, accountIdOverride));
       const lines = parsedRows
         .map((row: ParsedOfficeBankPreviewRow): OfficeBankStatementLineInsert | null => row.line)
         .filter((line: OfficeBankStatementLineInsert | null): line is OfficeBankStatementLineInsert => line !== null);
@@ -8017,6 +8018,9 @@ function assertOfficeBankImportPreviewRequest(context: ApiContext, request: Bank
 function assertOfficeBankImportConfirmRequest(context: ApiContext, request: BankImportConfirmRequest): void {
   assertStringField(context, request.workspaceId, "workspaceId");
   assertStringField(context, request.previewId, "previewId");
+  if (request.accountId !== undefined) {
+    assertStringField(context, request.accountId, "accountId");
+  }
   assertStringArray(context, request.acceptedRowIds, "acceptedRowIds");
   assertStringArray(context, request.rejectedRowIds, "rejectedRowIds");
 }
@@ -8466,10 +8470,16 @@ function parseOfficeBankPreviewRow(
   row: ApiImportPreviewRow,
   workspaceId: string,
   accounts: readonly OfficeBankAccountRow[],
-  exchangeRates: readonly OfficeWriteExchangeRateRow[]
+  exchangeRates: readonly OfficeWriteExchangeRateRow[],
+  accountIdOverride: string | null = null
 ): ParsedOfficeBankPreviewRow {
   const currency = normalizedCurrency(rowValue(row.rawData, ["currency", "currency_code", "Currency", "CURRENCY"])) ?? "MUR";
-  const account = accountForRow(row.rawData, workspaceId, currency, accounts);
+  const account = accountForRow(
+    accountIdOverride === null ? row.rawData : { ...row.rawData, accountId: accountIdOverride },
+    workspaceId,
+    currency,
+    accounts
+  );
   const occurredOn = isoDateValue(row.rawData, ["occurredOn", "occurred_on", "transactionDate", "transaction_date", "date", "DATE", "Date", "paid_on", "paidOn"]);
   const description = rowValue(row.rawData, ["description", "label", "particulars", "details", "narrative", "memo"]);
   const amount = amountForBankRow(row.rawData);

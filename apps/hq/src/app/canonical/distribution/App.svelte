@@ -3195,14 +3195,14 @@
 <title>Statement ${escapeHtml(statement.payeeName)}</title>
 <style>
   @page { size: A4; margin: 18mm; }
-  body { font-family: "Helvetica Neue", Arial, sans-serif; color: #111; margin: 0; }
-  header { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 2px solid #111; padding-bottom: 8px; }
-  h1 { font-size: 18px; margin: 16px 0 4px; }
-  dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; margin: 16px 0; font-size: 12px; }
+  body { font-family: var(--ehq-font, "Inter", "Segoe UI", sans-serif); color: var(--ehq-text, CanvasText); background: var(--ehq-bg-main, Canvas); margin: 0; }
+  header { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 2px solid var(--ehq-workspace-distribution, currentColor); padding-bottom: 8px; }
+  h1 { font-size: var(--ehq-type-section-title-size, 18px); margin: 16px 0 4px; }
+  dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; margin: 16px 0; font-size: var(--ehq-type-caption-size, 12px); }
   dt { font-weight: 700; }
   dd { margin: 0; }
-  table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  th, td { border-bottom: 1px solid #ccc; padding: 6px 8px; text-align: left; }
+  table { width: 100%; border-collapse: collapse; font-size: var(--ehq-type-caption-size, 12px); }
+  th, td { border-bottom: 1px solid var(--ehq-border, color-mix(in srgb, CanvasText 20%, Canvas)); padding: 6px 8px; text-align: left; }
   .num { text-align: right; font-variant-numeric: tabular-nums; }
 </style>
 </head>
@@ -5046,10 +5046,10 @@
   .import-result {
     margin: 0;
     padding: var(--ehq-space-3);
-    border: 1px solid var(--ehq-yellow-border);
+    border: 1px solid var(--ehq-border-strong);
     border-radius: var(--ehq-radius-sm);
-    background: var(--ehq-yellow-muted);
-    color: var(--ehq-yellow);
+    background: var(--ehq-workspace-distribution-bg);
+    color: var(--ehq-workspace-distribution);
     font-size: var(--ehq-type-caption-size);
   }
 
@@ -5129,8 +5129,8 @@
   }
 
   input:focus {
-    border-color: var(--ehq-yellow-border);
-    box-shadow: 0 0 0 3px var(--ehq-yellow-muted);
+    border-color: var(--ehq-border-strong);
+    box-shadow: 0 0 0 3px var(--ehq-workspace-distribution-bg);
   }
 
   .import-result {
@@ -5251,7 +5251,7 @@
     display: flex;
     justify-content: space-between;
     gap: var(--ehq-space-3);
-    color: var(--ehq-yellow);
+    color: var(--ehq-workspace-distribution);
   }
 
   .statement-pdf h2 {

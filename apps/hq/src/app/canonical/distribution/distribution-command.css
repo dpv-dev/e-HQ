@@ -15,8 +15,8 @@
   --ehq-edge-border-color: var(--ehq-border);
   border: 1px solid var(--ehq-border);
   border-radius: var(--ehq-radius-md);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 120px), var(--ehq-surface);
-  box-shadow: var(--orb-elev-1, 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 12px 28px rgba(0, 0, 0, 0.34));
+  background: var(--ehq-surface);
+  box-shadow: var(--ehq-shadow-sm);
   transition: box-shadow var(--ehq-transition-fast), border-color var(--ehq-transition-fast);
 }
 
@@ -48,11 +48,11 @@
   padding: 0 12px;
   border: 1px solid var(--ehq-warning-border);
   border-radius: var(--ehq-radius-pill);
-  background: var(--ehq-warning-bg);
+  background: var(--ehq-workspace-distribution-bg);
   color: var(--ehq-text);
   font-family: var(--ehq-mono);
   font-size: var(--ehq-type-label-size);
-  letter-spacing: 0.08em;
+  letter-spacing: 0;
   text-transform: uppercase;
 }
 

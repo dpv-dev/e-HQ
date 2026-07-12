@@ -2581,6 +2581,7 @@
     const request = {
       workspaceId: officeWorkspaceId,
       previewId: preview.previewId,
+      accountId: selectedImportAccountId,
       acceptedRowIds,
       rejectedRowIds
     };
