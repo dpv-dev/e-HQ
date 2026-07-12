@@ -47,6 +47,14 @@
   box-shadow: none;
 }
 
+/* Defensive cleanup: hide any stale profile/session layer from older cached chunks. */
+.ehq-workspace-shell:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .shell-user-wrap,
+.ehq-workspace-shell:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .shell-user,
+.ehq-workspace-shell:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .shell-session-menu,
+.ehq-workspace-shell:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .dev-session {
+  display: none !important;
+}
+
 :is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .content {
   gap: var(--ehq-space-4);
   padding-bottom: var(--ehq-space-4);

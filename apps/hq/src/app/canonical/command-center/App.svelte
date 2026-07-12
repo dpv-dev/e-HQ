@@ -44,7 +44,6 @@
   import { onMount } from "svelte";
   import { createShellApiClient } from "../../app-shell-data.js";
   import { getLatestDataPeriod, periodLabel } from "../../period-controls.js";
-  import DevSessionMenu from "../../DevSessionMenu.svelte";
   import { normalizeRoutePath } from "../../route-utils.js";
   import { isApiRequestLoading as isLoadingState } from "../request-state.js";
   import "../../../office-orbital-scope.css";
@@ -1125,16 +1124,8 @@
   navGroups={shellNavGroups}
   statusLabel="command-center"
   statusValue={systemStatusLabel}
-  userInitial={session.initials}
-  userName={session.displayName}
-  userContext={session.roleLabel}
-  signOutHref="#"
   onNavigate={handleShellNavigate}
-  onSignOut={onLogout}
 >
-  {#snippet footer()}
-    <DevSessionMenu {session} {onLogout} />
-  {/snippet}
     <div class="content">
       <PageHeader
         workspace="command-center"

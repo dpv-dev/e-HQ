@@ -13,19 +13,13 @@
     readonly navGroups: readonly WorkspaceNavGroup[] | null;
     readonly statusLabel: string;
     readonly statusValue: string;
-    readonly userInitial: string;
-    readonly userName: string;
-    readonly userContext: string;
-    readonly signOutHref: string;
     readonly onNavigate: ((href: string) => void) | null;
-    readonly onSignOut: (() => void) | null;
     readonly showWorkspaceNav?: boolean;
     readonly footer?: Snippet;
     readonly children?: Snippet;
   }
 
   const props: Props = $props();
-  let sessionMenuOpen = $state(false);
   let navCollapsed = $state(true);
   const showWorkspaceNav = $derived(props.showWorkspaceNav ?? true);
   const collapseStorageKey = $derived(`ehq-shell-nav-collapsed:${props.workspace}`);
@@ -55,20 +49,6 @@
     props.onNavigate(item.href);
   }
 
-  function toggleSessionMenu(): void {
-    sessionMenuOpen = !sessionMenuOpen;
-  }
-
-  function signOut(): void {
-    sessionMenuOpen = false;
-
-    if (props.onSignOut === null) {
-      return;
-    }
-
-    props.onSignOut();
-  }
-
   function toggleNavCollapse(): void {
     navCollapsed = !navCollapsed;
     window.localStorage.setItem(collapseStorageKey, navCollapsed ? "1" : "0");
@@ -78,6 +58,17 @@
 <div class={`ehq-workspace-shell ehq-workspace-${props.workspace} ${navCollapsed ? "shell-nav-collapsed" : ""}`}>
   <aside>
     <a class="shell-mark" href={props.homeHref} aria-label={`${props.brandLabel} home`}>ë</a>
+
+    <button
+      class="shell-collapse shell-collapse-side"
+      type="button"
+      aria-label={navCollapsed ? "Expand left menu" : "Collapse left menu"}
+      aria-expanded={!navCollapsed}
+      title={navCollapsed ? "Expand menu" : "Collapse menu"}
+      onclick={toggleNavCollapse}
+    >
+      <Icon name={navCollapsed ? "arrow-right" : "arrow-left"} size={16} strokeWidth={1.8} />
+    </button>
 
     {#if showWorkspaceNav}
       <nav aria-label={props.navLabel}>
@@ -124,41 +115,10 @@
 
   <div class="shell-main">
     <header class="shell-topbar">
-      <button
-        class="shell-collapse"
-        type="button"
-        aria-label={navCollapsed ? "Expand left menu" : "Collapse left menu"}
-        aria-expanded={!navCollapsed}
-        title={navCollapsed ? "Expand menu" : "Collapse menu"}
-        onclick={toggleNavCollapse}
-      >
-        <Icon name={navCollapsed ? "arrow-right" : "arrow-left"} size={16} strokeWidth={1.8} />
-      </button>
       <a class="shell-title" href={props.homeHref}>{props.brandLabel}</a>
       <div class="shell-search" aria-hidden="true">
         <span>Go to a section</span>
         <kbd>⌘K</kbd>
-      </div>
-      <div class="shell-user-wrap">
-        <button class="shell-user" type="button" aria-haspopup="menu" aria-expanded={sessionMenuOpen} onclick={toggleSessionMenu}>
-          <b>{props.userInitial}</b>
-          <span>
-            <strong>{props.userName}</strong>
-            <small>{props.userContext}</small>
-          </span>
-        </button>
-
-        {#if sessionMenuOpen}
-          <section class="shell-session-menu" aria-label="Session actions">
-            <header>
-              <span>session</span>
-              <strong>{props.userName}</strong>
-              <small>{props.userContext}</small>
-            </header>
-            <a href={props.signOutHref} onclick={(event: MouseEvent): void => event.preventDefault()}>Session active</a>
-            <button type="button" onclick={signOut}>Sign out</button>
-          </section>
-        {/if}
       </div>
     </header>
 
@@ -182,7 +142,7 @@
     color: var(--ehq-text);
     display: grid;
     grid-template-columns: var(--ehq-shell-sidebar-width) minmax(0, 1fr);
-    transition: grid-template-columns 220ms var(--ehq-ease);
+    transition: grid-template-columns 280ms cubic-bezier(0.22, 1, 0.36, 1);
   }
 
   .ehq-workspace-shell.shell-nav-collapsed {
@@ -198,12 +158,17 @@
     grid-template-rows: auto 1fr auto;
     gap: var(--ehq-space-5);
     overflow: hidden;
-    transition: padding 220ms var(--ehq-ease);
+    transition: padding 280ms cubic-bezier(0.22, 1, 0.36, 1);
   }
 
   nav {
     overflow-y: auto;
-    transition: padding 220ms var(--ehq-ease), border-color 220ms var(--ehq-ease), background-color 220ms var(--ehq-ease);
+    transform: translateX(0);
+    transition:
+      transform 280ms cubic-bezier(0.22, 1, 0.36, 1),
+      padding 220ms var(--ehq-ease),
+      border-color 220ms var(--ehq-ease),
+      background-color 220ms var(--ehq-ease);
   }
 
   .shell-mark {
@@ -320,8 +285,7 @@
     transition: opacity 180ms var(--ehq-ease), max-height 180ms var(--ehq-ease), padding 180ms var(--ehq-ease), border-color 180ms var(--ehq-ease);
   }
 
-  .shell-status span,
-  .shell-user small {
+  .shell-status span {
     color: var(--ehq-text-muted);
     font-family: var(--ehq-mono);
     font-size: var(--ehq-type-label-size);
@@ -355,6 +319,12 @@
     justify-content: center;
   }
 
+  .shell-collapse-side {
+    justify-self: center;
+    margin-top: -4px;
+    margin-bottom: var(--ehq-space-2);
+  }
+
   .shell-collapse:hover {
     border-color: var(--ehq-yellow-border);
     color: var(--ehq-yellow);
@@ -363,6 +333,10 @@
   .shell-nav-collapsed aside {
     padding: var(--ehq-space-4) var(--ehq-space-2);
     justify-items: center;
+  }
+
+  .shell-nav-collapsed nav {
+    transform: translateX(-2px);
   }
 
   .shell-nav-collapsed .nav-label,
@@ -408,7 +382,7 @@
     padding: 0 var(--ehq-space-5);
     border-bottom: 1px solid var(--ehq-border-soft);
     display: grid;
-    grid-template-columns: auto minmax(180px, 420px) auto;
+    grid-template-columns: minmax(180px, 420px) auto;
     align-items: center;
     gap: var(--ehq-space-4);
   }
@@ -439,111 +413,6 @@
     color: var(--ehq-text-soft);
     font-family: var(--ehq-mono);
     font-size: var(--ehq-type-label-size);
-  }
-
-  .shell-user-wrap {
-    position: relative;
-    justify-self: end;
-  }
-
-  .shell-user {
-    padding: 0;
-    border: 0;
-    background: transparent;
-    color: var(--ehq-text);
-    display: inline-flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: var(--ehq-space-2);
-    text-align: left;
-  }
-
-  .shell-user b {
-    width: 34px;
-    height: 34px;
-    border-radius: var(--ehq-radius-pill);
-    background: var(--ehq-yellow);
-    color: var(--ehq-text-on-yellow);
-    display: grid;
-    place-items: center;
-    font-family: var(--ehq-font);
-    font-size: var(--ehq-type-ui-size);
-  }
-
-  .shell-user span {
-    display: grid;
-    gap: 2px;
-  }
-
-  .shell-user strong {
-    font-family: var(--ehq-font);
-    font-size: var(--ehq-type-ui-size);
-    font-weight: var(--ehq-type-heading-weight);
-  }
-
-  .shell-session-menu {
-    position: absolute;
-    z-index: 20;
-    top: calc(100% + var(--ehq-space-2));
-    right: 0;
-    width: min(300px, calc(100vw - var(--ehq-space-6)));
-    padding: var(--ehq-space-3);
-    border: 1px solid var(--ehq-border);
-    border-radius: var(--ehq-radius-sm);
-    background: var(--ehq-surface);
-    box-shadow: var(--ehq-shadow-md);
-    display: grid;
-    gap: var(--ehq-space-3);
-  }
-
-  .shell-session-menu header {
-    display: grid;
-    gap: var(--ehq-space-1);
-  }
-
-  .shell-session-menu span,
-  .shell-session-menu small,
-  .shell-session-menu a,
-  .shell-session-menu button {
-    font-family: var(--ehq-mono);
-  }
-
-  .shell-session-menu span {
-    color: var(--ehq-yellow);
-    font-size: var(--ehq-type-label-size);
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-  }
-
-  .shell-session-menu strong {
-    font-size: var(--ehq-type-ui-size);
-  }
-
-  .shell-session-menu small {
-    color: var(--ehq-text-muted);
-    font-size: var(--ehq-type-label-size);
-  }
-
-  .shell-session-menu a,
-  .shell-session-menu button {
-    min-height: 32px;
-    border: 1px solid var(--ehq-border);
-    border-radius: var(--ehq-radius-sm);
-    background: transparent;
-    color: var(--ehq-text-muted);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: var(--ehq-type-action-size);
-    font-weight: var(--ehq-type-heading-weight);
-    letter-spacing: 0.08em;
-    text-decoration: none;
-    text-transform: uppercase;
-  }
-
-  .shell-session-menu button:hover {
-    border-color: var(--ehq-error);
-    color: var(--ehq-error);
   }
 
   main {
@@ -581,7 +450,7 @@
     }
 
     .shell-topbar {
-      grid-template-columns: auto 1fr;
+      grid-template-columns: 1fr;
       padding: 0 var(--ehq-space-4);
     }
 
@@ -643,17 +512,9 @@
 
     .shell-topbar {
       min-height: var(--ehq-shell-topbar-height);
-      grid-template-columns: 1fr auto;
+      grid-template-columns: 1fr;
       gap: var(--ehq-space-2);
       padding: 0 var(--ehq-space-3);
-    }
-
-    .shell-user {
-      gap: 0;
-    }
-
-    .shell-user span {
-      display: none;
     }
   }
 
@@ -665,12 +526,6 @@
 
     .shell-title {
       font-size: 0.9rem;
-    }
-
-    .shell-user b {
-      width: 30px;
-      height: 30px;
-      font-size: 0.8rem;
     }
 
     .nav-item {

@@ -4682,15 +4682,10 @@
   navLabel="Navigation Distribution"
   navItems={[]}
   navGroups={shellNavGroups}
-  showWorkspaceNav={false}
+  showWorkspaceNav={true}
   statusLabel="erh/v1"
   statusValue={writesEnabled ? "écriture activée" : "lecture seule"}
-  userInitial={session.initials}
-  userName={session.displayName}
-  userContext={session.roleLabel}
-  signOutHref="#"
   onNavigate={handleShellNavigate}
-  onSignOut={onLogout}
 >
   <div class={`content distribution-page-${activePageId}`}>
       <nav class="workspace-tab-bar ehq-edge-surface" aria-label="Sections Distribution">

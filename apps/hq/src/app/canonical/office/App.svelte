@@ -4272,15 +4272,10 @@
   navLabel="Office navigation"
   navItems={[]}
   navGroups={shellNavGroups}
-  showWorkspaceNav={false}
+  showWorkspaceNav={true}
   statusLabel="eof/v1"
   statusValue={writesEnabled ? "writes enabled" : "live reads"}
-  userInitial={session.initials}
-  userName={session.displayName}
-  userContext={session.roleLabel}
-  signOutHref="#"
   onNavigate={handleShellNavigate}
-  onSignOut={onLogout}
 >
     <div class={`content office-page-${activePageId}`}>
       <nav class="office-tab-bar ehq-edge-surface" aria-label="Office sections">
