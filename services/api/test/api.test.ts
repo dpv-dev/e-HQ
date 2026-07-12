@@ -170,6 +170,33 @@ test("Office global P&L is scoped to requested workspace", async () => {
   assert.equal(legacy.netMicro, "3750.00");
 });
 
+test("Office scoped reads keep reference projects and partner detail available", async () => {
+  const app = createFixtureApiService();
+
+  const projectsResponse = await app.request("/eof/v1/projects?workspaceId=eeee-mu&period=2026-02", {
+    headers: authHeaders()
+  });
+  assert.equal(projectsResponse.status, 200);
+  const projects = (await projectsResponse.json()) as {
+    readonly items: readonly { readonly id: string; readonly periodIncomeMicro: string; readonly periodExpenseMicro: string }[];
+  };
+  const projectIds = new Set(projects.items.map((project) => project.id));
+  assert.ok(projectIds.has("project_kaya"));
+  assert.ok(projectIds.has("project_null_reference"));
+  const kaya = projects.items.find((project) => project.id === "project_kaya");
+  assert.notEqual(kaya, undefined);
+  assert.equal(kaya.periodIncomeMicro, "0.00");
+  assert.equal(kaya.periodExpenseMicro, "0.00");
+
+  const partnerResponse = await app.request("/eof/v1/partners/partner_mcb?workspaceId=eeee-mu", {
+    headers: authHeaders()
+  });
+  assert.equal(partnerResponse.status, 200);
+  const partner = (await partnerResponse.json()) as { readonly id: string; readonly name: string };
+  assert.equal(partner.id, "partner_mcb");
+  assert.equal(partner.name, "MCB");
+});
+
 test("Projects list totals follow period and explicit date range filters", async () => {
   const app = createFixtureApiService();
 

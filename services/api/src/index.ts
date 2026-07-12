@@ -10470,20 +10470,11 @@ function officeDatasetForWorkspace(dataset: OfficeAnalyticsDataset, workspaceId:
   const transactionIds = new Set<string>(transactions.map((transaction) => transaction.id));
   const financialAllocations = dataset.financialAllocations.filter((allocation) => transactionIds.has(allocation.transactionId));
 
-  const projectIds = new Set<string>();
-  const partnerIds = new Set<string>();
-  for (const transaction of transactions) {
-    if (transaction.projectId !== null) {
-      projectIds.add(transaction.projectId);
-    }
-    if (transaction.partnerId !== null) {
-      partnerIds.add(transaction.partnerId);
-    }
-  }
-
-  const projects = dataset.projects.filter((project) => projectIds.has(project.id));
-  const projectBudgetLines = dataset.projectBudgetLines.filter((line) => projectIds.has(line.projectId));
-  const partners = dataset.partners.filter((partner) => partnerIds.has(partner.id));
+  // Projects/partners are reference entities in the current Office schema (no workspace_id on rows).
+  // Keep them visible across workspaces while scoping financial computations with transaction-bound data.
+  const projects = dataset.projects;
+  const projectBudgetLines = dataset.projectBudgetLines;
+  const partners = dataset.partners;
 
   const bankAccounts = dataset.bankAccounts.filter((account) => account.workspaceId === workspaceId);
   const accountIds = new Set<string>(bankAccounts.map((account) => account.id));
