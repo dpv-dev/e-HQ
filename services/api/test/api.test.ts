@@ -97,6 +97,79 @@ test("Office dashboard and global P&L are served from the domain read layer", as
   assert.equal(pnl.completeness, "complete");
 });
 
+test("Office global P&L is scoped to requested workspace", async () => {
+  const fixtures = createFixtureStore();
+  fixtures.office.transactions = [
+    ...fixtures.office.transactions,
+    {
+      ...fixtures.office.transactions[0],
+      id: "tx_scope_canonical_income",
+      workspaceId: "eeee-mu",
+      transactionDate: "2026-02-20T10:00:00.000Z",
+      type: "income",
+      status: "validated",
+      isActive: true,
+      amountMinor: 70_000n
+    }
+  ];
+  fixtures.office.financialAllocations = [
+    ...fixtures.office.financialAllocations,
+    {
+      id: "alloc_scope_canonical_income",
+      transactionId: "tx_scope_canonical_income",
+      departmentId: "dept_ops",
+      amountMinor: 70_000n
+    }
+  ];
+
+  const app = createApiService({
+    fixtures,
+    persistence: createMemoryPersistenceRuntime({ WRITES_ENABLED: "false" }),
+    health: null,
+    nowIso: (): string => "2026-06-21T00:00:00.000Z",
+    auth: createTestAuthVerifier()
+  });
+
+  const canonicalResponse = await app.request("/eof/v1/pl/global?workspaceId=eeee-mu&period=2026-02", {
+    headers: authHeaders()
+  });
+  assert.equal(canonicalResponse.status, 200);
+  const canonical = (await canonicalResponse.json()) as {
+    readonly incomeMicro: string;
+    readonly expenseMicro: string;
+    readonly netMicro: string;
+  };
+  assert.equal(canonical.incomeMicro, "700.00");
+  assert.equal(canonical.expenseMicro, "0.00");
+  assert.equal(canonical.netMicro, "700.00");
+
+  const aliasResponse = await app.request("/eof/v1/pl/global?workspaceId=office&period=2026-02", {
+    headers: authHeaders()
+  });
+  assert.equal(aliasResponse.status, 200);
+  const alias = (await aliasResponse.json()) as {
+    readonly incomeMicro: string;
+    readonly expenseMicro: string;
+    readonly netMicro: string;
+  };
+  assert.equal(alias.incomeMicro, canonical.incomeMicro);
+  assert.equal(alias.expenseMicro, canonical.expenseMicro);
+  assert.equal(alias.netMicro, canonical.netMicro);
+
+  const legacyResponse = await app.request("/eof/v1/pl/global?workspaceId=workspace_1&period=2026-02", {
+    headers: authHeaders()
+  });
+  assert.equal(legacyResponse.status, 200);
+  const legacy = (await legacyResponse.json()) as {
+    readonly incomeMicro: string;
+    readonly expenseMicro: string;
+    readonly netMicro: string;
+  };
+  assert.equal(legacy.incomeMicro, "5000.00");
+  assert.equal(legacy.expenseMicro, "1250.00");
+  assert.equal(legacy.netMicro, "3750.00");
+});
+
 test("Projects list totals follow period and explicit date range filters", async () => {
   const app = createFixtureApiService();
 

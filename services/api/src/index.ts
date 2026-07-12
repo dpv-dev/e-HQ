@@ -1081,18 +1081,19 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
   app.get("/eof/v1/dashboard", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
     const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
     const filters = rangeFiltersFromContext(context, period, null);
-    const monthlyRows = readMonthlyPnl(dependencies.fixtures.office, filters);
+    const monthlyRows = readMonthlyPnl(dataset, filters);
     const runwayWindowMonths = filterRunwayWindowMonths(monthlyRows, ["2026-02"]);
-    const dashboard = readOfficeDashboardFull(dependencies.fixtures.office, period, filters, runwayWindowMonths);
-    const recentImports = dependencies.fixtures.office.bankImportBatches.filter((batch) => batch.workspaceId === workspaceId);
+    const dashboard = readOfficeDashboardFull(dataset, period, filters, runwayWindowMonths);
+    const recentImports = dataset.bankImportBatches;
     const response: OfficeDashboardResponse = {
       period,
       cashBalanceMicro: dashboard.cashRunway.cashBalanceMur,
       receivablesMicro: dashboard.pnl.income,
       payablesMicro: dashboard.pnl.expense,
       unreconciledTransactionCount: dashboard.bankQuality.unmatchedLineCount,
-      previous: readOfficeDashboardPrevious(dependencies, filters),
+      previous: readOfficeDashboardPrevious(dataset, filters),
       lastAuditEventId: dependencies.fixtures.officeAuditLog[0]?.id ?? null,
       recentImports: recentImports.map((batch) => ({
         id: batch.id,
@@ -1113,44 +1114,50 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
   app.get("/eof/v1/analytics/dashboard", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
     const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
     const filters = rangeFiltersFromContext(context, period, null);
-    return context.json(readOfficeDashboardAnalytics(dependencies, workspaceId, period, filters));
+    return context.json(readOfficeDashboardAnalytics(dependencies, dataset, workspaceId, period, filters));
   });
 
   app.get("/eof/v1/pl/global", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
-    resolveWorkspaceId(context);
-    const response = toOfficeGlobalPnl(dependencies.fixtures.office, period, rangeFiltersFromContext(context, period, null));
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
+    const response = toOfficeGlobalPnl(dataset, period, rangeFiltersFromContext(context, period, null));
     return context.json(response);
   });
 
   app.get("/eof/v1/pl/department/:departmentId", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
-    resolveWorkspaceId(context);
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
     const departmentId = context.req.param("departmentId");
-    const response = toOfficeDepartmentPnl(dependencies.fixtures.office, departmentId, period, rangeFiltersFromContext(context, period, departmentId));
+    const response = toOfficeDepartmentPnl(dataset, departmentId, period, rangeFiltersFromContext(context, period, departmentId));
     return context.json(response);
   });
 
   app.get("/eof/v1/pl/division", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
-    resolveWorkspaceId(context);
-    const divisions = readPnlByDivision(dependencies.fixtures.office, rangeFiltersFromContext(context, period, null)).map(toApiDivisionPnl);
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
+    const divisions = readPnlByDivision(dataset, rangeFiltersFromContext(context, period, null)).map(toApiDivisionPnl);
     return context.json(pageItems(context, divisions));
   });
 
   app.get("/eof/v1/pl/category", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
-    resolveWorkspaceId(context);
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
     const departmentId = nullableQuery(context, "departmentId");
     const filters = rangeFiltersFromContext(context, period, departmentId);
-    return context.json(pageItems(context, toOfficeCategoryPnlLines(dependencies.fixtures.office, filters)));
+    return context.json(pageItems(context, toOfficeCategoryPnlLines(dataset, filters)));
   });
 
   app.get("/eof/v1/transactions", (context) => {
-    resolveWorkspaceId(context);
-    const transactions = dependencies.fixtures.office.transactions
-      .map((transaction) => toOfficeTransaction(dependencies.fixtures.office, transaction))
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
+    const transactions = dataset.transactions
+      .map((transaction) => toOfficeTransaction(dataset, transaction))
       .filter((transaction) => matchesOfficeTransactionQuery(context, transaction));
     return context.json(pageItems(context, transactions));
   });
@@ -1278,9 +1285,10 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
   app.get("/eof/v1/cashflow", (context) => {
     const from = requireCompatQuery(context, ["from", "fromDate"], "from");
     const to = requireCompatQuery(context, ["to", "toDate"], "to");
-    resolveWorkspaceId(context);
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
     const accountId = nullableQuery(context, "accountId");
-    const buckets = readOfficeCashflowProjection(dependencies.fixtures.office, from, to, accountId);
+    const buckets = readOfficeCashflowProjection(dataset, from, to, accountId);
     return context.json(toCashflowBuckets(buckets));
   });
 
@@ -1370,17 +1378,19 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
   app.get("/eof/v1/partners", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
     const facet = requirePartnerFacet(context);
-    resolveWorkspaceId(context);
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
     const filters = rangeFiltersFromContext(context, period, null);
-    const partners = dependencies.fixtures.office.partners
-      .map((partner) => toPartnerListItem(dependencies.fixtures, partner, filters))
+    const partners = dataset.partners
+      .map((partner) => toPartnerListItem({ ...dependencies.fixtures, office: dataset }, partner, filters))
       .filter((partner) => hasFacetActivity(partner, facet));
     return context.json(pageItems(context, partners));
   });
 
   app.get("/eof/v1/partners/:partnerId", (context) => {
-    resolveWorkspaceId(context);
-    const partner = requirePartner(dependencies.fixtures.office, context.req.param("partnerId"));
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
+    const partner = requirePartner(dataset, context.req.param("partnerId"));
     return context.json({
       id: partner.id,
       name: partner.name,
@@ -1395,9 +1405,11 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
 
   app.get("/eof/v1/pl/partner/:partnerId", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
-    resolveWorkspaceId(context);
-    const partner = requirePartner(dependencies.fixtures.office, context.req.param("partnerId"));
-    const response = toPartnerDetail(dependencies.fixtures, partner, period, rangeFiltersFromContext(context, period, null));
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
+    const scopedFixtures = { ...dependencies.fixtures, office: dataset };
+    const partner = requirePartner(dataset, context.req.param("partnerId"));
+    const response = toPartnerDetail(scopedFixtures, partner, period, rangeFiltersFromContext(context, period, null));
     return context.json(response);
   });
 
@@ -1407,9 +1419,11 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
   });
 
   app.get("/eof/v1/partners/:partnerId/payee-link", (context) => {
-    resolveWorkspaceId(context);
-    const partner = requirePartner(dependencies.fixtures.office, context.req.param("partnerId"));
-    return context.json(toPartnerPayeeLink(dependencies.fixtures, partner));
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
+    const scopedFixtures = { ...dependencies.fixtures, office: dataset };
+    const partner = requirePartner(dataset, context.req.param("partnerId"));
+    return context.json(toPartnerPayeeLink(scopedFixtures, partner));
   });
 
   app.post("/eof/v1/partners", async (context) => {
@@ -1486,7 +1500,8 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
   });
 
   app.get("/eof/v1/projects", (context) => {
-    resolveWorkspaceId(context);
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
     const period = optionalCompatQuery(context, ["period", "month"]);
     const dateFrom = optionalCompatQuery(context, ["dateFrom", "date_from", "from", "fromDate", "from_date"]);
     const dateTo = optionalCompatQuery(context, ["dateTo", "date_to", "to", "toDate", "to_date"]);
@@ -1495,8 +1510,8 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
         ? { dateFrom: null, dateTo: null, departmentId: null }
         : rangeFiltersFromContext(context, period ?? dependencies.nowIso().slice(0, 7), null);
     const status = nullableQuery(context, "status");
-    const projects = dependencies.fixtures.office.projects
-      .map((project) => toProjectSummary(dependencies.fixtures.office, project, filters))
+    const projects = dataset.projects
+      .map((project) => toProjectSummary(dataset, project, filters))
       .filter((project) => status === null || project.status === status);
     return context.json(pageItems(context, projects));
   });
@@ -1517,20 +1532,23 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
 
   app.get("/eof/v1/pl/project/:projectId", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
-    resolveWorkspaceId(context);
-    return context.json(toProjectPnl(dependencies.fixtures.office, context.req.param("projectId"), period, rangeFiltersFromContext(context, period, null)));
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
+    return context.json(toProjectPnl(dataset, context.req.param("projectId"), period, rangeFiltersFromContext(context, period, null)));
   });
 
   app.get("/eof/v1/integrity/check-all", (context) => {
-    resolveWorkspaceId(context);
-    return context.json(toOfficeIntegrity(dependencies.fixtures.office, dependencies.nowIso()));
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
+    return context.json(toOfficeIntegrity(dataset, dependencies.nowIso()));
   });
 
   app.get("/eof/v1/analytics/bank-quality", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
-    resolveWorkspaceId(context);
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
     const filters = rangeFiltersFromContext(context, period, null);
-    const result = readOfficeBankQualityForFilters(dependencies.fixtures.office, period, filters);
+    const result = readOfficeBankQualityForFilters(dataset, period, filters);
     const response: OfficeBankQualityResponse = {
       period: result.period,
       matchedRateBp: result.matchedRateBp,
@@ -10396,19 +10414,16 @@ function previousRangeFilters(filters: OfficePnlFilters): OfficePnlFilters | nul
   };
 }
 
-function readOfficeDashboardPrevious(
-  dependencies: ApiServiceDependencies,
-  filters: OfficePnlFilters
-): OfficeDashboardPreviousPeriod | null {
+function readOfficeDashboardPrevious(dataset: OfficeAnalyticsDataset, filters: OfficePnlFilters): OfficeDashboardPreviousPeriod | null {
   const previousFilters = previousRangeFilters(filters);
   if (previousFilters === null || !isIsoDate(previousFilters.dateFrom) || !isIsoDate(previousFilters.dateTo)) {
     return null;
   }
 
   const previousPeriod = previousFilters.dateTo.slice(0, 7);
-  const monthlyRows = readMonthlyPnl(dependencies.fixtures.office, previousFilters);
+  const monthlyRows = readMonthlyPnl(dataset, previousFilters);
   const runwayWindowMonths = filterRunwayWindowMonths(monthlyRows, ["2026-02"]);
-  const dashboard = readOfficeDashboardFull(dependencies.fixtures.office, previousPeriod, previousFilters, runwayWindowMonths);
+  const dashboard = readOfficeDashboardFull(dataset, previousPeriod, previousFilters, runwayWindowMonths);
   return {
     dateFrom: previousFilters.dateFrom,
     dateTo: previousFilters.dateTo,
@@ -10421,11 +10436,11 @@ function readOfficeDashboardPrevious(
 
 function readOfficeDashboardAnalytics(
   dependencies: ApiServiceDependencies,
+  dataset: OfficeAnalyticsDataset,
   workspaceId: string,
   period: string,
   filters: OfficePnlFilters
 ): OfficeDashboardAnalyticsResponse {
-  const dataset = dependencies.fixtures.office;
   const monthlyRows = readMonthlyPnl(dataset, filters);
   const runwayWindowMonths = selectRunwayWindowMonths(monthlyRows);
   const runway = readDashboardRunwayV1(dataset, period, monthlyRows, runwayWindowMonths);
@@ -10447,6 +10462,55 @@ function readOfficeDashboardAnalytics(
     oldestUnmatchedDays: oldestUnmatchedDayInAccounts(reconciliationByAccount),
     expenseTrendMonths,
     expenseTrendByDepartment
+  };
+}
+
+function officeDatasetForWorkspace(dataset: OfficeAnalyticsDataset, workspaceId: string): OfficeAnalyticsDataset {
+  const transactions = dataset.transactions.filter((transaction) => transaction.workspaceId === workspaceId);
+  const transactionIds = new Set<string>(transactions.map((transaction) => transaction.id));
+  const financialAllocations = dataset.financialAllocations.filter((allocation) => transactionIds.has(allocation.transactionId));
+
+  const projectIds = new Set<string>();
+  const partnerIds = new Set<string>();
+  for (const transaction of transactions) {
+    if (transaction.projectId !== null) {
+      projectIds.add(transaction.projectId);
+    }
+    if (transaction.partnerId !== null) {
+      partnerIds.add(transaction.partnerId);
+    }
+  }
+
+  const projects = dataset.projects.filter((project) => projectIds.has(project.id));
+  const projectBudgetLines = dataset.projectBudgetLines.filter((line) => projectIds.has(line.projectId));
+  const partners = dataset.partners.filter((partner) => partnerIds.has(partner.id));
+
+  const bankAccounts = dataset.bankAccounts.filter((account) => account.workspaceId === workspaceId);
+  const accountIds = new Set<string>(bankAccounts.map((account) => account.id));
+  const bankImportBatches = dataset.bankImportBatches.filter((batch) => batch.workspaceId === workspaceId);
+  const batchIds = new Set<string>(bankImportBatches.map((batch) => batch.id));
+  const bankStatementLines = dataset.bankStatementLines.filter(
+    (line) => accountIds.has(line.accountId) || batchIds.has(line.importBatchId)
+  );
+  const bankLineIds = new Set<string>(bankStatementLines.map((line) => line.id));
+  const bankReconciliationMatches = dataset.bankReconciliationMatches.filter(
+    (match) => bankLineIds.has(match.bankStatementLineId) && transactionIds.has(match.transactionId)
+  );
+
+  const cashflowProjectionRows = dataset.cashflowProjectionRows.filter((row) => row.workspaceId === workspaceId);
+
+  return {
+    ...dataset,
+    partners,
+    projects,
+    projectBudgetLines,
+    transactions,
+    financialAllocations,
+    bankAccounts,
+    bankImportBatches,
+    bankStatementLines,
+    bankReconciliationMatches,
+    cashflowProjectionRows
   };
 }
 
