@@ -876,6 +876,67 @@ test("Bank import preview warns when file profile mismatches selected account ba
   assert.ok(preview.warnings.some((warning) => warning.includes("Bank profile mismatch")));
 });
 
+test("bank import preview resolves account by detected bank profile when multiple active same-currency accounts exist", async () => {
+  const fixture = createFixtureStore();
+  const app = createApiService({
+    fixtures: {
+      ...fixture,
+      office: {
+        ...fixture.office,
+        bankAccounts: [
+          ...fixture.office.bankAccounts,
+          {
+            id: "bank_sbi",
+            workspaceId: "workspace_1",
+            bankName: "State Bank of Mauritius",
+            accountLabel: "SBI Current",
+            accountReferenceHash: "sbi-current",
+            currency: "MUR",
+            currentBalanceMinor: 0n,
+            currentBalanceMurMinor: 0n,
+            isActive: true,
+            balanceAsOf: null
+          }
+        ]
+      }
+    },
+    persistence: createMemoryPersistenceRuntime({ WRITES_ENABLED: "false" }),
+    health: null,
+    nowIso: (): string => "2026-06-21T00:00:00.000Z",
+    auth: createTestAuthVerifier()
+  });
+
+  const response = await app.request("/eof/v1/bank-import/preview", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      source: "pdf",
+      fileName: "mcb-no-account-id.pdf",
+      checksum: "mcb-no-account-id",
+      rows: [
+        {
+          occurredOn: "2026-02-11",
+          description: "IB Own Account Transfer FT26107LWQWP",
+          debit: "100.00",
+          currency: "MUR",
+          transactionDetails: "TRANS DATE VALUE DATE TRANSACTION DETAILS Mauritius Commercial Bank"
+        }
+      ]
+    })
+  });
+
+  assert.equal(response.status, 200);
+  const preview = await response.json() as {
+    readonly accountReference: string | null;
+    readonly acceptedRowCount: number;
+    readonly rejectedRowCount: number;
+  };
+  assert.equal(preview.accountReference, "bank_mur");
+  assert.equal(preview.acceptedRowCount, 1);
+  assert.equal(preview.rejectedRowCount, 0);
+});
+
 test("bank import preview returns opening and closing balances from running statement balances", async () => {
   const app = createFixtureApiService();
 

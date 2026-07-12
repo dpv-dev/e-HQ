@@ -7168,8 +7168,17 @@ async function officeBankImportPreviewResponse(context: ApiContext, dependencies
   assertOfficeBankImportPreviewRequest(context, request);
   requirePermissionForWorkspace(context.get("authUser"), "office_bank_import_preview", request.workspaceId);
   const previewRows = previewRowsFromRecords(request.rows);
+  const detectedBankProfile = detectBankProfileFromRows(request.rows).detectedBank;
   const allParsedRows = previewRows
-    .map((row: ApiImportPreviewRow): ParsedOfficeBankPreviewRow => parseOfficeBankPreviewRow(row, request.workspaceId, dependencies.fixtures.office.bankAccounts, dependencies.fixtures.office.exchangeRates));
+    .map((row: ApiImportPreviewRow): ParsedOfficeBankPreviewRow => {
+      return parseOfficeBankPreviewRow(
+        row,
+        request.workspaceId,
+        dependencies.fixtures.office.bankAccounts,
+        dependencies.fixtures.office.exchangeRates,
+        detectedBankProfile
+      );
+    });
   const parsedRows = allParsedRows
     .filter((row: ParsedOfficeBankPreviewRow): row is ParsedOfficeBankPreviewRow & { readonly line: OfficeBankStatementLineInsert } => row.line !== null);
   const idempotencyFingerprint = `${request.source}:${request.checksum}:${hashRequestBody(request.rows)}`;
@@ -7387,9 +7396,18 @@ async function officeBankImportConfirmResponse(context: ApiContext, dependencies
       }
 
       const acceptedRowIds = new Set<string>(request.acceptedRowIds);
+      const detectedBankProfile = detectBankProfileFromRows(preview.rows.map((row) => row.rawData)).detectedBank;
       const parsedRows = preview.rows
         .filter((row: ApiImportPreviewRow): boolean => acceptedRowIds.has(row.id))
-        .map((row: ApiImportPreviewRow): ParsedOfficeBankPreviewRow => parseOfficeBankPreviewRow(row, request.workspaceId, dependencies.fixtures.office.bankAccounts, dependencies.fixtures.office.exchangeRates));
+        .map((row: ApiImportPreviewRow): ParsedOfficeBankPreviewRow => {
+          return parseOfficeBankPreviewRow(
+            row,
+            request.workspaceId,
+            dependencies.fixtures.office.bankAccounts,
+            dependencies.fixtures.office.exchangeRates,
+            detectedBankProfile
+          );
+        });
       const lines = parsedRows
         .map((row: ParsedOfficeBankPreviewRow): OfficeBankStatementLineInsert | null => row.line)
         .filter((line: OfficeBankStatementLineInsert | null): line is OfficeBankStatementLineInsert => line !== null);
@@ -8480,10 +8498,11 @@ function parseOfficeBankPreviewRow(
   row: ApiImportPreviewRow,
   workspaceId: string,
   accounts: readonly OfficeBankAccountRow[],
-  exchangeRates: readonly OfficeWriteExchangeRateRow[]
+  exchangeRates: readonly OfficeWriteExchangeRateRow[],
+  detectedBankProfile: "sbi" | "mcb" | "unknown"
 ): ParsedOfficeBankPreviewRow {
   const currency = normalizedCurrency(rowValue(row.rawData, ["currency", "currency_code", "Currency", "CURRENCY"])) ?? "MUR";
-  const account = accountForRow(row.rawData, workspaceId, currency, accounts);
+  const account = accountForRow(row.rawData, workspaceId, currency, accounts, detectedBankProfile);
   const occurredOn = isoDateValue(row.rawData, ["occurredOn", "occurred_on", "transactionDate", "transaction_date", "date", "DATE", "Date", "paid_on", "paidOn"]);
   const description = rowValue(row.rawData, ["description", "label", "particulars", "details", "narrative", "memo"]);
   const amount = amountForBankRow(row.rawData);
@@ -8845,7 +8864,8 @@ function accountForRow(
   row: Readonly<Record<string, string>>,
   workspaceId: string,
   currency: string,
-  accounts: readonly OfficeBankAccountRow[]
+  accounts: readonly OfficeBankAccountRow[],
+  detectedBankProfile: "sbi" | "mcb" | "unknown"
 ): OfficeBankAccountRow | null {
   const accountId = rowValue(row, ["accountId", "account_id"]);
   if (accountId !== null) {
@@ -8856,7 +8876,24 @@ function accountForRow(
     return accounts.find((account: OfficeBankAccountRow): boolean => account.id === accountId) ?? null;
   }
 
-  return accounts.find((account: OfficeBankAccountRow): boolean => account.workspaceId === workspaceId && account.currency === currency && account.isActive) ?? null;
+  const candidates = accounts.filter(
+    (account: OfficeBankAccountRow): boolean => account.workspaceId === workspaceId && account.currency === currency && account.isActive
+  );
+
+  if (candidates.length === 1) {
+    return candidates[0] ?? null;
+  }
+
+  if (candidates.length > 1 && detectedBankProfile !== "unknown") {
+    const matchingBank = candidates.filter(
+      (account: OfficeBankAccountRow): boolean => normalizeBankName(account.bankName) === detectedBankProfile
+    );
+    if (matchingBank.length === 1) {
+      return matchingBank[0] ?? null;
+    }
+  }
+
+  return null;
 }
 
 function amountForBankRow(row: Readonly<Record<string, string>>): {
