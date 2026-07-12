@@ -410,14 +410,16 @@
     officeNavGroups.map((group: OfficeNavGroup): WorkspaceNavGroup => ({
       id: group.id,
       label: group.label,
-      items: group.items.map((item: OfficeNavItem): WorkspaceNavItem => ({
+      items: group.items
+        .filter((item: OfficeNavItem): boolean => item.id !== "waveInvoices")
+        .map((item: OfficeNavItem): WorkspaceNavItem => ({
         label: item.label,
         href: item.id,
         icon: navIcons[item.id],
         active: activePageId === item.id,
         disabled: false,
         badge: null
-      }))
+        }))
     }))
   );
   const handleShellNavigate = (href: string): void => {
