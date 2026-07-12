@@ -11,6 +11,7 @@ coverage/
 *.tsbuildinfo
 reports/
 services/api/output/parser-parity-report.json
+services/api/output/office-full-reset-backup-*.json
 data/dumps/*.sql
 *.zip
 app-eeee-frontend/
