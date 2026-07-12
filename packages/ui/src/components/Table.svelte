@@ -323,7 +323,7 @@
 
   h3 {
     margin: 0;
-    font-size: var(--ehq-type-section-title-size);
+    font-size: 13px;
   }
 
   .title-stack,

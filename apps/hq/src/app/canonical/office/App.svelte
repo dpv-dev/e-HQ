@@ -543,6 +543,10 @@
   const planTableNodes = $derived(readPageItems(planTableState));
   const transactionRows = $derived(readPageItems(transactionsState));
   const pendingRows = $derived(readPageItems(pendingState));
+  const pendingVisibleIds = $derived(pendingRows.map((transaction: OfficeTransaction): string => transaction.id));
+  const pendingAllVisibleSelected = $derived(
+    pendingVisibleIds.length > 0 && selectedPendingIds.length === pendingVisibleIds.length
+  );
   const reconciliationRows = $derived(readPageItems(reconciliationState));
   const selectableReconciliationIds = $derived(
     reconciliationRows
@@ -684,6 +688,24 @@
     { label: "Create entry", onAction: openReconcileCreate },
     { label: "Unmatch", onAction: unmatchReconciliationById },
     { label: "Reject", onAction: rejectReconciliationById, danger: true }
+  ]);
+  const pendingRowActions = $derived<readonly TableRowAction[]>([
+    {
+      label: "Select",
+      onAction: togglePendingSelection,
+      isEnabled: canSelectPendingById
+    },
+    {
+      label: "Unselect",
+      onAction: togglePendingSelection,
+      isEnabled: canUnselectPendingById
+    },
+    {
+      label: "Validate",
+      onAction: validatePendingById,
+      isEnabled: canValidatePendingById,
+      disabledReason: validatePendingDisabledReason
+    }
   ]);
   const reconcileTransactionOptions = $derived(
     sortOptionsAlphabetically(
@@ -3039,6 +3061,82 @@
     selectedPendingIds = [...selectedPendingIds, transactionId];
   }
 
+  function pendingTransactionById(transactionId: string): OfficeTransaction | null {
+    return pendingRows.find((transaction: OfficeTransaction): boolean => transaction.id === transactionId) ?? null;
+  }
+
+  function canSelectPendingById(transactionId: string): boolean {
+    return pendingVisibleIds.includes(transactionId) && !selectedPendingIds.includes(transactionId);
+  }
+
+  function canUnselectPendingById(transactionId: string): boolean {
+    return selectedPendingIds.includes(transactionId);
+  }
+
+  function canValidatePendingById(transactionId: string): boolean {
+    if (!writesEnabled) {
+      return false;
+    }
+
+    const transaction = pendingTransactionById(transactionId);
+    return transaction !== null && transaction.categoryId !== null;
+  }
+
+  function validatePendingDisabledReason(transactionId: string): string | null {
+    if (!writesEnabled) {
+      return writeDisabledTitle();
+    }
+
+    const transaction = pendingTransactionById(transactionId);
+    if (transaction === null) {
+      return "This row is no longer available.";
+    }
+
+    if (transaction.categoryId === null) {
+      return "Classify this row before validation.";
+    }
+
+    return null;
+  }
+
+  function toggleSelectAllPending(): void {
+    if (pendingVisibleIds.length === 0) {
+      return;
+    }
+
+    if (pendingAllVisibleSelected) {
+      selectedPendingIds = [];
+      return;
+    }
+
+    selectedPendingIds = [...pendingVisibleIds];
+  }
+
+  async function validatePendingById(transactionId: string): Promise<void> {
+    if (!canValidatePendingById(transactionId)) {
+      return;
+    }
+
+    try {
+      const receipt = await client.office.validateTransaction(
+        transactionId,
+        { workspaceId: officeWorkspaceId },
+        { idempotencyKey: createIdempotencyKey(`pending-validate-${transactionId}`) }
+      );
+      actionReceipt = receipt;
+      selectedPendingIds = selectedPendingIds.filter((id: string): boolean => id !== transactionId);
+      await Promise.all([
+        loadPendingTransactions(),
+        loadTransactions(),
+        loadDashboard(),
+        loadDashboardAnalytics(),
+        refreshReconciliationViews()
+      ]);
+    } catch (error: unknown) {
+      pendingState = createErrorState<PageResult<OfficeTransaction>>(error);
+    }
+  }
+
   // Apply one category (and optionally project) to every selected pending row via the transaction
   // update endpoint, keeping each row's own project when none is chosen. Classification is the
   // precondition for validation — a pending row cannot be validated until it has a category.
@@ -4016,6 +4114,7 @@
     return rows.map((transaction: OfficeTransaction): TableRow => ({
       id: transaction.id,
       cells: [
+        { kind: "text", value: formatDateOnly(transaction.occurredOn), strong: false },
         { kind: "badge", value: selectedIds.includes(transaction.id) ? "selected" : "to validate", tone: selectedIds.includes(transaction.id) ? "active" : "warning" },
         { kind: "text", value: transaction.description, strong: true },
         { kind: "text", value: transactionPathLabel(transaction), strong: false },
@@ -4029,13 +4128,13 @@
     return rows.map((candidate: OfficeReconciliationCandidate): TableRow => ({
       id: candidate.id,
       cells: [
+        { kind: "text", value: formatDateOnly(candidate.occurredOn), strong: false },
         {
           kind: "badge",
           value: selectedIds.includes(candidate.id) ? "selected" : isReconciliationBulkCreatable(candidate) ? "selectable" : "locked",
           tone: selectedIds.includes(candidate.id) ? "active" : isReconciliationBulkCreatable(candidate) ? "muted" : "warning"
         },
         { kind: "text", value: candidate.bankDescription, strong: true },
-        { kind: "text", value: formatDateOnly(candidate.occurredOn), strong: false },
         // amountMicro here is the bank line's MUR-converted magnitude (amountMurMinor),
         // not its original currency — MUR is the correct label, not a hardcoding bug.
         { kind: "money", value: formatSignedMicro(candidate.amountMicro, "MUR"), tone: moneyTone(candidate.amountMicro) },
@@ -4805,16 +4904,21 @@
               </header>
               <div class="import-rows-table" role="table">
                 <div class="import-row import-row--header" role="row">
-                  <span role="columnheader" aria-label="Import"></span>
                   <span role="columnheader">Date</span>
                   <span role="columnheader">Description</span>
                   <span role="columnheader">Amount</span>
                   <span role="columnheader">Direction</span>
                   <span role="columnheader">Status</span>
+                  <span role="columnheader" aria-label="Import"></span>
                   <span role="columnheader" aria-label="Action"></span>
                 </div>
                 {#each importPreviewTableRows.slice(0, 200) as row (row.id)}
                   <div class="import-row" class:import-row--rejected={row.status === "rejected"} role="row">
+                    <span role="cell">{row.date}</span>
+                    <span role="cell" class="import-row-desc">{row.description}</span>
+                    <span role="cell">{row.amount} {row.currency}</span>
+                    <span role="cell">{row.direction}</span>
+                    <span role="cell">{row.status === "accepted" ? "Accepted" : `Rejected — ${row.reason}`}</span>
                     <span role="cell">
                       {#if row.status === "accepted"}
                         <input type="checkbox" checked={importRowSelection[row.id] === true} onchange={() => toggleImportRow(row.id)} aria-label={`Import row ${String(row.rowNumber)}`} />
@@ -4822,11 +4926,6 @@
                         <span class="import-row-flag" aria-hidden="true">!</span>
                       {/if}
                     </span>
-                    <span role="cell">{row.date}</span>
-                    <span role="cell" class="import-row-desc">{row.description}</span>
-                    <span role="cell">{row.amount} {row.currency}</span>
-                    <span role="cell">{row.direction}</span>
-                    <span role="cell">{row.status === "accepted" ? "Accepted" : `Rejected — ${row.reason}`}</span>
                     <span role="cell">
                       {#if row.status === "rejected"}
                         <Button label="Fix" variant="secondary" size="small" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel={`Fix row ${String(row.rowNumber)}`} onclick={(): void => { startImportRowEdit(row.rowNumber); }} />
@@ -4958,6 +5057,7 @@
             message=""
             onchange={(value: string): void => { pendingClassifyProjectId = value; }}
           />
+          <Button label={pendingAllVisibleSelected ? "Unselect all visible" : "Select all visible"} variant="secondary" size="medium" type="button" disabled={pendingVisibleIds.length === 0} loading={false} locked={false} focus={false} ariaLabel="Toggle select all pending rows" onclick={toggleSelectAllPending} />
           <Button label="Classify selection" variant="secondary" size="medium" type="button" disabled={!writesEnabled || selectedPendingIds.length === 0 || pendingClassifyCategoryId.length === 0} loading={false} locked={false} focus={false} ariaLabel="Classify selection" title={writeDisabledTitle()} onclick={classifySelectedPending} />
           <Button label="Validate selection" variant="primary" size="medium" type="button" disabled={!writesEnabled || selectedPendingIds.length === 0} loading={false} locked={false} focus={false} ariaLabel="Validate selection" title={writeDisabledTitle()} onclick={bulkValidatePending} />
           <span class="ehq-type-label-mono">{selectedPendingIds.length} selected</span>
@@ -4986,21 +5086,7 @@
           <BarsChart title="Pending queue status mix (current page)" points={pendingStatusPoints} tone="warning" />
         </section>
 
-        <div class="pending-list">
-          {#each pendingRows as transaction (transaction.id)}
-            <button
-              class="ehq-edge-surface"
-              class:selected={selectedPendingIds.includes(transaction.id)}
-              type="button"
-              onclick={() => togglePendingSelection(transaction.id)}
-            >
-              <strong class="ehq-type-body">{transaction.description}</strong>
-              <span class="ehq-type-body">{transaction.departmentLabel ?? "to classify"} · {transaction.categoryLabel ?? "to classify"} · {formatSignedMicro(transaction.amountMicro, transaction.currency)}</span>
-            </button>
-          {/each}
-        </div>
-
-        <Table title="Queue pending" columns={pendingColumns} rows={pendingTableRows} state={isLoadingState(pendingState) ? "loading" : pendingState.status === "error" ? "error" : pendingRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={pendingPagination} />
+        <Table title="Queue pending" columns={pendingColumns} rows={pendingTableRows} state={isLoadingState(pendingState) ? "loading" : pendingState.status === "error" ? "error" : pendingRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={pendingRowActions} pagination={pendingPagination} />
       {:else if activePageId === "cashflow"}
         <section class="filter-strip ehq-edge-surface" aria-label="Cash-flow filters">
           <Select id="office-cashflow-account" label="Account" value={accountFilter} options={accountOptions} state="default" message="" onchange={updateAccountFilter} />
@@ -5117,15 +5203,16 @@
     { label: "Window", align: "left", sortable: true }
   ];
   const reconciliationColumns: readonly TableColumn[] = [
+    { label: "Date", align: "left", sortable: true },
     { label: "Selection", align: "left", sortable: true },
     { label: "Description", align: "left", sortable: true },
-    { label: "Date", align: "left", sortable: true },
     { label: "Amount", align: "right", sortable: true },
     { label: "Suggested match", align: "left", sortable: true },
     { label: "Conf.", align: "left", sortable: true },
     { label: "Status", align: "left", sortable: true }
   ];
   const pendingColumns: readonly TableColumn[] = [
+    { label: "Date", align: "left", sortable: true },
     { label: "Selection", align: "left", sortable: true },
     { label: "Label", align: "left", sortable: true },
     { label: "Department · Division · Category", align: "left", sortable: true },
@@ -5560,44 +5647,9 @@
     font-size: var(--ehq-type-caption-size);
   }
 
-  .pending-list {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: var(--ehq-space-3);
-  }
-
-  .pending-list button {
-    min-width: 0;
-    min-height: 88px;
-    padding: var(--ehq-space-3);
-    border: 0;
-    border-radius: var(--ehq-radius-sm);
-    background: transparent;
-    color: var(--ehq-text);
-    display: grid;
-    gap: var(--ehq-space-2);
-    text-align: left;
-  }
-
-  .pending-list button.selected {
-    border-color: var(--ehq-yellow-border);
-    box-shadow: inset 3px 0 0 var(--ehq-yellow);
-  }
-
-  .pending-list strong {
-    font-size: var(--ehq-type-ui-size);
-  }
-
-  .pending-list span {
-    color: var(--ehq-text-muted);
-    font-size: var(--ehq-type-caption-size);
-    line-height: var(--ehq-type-ui-line);
-  }
-
   @media (max-width: 1100px) {
     .kpi-grid,
-    .dashboard-grid,
-    .pending-list {
+    .dashboard-grid {
       grid-template-columns: 1fr 1fr;
     }
 
@@ -5623,8 +5675,7 @@
     .dashboard-grid,
     .import-actions,
     .import-steps,
-    .filter-grid,
-    .pending-list {
+    .filter-grid {
       grid-template-columns: 1fr;
     }
 
