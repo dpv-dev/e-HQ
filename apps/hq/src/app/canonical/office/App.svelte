@@ -4460,8 +4460,8 @@
         </section>
 
         <section class="dashboard-grid">
-          <BarsChart title="Transaction mix by type" points={transactionTypePoints} tone="active" />
-          <BarsChart title="Transaction mix by status" points={transactionStatusPoints} tone="info" />
+          <BarsChart title="Transaction mix by type (current page)" points={transactionTypePoints} tone="active" />
+          <BarsChart title="Transaction mix by status (current page)" points={transactionStatusPoints} tone="info" />
         </section>
 
         {#if creatingTransaction}
@@ -4766,7 +4766,7 @@
         </section>
 
         <section class="dashboard-grid">
-          <BarsChart title="Reconciliation status mix" points={reconciliationStatusPoints} tone="info" />
+          <BarsChart title="Reconciliation status mix (current page)" points={reconciliationStatusPoints} tone="info" />
         </section>
 
         <Table title="Bank ↔ ledger matching" columns={reconciliationColumns} rows={reconciliationTableRows} state={isLoadingState(reconciliationState) ? "loading" : reconciliationState.status === "error" ? "error" : reconciliationRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={reconciliationRowActions} pagination={reconciliationPagination} />
@@ -4865,7 +4865,7 @@
         </section>
 
         <section class="dashboard-grid">
-          <BarsChart title="Pending queue status mix" points={pendingStatusPoints} tone="warning" />
+          <BarsChart title="Pending queue status mix (current page)" points={pendingStatusPoints} tone="warning" />
         </section>
 
         <div class="pending-list">

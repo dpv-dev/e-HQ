@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import {
     BarsChart,
+    Button,
     Card,
     Loader,
     Table,
@@ -35,6 +35,9 @@
   let accountsState = $state<ApiRequestState<PageResult<OfficeBankAccountSummary>>>(
     createIdleState<PageResult<OfficeBankAccountSummary>>()
   );
+  let statusState = $state<ApiRequestState<{ readonly writesEnabled: boolean }>>(
+    createIdleState<{ readonly writesEnabled: boolean }>()
+  );
   let accountsLoadingMore = $state(false);
   let accountsLoadMoreError = $state<string | null>(null);
 
@@ -45,19 +48,46 @@
     createTablePagination(accountsState, accountsLoadingMore, accountsLoadMoreError, loadMoreAccounts, loadAllAccounts)
   );
 
-  onMount((): void => {
+  $effect((): void => {
     void loadSettings();
   });
 
+  const writesEnabled = $derived(statusState.status === "success" && statusState.data.writesEnabled);
+  const writeGateLabel = $derived(
+    statusState.status === "success"
+      ? (statusState.data.writesEnabled ? "Writes enabled" : "Writes disabled")
+      : "Status unknown"
+  );
+
+  const writeGateDetail = $derived(
+    statusState.status === "success"
+      ? (statusState.data.writesEnabled
+        ? "Runtime write gate is open. Mutations still require role permissions and idempotency keys."
+        : "Runtime write gate is closed. Set WRITES_ENABLED=true on API runtime and restart to enable mutations.")
+      : "Unable to read runtime write gate status from eof/v1/status."
+  );
+
+  const writeGateTone = $derived(
+    statusState.status === "success"
+      ? (statusState.data.writesEnabled ? "success" : "warning")
+      : "muted"
+  );
+
   async function loadSettings(): Promise<void> {
     accountsState = beginReload<PageResult<OfficeBankAccountSummary>>(accountsState);
+    statusState = beginReload<{ readonly writesEnabled: boolean }>(statusState);
 
     try {
-      const accounts = await props.client.listBankAccounts({ workspaceId: props.workspaceId, cursor: null, limit: TABLE_PAGE_SIZE });
+      const [accounts, status] = await Promise.all([
+        props.client.listBankAccounts({ workspaceId: props.workspaceId, cursor: null, limit: TABLE_PAGE_SIZE }),
+        props.client.getStatus({ workspaceId: props.workspaceId })
+      ]);
       accountsState = createSuccessState<PageResult<OfficeBankAccountSummary>>(accounts);
+      statusState = createSuccessState<{ readonly writesEnabled: boolean }>(status);
       accountsLoadMoreError = null;
     } catch (error: unknown) {
       accountsState = createErrorState<PageResult<OfficeBankAccountSummary>>(error);
+      statusState = createErrorState<{ readonly writesEnabled: boolean }>(error);
     }
   }
 
@@ -222,15 +252,30 @@
     />
     <Card
       eyebrow="Maintenance"
-      title="Read-only"
-      subtitle="This console exposes Office in read-only mode. Maintenance and configuration changes are made in the eof admin backend; no editable settings are surfaced here."
+      title={writeGateLabel}
+      subtitle={writeGateDetail}
       state="default"
       accent={false}
       badgeLabel=""
-      badgeTone="muted"
+      badgeTone={writeGateTone}
       actionLabel=""
     />
   </section>
+
+  <div class="settings-actions">
+    <Button
+      label="Refresh runtime status"
+      variant="secondary"
+      size="medium"
+      type="button"
+      disabled={false}
+      loading={isLoadingState(statusState)}
+      locked={false}
+      focus={false}
+      ariaLabel="Refresh Office runtime status"
+      onclick={loadSettings}
+    />
+  </div>
 
   <section class="dashboard-grid">
     <BarsChart title="Currency balance distribution (MUR)" points={currencyBalancePoints} tone="info" />
@@ -280,6 +325,11 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr);
     gap: var(--ehq-space-3);
+  }
+
+  .settings-actions {
+    display: flex;
+    justify-content: flex-end;
   }
 
   .state-copy {

@@ -156,28 +156,28 @@
       {
         label: "Net result",
         value: netValue,
-        detail: globalPnl.status === "success" ? globalPnl.data.period : stateLabel(globalPnl),
+        detail: globalPnl.status === "success" ? `${globalPnl.data.period} · eof/v1/pl/global` : stateLabel(globalPnl),
         tone: netTone,
         accent: true
       },
       {
         label: "Income",
         value: incomeValue,
-        detail: "validated projection",
+        detail: "validated projection · eof/v1/pl/global",
         tone: "success",
         accent: false
       },
       {
         label: "Expenses",
         value: expenseValue,
-        detail: "validated projection",
+        detail: "validated projection · eof/v1/pl/global",
         tone: "warning",
         accent: false
       },
       {
         label: "Cash",
         value: cashValue,
-        detail: dashboard.status === "success" ? `${String(dashboard.data.unreconciledTransactionCount)} to reconcile` : stateLabel(dashboard),
+        detail: dashboard.status === "success" ? `${String(dashboard.data.unreconciledTransactionCount)} to reconcile · eof/v1/dashboard` : stateLabel(dashboard),
         tone: "info",
         accent: false
       }
@@ -272,7 +272,7 @@
     {:else}
       <DivergeChart title="Revenue and expenses by department" points={departmentChartPoints} />
     {/if}
-    <Table title="Result by category" columns={categoryColumns} rows={departmentTableRows} state={departmentTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
+    <Table title="Result by category (API lines)" columns={categoryColumns} rows={departmentTableRows} state={departmentTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
     <Table title="Result by division" columns={divisionColumns} rows={divisionTableRows} state={isLoadingState(divisionState) ? "loading" : divisionState.status === "error" ? "error" : divisionTableRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={divisionPagination} />
   {/if}
 </section>
@@ -283,16 +283,16 @@
   // sortable stays false everywhere: the shared Table renders the sort glyph but
   // implements no sorting, so advertising it would be a dead affordance.
   const categoryColumns: readonly TableColumn[] = [
-    { label: "Category", align: "left", sortable: true },
-    { label: "Income", align: "right", sortable: true },
-    { label: "Expenses", align: "right", sortable: true },
-    { label: "Net", align: "right", sortable: true }
+    { label: "Category", align: "left", sortable: false },
+    { label: "Income", align: "right", sortable: false },
+    { label: "Expenses", align: "right", sortable: false },
+    { label: "Net", align: "right", sortable: false }
   ];
   const divisionColumns: readonly TableColumn[] = [
-    { label: "Division", align: "left", sortable: true },
-    { label: "Income", align: "right", sortable: true },
-    { label: "Expenses", align: "right", sortable: true },
-    { label: "Net", align: "right", sortable: true }
+    { label: "Division", align: "left", sortable: false },
+    { label: "Income", align: "right", sortable: false },
+    { label: "Expenses", align: "right", sortable: false },
+    { label: "Net", align: "right", sortable: false }
   ];
 </script>
 
