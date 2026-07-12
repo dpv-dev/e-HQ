@@ -223,3 +223,38 @@
   - final stable example: `Receivables 2,403,889.38 Rs`
   - final stable example: `Payables 14,033,987.78 Rs`
 - Non-numeric ratio check: `4/4` remained exact and stable over repeated samples (no animation drift).
+
+## Office Workspace Scope Fix Deployment - 2026-07-12
+
+### Scope
+- Release commit: `152eb4f` (`fix(api): scope office read routes by workspace`).
+- Objective: enforce workspace-bound Office read data to eliminate P&L/dashboard cross-workspace leakage.
+
+### Ordered validation sequence
+- Ran `./deploy-build.sh` -> success
+  - API tests: `99/99` pass
+  - HQ `svelte-check`/build: pass
+  - Regression gate: pass
+  - SQL column check: pass
+  - Artifacts regenerated: `app-eeee-api-hostinger.zip`, `app-eeee-frontend.zip`
+
+### Rollout
+- Uploaded fresh artifacts to `~/ehq-deploy-upload/` via `scp`.
+- Deployed API artifact to `~/domains/api.eeee.mu/nodejs/`.
+- Deployed frontend artifact to `~/domains/app.eeee.mu/public_html/`.
+- Restarted API via `touch ~/domains/api.eeee.mu/nodejs/tmp/restart.txt`.
+
+### Post-deploy verification
+- Immediate health check: startup warm-up observed (`503 {"status":"starting"}`).
+- Follow-up direct health check: `https://api.eeee.mu/healthz` -> `200` with DB status `ok`.
+- First post-restart smoke run still saw transient health jitter (`503`) while app routes remained `200`.
+- Final rerun `corepack pnpm smoke:critical` -> PASS:
+  - `https://api.eeee.mu/healthz` -> 200
+  - `https://app.eeee.mu/` -> 200
+  - `https://app.eeee.mu/console/office/bank` -> 200
+  - `https://app.eeee.mu/console/distribution/settings` -> 200
+  - `https://app.eeee.mu/console/command-center/settings` -> 200
+
+### Connected visual verification
+- Opened `https://app.eeee.mu/console/office/pnl` in authenticated session.
+- Confirmed route renders and Office P&L surfaces load under the deployed build.

@@ -3,7 +3,7 @@
 Last updated: 2026-07-12
 Branch: theme/distribution-command
 Main baseline: 146e25b
-Current head: 30cceb1
+Current head: 152eb4f
 
 ## Current Snapshot
 - Repo health: canonical gate green on HEAD (API tests 98/98, HQ check/build, regression, SQL guard).
@@ -13,6 +13,34 @@ Current head: 30cceb1
 - Financial correctness hardening: deployed commit pair `4d5697d` + `2d264ce` to lock EUR reconciliation currency normalization and debit/credit-only direction ingestion.
 - Latest rollout: commit set `4515b53` + `afe14c2` deployed on 2026-07-12 with post-warmup smoke PASS.
 - Follow-up production hotfixes deployed on 2026-07-12: `5cc869c` (allow Cache-Control in CORS preflight headers) and `30cceb1` (allow Pragma in CORS preflight headers).
+
+## Workspace Scope Hardening - 2026-07-12
+
+### Scope
+- Remove cross-workspace leakage from Office read paths while preserving compatibility query aliasing.
+
+### Changes
+- Commit `152eb4f`: Office read routes now build a workspace-scoped dataset before domain reads.
+- Added helper in `services/api/src/index.ts`: `officeDatasetForWorkspace(...)`.
+- Applied scoped dataset reads to:
+	- dashboard and analytics
+	- global/department/division/category P&L
+	- transactions, cashflow, projects, partners
+	- integrity and bank-quality analytics
+- Added API regression test in `services/api/test/api.test.ts` proving:
+	- `workspaceId=eeee-mu` reads only canonical rows
+	- `workspaceId=office` alias resolves to canonical rows
+	- `workspaceId=workspace_1` remains isolated legacy scope
+
+### Validation and rollout
+- Canonical gate `./deploy-build.sh` passed (API tests `99/99`, HQ check/build, regression, SQL guard).
+- Artifacts uploaded and deployed to Hostinger API/frontend targets.
+- API restart executed via `tmp/restart.txt`.
+- Post-deploy verification:
+	- warm-up `503 {"status":"starting"}` observed immediately after restart
+	- direct health recovered to `200`
+	- `corepack pnpm smoke:critical` final run PASS across all critical routes
+- Connected visual verification on `https://app.eeee.mu/console/office/pnl` succeeded (page renders and loads scoped P&L surfaces).
 
 ## Program Phases
 
