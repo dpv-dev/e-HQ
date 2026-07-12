@@ -1098,7 +1098,7 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
       recentImports: recentImports.map((batch) => ({
         id: batch.id,
         source: batch.source,
-        fileName: `${batch.source}-${batch.id}.csv`,
+        fileName: batch.fileName,
         importedAt: batch.importedAt ?? dependencies.nowIso(),
         periodLabel: formatPeriodLabel(batch.periodStart, batch.periodEnd),
         acceptedRowCount: batch.acceptedRowCount,
