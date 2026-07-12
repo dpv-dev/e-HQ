@@ -3631,7 +3631,11 @@
           { idempotencyKey: createIdempotencyKey(`recon-action-${action.id}`) }
         );
         mutationReceiptPageId = activePageId;
-        await Promise.all([loadReconciliation(), loadAuditLog()]);
+        if (action.id === "recompute-payee-balance") {
+          await Promise.all([loadPayments(), loadRevenue(), loadReconciliation(), loadAuditLog()]);
+        } else {
+          await Promise.all([loadReconciliation(), loadAuditLog()]);
+        }
       } catch (error: unknown) {
         reportActionError(error);
       }
@@ -3663,11 +3667,6 @@
       } catch (error: unknown) {
         reportActionError(error);
       }
-      return;
-    }
-
-    if (action.id === "recompute-payee-balance") {
-      reportActionError(new Error("Recompute payee balance is disabled until a dedicated endpoint is available."));
       return;
     }
 

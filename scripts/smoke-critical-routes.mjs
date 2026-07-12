@@ -7,7 +7,10 @@ const checks = [
   { label: "API health", url: `${apiBase}/healthz`, expected: 200 },
   { label: "App root", url: `${appBase}/`, expected: 200 },
   { label: "Office bank", url: `${appBase}/console/office/bank`, expected: 200 },
+  { label: "Office VAT", url: `${appBase}/console/office/vat`, expected: 200 },
   { label: "Distribution settings", url: `${appBase}/console/distribution/settings`, expected: 200 },
+  { label: "Distribution payments", url: `${appBase}/console/distribution/payments`, expected: 200 },
+  { label: "Command Center dashboard", url: `${appBase}/console/command-center/dashboard`, expected: 200 },
   { label: "Command Center settings", url: `${appBase}/console/command-center/settings`, expected: 200 }
 ];
 
