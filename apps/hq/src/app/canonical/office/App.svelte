@@ -478,6 +478,7 @@
   // produce suggested candidates for optional batch approval.
   let reconciliationStatusFilter = $state<SelectFilterValue>("unmatched");
   let selectedPendingIds = $state<readonly string[]>([]);
+  let selectedReconciliationIds = $state<readonly string[]>([]);
   let pendingClassifyCategoryId = $state("");
   let pendingClassifyProjectId = $state("");
   let reconcileDrawerLineId = $state<string | null>(null);
@@ -543,6 +544,17 @@
   const transactionRows = $derived(readPageItems(transactionsState));
   const pendingRows = $derived(readPageItems(pendingState));
   const reconciliationRows = $derived(readPageItems(reconciliationState));
+  const selectableReconciliationIds = $derived(
+    reconciliationRows
+      .filter((candidate: OfficeReconciliationCandidate): boolean => isReconciliationBulkCreatable(candidate))
+      .map((candidate: OfficeReconciliationCandidate): string => candidate.id)
+  );
+  const selectedCreatableReconciliationIds = $derived(
+    selectedReconciliationIds.filter((id: string): boolean => selectableReconciliationIds.includes(id))
+  );
+  const reconciliationAllVisibleSelected = $derived(
+    selectableReconciliationIds.length > 0 && selectedCreatableReconciliationIds.length === selectableReconciliationIds.length
+  );
   const cashflowRows = $derived(readArrayState(cashflowState));
   const auditRows = $derived(readPageItems(auditState));
   const auditTableRows = $derived(createAuditTableRows(auditRows));
@@ -657,6 +669,16 @@
     { label: "Delete", onAction: deletePlanNode, danger: true }
   ]);
   const reconciliationRowActions = $derived<readonly TableRowAction[]>([
+    {
+      label: "Select",
+      onAction: toggleReconciliationSelection,
+      isEnabled: canSelectReconciliationById
+    },
+    {
+      label: "Unselect",
+      onAction: toggleReconciliationSelection,
+      isEnabled: canUnselectReconciliationById
+    },
     { label: "Accept", onAction: acceptReconciliation },
     { label: "Match", onAction: openReconcileMatch },
     { label: "Create entry", onAction: openReconcileCreate },
@@ -687,7 +709,7 @@
   const planTableRows = $derived(createPlanTableRows(planTableNodes));
   const transactionTableRows = $derived(createTransactionTableRows(transactionRows));
   const pendingTableRows = $derived(createPendingTableRows(pendingRows, selectedPendingIds));
-  const reconciliationTableRows = $derived(createReconciliationTableRows(reconciliationRows));
+  const reconciliationTableRows = $derived(createReconciliationTableRows(reconciliationRows, selectedReconciliationIds));
   const divisionPnlPagination = $derived<TablePagination | null>(
     createTablePagination(divisionPnlState, tablePaginationLoading === "divisionPnl", tablePaginationError("divisionPnl"), loadMoreDivisionPnl, loadAllDivisionPnl)
   );
@@ -1683,6 +1705,9 @@
       });
       reconciliationState = createSuccessState<PageResult<OfficeReconciliationCandidate>>(page);
       setTablePaginationError("reconciliation", null);
+      selectedReconciliationIds = selectedReconciliationIds.filter((id: string): boolean =>
+        page.items.some((candidate: OfficeReconciliationCandidate): boolean => candidate.id === id && isReconciliationBulkCreatable(candidate))
+      );
     } catch (error: unknown) {
       reconciliationState = createErrorState<PageResult<OfficeReconciliationCandidate>>(error);
     }
@@ -2920,6 +2945,91 @@
     }
   }
 
+  function isReconciliationBulkCreatable(candidate: OfficeReconciliationCandidate): boolean {
+    return candidate.status === "unmatched" || candidate.status === "suggested";
+  }
+
+  function reconciliationCandidateById(candidateId: string): OfficeReconciliationCandidate | null {
+    return reconciliationRows.find((candidate: OfficeReconciliationCandidate): boolean => candidate.id === candidateId) ?? null;
+  }
+
+  function canSelectReconciliationById(candidateId: string): boolean {
+    const candidate = reconciliationCandidateById(candidateId);
+    return candidate !== null && isReconciliationBulkCreatable(candidate) && !selectedReconciliationIds.includes(candidateId);
+  }
+
+  function canUnselectReconciliationById(candidateId: string): boolean {
+    return selectedReconciliationIds.includes(candidateId);
+  }
+
+  function toggleReconciliationSelection(candidateId: string): void {
+    if (selectedReconciliationIds.includes(candidateId)) {
+      selectedReconciliationIds = selectedReconciliationIds.filter((id: string): boolean => id !== candidateId);
+      return;
+    }
+
+    const candidate = reconciliationCandidateById(candidateId);
+    if (candidate === null || !isReconciliationBulkCreatable(candidate)) {
+      return;
+    }
+
+    selectedReconciliationIds = [...selectedReconciliationIds, candidateId];
+  }
+
+  function toggleSelectAllReconciliations(): void {
+    if (selectableReconciliationIds.length === 0) {
+      return;
+    }
+
+    if (reconciliationAllVisibleSelected) {
+      selectedReconciliationIds = selectedReconciliationIds.filter(
+        (id: string): boolean => !selectableReconciliationIds.includes(id)
+      );
+      return;
+    }
+
+    selectedReconciliationIds = [...new Set([...selectedReconciliationIds, ...selectableReconciliationIds])];
+  }
+
+  async function bulkCreateSelectedReconciliations(): Promise<void> {
+    if (selectedCreatableReconciliationIds.length === 0) {
+      return;
+    }
+
+    try {
+      const matchedAt = new Date().toISOString();
+      const selectedCandidates = reconciliationRows.filter(
+        (candidate: OfficeReconciliationCandidate): boolean =>
+          selectedCreatableReconciliationIds.includes(candidate.id) && isReconciliationBulkCreatable(candidate)
+      );
+      const writeResults = await Promise.all(
+        selectedCandidates.map((candidate: OfficeReconciliationCandidate): Promise<ApiMutationReceipt> =>
+          client.office.createTransactionFromBankLine(
+            {
+              workspaceId: officeWorkspaceId,
+              statementLineId: candidate.statementLineId,
+              categoryId: null,
+              projectId: null,
+              matchedAt
+            },
+            { idempotencyKey: createIdempotencyKey(`reconcile-create-bulk-${candidate.statementLineId}`) }
+          )
+        )
+      );
+      actionReceipt = writeResults[writeResults.length - 1] ?? null;
+      selectedReconciliationIds = [];
+      await Promise.all([
+        refreshReconciliationViews(),
+        loadTransactions(),
+        loadPendingTransactions(),
+        loadDashboard(),
+        loadDashboardAnalytics()
+      ]);
+    } catch (error: unknown) {
+      reconciliationState = createErrorState<PageResult<OfficeReconciliationCandidate>>(error);
+    }
+  }
+
   function togglePendingSelection(transactionId: string): void {
     if (selectedPendingIds.includes(transactionId)) {
       selectedPendingIds = selectedPendingIds.filter((id: string): boolean => id !== transactionId);
@@ -3915,10 +4025,15 @@
     }));
   }
 
-  function createReconciliationTableRows(rows: readonly OfficeReconciliationCandidate[]): readonly TableRow[] {
+  function createReconciliationTableRows(rows: readonly OfficeReconciliationCandidate[], selectedIds: readonly string[]): readonly TableRow[] {
     return rows.map((candidate: OfficeReconciliationCandidate): TableRow => ({
       id: candidate.id,
       cells: [
+        {
+          kind: "badge",
+          value: selectedIds.includes(candidate.id) ? "selected" : isReconciliationBulkCreatable(candidate) ? "selectable" : "locked",
+          tone: selectedIds.includes(candidate.id) ? "active" : isReconciliationBulkCreatable(candidate) ? "muted" : "warning"
+        },
         { kind: "text", value: candidate.bankDescription, strong: true },
         { kind: "text", value: formatDateOnly(candidate.occurredOn), strong: false },
         // amountMicro here is the bank line's MUR-converted magnitude (amountMurMinor),
@@ -4749,6 +4864,9 @@
           <Select id="office-reconciliation-account" label="Account" value={accountFilter} options={accountOptions} state="default" message="" onchange={updateAccountFilter} />
           <Select id="office-reconciliation-status" label="Status" value={reconciliationStatusFilter} options={reconciliationStatusOptions} state="default" message="" onchange={updateReconciliationStatusFilter} />
           <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Apply reconciliation filters" onclick={applyReconciliationFilters} />
+          <Button label={reconciliationAllVisibleSelected ? "Unselect all visible" : "Select all visible"} variant="secondary" size="medium" type="button" disabled={selectableReconciliationIds.length === 0} loading={false} locked={false} focus={false} ariaLabel="Toggle select all visible reconciliation rows" onclick={toggleSelectAllReconciliations} />
+          <Button label="Bulk create transaction" variant="primary" size="medium" type="button" disabled={!writesEnabled || selectedCreatableReconciliationIds.length === 0} loading={false} locked={false} focus={false} ariaLabel="Create transactions from selected reconciliation rows" title={writeDisabledTitle()} onclick={bulkCreateSelectedReconciliations} />
+          <span class="ehq-type-label-mono">{selectedCreatableReconciliationIds.length} selected</span>
           <Button label="Auto-approve strong suggested" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Auto-approve suggested reconciliations above confidence threshold" title={writeDisabledTitle()} onclick={approveSuggestedReconciliations} />
         </section>
 
@@ -4999,6 +5117,7 @@
     { label: "Window", align: "left", sortable: true }
   ];
   const reconciliationColumns: readonly TableColumn[] = [
+    { label: "Selection", align: "left", sortable: true },
     { label: "Description", align: "left", sortable: true },
     { label: "Date", align: "left", sortable: true },
     { label: "Amount", align: "right", sortable: true },
