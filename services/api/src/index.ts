@@ -2956,7 +2956,7 @@ async function officeReconciliationCreateTransactionResponse(context: ApiContext
     accountId: line.accountId,
     categoryId: request.categoryId,
     projectId: request.projectId,
-    description: line.description ?? line.reference ?? "Ligne bancaire",
+    description: line.description ?? line.reference ?? "Bank line",
     amountMicro: bankLineAmountText(line),
     currency: reconciliationCurrency
   };
@@ -7142,7 +7142,7 @@ async function officeBankImportParsePreviewResponse(context: ApiContext, depende
     throw new ApiRouteError(
       422,
       "bank_import_statement_validation_failed",
-      "Le relevé ne concorde pas avec ses soldes et totaux imprimés.",
+      "The statement does not reconcile with its printed balances and totals.",
       [
         `path=${context.req.path}`,
         `fileName=${request.fileName}`,
@@ -7223,7 +7223,7 @@ async function officeBankImportPreviewResponse(context: ApiContext, dependencies
     rejectedRowCount: rejectedRows.length,
     duplicateRowCount: duplicateRows.length,
     parsingNotes: [
-      "Les lignes normalisées ont été comparées à l’historique bancaire existant."
+      "Normalized rows were compared with the existing bank history."
     ],
     warnings: [
       ...(rejectedRows.length === 0
@@ -7231,7 +7231,7 @@ async function officeBankImportPreviewResponse(context: ApiContext, dependencies
         : ["Some rows could not be converted into bank statement lines and will remain in batch metadata instead of being fabricated."]),
       ...(duplicateRows.length === 0
         ? []
-        : [`${duplicateRows.length} ligne(s) bancaire(s) existante(s) détectée(s) et exclue(s) de l’import.`]),
+        : [`${duplicateRows.length} existing bank row(s) detected and excluded from import.`]),
       ...bankImportAccountMismatchWarnings(request.rows, dependencies.fixtures.office.bankAccounts)
     ],
     rejectionReasons: aggregateRejectionReasons(rejectedRows),
@@ -7377,7 +7377,7 @@ async function officeBankImportConfirmResponse(context: ApiContext, dependencies
               officeBankAccountBelongsToWorkspace(candidate, request.workspaceId)
           ) ?? null;
       if (account === null) {
-        throw new ApiRouteError(400, "bank_import_account_invalid", "Le compte de destination est absent ou appartient à un autre espace.", [
+        throw new ApiRouteError(400, "bank_import_account_invalid", "The destination account is missing or belongs to another workspace.", [
           `path=${context.req.path}`,
           `previewId=${request.previewId}`,
           `accountId=${String(accountIdOverride)}`
@@ -7441,7 +7441,7 @@ async function officeBankImportConfirmResponse(context: ApiContext, dependencies
         .map((row: ParsedOfficeBankPreviewRow): OfficeBankStatementLineInsert | null => row.line)
         .filter((line: OfficeBankStatementLineInsert | null): line is OfficeBankStatementLineInsert => line !== null);
       if (parsedLines.length !== request.acceptedRowIds.length) {
-        throw new ApiRouteError(409, "bank_import_preview_stale", "Les lignes acceptées ne passent plus la validation ; relancez l’analyse.", [
+        throw new ApiRouteError(409, "bank_import_preview_stale", "The accepted rows no longer pass validation; analyze the statement again.", [
           `path=${context.req.path}`,
           `previewId=${request.previewId}`
         ]);
@@ -7451,7 +7451,7 @@ async function officeBankImportConfirmResponse(context: ApiContext, dependencies
         line.valueOn === null ? [line.occurredOn] : [line.occurredOn, line.valueOn]
       ));
       if (candidateDateRange.start === null || candidateDateRange.end === null) {
-        throw new ApiRouteError(400, "bank_import_selection_empty", "Sélectionnez au moins une nouvelle ligne bancaire.", [
+        throw new ApiRouteError(400, "bank_import_selection_empty", "Select at least one new bank row.", [
           `path=${context.req.path}`,
           `previewId=${request.previewId}`
         ]);
@@ -7472,7 +7472,7 @@ async function officeBankImportConfirmResponse(context: ApiContext, dependencies
         existingLines
       ).filter((result) => result.match !== null);
       if (staleDuplicates.length > 0) {
-        throw new ApiRouteError(409, "bank_import_preview_stale_duplicates", "L’historique bancaire a changé depuis l’aperçu ; relancez l’analyse.", [
+        throw new ApiRouteError(409, "bank_import_preview_stale_duplicates", "Bank history changed after the preview; analyze the statement again.", [
           `path=${context.req.path}`,
           `previewId=${request.previewId}`,
           `duplicateCount=${String(staleDuplicates.length)}`
@@ -8155,13 +8155,13 @@ function assertOfficeBankImportSelection(
     [...previewIds].some((id) => !accepted.has(id) && !rejected.has(id));
 
   if (invalidPartition) {
-    throw new ApiRouteError(400, "bank_import_selection_invalid", "La sélection doit couvrir tout l’aperçu avec des identifiants uniques et disjoints.", [
+    throw new ApiRouteError(400, "bank_import_selection_invalid", "The selection must cover the entire preview with unique, disjoint identifiers.", [
       `path=${context.req.path}`,
       `previewId=${preview.previewId}`
     ]);
   }
   if (accepted.size === 0) {
-    throw new ApiRouteError(400, "bank_import_selection_empty", "Sélectionnez au moins une nouvelle ligne bancaire.", [
+    throw new ApiRouteError(400, "bank_import_selection_empty", "Select at least one new bank row.", [
       `path=${context.req.path}`,
       `previewId=${preview.previewId}`
     ]);
@@ -8170,7 +8170,7 @@ function assertOfficeBankImportSelection(
     decisions.size !== previewIds.size ||
     [...accepted].some((id) => decisions.get(id)?.status !== "accepted")
   ) {
-    throw new ApiRouteError(409, "bank_import_preview_decision_changed", "Une ligne rejetée ou en doublon ne peut pas être forcée ; relancez l’analyse.", [
+    throw new ApiRouteError(409, "bank_import_preview_decision_changed", "A rejected or duplicate row cannot be forced; analyze the statement again.", [
       `path=${context.req.path}`,
       `previewId=${preview.previewId}`
     ]);
@@ -9413,7 +9413,7 @@ function requireOfficeBankPreviewRecord(
   }
 
   if (!Array.isArray((preview as { readonly rowDecisions?: unknown }).rowDecisions)) {
-    throw new ApiRouteError(409, "bank_import_preview_schema_stale", "Cet aperçu est antérieur au contrôle des doublons ; relancez l’analyse.", [
+    throw new ApiRouteError(409, "bank_import_preview_schema_stale", "This preview predates duplicate checking; analyze the statement again.", [
       `path=${context.req.path}`,
       `previewId=${previewId}`
     ]);

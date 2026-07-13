@@ -59,7 +59,7 @@ export interface TableRow {
   readonly cells: readonly TableCell[];
 }
 
-// Optional per-row action button rendered in a trailing column (e.g. "Éditer", "Annuler").
+// Optional per-row action button rendered in a trailing column (e.g. "Edit", "Cancel").
 export interface TableRowAction {
   readonly label: string;
   readonly onAction: (rowId: string) => void | Promise<void>;

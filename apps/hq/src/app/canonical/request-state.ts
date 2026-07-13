@@ -21,15 +21,3 @@ export function apiRequestStateLabel<TData>(state: ApiRequestState<TData>): "loa
 
   return "loaded";
 }
-
-export function apiRequestStateLabelFr<TData>(state: ApiRequestState<TData>): "chargement" | "erreur" | "chargé" {
-  if (isApiRequestLoading(state)) {
-    return "chargement";
-  }
-
-  if (state.status === "error") {
-    return "erreur";
-  }
-
-  return "chargé";
-}

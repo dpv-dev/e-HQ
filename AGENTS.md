@@ -137,7 +137,8 @@ These are not preferences. A change that breaks any of them is a defect.
 - **Services:** Hono + Drizzle. Zod schemas and money utilities live in the
   shared package and are imported, not re-implemented.
 - **Monorepo:** pnpm workspace.
-- **UI copy is in French.**
+- **UI copy is in English.** All navigation, actions, statuses, errors, empty states,
+  accessibility labels, and user-facing API messages must remain English-only.
 - **UI visual layer:** apps import `packages/ui/tokens/visual-tokens.css` or
   `packages/ui/tokens/tokens.ts`; do not hardcode app/component colors. Use
   `--ehq-*` variables and `.ehq-*` component classes.
@@ -161,7 +162,7 @@ These are not preferences. A change that breaks any of them is a defect.
 - **Fail loud in the engine** — throw typed domain errors; never silently
   return a wrong number.
 - **Fail graceful at the edge** — the API returns a typed error envelope with a
-  stable code; the UI shows a useful, French, non-leaky message.
+  stable code; the UI shows a useful, English, non-leaky message.
 - **Never swallow a money or allocation error.** A failed allocation aborts the
   batch and is recorded, it does not get partially written.
 
@@ -325,4 +326,3 @@ See commit `ea08a34` for full details. Key fixes:
 - **P5 openExpenseMicro:** `readDistributionContractExpenses` subtracts already-applied amounts (BigInt). `readDistributionContracts.open_expense` does the same.
 - **P6a import batch currency:** `toDistributionImportBatch` sums only the primary (first) currency row — never adds EUR+USD.
 - **P6c print rounding:** `formatPrintAmount` uses BigInt integer arithmetic, not `Number().toFixed(2)`.
-

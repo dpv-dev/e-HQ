@@ -8,7 +8,6 @@ import {
 } from "@ehq/api-client";
 import {
   apiRequestStateLabel,
-  apiRequestStateLabelFr,
   isApiRequestLoading,
   isRequestStatusLoading
 } from "./request-state.js";
@@ -43,17 +42,5 @@ describe("canonical request-state helpers", () => {
     expect(apiRequestStateLabel(loadingState)).toBe("loading");
     expect(apiRequestStateLabel(successState)).toBe("loaded");
     expect(apiRequestStateLabel(errorState)).toBe("error");
-  });
-
-  it("returns consistent French state labels", () => {
-    const idleState = createIdleState<unknown>();
-    const loadingState = createLoadingState<unknown>();
-    const successState = createSuccessState<unknown>({});
-    const errorState = createErrorState<unknown>(new Error("boom"));
-
-    expect(apiRequestStateLabelFr(idleState)).toBe("chargement");
-    expect(apiRequestStateLabelFr(loadingState)).toBe("chargement");
-    expect(apiRequestStateLabelFr(successState)).toBe("chargé");
-    expect(apiRequestStateLabelFr(errorState)).toBe("erreur");
   });
 });

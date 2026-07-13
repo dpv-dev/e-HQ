@@ -138,7 +138,7 @@ test("SBI fixed-column parser ignores B/F and verifies explicit debit/credit tot
   assert.ok(frontend.every((row) => row.directionConfidence === "high"));
   assert.equal(backend.parsedRowCount, 2);
   assert.deepEqual(backend.validationIssues, []);
-  assert.ok(backend.parsingNotes.some((note) => note.includes("totaux")));
+  assert.ok(backend.parsingNotes.some((note) => note.includes("totals")));
 });
 
 test("SBI fixed-column parser fails validation when printed totals drift", () => {

@@ -51,7 +51,7 @@
   import { sortOptionsAlphabetically } from "../../select-options.js";
   import { appendPageResult, createTablePagination, loadPageResult, readPageItems, TABLE_PAGE_SIZE, type PageLoadMode } from "../../table-pagination.js";
   import {
-    apiRequestStateLabelFr as stateLabel,
+    apiRequestStateLabel as stateLabel,
     isRequestStatusLoading
   } from "../request-state.js";
   import type { CanonicalRequestStatus } from "../request-state.js";
@@ -156,41 +156,41 @@
   const navGroups: readonly DistributionNavGroup[] = [
     {
       id: "overview",
-      label: "Vue d'ensemble",
+      label: "Overview",
       items: [
-        { id: "dashboard", label: "Tableau de bord", title: "Tableau de bord", subtitle: "Cockpit royalties, blocages et actions prioritaires." },
-        { id: "allocations", label: "Allocations", title: "Allocations", subtitle: "Prévisualiser, poster et annuler via des runs cadencés verrouillés." },
-        { id: "suspense", label: "Suspens", title: "Suspens", subtitle: "Regroupement par cause avec chemin de correction explicite." },
-        { id: "statements", label: "Statements", title: "Statements", subtitle: "Synthèse financière d'abord, puis impression A4." },
-        { id: "payments", label: "Paiements", title: "Paiements", subtitle: "Enregistrer, corriger, annuler et rapprocher les paiements." },
-        { id: "revenue", label: "Revenus", title: "Revenus", subtitle: "Lecture financière par ayants droit, track, devise, store ou période." },
+        { id: "dashboard", label: "Dashboard", title: "Dashboard", subtitle: "Royalty cockpit, blockers and priority actions." },
+        { id: "allocations", label: "Allocations", title: "Allocations", subtitle: "Preview, post and reverse through scheduled, locked runs." },
+        { id: "suspense", label: "Suspense", title: "Suspense", subtitle: "Grouped by cause with a clear resolution path." },
+        { id: "statements", label: "Statements", title: "Statements", subtitle: "Financial summary first, then A4 printing." },
+        { id: "payments", label: "Payments", title: "Payments", subtitle: "Record, edit, void and reconcile payments." },
+        { id: "revenue", label: "Revenue", title: "Revenue", subtitle: "Financial view by payee, track, currency, store or period." },
       ]
     },
     {
       id: "imports",
       label: "Import & mapping",
       items: [
-        { id: "imports", label: "Imports", title: "Imports", subtitle: "Exports Kontor/RouteNote, prévisualisation puis confirmation." },
-        { id: "mapping", label: "Mapping", title: "Mapping", subtitle: "Réviser les lignes, automatiser les matchs sûrs, appliquer les règles." },
-        { id: "aliases", label: "Alias", title: "Alias", subtitle: "Alias catalogue pour router les noms importés vers le canonique." },
-        { id: "duplicates", label: "Doublons", title: "Doublons", subtitle: "Détection des enregistrements potentiellement dupliqués." }
+        { id: "imports", label: "Imports", title: "Imports", subtitle: "Kontor/RouteNote exports, preview and confirmation." },
+        { id: "mapping", label: "Mapping", title: "Mapping", subtitle: "Review rows, automate safe matches and apply rules." },
+        { id: "aliases", label: "Aliases", title: "Aliases", subtitle: "Catalog aliases route imported names to canonical entities." },
+        { id: "duplicates", label: "Duplicates", title: "Duplicates", subtitle: "Detect potentially duplicated records." }
       ]
     },
     {
       id: "catalog",
-      label: "Catalogue & contrats",
+      label: "Catalog & contracts",
       items: [
-        { id: "catalog", label: "Catalogue", title: "Catalogue", subtitle: "Releases, tracks, contributeurs et santé des splits." },
-        { id: "contracts", label: "Contrats", title: "Contrats", subtitle: "Splits, ayants droit, dépenses et recoupements." },
-        { id: "financial-reconciliation", label: "Rapprochement financier", title: "Rapprochement financier", subtitle: "Diagnostic en lecture seule des paiements, statements, soldes et allocations." }
+        { id: "catalog", label: "Catalog", title: "Catalog", subtitle: "Releases, tracks, contributors and split health." },
+        { id: "contracts", label: "Contracts", title: "Contracts", subtitle: "Splits, payees, expenses and recoupments." },
+        { id: "financial-reconciliation", label: "Financial reconciliation", title: "Financial reconciliation", subtitle: "Read-only diagnostics for payments, statements, balances and allocations." }
       ]
     },
     {
       id: "administration",
       label: "Administration",
       items: [
-        { id: "audit-log", label: "Journal d'audit", title: "Journal d'audit", subtitle: "Traçabilité Distribution des actions enregistrées." },
-        { id: "settings", label: "Paramètres", title: "Paramètres", subtitle: "Configuration Distribution et taux FX." }
+        { id: "audit-log", label: "Audit log", title: "Audit log", subtitle: "Distribution audit trail for recorded actions." },
+        { id: "settings", label: "Settings", title: "Settings", subtitle: "Distribution configuration and FX rates." }
       ]
     }
   ];
@@ -200,7 +200,7 @@
     { label: "RouteNote", value: "routenote" }
   ];
   const importFilterOptions: readonly SelectOption[] = [
-    { label: "Toutes sources", value: allValue },
+    { label: "All sources", value: allValue },
     { label: "Kontor", value: "kontor" },
     { label: "RouteNote", value: "routenote" }
   ];
@@ -213,43 +213,43 @@
     { label: "Voided", value: "voided" }
   ];
   const mappingStatusOptions: readonly SelectOption[] = [
-    { label: "Tous", value: allValue },
-    { label: "Non mappé", value: "unmapped" },
-    { label: "Suggéré", value: "suggested" },
-    { label: "Mappé", value: "mapped" }
+    { label: "All", value: allValue },
+    { label: "Unmapped", value: "unmapped" },
+    { label: "Suggested", value: "suggested" },
+    { label: "Mapped", value: "mapped" }
   ];
   const suspenseStatusOptions: readonly SelectOption[] = [
-    { label: "Tous", value: allValue },
-    { label: "Ouvert", value: "open" },
-    { label: "Résolu", value: "resolved" }
+    { label: "All", value: allValue },
+    { label: "Open", value: "open" },
+    { label: "Resolved", value: "resolved" }
   ];
   const paymentStatusOptions: readonly SelectOption[] = [
-    { label: "Tous", value: allValue },
-    { label: "Brouillon", value: "draft" },
-    { label: "En file", value: "queued" },
-    { label: "Payé", value: "paid" },
-    { label: "Annulé", value: "voided" }
+    { label: "All", value: allValue },
+    { label: "Draft", value: "draft" },
+    { label: "Queued", value: "queued" },
+    { label: "Paid", value: "paid" },
+    { label: "Voided", value: "voided" }
   ];
   const catalogStatusOptions: readonly SelectOption[] = [
-    { label: "Brouillon", value: "draft" },
-    { label: "Publié", value: "released" },
-    { label: "Archivé", value: "archived" }
+    { label: "Draft", value: "draft" },
+    { label: "Released", value: "released" },
+    { label: "Archived", value: "archived" }
   ];
   const contractStatusOptions: readonly SelectOption[] = [
-    { label: "Brouillon", value: "draft" },
-    { label: "Actif", value: "active" },
-    { label: "En pause", value: "paused" },
-    { label: "Terminé", value: "ended" }
+    { label: "Draft", value: "draft" },
+    { label: "Active", value: "active" },
+    { label: "Paused", value: "paused" },
+    { label: "Ended", value: "ended" }
   ];
   const revenueGroupOptions: readonly SelectOption[] = [
     { label: "Store", value: "store" },
-    { label: "Ayant droit", value: "payee" },
+    { label: "Payee", value: "payee" },
     { label: "Track", value: "track" },
-    { label: "Devise", value: "currency" },
-    { label: "Période", value: "period" }
+    { label: "Currency", value: "currency" },
+    { label: "Period", value: "period" }
   ];
   const aliasTargetTypeOptions: readonly SelectOption[] = [
-    { label: "Non assigné", value: "unassigned" },
+    { label: "Unassigned", value: "unassigned" },
     { label: "Payee", value: "payee" },
     { label: "Release", value: "release" },
     { label: "Track", value: "track" },
@@ -258,144 +258,144 @@
   ];
   const dashboardColumns: readonly TableColumn[] = [
     { label: "Action", align: "left", sortable: true },
-    { label: "Contexte", align: "left", sortable: true },
+    { label: "Context", align: "left", sortable: true },
     { label: "Volume", align: "right", sortable: true },
-    { label: "Chemin de correction", align: "left", sortable: true }
+    { label: "Resolution path", align: "left", sortable: true }
   ];
   const importColumns: readonly TableColumn[] = [
-    { label: "Fichier", align: "left", sortable: true },
+    { label: "File", align: "left", sortable: true },
     { label: "Source", align: "left", sortable: true },
     { label: "Statement", align: "left", sortable: true },
-    { label: "Lignes", align: "right", sortable: true },
-    { label: "À payer", align: "right", sortable: true },
-    { label: "Non rapprochées", align: "right", sortable: true },
-    { label: "Clés de jointure", align: "left", sortable: true },
-    { label: "Statut", align: "left", sortable: true },
-    { label: "Action exacte", align: "left", sortable: true }
+    { label: "Rows", align: "right", sortable: true },
+    { label: "Payable", align: "right", sortable: true },
+    { label: "Unreconciled", align: "right", sortable: true },
+    { label: "Join keys", align: "left", sortable: true },
+    { label: "Status", align: "left", sortable: true },
+    { label: "Exact action", align: "left", sortable: true }
   ];
   const mappingColumns: readonly TableColumn[] = [
-    { label: "Titre source", align: "left", sortable: true },
-    { label: "Artiste", align: "left", sortable: true },
+    { label: "Source title", align: "left", sortable: true },
+    { label: "Artist", align: "left", sortable: true },
     { label: "Store", align: "left", sortable: true },
-    { label: "Match suggéré", align: "left", sortable: true },
-    { label: "Confiance", align: "left", sortable: true },
-    { label: "Chemin de correction", align: "left", sortable: true },
-    { label: "Sélection", align: "left", sortable: true }
+    { label: "Suggested match", align: "left", sortable: true },
+    { label: "Confidence", align: "left", sortable: true },
+    { label: "Resolution path", align: "left", sortable: true },
+    { label: "Selection", align: "left", sortable: true }
   ];
   const catalogColumns: readonly TableColumn[] = [
-    { label: "Titre", align: "left", sortable: true },
-    { label: "Artiste", align: "left", sortable: true },
+    { label: "Title", align: "left", sortable: true },
+    { label: "Artist", align: "left", sortable: true },
     { label: "ID", align: "left", sortable: true },
-    { label: "Statut", align: "left", sortable: true },
-    { label: "Contributeurs", align: "right", sortable: true },
+    { label: "Status", align: "left", sortable: true },
+    { label: "Contributors", align: "right", sortable: true },
     { label: "Split", align: "left", sortable: true }
   ];
   const contractColumns: readonly TableColumn[] = [
-    { label: "Contrat", align: "left", sortable: true },
-    { label: "Ayant droit", align: "left", sortable: true },
+    { label: "Contract", align: "left", sortable: true },
+    { label: "Payee", align: "left", sortable: true },
     { label: "Split", align: "right", sortable: true },
-    { label: "Dépenses ouvertes", align: "right", sortable: true },
-    { label: "Statut", align: "left", sortable: true }
+    { label: "Open expenses", align: "right", sortable: true },
+    { label: "Status", align: "left", sortable: true }
   ];
   const expenseColumns: readonly TableColumn[] = [
-    { label: "Dépense", align: "left", sortable: true },
+    { label: "Expense", align: "left", sortable: true },
     { label: "Date", align: "left", sortable: true },
-    { label: "Montant initial", align: "right", sortable: true },
-    { label: "Ouvert", align: "right", sortable: true },
-    { label: "Statut", align: "left", sortable: true }
+    { label: "Original amount", align: "right", sortable: true },
+    { label: "Open", align: "right", sortable: true },
+    { label: "Status", align: "left", sortable: true }
   ];
   const allocationColumns: readonly TableColumn[] = [
     { label: "Run", align: "left", sortable: true },
-    { label: "Période", align: "left", sortable: true },
-    { label: "Verrou", align: "left", sortable: true },
-    { label: "Entrée", align: "right", sortable: true },
-    { label: "Alloué", align: "right", sortable: true },
-    { label: "Statut", align: "left", sortable: true }
+    { label: "Period", align: "left", sortable: true },
+    { label: "Lock", align: "left", sortable: true },
+    { label: "Input", align: "right", sortable: true },
+    { label: "Allocated", align: "right", sortable: true },
+    { label: "Status", align: "left", sortable: true }
   ];
   const suspenseColumns: readonly TableColumn[] = [
-    { label: "Motif", align: "left", sortable: true },
+    { label: "Reason", align: "left", sortable: true },
     { label: "Source", align: "left", sortable: true },
-    { label: "Montant", align: "right", sortable: true },
-    { label: "Chemin de correction", align: "left", sortable: true },
-    { label: "Statut", align: "left", sortable: true }
+    { label: "Amount", align: "right", sortable: true },
+    { label: "Resolution path", align: "left", sortable: true },
+    { label: "Status", align: "left", sortable: true }
   ];
   const statementColumns: readonly TableColumn[] = [
-    { label: "Ayant droit", align: "left", sortable: true },
-    { label: "Brut", align: "right", sortable: true },
-    { label: "Recoup", align: "right", sortable: true },
-    { label: "Payé", align: "right", sortable: true },
-    { label: "À payer", align: "right", sortable: true },
-    { label: "Période", align: "left", sortable: true },
-    { label: "Statut", align: "left", sortable: true }
+    { label: "Payee", align: "left", sortable: true },
+    { label: "Gross", align: "right", sortable: true },
+    { label: "Recoupment", align: "right", sortable: true },
+    { label: "Paid", align: "right", sortable: true },
+    { label: "Payable", align: "right", sortable: true },
+    { label: "Period", align: "left", sortable: true },
+    { label: "Status", align: "left", sortable: true }
   ];
   const paymentColumns: readonly TableColumn[] = [
-    { label: "Ayant droit", align: "left", sortable: true },
-    { label: "Montant", align: "right", sortable: true },
-    { label: "Référence", align: "left", sortable: true },
-    { label: "Payé le", align: "left", sortable: true },
-    { label: "Statut", align: "left", sortable: true }
+    { label: "Payee", align: "left", sortable: true },
+    { label: "Amount", align: "right", sortable: true },
+    { label: "Reference", align: "left", sortable: true },
+    { label: "Paid on", align: "left", sortable: true },
+    { label: "Status", align: "left", sortable: true }
   ];
   const revenueColumns: readonly TableColumn[] = [
-    { label: "Groupe", align: "left", sortable: true },
-    { label: "Brut", align: "right", sortable: true },
+    { label: "Group", align: "left", sortable: true },
+    { label: "Gross", align: "right", sortable: true },
     { label: "Net", align: "right", sortable: true },
-    { label: "À payer", align: "right", sortable: true },
-    { label: "Devise", align: "left", sortable: true }
+    { label: "Payable", align: "right", sortable: true },
+    { label: "Currency", align: "left", sortable: true }
   ];
   const reconStatementColumns: readonly TableColumn[] = [
     { label: "Statement", align: "left", sortable: true },
-    { label: "Ayant droit", align: "left", sortable: true },
-    { label: "Période", align: "left", sortable: true },
-    { label: "Devise", align: "left", sortable: true },
-    { label: "Net à payer", align: "right", sortable: true }
+    { label: "Payee", align: "left", sortable: true },
+    { label: "Period", align: "left", sortable: true },
+    { label: "Currency", align: "left", sortable: true },
+    { label: "Net payable", align: "right", sortable: true }
   ];
   const reconExpenseColumns: readonly TableColumn[] = [
-    { label: "Terme de coût", align: "left", sortable: true },
-    { label: "Contrat", align: "left", sortable: true },
+    { label: "Cost term", align: "left", sortable: true },
+    { label: "Contract", align: "left", sortable: true },
     { label: "Description", align: "left", sortable: true },
-    { label: "Montant", align: "right", sortable: true },
-    { label: "Devise", align: "left", sortable: true },
-    { label: "Statut", align: "left", sortable: true }
+    { label: "Amount", align: "right", sortable: true },
+    { label: "Currency", align: "left", sortable: true },
+    { label: "Status", align: "left", sortable: true }
   ];
   const reconMatchedColumns: readonly TableColumn[] = [
     { label: "Earning", align: "left", sortable: true },
     { label: "Lot", align: "left", sortable: true },
     { label: "Track", align: "left", sortable: true },
-    { label: "Devise", align: "left", sortable: true },
-    { label: "Brut", align: "right", sortable: true },
-    { label: "Statut", align: "left", sortable: true }
+    { label: "Currency", align: "left", sortable: true },
+    { label: "Gross", align: "right", sortable: true },
+    { label: "Status", align: "left", sortable: true }
   ];
   const reconBalanceColumns: readonly TableColumn[] = [
-    { label: "Ayant droit", align: "left", sortable: true },
-    { label: "Devise", align: "left", sortable: true },
-    { label: "Lignes", align: "right", sortable: true },
-    { label: "Première ligne", align: "left", sortable: true },
-    { label: "Dernière ligne", align: "left", sortable: true },
-    { label: "Dernière clôture", align: "right", sortable: true }
+    { label: "Payee", align: "left", sortable: true },
+    { label: "Currency", align: "left", sortable: true },
+    { label: "Rows", align: "right", sortable: true },
+    { label: "First row", align: "left", sortable: true },
+    { label: "Last row", align: "left", sortable: true },
+    { label: "Last closing balance", align: "right", sortable: true }
   ];
   const aliasColumns: readonly TableColumn[] = [
     { label: "Alias", align: "left", sortable: true },
-    { label: "Cible", align: "left", sortable: true },
+    { label: "Target", align: "left", sortable: true },
     { label: "Type", align: "left", sortable: true }
   ];
   const duplicateColumns: readonly TableColumn[] = [
     { label: "Label", align: "left", sortable: true },
     { label: "Type", align: "left", sortable: true },
     { label: "Occurrences", align: "right", sortable: true },
-    { label: "Exemples", align: "left", sortable: true },
-    { label: "Fusion", align: "left", sortable: true }
+    { label: "Examples", align: "left", sortable: true },
+    { label: "Merge", align: "left", sortable: true }
   ];
   const auditColumns: readonly TableColumn[] = [
     { label: "Date", align: "left", sortable: true },
-    { label: "Acteur", align: "left", sortable: true },
+    { label: "Actor", align: "left", sortable: true },
     { label: "Action", align: "left", sortable: true },
-    { label: "Entité", align: "left", sortable: true }
+    { label: "Entity", align: "left", sortable: true }
   ];
   const fxRateColumns: readonly TableColumn[] = [
-    { label: "De", align: "left", sortable: true },
-    { label: "Vers", align: "left", sortable: true },
+    { label: "From", align: "left", sortable: true },
+    { label: "To", align: "left", sortable: true },
     { label: "Date", align: "left", sortable: true },
-    { label: "Taux", align: "right", sortable: true }
+    { label: "Rate", align: "right", sortable: true }
   ];
 
   let activePageId = $state<DistributionPageId>("dashboard");
@@ -499,7 +499,7 @@
     checksum: "",
     preview: null,
     confirm: null,
-    message: "Sélectionnez un export Kontor ou RouteNote (CSV/TSV) pour lancer la prévisualisation."
+    message: "Select a Kontor or RouteNote export (CSV/TSV) to start the preview."
   });
   let importFileInput = $state<HTMLInputElement | null>(null);
   let runReceipt = $state<ApiRunReceipt | null>(null);
@@ -507,7 +507,7 @@
   let runReceiptPageId = $state<DistributionPageId | null>(null);
   let mutationReceiptPageId = $state<DistributionPageId | null>(null);
   let writesEnabled = $state(false);
-  let writeGateMessage = $state("Vérification du droit d'écriture.");
+  let writeGateMessage = $state("Checking write access.");
   let tablePaginationLoading = $state<DistributionPagedTableId | null>(null);
   let tablePaginationErrors = $state<Partial<Record<DistributionPagedTableId, string | null>>>({});
   let selectedMappingRowIds = $state<readonly string[]>([]);
@@ -671,7 +671,7 @@
   );
   const importToolbarFilters = $derived(createImportToolbarFilters(importState));
   const mappingBatchFilterOptions = $derived<readonly SelectOption[]>([
-    { label: "Tous les batches", value: allValue },
+    { label: "All batches", value: allValue },
     ...importBatches
       .filter((batch: DistributionImportBatch): boolean => batch.status !== "voided")
       .map((batch: DistributionImportBatch): SelectOption => ({
@@ -706,28 +706,28 @@
   );
   const expenseAmountMicro = $derived(parseExpenseAmountMicro(expenseAmountInput));
   const expenseContractSelectOptions = $derived<readonly SelectOption[]>(sortOptionsAlphabetically([
-    { label: "Sélectionner un contrat", value: "" },
+    { label: "Select a contract", value: "" },
     ...contracts.map((contract: DistributionContract): SelectOption => ({ label: `${contract.title} · ${contract.currency}`, value: contract.id }))
   ], 1));
   const expenseTableTitle = $derived(
     selectedExpenseFilterContract === null
-      ? "Dépenses / recoupements"
-      : `Dépenses / recoupements · ${selectedExpenseFilterContract.title}`
+      ? "Expenses / recoupments"
+      : `Expenses / recoupments · ${selectedExpenseFilterContract.title}`
   );
   const payeeSelectOptions = $derived<readonly SelectOption[]>(sortOptionsAlphabetically([
-    { label: "Sélectionner un ayant droit", value: "" },
+    { label: "Select a payee", value: "" },
     ...payees.map((payee: PayeeSummary): SelectOption => ({ label: `${payee.displayName} · ${payee.defaultCurrency}`, value: payee.id }))
   ], 1));
   const trackReleaseSelectOptions = $derived<readonly SelectOption[]>(sortOptionsAlphabetically([
-    { label: "Aucune release", value: "" },
+    { label: "No release", value: "" },
     ...releases.map((release: ReleaseSummary): SelectOption => ({ label: `${release.title} · ${release.artistName}`, value: release.id }))
   ], 1));
   const suspenseTrackSelectOptions = $derived<readonly SelectOption[]>(sortOptionsAlphabetically([
-    { label: "Sélectionner un track", value: "" },
+    { label: "Select a track", value: "" },
     ...(suspenseTrackOptions ?? []).map((track: TrackSummary): SelectOption => ({ label: `${track.title} · ${track.artistName}`, value: track.id }))
   ], 1));
   const openStatementSelectOptions = $derived<readonly SelectOption[]>(sortOptionsAlphabetically([
-    { label: "Sélectionner un statement ouvert", value: "" },
+    { label: "Select an open statement", value: "" },
     ...openStatements.map((statement: StatementSummary): SelectOption => ({
       label: `${statement.payeeName} · ${statement.period} · ${formatMoney(statement.netPayableMicro, statement.currency)}`,
       value: statement.id
@@ -739,15 +739,15 @@
     combineRequestStatuses([suspenseState.status, statementsState.status, paymentsState.status])
   );
   const paymentRowActions: readonly TableRowAction[] = [
-    { label: "Modifier référence", onAction: (rowId: string): void => openPaymentPanel(rowId, "edit") },
-    { label: "Rapprocher", onAction: (rowId: string): void => openPaymentPanel(rowId, "reconcile") },
-    { label: "Annuler", onAction: (rowId: string): void => openPaymentPanel(rowId, "void"), danger: true }
+    { label: "Edit reference", onAction: (rowId: string): void => openPaymentPanel(rowId, "edit") },
+    { label: "Reconcile", onAction: (rowId: string): void => openPaymentPanel(rowId, "reconcile") },
+    { label: "Void", onAction: (rowId: string): void => openPaymentPanel(rowId, "void"), danger: true }
   ];
   const contractRowActions: readonly TableRowAction[] = [
-    { label: "Remplacer le jeu de règles", onAction: openContractRulePanel }
+    { label: "Replace rule set", onAction: openContractRulePanel }
   ];
   const statementRowActions: readonly TableRowAction[] = [
-    { label: "Imprimer PDF", onAction: printStatementPdf }
+    { label: "Print PDF", onAction: printStatementPdf }
   ];
   const importRowActions: readonly TableRowAction[] = [
     {
@@ -765,19 +765,19 @@
     }
   ];
   const mappingRowActions: readonly TableRowAction[] = [
-    { label: "Toggle sélection", onAction: toggleMappingRowSelection }
+    { label: "Toggle selection", onAction: toggleMappingRowSelection }
   ];
   const suspenseRowActions: readonly TableRowAction[] = [
-    { label: "Résoudre", onAction: openSuspenseResolution }
+    { label: "Resolve", onAction: openSuspenseResolution }
   ];
   const allocationRowActions: readonly TableRowAction[] = [
-    { label: "Demander annulation", onAction: selectRunForUnpost, danger: true }
+    { label: "Request reversal", onAction: selectRunForUnpost, danger: true }
   ];
   const aliasRowActions: readonly TableRowAction[] = [
-    { label: "Modifier", onAction: openAliasEditor }
+    { label: "Edit", onAction: openAliasEditor }
   ];
   const duplicateRowActions: readonly TableRowAction[] = [
-    { label: "Résoudre", onAction: resolveDuplicateRow }
+    { label: "Resolve", onAction: resolveDuplicateRow }
   ];
 
   onMount((): (() => void) => {
@@ -850,7 +850,7 @@
 
   function applyScreenBundle(screen: DistributionScreenResponse): void {
     writesEnabled = screen.status.writesEnabled;
-    writeGateMessage = screen.status.writesEnabled ? "écriture activée" : "activez l'écriture";
+    writeGateMessage = screen.status.writesEnabled ? "write access enabled" : "enable write access";
     dashboardState = createSuccessState<DistributionDashboardResponse>(screen.dashboard);
     importBatchesState = createSuccessState<PageResult<DistributionImportBatch>>(screen.importBatches);
     mappingState = createSuccessState<PageResult<DistributionMappingRow>>(screen.mappingRows);
@@ -1345,7 +1345,7 @@
         workspaceId: distributionWorkspaceId
       });
       writesEnabled = status.writesEnabled;
-      writeGateMessage = status.writesEnabled ? "écriture activée" : "activez l'écriture";
+      writeGateMessage = status.writesEnabled ? "write access enabled" : "enable write access";
     } catch (error: unknown) {
       writesEnabled = false;
       writeGateMessage = getErrorMessage(error);
@@ -1747,7 +1747,7 @@
 
     if (!writesEnabled) {
       fxRateSaveStatus = "error";
-      fxRateSaveMessage = "Activez l'écriture pour enregistrer un taux FX.";
+      fxRateSaveMessage = "Enable write access to save an FX rate.";
       return;
     }
 
@@ -1758,7 +1758,7 @@
 
     if (fromCurrency === null || toCurrency === null || effectiveDate === null || rate === null) {
       fxRateSaveStatus = "error";
-      fxRateSaveMessage = "Vérifiez les champs FX (codes ISO, date YYYY-MM-DD, taux > 0).";
+      fxRateSaveMessage = "Check the FX fields (ISO codes, YYYY-MM-DD date, rate > 0).";
       return;
     }
 
@@ -1783,7 +1783,7 @@
         }
       );
       fxRateSaveStatus = "success";
-      fxRateSaveMessage = "Taux FX enregistré.";
+      fxRateSaveMessage = "FX rate saved.";
       fxRateInput = "";
       await Promise.all([loadSettings(), loadFxRates(), loadAuditLog()]);
     } catch (error: unknown) {
@@ -2061,7 +2061,7 @@
       source,
       preview: null,
       confirm: null,
-      message: "Source changée, relancez la prévisualisation."
+      message: "Source changed. Run the preview again."
     };
   }
 
@@ -2087,7 +2087,7 @@
         checksum: "",
         preview: null,
         confirm: null,
-        message: `${file.name} est un export Excel binaire non lisible ici. Réexportez en CSV puis réessayez.`
+        message: `${file.name} is a binary Excel export and cannot be read here. Export it as CSV and try again.`
       };
       return;
     }
@@ -2105,7 +2105,7 @@
           checksum: "",
           preview: null,
           confirm: null,
-          message: "Aucune ligne exploitable dans ce fichier. En-tête attendu puis lignes de données."
+          message: "No usable rows found in this file. A header followed by data rows is required."
         };
         return;
       }
@@ -2118,7 +2118,7 @@
         checksum: importContentChecksum(text),
         preview: null,
         confirm: null,
-        message: `${String(rows.length)} lignes lues, prêtes pour la prévisualisation.`
+        message: `${String(rows.length)} rows read and ready for preview.`
       };
     } catch (error: unknown) {
       importState = {
@@ -2168,7 +2168,7 @@
       source,
       preview: null,
       confirm: null,
-      message: "Source changée, relancez la prévisualisation."
+      message: "Source changed. Run the preview again."
     };
   }
 
@@ -2181,7 +2181,7 @@
       checksum: "",
       preview: null,
       confirm: null,
-      message: "Sélectionnez un export Kontor ou RouteNote (CSV/TSV) pour lancer la prévisualisation."
+      message: "Select a Kontor or RouteNote export (CSV/TSV) to start the preview."
     };
   }
 
@@ -2221,7 +2221,7 @@
 
     const batch = importBatches.find((candidate: DistributionImportBatch): boolean => candidate.id === batchId);
     if (batch === undefined) {
-      reportActionError(new Error("Batch introuvable dans la liste chargée."));
+      reportActionError(new Error("Batch not found in the loaded list."));
       return;
     }
 
@@ -2443,7 +2443,7 @@
         status: "error",
         preview: null,
         confirm: null,
-        message: "Sélectionnez un fichier d'export CSV/TSV avant la prévisualisation."
+        message: "Select a CSV/TSV export file before previewing."
       };
       return;
     }
@@ -2453,7 +2453,7 @@
       status: "loading",
       preview: null,
       confirm: null,
-      message: "Prévisualisation d'import en cours."
+      message: "Import preview in progress."
     };
 
     try {
@@ -2472,7 +2472,7 @@
         status: "success",
         preview,
         confirm: null,
-        message: "Prévisualisation Kontor/RouteNote prête."
+        message: "Kontor/RouteNote preview ready."
       };
     } catch (error: unknown) {
       importState = {
@@ -2494,7 +2494,7 @@
     importState = {
       ...importState,
       status: "loading",
-      message: "Confirmation d'import en cours."
+      message: "Import confirmation in progress."
     };
 
     try {
@@ -2522,7 +2522,7 @@
         ...importState,
         status: "success",
         confirm,
-        message: "Import confirmé."
+        message: "Import confirmed."
       };
       await Promise.all([loadImportBatches(), loadMappingRows(), loadDashboard(), loadSuspense(), loadRevenue(), loadReconciliation(), loadAuditLog()]);
     } catch (error: unknown) {
@@ -2546,7 +2546,7 @@
     const batchId = batchIds[0];
 
     if (batchId === undefined || batchIds.length !== 1) {
-      reportActionError(new Error("Sélection invalide: appliquez les règles sur un seul batch à la fois."));
+      reportActionError(new Error("Invalid selection: apply rules to one batch at a time."));
       return;
     }
 
@@ -3057,7 +3057,7 @@
     track: TrackSummary | null
   ): SuspenseResolveTarget {
     if (resolution === null) {
-      return { ready: false, targetId: null, hint: "Sélectionnez d'abord un item de suspens." };
+      return { ready: false, targetId: null, hint: "Select a suspense item first." };
     }
 
     if (resolution === "hold") {
@@ -3065,7 +3065,7 @@
     }
 
     if (track === null) {
-      return { ready: false, targetId: null, hint: "Sélectionnez d'abord le track cible." };
+      return { ready: false, targetId: null, hint: "Select the target track first." };
     }
 
     if (resolution === "map_to_track") {
@@ -3073,7 +3073,7 @@
     }
 
     if (track.releaseId === null) {
-      return { ready: false, targetId: null, hint: "Ce track n'a pas de release; sélectionnez un track rattaché à une release." };
+      return { ready: false, targetId: null, hint: "This track has no release; select a track linked to a release." };
     }
 
     return { ready: true, targetId: track.releaseId, hint: "" };
@@ -3619,18 +3619,18 @@
   function createDashboardKpis(state: ApiRequestState<DistributionDashboardResponse>): readonly DistributionKpi[] {
     if (state.status !== "success") {
       return [
-        { label: "Brut", value: "—", detail: stateLabel(state), tone: "muted", accent: true },
-        { label: "Recoupé", value: "—", detail: "moteur", tone: "muted", accent: false },
-        { label: "Net à payer", value: "—", detail: "statements", tone: "muted", accent: false },
-        { label: "Suspens", value: "—", detail: "blocages", tone: "muted", accent: false }
+        { label: "Gross", value: "—", detail: stateLabel(state), tone: "muted", accent: true },
+        { label: "Recouped", value: "—", detail: "engine", tone: "muted", accent: false },
+        { label: "Net payable", value: "—", detail: "statements", tone: "muted", accent: false },
+        { label: "Suspense", value: "—", detail: "blockers", tone: "muted", accent: false }
       ];
     }
 
     return [
-      { label: "Royalties brutes", value: formatMicro(state.data.grossRoyaltyMicro), detail: state.data.period, tone: "info", accent: true },
-      { label: "Recoupé", value: formatMicro(state.data.recoupedMicro), detail: "sources auditées", tone: "warning", accent: false },
-      { label: "Net à payer", value: formatMicro(state.data.netPayableMicro), detail: `${String(state.data.openStatementCount)} statements`, tone: "success", accent: false },
-      { label: "Suspens", value: String(state.data.suspenseCount), detail: "regroupé par motif", tone: "warning", accent: false }
+      { label: "Gross royalties", value: formatMicro(state.data.grossRoyaltyMicro), detail: state.data.period, tone: "info", accent: true },
+      { label: "Recouped", value: formatMicro(state.data.recoupedMicro), detail: "audited sources", tone: "warning", accent: false },
+      { label: "Net payable", value: formatMicro(state.data.netPayableMicro), detail: `${String(state.data.openStatementCount)} statements`, tone: "success", accent: false },
+      { label: "Suspense", value: String(state.data.suspenseCount), detail: "grouped by reason", tone: "warning", accent: false }
     ];
   }
 
@@ -3675,7 +3675,7 @@
     ]);
     downloadCsv(
       `distribution-revenue-${revenueGroupBy}-${distributionPeriod}.csv`,
-      ["Groupe", "Brut (micro)", "Net (micro)", "A payer (micro)", "Brut", "Net", "A payer", "Devise", "Bar level"],
+      ["Group", "Gross (micro)", "Net (micro)", "Payable (micro)", "Gross", "Net", "Payable", "Currency", "Bar level"],
       rows
     );
   }
@@ -3689,7 +3689,7 @@
       {
         id: "dash_mapping",
         cells: [
-          { kind: "text", value: "Revoir le mapping RouteNote", strong: true },
+          { kind: "text", value: "Review RouteNote mapping", strong: true },
           { kind: "text", value: "Imports · RouteNote", strong: false },
           { kind: "text", value: String(suspense.filter((item: SuspenseItem): boolean => item.reason === "unmapped_track").length), strong: false },
           { kind: "badge", value: "mapping", tone: "warning" }
@@ -3698,7 +3698,7 @@
       {
         id: "dash_statements",
         cells: [
-          { kind: "text", value: "Générer les statements postés", strong: true },
+          { kind: "text", value: "Generate posted statements", strong: true },
           { kind: "text", value: "Statements", strong: false },
           { kind: "text", value: String(statementItems.length), strong: false },
           { kind: "badge", value: "statements", tone: "info" }
@@ -3707,8 +3707,8 @@
       {
         id: "dash_payments",
         cells: [
-          { kind: "text", value: "Rapprocher les paiements en file", strong: true },
-          { kind: "text", value: "Paiements", strong: false },
+          { kind: "text", value: "Reconcile queued payments", strong: true },
+          { kind: "text", value: "Payments", strong: false },
           { kind: "text", value: String(paymentItems.filter((payment: PaymentSummary): boolean => payment.status === "queued").length), strong: false },
           { kind: "badge", value: "payments", tone: "active" }
         ]
@@ -3740,10 +3740,10 @@
         { kind: "text", value: row.sourceTitle, strong: true },
         { kind: "text", value: row.sourceArtist, strong: false },
         { kind: "text", value: row.sourceStore, strong: false },
-        { kind: "text", value: row.suggestedTrackTitle ?? "track manuel requis", strong: false },
+        { kind: "text", value: row.suggestedTrackTitle ?? "manual track required", strong: false },
         { kind: "badge", value: formatConfidence(row.confidenceBp), tone: confidenceTone(row.confidenceBp) },
         { kind: "badge", value: row.exactFixPath, tone: "active" },
-        { kind: "badge", value: selectedIds.includes(row.id) ? "sélectionnée" : "—", tone: selectedIds.includes(row.id) ? "success" : "muted" }
+        { kind: "badge", value: selectedIds.includes(row.id) ? "selected" : "—", tone: selectedIds.includes(row.id) ? "success" : "muted" }
       ]
     }));
   }
@@ -3754,7 +3754,7 @@
       cells: [
         { kind: "text", value: release.title, strong: true },
         { kind: "text", value: release.artistName, strong: false },
-        { kind: "text", value: release.upc ?? "pas d'UPC", strong: false },
+        { kind: "text", value: release.upc ?? "no UPC", strong: false },
         { kind: "badge", value: release.status, tone: catalogTone(release.status) },
         { kind: "text", value: String(release.trackCount), strong: false },
         { kind: "badge", value: "release", tone: "muted" }
@@ -3765,10 +3765,10 @@
       cells: [
         { kind: "text", value: track.title, strong: true },
         { kind: "text", value: track.artistName, strong: false },
-        { kind: "text", value: track.isrc ?? "pas d'ISRC", strong: false },
+        { kind: "text", value: track.isrc ?? "no ISRC", strong: false },
         { kind: "badge", value: track.status, tone: catalogTone(track.status) },
         { kind: "text", value: String(track.contributorCount), strong: false },
-        { kind: "badge", value: track.splitStatus === "balanced" ? "équilibré" : track.splitStatus, tone: track.splitStatus === "balanced" ? "success" : "warning" }
+        { kind: "badge", value: track.splitStatus === "balanced" ? "balanced" : track.splitStatus, tone: track.splitStatus === "balanced" ? "success" : "warning" }
       ]
     }));
 
@@ -3849,8 +3849,8 @@
       cells: [
         { kind: "text", value: payment.payeeName, strong: true },
         { kind: "money", value: formatMoney(payment.amountMicro, payment.currency), tone: moneyTone(payment.amountMicro) },
-        { kind: "text", value: payment.reference ?? "à compléter", strong: false },
-        { kind: "text", value: payment.paidAt === null ? "non payé" : formatDateOnly(payment.paidAt), strong: false },
+        { kind: "text", value: payment.reference ?? "missing", strong: false },
+        { kind: "text", value: payment.paidAt === null ? "unpaid" : formatDateOnly(payment.paidAt), strong: false },
         { kind: "badge", value: payment.status, tone: payment.status === "paid" ? "success" : "warning" }
       ]
     }));
@@ -3977,7 +3977,7 @@
         { kind: "badge", value: duplicate.kind, tone: "muted" },
         { kind: "text", value: String(duplicate.count), strong: false },
         { kind: "text", value: duplicate.sampleLabels.join(", "), strong: false },
-        { kind: "badge", value: "revue requise", tone: "warning" }
+        { kind: "badge", value: "review required", tone: "warning" }
       ]
     }));
   }
@@ -3990,26 +3990,26 @@
   ): readonly SelectOption[] {
     if (targetType === "payee") {
       return sortOptionsAlphabetically([
-        { label: "Sélectionner un payee", value: "" },
+        { label: "Select a payee", value: "" },
         ...payeeItems.map((payee: PayeeSummary): SelectOption => ({ label: `${payee.displayName} · ${payee.defaultCurrency}`, value: payee.id }))
       ], 1);
     }
 
     if (targetType === "release") {
       return sortOptionsAlphabetically([
-        { label: "Sélectionner une release", value: "" },
+        { label: "Select a release", value: "" },
         ...releaseItems.map((release: ReleaseSummary): SelectOption => ({ label: `${release.title} · ${release.artistName}`, value: release.id }))
       ], 1);
     }
 
     if (targetType === "track") {
       return sortOptionsAlphabetically([
-        { label: "Sélectionner un track", value: "" },
+        { label: "Select a track", value: "" },
         ...trackItems.map((track: TrackSummary): SelectOption => ({ label: `${track.title} · ${track.artistName}`, value: track.id }))
       ], 1);
     }
 
-    return [{ label: "Aucune sélection", value: "" }];
+    return [{ label: "No selection", value: "" }];
   }
 
   function createAuditRows(items: readonly AuditLogEntry[]): readonly TableRow[] {
@@ -4112,9 +4112,9 @@
 
   function createImportToolbarFilters(state: ImportUiState): readonly ToolbarFilter[] {
     return [
-      { label: "Source", value: state.source, active: true, disabled: false, actionId: "source", title: "Changer la source d'import" },
-      { label: "Fichier", value: state.fileName === "" ? "aucun fichier sélectionné" : state.fileName, active: false, disabled: false, actionId: "file", title: "Effacer le fichier sélectionné" },
-      { label: "État", value: state.status, active: false, disabled: false, actionId: "status", title: "Lancer la prévisualisation" }
+      { label: "Source", value: state.source, active: true, disabled: false, actionId: "source", title: "Change import source" },
+      { label: "File", value: state.fileName === "" ? "no file selected" : state.fileName, active: false, disabled: false, actionId: "file", title: "Clear selected file" },
+      { label: "Status", value: state.status, active: false, disabled: false, actionId: "status", title: "Run preview" }
     ];
   }
 
@@ -4246,7 +4246,7 @@
       return actorEmail;
     }
 
-    return "Acteur vérifié";
+    return "Verified actor";
   }
 
   function humanReference(value: string, fallback: string): string {
@@ -4311,18 +4311,18 @@
 
   function exactImportAction(action: "review_mapping" | "apply_rules" | "validate" | "retry"): string {
     if (action === "review_mapping") {
-      return "Revoir le mapping";
+      return "Review mapping";
     }
 
     if (action === "apply_rules") {
-      return "Appliquer les règles";
+      return "Apply rules";
     }
 
     if (action === "validate") {
-      return "Valider le lot";
+      return "Validate batch";
     }
 
-    return "Relancer l'import";
+    return "Retry import";
   }
 
   function catalogTone(status: "draft" | "released" | "archived"): Tone {
@@ -4339,18 +4339,18 @@
 
   function suspenseReason(reason: "missing_split" | "unmapped_track" | "import_retry" | "contract_hold"): string {
     if (reason === "missing_split") {
-      return "Split manquant";
+      return "Missing split";
     }
 
     if (reason === "unmapped_track") {
-      return "Track non mappé";
+      return "Unmapped track";
     }
 
     if (reason === "import_retry") {
-      return "Import à relancer";
+      return "Import retry required";
     }
 
-    return "Contrat en attente";
+    return "Contract on hold";
   }
 
   function suspenseResolutionFor(item: SuspenseItem): "map_to_release" | "map_to_track" | "hold" {
@@ -4386,7 +4386,7 @@
       return error.message;
     }
 
-    return "Erreur inconnue.";
+    return "Unknown error.";
   }
 </script>
 
@@ -4402,7 +4402,7 @@
   navItems={[]}
   navGroups={shellNavGroups}
   statusLabel="erh/v1"
-  statusValue={writesEnabled ? "écriture activée" : "lecture seule"}
+  statusValue={writesEnabled ? "write access enabled" : "read-only"}
   userInitial={session.initials}
   userName={session.displayName}
   userContext={session.roleLabel}
@@ -4422,10 +4422,10 @@
       />
 
       {#if periodControlVisible}
-        <section class="period-control ehq-edge-surface" aria-label="Contrôle de période">
+        <section class="period-control ehq-edge-surface" aria-label="Period controls">
           <Select
             id="distribution-period-scope"
-            label="Période"
+            label="Period"
             value={periodScope}
             options={periodOptions}
             state="default"
@@ -4434,11 +4434,11 @@
           />
           {#if periodScope === "custom"}
             <label>
-              <span>Du</span>
+              <span>From</span>
               <input type="date" value={activeRange.from} max={activeRange.to} onchange={updateCustomFrom} />
             </label>
             <label>
-              <span>Au</span>
+              <span>To</span>
               <input type="date" value={activeRange.to} min={activeRange.from} onchange={updateCustomTo} />
             </label>
           {/if}
@@ -4447,15 +4447,15 @@
       {/if}
 
       {#if mutationReceipt !== null && mutationReceiptPageId === activePageId}
-        <Alert tone="success" title="Action acceptée" message="Audit enregistré." dismissible={false} />
+        <Alert tone="success" title="Action accepted" message="Audit recorded." dismissible={false} />
       {/if}
 
       {#if runReceipt !== null && runReceiptPageId === activePageId}
-        <Alert tone="info" title="Run planifié" message="Verrou détenu par le workflow." dismissible={false} />
+        <Alert tone="info" title="Run scheduled" message="Lock held by the workflow." dismissible={false} />
       {/if}
 
       {#if actionError !== null && actionErrorPageId === activePageId}
-        <Alert tone="error" title="Erreur" message={actionError} dismissible={false} />
+        <Alert tone="error" title="Error" message={actionError} dismissible={false} />
       {/if}
 
       {#if activePageId === "dashboard"}
@@ -4465,227 +4465,227 @@
           {/each}
         </section>
         <section class="dashboard-grid">
-          <BarsChart title="Revenus par source" points={revenueChartPoints} tone="active" />
-          <Table title="Liste d'actions" columns={dashboardColumns} rows={dashboardRows} state={tableStateFor(dashboardActionListStatus, dashboardRows.length)} actionLabel="" />
+          <BarsChart title="Revenue by source" points={revenueChartPoints} tone="active" />
+          <Table title="Action list" columns={dashboardColumns} rows={dashboardRows} state={tableStateFor(dashboardActionListStatus, dashboardRows.length)} actionLabel="" />
         </section>
       {:else if activePageId === "imports"}
         <Toolbar label="Import Kontor RouteNote" filters={importToolbarFilters} actionLabel="" loading={isLoadingStatus(importState.status)} onFilterSelect={selectImportToolbarFilter} />
         <section class="form-panel ehq-edge-surface" aria-label="Import Kontor RouteNote">
           <Select id="distribution-import-source" label="Source" value={importState.source} options={importSourceOptions} state="default" message="" onchange={updateImportSource} />
           <label>
-            <span>Fichier d'export</span>
+            <span>Export file</span>
             <input type="file" accept="text/csv,.csv,.tsv,text/tab-separated-values" bind:this={importFileInput} onchange={handleImportFile} />
           </label>
-          <Button label="Import files" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Import files" title="Choisir un fichier d'export" onclick={openImportFilePicker} />
-          <Button label="Preflight assistant" variant="secondary" size="medium" type="button" disabled={!canPreviewImport} loading={false} locked={false} focus={false} ariaLabel="Preflight assistant" title={canPreviewImport ? "" : "Sélectionnez d'abord un fichier d'export CSV/TSV"} onclick={previewImport} />
-          <Button label="Open assistant" variant="secondary" size="medium" type="button" disabled={!canOpenImportAssistant} loading={false} locked={false} focus={false} ariaLabel="Open assistant" title={canOpenImportAssistant ? "" : "Lancez d'abord le preflight assistant"} onclick={openImportAssistant} />
-          <Button label="Valider l'import" variant="primary" size="medium" type="button" disabled={!canConfirmImport || !writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Valider l'import" title={writeDisabledTitle()} onclick={confirmImport} />
+          <Button label="Import files" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Import files" title="Choose an export file" onclick={openImportFilePicker} />
+          <Button label="Preflight assistant" variant="secondary" size="medium" type="button" disabled={!canPreviewImport} loading={false} locked={false} focus={false} ariaLabel="Preflight assistant" title={canPreviewImport ? "" : "Select a CSV/TSV export file first"} onclick={previewImport} />
+          <Button label="Open assistant" variant="secondary" size="medium" type="button" disabled={!canOpenImportAssistant} loading={false} locked={false} focus={false} ariaLabel="Open assistant" title={canOpenImportAssistant ? "" : "Run the preflight assistant first"} onclick={openImportAssistant} />
+          <Button label="Confirm import" variant="primary" size="medium" type="button" disabled={!canConfirmImport || !writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Confirm import" title={writeDisabledTitle()} onclick={confirmImport} />
         </section>
-        <section class="filter-strip ehq-edge-surface" aria-label="Filtres d'import">
-          <Select id="distribution-import-filter" label="Filtre source" value={importSourceFilter} options={importFilterOptions} state="default" message="" onchange={updateImportFilter} />
-          <Select id="distribution-import-status" label="Filtre statut" value={importStatusFilter} options={importStatusFilterOptions} state="default" message="" onchange={updateImportStatusFilter} />
-          <Button label="Filtrer" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Appliquer les filtres d'import" onclick={loadImportBatches} />
+        <section class="filter-strip ehq-edge-surface" aria-label="Import filters">
+          <Select id="distribution-import-filter" label="Source filter" value={importSourceFilter} options={importFilterOptions} state="default" message="" onchange={updateImportFilter} />
+          <Select id="distribution-import-status" label="Status filter" value={importStatusFilter} options={importStatusFilterOptions} state="default" message="" onchange={updateImportStatusFilter} />
+          <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Apply import filters" onclick={loadImportBatches} />
         </section>
         <section class="import-result ehq-edge-surface" class:error={importState.status === "error"} aria-live="polite">
           <strong>{importState.message}</strong>
           {#if importState.preview !== null}
-            <span>{importState.preview.acceptedRowCount} acceptées · {importState.preview.unmappedRowCount} en suspens · {formatMoney(importState.preview.payableMicro, importState.preview.currencyCodes[0] ?? "USD")}</span>
-            <span>{importState.preview.statementReference} · clés {importState.preview.joinKeys.join(" + ")}</span>
+            <span>{importState.preview.acceptedRowCount} accepted · {importState.preview.unmappedRowCount} in suspense · {formatMoney(importState.preview.payableMicro, importState.preview.currencyCodes[0] ?? "USD")}</span>
+            <span>{importState.preview.statementReference} · keys {importState.preview.joinKeys.join(" + ")}</span>
           {/if}
           {#if importState.confirm !== null}
-            <span>{importState.confirm.importedRoyaltyEventCount} événements de royalties importés.</span>
+            <span>{importState.confirm.importedRoyaltyEventCount} royalty events imported.</span>
           {/if}
         </section>
         <Table title="Batches Kontor / RouteNote" columns={importColumns} rows={importRows} rowActions={importRowActions} state={tableStateFor(importBatchesState.status, importBatches.length)} actionLabel="" pagination={importPagination} />
       {:else if activePageId === "mapping"}
-        <section class="filter-strip ehq-edge-surface" aria-label="Filtres de mapping">
-          <Select id="distribution-mapping-status" label="Statut" value={mappingStatusFilter} options={mappingStatusOptions} state="default" message="" onchange={updateMappingStatus} />
+        <section class="filter-strip ehq-edge-surface" aria-label="Mapping filters">
+          <Select id="distribution-mapping-status" label="Status" value={mappingStatusFilter} options={mappingStatusOptions} state="default" message="" onchange={updateMappingStatus} />
           <Select id="distribution-mapping-batch" label="Batch" value={mappingBatchFilter} options={mappingBatchFilterOptions} state="default" message="" onchange={updateMappingBatchFilter} />
-          <Button label="Filtrer" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Appliquer les filtres de mapping" onclick={loadMappingRows} />
-          <Button label="Tout sélectionner (page)" variant="secondary" size="medium" type="button" disabled={mappingRows.length === 0} loading={false} locked={false} focus={false} ariaLabel="Sélectionner toutes les lignes visibles de mapping" onclick={selectAllVisibleMappingRows} />
-          <Button label="Effacer sélection" variant="secondary" size="medium" type="button" disabled={selectedMappingRowIds.length === 0} loading={false} locked={false} focus={false} ariaLabel="Effacer la sélection mapping" onclick={clearMappingSelection} />
-          <Button label="Appliquer les règles réutilisables" variant="primary" size="medium" type="button" disabled={!writesEnabled || (mappingRows.length === 0 && selectedMappingRowIds.length === 0)} loading={false} locked={false} focus={false} ariaLabel="Appliquer les règles réutilisables" title={writeDisabledTitle()} onclick={applyMappingRules} />
-          <span class="ehq-type-label-mono">{selectedMappingRowIds.length} sélectionnée(s)</span>
+          <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Apply mapping filters" onclick={loadMappingRows} />
+          <Button label="Select all (page)" variant="secondary" size="medium" type="button" disabled={mappingRows.length === 0} loading={false} locked={false} focus={false} ariaLabel="Select all visible mapping rows" onclick={selectAllVisibleMappingRows} />
+          <Button label="Clear selection" variant="secondary" size="medium" type="button" disabled={selectedMappingRowIds.length === 0} loading={false} locked={false} focus={false} ariaLabel="Clear mapping selection" onclick={clearMappingSelection} />
+          <Button label="Apply reusable rules" variant="primary" size="medium" type="button" disabled={!writesEnabled || (mappingRows.length === 0 && selectedMappingRowIds.length === 0)} loading={false} locked={false} focus={false} ariaLabel="Apply reusable rules" title={writeDisabledTitle()} onclick={applyMappingRules} />
+          <span class="ehq-type-label-mono">{selectedMappingRowIds.length} selected</span>
         </section>
-        <Table title="Lignes Kontor / RouteNote à mapper" columns={mappingColumns} rows={mappingTableRows} state={isLoadingStatus(mappingState.status) ? "loading" : mappingState.status === "error" ? "error" : mappingRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={mappingRowActions} pagination={mappingPagination} />
+        <Table title="Kontor / RouteNote rows to map" columns={mappingColumns} rows={mappingTableRows} state={isLoadingStatus(mappingState.status) ? "loading" : mappingState.status === "error" ? "error" : mappingRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={mappingRowActions} pagination={mappingPagination} />
       {:else if activePageId === "catalog"}
         <section class="contracts-actions ehq-edge-surface">
-          <Button label="Nouvelle release" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Nouvelle release" onclick={() => openCatalogPanel("release")} />
-          <Button label="Nouveau track" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Nouveau track" onclick={() => openCatalogPanel("track")} />
-          <span>Les releases et tracks restent des données source; les corrections deviennent des overrides audités.</span>
+          <Button label="New release" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="New release" onclick={() => openCatalogPanel("release")} />
+          <Button label="New track" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="New track" onclick={() => openCatalogPanel("track")} />
+          <span>Releases and tracks remain source data; corrections become audited overrides.</span>
         </section>
         {#if catalogPanelMode === "release"}
-          <section class="form-panel ehq-edge-surface" aria-label="Nouvelle release">
-            <Input id="distribution-release-title" label="Titre" value={releaseTitleInput} placeholder="" type="text" state="default" message="" oninput={updateReleaseTitle} />
-            <Input id="distribution-release-artist" label="Artiste" value={releaseArtistInput} placeholder="" type="text" state="default" message="" oninput={updateReleaseArtist} />
-            <Input id="distribution-release-upc" label="UPC (optionnel)" value={releaseUpcInput} placeholder="" type="text" state="default" message="" oninput={updateReleaseUpc} />
-            <Select id="distribution-release-status" label="Statut" value={releaseStatusInput} options={catalogStatusOptions} state="default" message="" onchange={updateReleaseStatus} />
+          <section class="form-panel ehq-edge-surface" aria-label="New release">
+            <Input id="distribution-release-title" label="Title" value={releaseTitleInput} placeholder="" type="text" state="default" message="" oninput={updateReleaseTitle} />
+            <Input id="distribution-release-artist" label="Artist" value={releaseArtistInput} placeholder="" type="text" state="default" message="" oninput={updateReleaseArtist} />
+            <Input id="distribution-release-upc" label="UPC (optional)" value={releaseUpcInput} placeholder="" type="text" state="default" message="" oninput={updateReleaseUpc} />
+            <Select id="distribution-release-status" label="Status" value={releaseStatusInput} options={catalogStatusOptions} state="default" message="" onchange={updateReleaseStatus} />
             <label>
-              <span>Date de release (optionnelle)</span>
+              <span>Release date (optional)</span>
               <input type="date" value={releaseDateInput} onchange={updateReleaseDate} />
             </label>
-            <Button label="Créer la release" variant="primary" size="medium" type="button" disabled={!writesEnabled || releaseTitleInput.trim() === "" || releaseArtistInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Créer la release" title={writesEnabled ? (releaseTitleInput.trim() === "" ? "Saisissez d'abord un titre de release" : releaseArtistInput.trim() === "" ? "Saisissez d'abord un nom d'artiste" : "") : writeGateMessage} onclick={createRelease} />
-            <Button label="Annuler" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Annuler la création de release" onclick={closeCatalogPanel} />
+            <Button label="Create release" variant="primary" size="medium" type="button" disabled={!writesEnabled || releaseTitleInput.trim() === "" || releaseArtistInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Create release" title={writesEnabled ? (releaseTitleInput.trim() === "" ? "Enter a release title first" : releaseArtistInput.trim() === "" ? "Enter an artist name first" : "") : writeGateMessage} onclick={createRelease} />
+            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel release creation" onclick={closeCatalogPanel} />
           </section>
         {:else if catalogPanelMode === "track"}
-          <section class="form-panel ehq-edge-surface" aria-label="Nouveau track">
-            <Input id="distribution-track-title" label="Titre" value={trackTitleInput} placeholder="" type="text" state="default" message="" oninput={updateTrackTitle} />
-            <Input id="distribution-track-artist" label="Artiste" value={trackArtistInput} placeholder="" type="text" state="default" message="" oninput={updateTrackArtist} />
-            <Input id="distribution-track-isrc" label="ISRC (optionnel)" value={trackIsrcInput} placeholder="" type="text" state="default" message="" oninput={updateTrackIsrc} />
+          <section class="form-panel ehq-edge-surface" aria-label="New track">
+            <Input id="distribution-track-title" label="Title" value={trackTitleInput} placeholder="" type="text" state="default" message="" oninput={updateTrackTitle} />
+            <Input id="distribution-track-artist" label="Artist" value={trackArtistInput} placeholder="" type="text" state="default" message="" oninput={updateTrackArtist} />
+            <Input id="distribution-track-isrc" label="ISRC (optional)" value={trackIsrcInput} placeholder="" type="text" state="default" message="" oninput={updateTrackIsrc} />
             <Select id="distribution-track-release" label="Release" value={trackReleaseIdInput} options={trackReleaseSelectOptions} state="default" message="" onchange={updateTrackRelease} />
-            <Select id="distribution-track-status" label="Statut" value={trackStatusInput} options={catalogStatusOptions} state="default" message="" onchange={updateTrackStatus} />
-            <Button label="Créer le track" variant="primary" size="medium" type="button" disabled={!writesEnabled || trackTitleInput.trim() === "" || trackArtistInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Créer le track" title={writesEnabled ? (trackTitleInput.trim() === "" ? "Saisissez d'abord un titre de track" : trackArtistInput.trim() === "" ? "Saisissez d'abord un nom d'artiste" : "") : writeGateMessage} onclick={createTrack} />
-            <Button label="Annuler" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Annuler la création de track" onclick={closeCatalogPanel} />
+            <Select id="distribution-track-status" label="Status" value={trackStatusInput} options={catalogStatusOptions} state="default" message="" onchange={updateTrackStatus} />
+            <Button label="Create track" variant="primary" size="medium" type="button" disabled={!writesEnabled || trackTitleInput.trim() === "" || trackArtistInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Create track" title={writesEnabled ? (trackTitleInput.trim() === "" ? "Enter a track title first" : trackArtistInput.trim() === "" ? "Enter an artist name first" : "") : writeGateMessage} onclick={createTrack} />
+            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel track creation" onclick={closeCatalogPanel} />
           </section>
         {/if}
         <section class="dashboard-grid">
-          <Table title="Catalogue canonique + contributeurs" columns={catalogColumns} rows={catalogRows} state={tableStateFor(tracksState.status, catalogRows.length)} actionLabel="" pagination={catalogPagination} />
+          <Table title="Canonical catalog + contributors" columns={catalogColumns} rows={catalogRows} state={tableStateFor(tracksState.status, catalogRows.length)} actionLabel="" pagination={catalogPagination} />
           <div class="command-card ehq-edge-surface">
             <SectionTemplate
               eyebrow="catalog"
-              title="Point d'attention"
-              detail="Les artistes import et les contributeurs catalogue restent séparés tant qu'un match track exact n'est pas validé."
+              title="Attention required"
+              detail="Imported artists and catalog contributors remain separate until an exact track match is validated."
               state="ready"
             >
-              <Button label="Corriger le mapping contributeurs" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Corriger le mapping contributeurs" onclick={() => selectPage("mapping")} />
+              <Button label="Fix contributor mapping" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Fix contributor mapping" onclick={() => selectPage("mapping")} />
             </SectionTemplate>
           </div>
         </section>
       {:else if activePageId === "contracts"}
         <section class="contracts-actions ehq-edge-surface">
-          <Button label="Nouveau contrat" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Nouveau contrat" onclick={openContractPanel} />
-          <Button label="Enregistrer une dépense recoupable" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Enregistrer une dépense recoupable" title={writeDisabledTitle()} onclick={openExpensePanel} />
-          <span>Les dépenses restent des données source; les corrections deviennent des overrides audités.</span>
+          <Button label="New contract" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="New contract" onclick={openContractPanel} />
+          <Button label="Record recoupable expense" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Record recoupable expense" title={writeDisabledTitle()} onclick={openExpensePanel} />
+          <span>Expenses remain source data; corrections become audited overrides.</span>
         </section>
         {#if expensePanelOpen}
-          <section class="form-panel ehq-edge-surface" aria-label="Enregistrer une dépense recoupable">
-            <Select id="distribution-expense-contract" label="Contrat" value={expenseContractIdInput} options={expenseContractSelectOptions} state="default" message="" onchange={updateExpenseContract} />
-            <Input id="distribution-expense-label" label="Libellé" value={expenseLabelInput} placeholder="Avance" type="text" state="default" message="" oninput={updateExpenseLabel} />
-            <Input id="distribution-expense-amount" label="Montant" value={expenseAmountInput} placeholder="2500.00" type="text" state="default" message="" oninput={updateExpenseAmount} />
+          <section class="form-panel ehq-edge-surface" aria-label="Record recoupable expense">
+            <Select id="distribution-expense-contract" label="Contract" value={expenseContractIdInput} options={expenseContractSelectOptions} state="default" message="" onchange={updateExpenseContract} />
+            <Input id="distribution-expense-label" label="Label" value={expenseLabelInput} placeholder="Advance" type="text" state="default" message="" oninput={updateExpenseLabel} />
+            <Input id="distribution-expense-amount" label="Amount" value={expenseAmountInput} placeholder="2500.00" type="text" state="default" message="" oninput={updateExpenseAmount} />
             <label>
-              <span>Date de dépense</span>
+              <span>Expense date</span>
               <input type="date" value={expenseDateInput} onchange={updateExpenseDate} />
             </label>
-            <Button label="Enregistrer la dépense" variant="primary" size="medium" type="button" disabled={!writesEnabled || selectedExpenseContract === null || expenseLabelInput.trim() === "" || expenseAmountMicro === null || expenseDateInput === ""} loading={false} locked={false} focus={false} ariaLabel="Enregistrer la dépense" title={writesEnabled ? (selectedExpenseContract === null ? "Sélectionnez d'abord un contrat" : expenseLabelInput.trim() === "" ? "Saisissez d'abord un libellé" : expenseAmountMicro === null ? "Saisissez un montant positif, ex: 2500.00" : expenseDateInput === "" ? "Choisissez d'abord la date de dépense" : "") : writeGateMessage} onclick={recordExpense} />
-            <Button label="Annuler" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Annuler l'enregistrement de dépense" onclick={closeExpensePanel} />
+            <Button label="Record expense" variant="primary" size="medium" type="button" disabled={!writesEnabled || selectedExpenseContract === null || expenseLabelInput.trim() === "" || expenseAmountMicro === null || expenseDateInput === ""} loading={false} locked={false} focus={false} ariaLabel="Record expense" title={writesEnabled ? (selectedExpenseContract === null ? "Select a contract first" : expenseLabelInput.trim() === "" ? "Enter a label first" : expenseAmountMicro === null ? "Enter a positive amount, e.g. 2500.00" : expenseDateInput === "" ? "Choose the expense date first" : "") : writeGateMessage} onclick={recordExpense} />
+            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel expense entry" onclick={closeExpensePanel} />
           </section>
         {/if}
         {#if contractPanelOpen}
-          <section class="form-panel ehq-edge-surface" aria-label="Nouveau contrat">
-            <Input id="distribution-contract-title" label="Titre" value={contractTitleInput} placeholder="" type="text" state="default" message="" oninput={updateContractTitle} />
-            <Select id="distribution-contract-payee" label="Ayant droit" value={contractPayeeIdInput} options={payeeSelectOptions} state="default" message="" onchange={updateContractPayee} />
-            <Select id="distribution-contract-status" label="Statut" value={contractStatusInput} options={contractStatusOptions} state="default" message="" onchange={updateContractStatus} />
+          <section class="form-panel ehq-edge-surface" aria-label="New contract">
+            <Input id="distribution-contract-title" label="Title" value={contractTitleInput} placeholder="" type="text" state="default" message="" oninput={updateContractTitle} />
+            <Select id="distribution-contract-payee" label="Payee" value={contractPayeeIdInput} options={payeeSelectOptions} state="default" message="" onchange={updateContractPayee} />
+            <Select id="distribution-contract-status" label="Status" value={contractStatusInput} options={contractStatusOptions} state="default" message="" onchange={updateContractStatus} />
             <label>
-              <span>Actif à partir du</span>
+              <span>Effective from</span>
               <input type="date" value={contractEffectiveFromInput} onchange={updateContractEffectiveFrom} />
             </label>
             <label>
-              <span>Actif jusqu'au (optionnel)</span>
+              <span>Effective to (optional)</span>
               <input type="date" value={contractEffectiveToInput} min={contractEffectiveFromInput} onchange={updateContractEffectiveTo} />
             </label>
             <Input id="distribution-contract-split" label="Split (%)" value={contractSplitPercentInput} placeholder="80" type="text" state="default" message="" oninput={updateContractSplitPercent} />
-            <Input id="distribution-contract-currency" label="Devise" value={contractCurrencyInput} placeholder="MUR" type="text" state="default" message="" oninput={updateContractCurrency} />
-            <Button label="Créer le contrat" variant="primary" size="medium" type="button" disabled={!writesEnabled || contractTitleInput.trim() === "" || contractPayeeIdInput === "" || contractEffectiveFromInput === "" || contractSplitBp === null || contractCurrencyInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Créer le contrat" title={writesEnabled ? (contractTitleInput.trim() === "" ? "Saisissez d'abord un titre de contrat" : contractPayeeIdInput === "" ? "Sélectionnez d'abord un ayant droit" : contractEffectiveFromInput === "" ? "Choisissez d'abord la date de début" : contractSplitBp === null ? "Saisissez un split entre 0.01 et 100" : contractCurrencyInput.trim() === "" ? "Saisissez d'abord un code devise" : "") : writeGateMessage} onclick={createContract} />
-            <Button label="Annuler" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Annuler la création de contrat" onclick={closeContractPanel} />
+            <Input id="distribution-contract-currency" label="Currency" value={contractCurrencyInput} placeholder="MUR" type="text" state="default" message="" oninput={updateContractCurrency} />
+            <Button label="Create contract" variant="primary" size="medium" type="button" disabled={!writesEnabled || contractTitleInput.trim() === "" || contractPayeeIdInput === "" || contractEffectiveFromInput === "" || contractSplitBp === null || contractCurrencyInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Create contract" title={writesEnabled ? (contractTitleInput.trim() === "" ? "Enter a contract title first" : contractPayeeIdInput === "" ? "Select a payee first" : contractEffectiveFromInput === "" ? "Choose the start date first" : contractSplitBp === null ? "Enter a split between 0.01 and 100" : contractCurrencyInput.trim() === "" ? "Enter a currency code first" : "") : writeGateMessage} onclick={createContract} />
+            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel contract creation" onclick={closeContractPanel} />
           </section>
         {/if}
         {#if selectedRuleContract !== null}
-          <section class="form-panel ehq-edge-surface" aria-label="Remplacer le jeu de règles royalties">
+          <section class="form-panel ehq-edge-surface" aria-label="Replace royalty rule set">
             <div class="panel-context">
               <strong>{selectedRuleContract.title}</strong>
-              <span>Cette action remplace le jeu de règles précédent; seul un remplacement mono-payee à 100% est autorisé ici.</span>
+              <span>This action replaces the previous rule set; only a single-payee 100% replacement is allowed here.</span>
             </div>
-            <Select id="distribution-rule-payee" label="Ayant droit" value={rulePayeeIdInput} options={payeeSelectOptions} state="default" message="" onchange={updateRulePayee} />
-            <Input id="distribution-rule-percentage" label="Pourcentage" value={rulePercentageInput} placeholder="100" type="text" state="default" message="" oninput={updateRulePercentage} />
-            <Button label="Remplacer le jeu de règles" variant="primary" size="medium" type="button" disabled={!writesEnabled || rulePayeeIdInput === "" || ruleReplacementPercentage === null} loading={false} locked={false} focus={false} ariaLabel="Remplacer le jeu de règles" title={writesEnabled ? (rulePayeeIdInput === "" ? "Sélectionnez d'abord un ayant droit" : ruleReplacementPercentage === null ? "Ce chemin sécurisé n'accepte que 100.000000" : "") : writeGateMessage} onclick={addContractRule} />
-            <Button label="Annuler" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Annuler l'édition des règles" onclick={closeContractRulePanel} />
+            <Select id="distribution-rule-payee" label="Payee" value={rulePayeeIdInput} options={payeeSelectOptions} state="default" message="" onchange={updateRulePayee} />
+            <Input id="distribution-rule-percentage" label="Percentage" value={rulePercentageInput} placeholder="100" type="text" state="default" message="" oninput={updateRulePercentage} />
+            <Button label="Replace rule set" variant="primary" size="medium" type="button" disabled={!writesEnabled || rulePayeeIdInput === "" || ruleReplacementPercentage === null} loading={false} locked={false} focus={false} ariaLabel="Replace rule set" title={writesEnabled ? (rulePayeeIdInput === "" ? "Select a payee first" : ruleReplacementPercentage === null ? "This secure path only accepts 100.000000" : "") : writeGateMessage} onclick={addContractRule} />
+            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel rule editing" onclick={closeContractRulePanel} />
           </section>
         {/if}
-        <section class="filter-strip ehq-edge-surface" aria-label="Filtre contrat de dépense">
-          <Select id="distribution-expense-contract-filter" label="Contrat de dépense" value={expenseContractFilterId} options={expenseContractSelectOptions} state="default" message="" onchange={updateExpenseContractFilter} />
-          <Button label="Recharger les dépenses" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Recharger les dépenses du contrat sélectionné" onclick={loadExpenses} />
+        <section class="filter-strip ehq-edge-surface" aria-label="Expense contract filter">
+          <Select id="distribution-expense-contract-filter" label="Expense contract" value={expenseContractFilterId} options={expenseContractSelectOptions} state="default" message="" onchange={updateExpenseContractFilter} />
+          <Button label="Reload expenses" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Reload expenses for the selected contract" onclick={loadExpenses} />
         </section>
         <section class="dashboard-grid">
-          <Table title="Splits / contrats" columns={contractColumns} rows={contractRows} state={tableStateFor(contractsState.status, contracts.length)} actionLabel="" rowActions={contractRowActions} pagination={contractsPagination} />
+          <Table title="Splits / contracts" columns={contractColumns} rows={contractRows} state={tableStateFor(contractsState.status, contracts.length)} actionLabel="" rowActions={contractRowActions} pagination={contractsPagination} />
           <Table title={expenseTableTitle} columns={expenseColumns} rows={expenseRows} state={tableStateFor(expensesState.status, expenses.length)} actionLabel="" pagination={expensesPagination} />
         </section>
       {:else if activePageId === "allocations"}
         <section class="lock-panel ehq-edge-surface">
           <SectionTemplate
             eyebrow="allocations"
-            title="Verrou serveur"
-            detail="Prévisualisation, post et annulation sont disponibles uniquement via des runs workflow cadencés."
+            title="Server lock"
+            detail="Preview, posting and reversal are only available through scheduled workflow runs."
             state="ready"
           >
             {#snippet action()}
-              <Button label="Prévisualiser le run verrouillé" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Prévisualiser le run verrouillé" onclick={previewAllocationRun} />
-              <Button label="Poster la vague cadencée" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Poster la vague cadencée" title={writeDisabledTitle()} onclick={startCadencedAllocationRun} />
+              <Button label="Preview locked run" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Preview locked run" onclick={previewAllocationRun} />
+              <Button label="Post scheduled batch" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Post scheduled batch" title={writeDisabledTitle()} onclick={startCadencedAllocationRun} />
             {/snippet}
             <p class="lock-key">{allocationLockKey}</p>
           </SectionTemplate>
         </section>
         {#if selectedRun !== null}
-          <section class="form-panel ehq-edge-surface" aria-label="Demander l'annulation d'un run">
+          <section class="form-panel ehq-edge-surface" aria-label="Request run reversal">
             <div class="panel-context">
               <strong>{selectedRun.runReference}</strong>
-              <span>{selectedRun.period} · {selectedRun.status} · verrou {selectedRun.lockKey}</span>
+              <span>{selectedRun.period} · {selectedRun.status} · lock {selectedRun.lockKey}</span>
             </div>
-            <Input id="distribution-unpost-reason" label="Motif d'annulation" value={unpostReasonInput} placeholder="" type="text" state="default" message="" oninput={updateUnpostReason} />
-            <Button label="Annuler le run" variant="danger" size="medium" type="button" disabled={!writesEnabled || unpostReasonInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Annuler le run" title={writesEnabled ? (unpostReasonInput.trim() === "" ? "Saisissez d'abord un motif d'annulation" : "") : writeGateMessage} onclick={unpostAllocationRun} />
-            <Button label="Annuler" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Annuler la demande d'annulation" onclick={closeUnpostPanel} />
+            <Input id="distribution-unpost-reason" label="Reversal reason" value={unpostReasonInput} placeholder="" type="text" state="default" message="" oninput={updateUnpostReason} />
+            <Button label="Reverse run" variant="danger" size="medium" type="button" disabled={!writesEnabled || unpostReasonInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Reverse run" title={writesEnabled ? (unpostReasonInput.trim() === "" ? "Enter a reversal reason first" : "") : writeGateMessage} onclick={unpostAllocationRun} />
+            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel reversal request" onclick={closeUnpostPanel} />
           </section>
         {/if}
-        <Table title="Runs d'allocation" columns={allocationColumns} rows={allocationRows} state={tableStateFor(allocationsState.status, allocationRuns.length)} actionLabel="" rowActions={allocationRowActions} pagination={allocationsPagination} />
+        <Table title="Allocation runs" columns={allocationColumns} rows={allocationRows} state={tableStateFor(allocationsState.status, allocationRuns.length)} actionLabel="" rowActions={allocationRowActions} pagination={allocationsPagination} />
       {:else if activePageId === "suspense"}
-        <section class="filter-strip ehq-edge-surface" aria-label="Filtres de suspens">
-          <Select id="distribution-suspense-status" label="Statut" value={suspenseStatusFilter} options={suspenseStatusOptions} state="default" message="" onchange={updateSuspenseStatus} />
-          <Button label="Filtrer" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Appliquer les filtres de suspens" onclick={loadSuspense} />
+        <section class="filter-strip ehq-edge-surface" aria-label="Suspense filters">
+          <Select id="distribution-suspense-status" label="Status" value={suspenseStatusFilter} options={suspenseStatusOptions} state="default" message="" onchange={updateSuspenseStatus} />
+          <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Apply suspense filters" onclick={loadSuspense} />
         </section>
         {#if selectedSuspenseItem !== null}
-          <section class="form-panel ehq-edge-surface" aria-label="Résoudre l'item de suspens">
+          <section class="form-panel ehq-edge-surface" aria-label="Resolve suspense item">
             <div class="panel-context">
               <strong>{selectedSuspenseItem.sourceReference}</strong>
-              <span>{suspenseReason(selectedSuspenseItem.reason)} · {formatMoney(selectedSuspenseItem.amountMicro, selectedSuspenseItem.currency)} · résolution {selectedSuspenseResolution}</span>
+              <span>{suspenseReason(selectedSuspenseItem.reason)} · {formatMoney(selectedSuspenseItem.amountMicro, selectedSuspenseItem.currency)} · resolution {selectedSuspenseResolution}</span>
             </div>
             {#if selectedSuspenseResolution !== "hold"}
-              <Select id="distribution-suspense-track" label="Track cible" value={suspenseTargetTrackId} options={suspenseTrackSelectOptions} state="default" message="" onchange={updateSuspenseTargetTrack} />
+              <Select id="distribution-suspense-track" label="Target track" value={suspenseTargetTrackId} options={suspenseTrackSelectOptions} state="default" message="" onchange={updateSuspenseTargetTrack} />
               {#if suspenseTrackOptionsError !== null}
                 <span class="panel-error">{suspenseTrackOptionsError}</span>
               {/if}
             {/if}
-            <Button label="Résoudre" variant="primary" size="medium" type="button" disabled={!writesEnabled || !suspenseResolveTarget.ready} loading={false} locked={false} focus={false} ariaLabel="Résoudre l'item de suspens" title={writesEnabled ? suspenseResolveTarget.hint : writeGateMessage} onclick={resolveSelectedSuspense} />
-            <Button label="Annuler" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Annuler la résolution du suspens" onclick={closeSuspensePanel} />
+            <Button label="Resolve" variant="primary" size="medium" type="button" disabled={!writesEnabled || !suspenseResolveTarget.ready} loading={false} locked={false} focus={false} ariaLabel="Resolve suspense item" title={writesEnabled ? suspenseResolveTarget.hint : writeGateMessage} onclick={resolveSelectedSuspense} />
+            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel suspense resolution" onclick={closeSuspensePanel} />
           </section>
         {/if}
-        <Table title="Suspens groupés par motif" columns={suspenseColumns} rows={suspenseTableRows} state={isLoadingStatus(suspenseState.status) ? "loading" : suspenseState.status === "error" ? "error" : suspenseItems.length === 0 ? "empty" : "default"} actionLabel="" rowActions={suspenseRowActions} pagination={suspensePagination} />
+        <Table title="Suspense grouped by reason" columns={suspenseColumns} rows={suspenseTableRows} state={isLoadingStatus(suspenseState.status) ? "loading" : suspenseState.status === "error" ? "error" : suspenseItems.length === 0 ? "empty" : "default"} actionLabel="" rowActions={suspenseRowActions} pagination={suspensePagination} />
       {:else if activePageId === "statements"}
         <section class="statement-summary ehq-edge-surface">
           {#if statementPreview !== null}
             <div>
-              <p>Synthèse financière en premier</p>
+              <p>Financial summary first</p>
               <h2>{statementPreview.payeeName} · {formatDateRange(statementPreview.period_start, statementPreview.period_end)}</h2>
               <dl>
-                <div><dt>Brut</dt><dd>{formatMoney(statementPreview.grossMicro, statementPreview.currency)}</dd></div>
-                <div><dt>Recoupé</dt><dd>{formatMoney(statementPreview.recoupedMicro, statementPreview.currency)}</dd></div>
-                <div><dt>Payé</dt><dd>{formatMoney(statementPreview.paidMicro, statementPreview.currency)}</dd></div>
-                <div><dt>Total à payer</dt><dd>{formatMoney(statementPreview.netPayableMicro, statementPreview.currency)}</dd></div>
+                <div><dt>Gross</dt><dd>{formatMoney(statementPreview.grossMicro, statementPreview.currency)}</dd></div>
+                <div><dt>Recouped</dt><dd>{formatMoney(statementPreview.recoupedMicro, statementPreview.currency)}</dd></div>
+                <div><dt>Paid</dt><dd>{formatMoney(statementPreview.paidMicro, statementPreview.currency)}</dd></div>
+                <div><dt>Total payable</dt><dd>{formatMoney(statementPreview.netPayableMicro, statementPreview.currency)}</dd></div>
               </dl>
             </div>
           {/if}
           <div class="statement-summary-actions">
-            <Button label="Générer les statements" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Générer les statements" title={writeDisabledTitle()} onclick={generateStatements} />
+            <Button label="Generate statements" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Generate statements" title={writeDisabledTitle()} onclick={generateStatements} />
           </div>
         </section>
-        <section class="statement-pdf ehq-edge-surface" aria-label="Prévisualisation PDF statement A4">
+        <section class="statement-pdf ehq-edge-surface" aria-label="A4 statement PDF preview">
           <header>
             <strong>ë • Distribution</strong>
-            <span>PDF A4 · impression prioritaire</span>
+            <span>A4 PDF · print-ready</span>
           </header>
-          <h2>Statement {statementPreview?.payeeName ?? "Ayant droit"}</h2>
-          <p>Période {statementPreview === null ? periodLabel(distributionPeriod) : formatDateRange(statementPreview.period_start, statementPreview.period_end)} · devise {statementPreview?.currency ?? "MUR"}</p>
+          <h2>Statement {statementPreview?.payeeName ?? "Payee"}</h2>
+          <p>Period {statementPreview === null ? periodLabel(distributionPeriod) : formatDateRange(statementPreview.period_start, statementPreview.period_end)} · currency {statementPreview?.currency ?? "MUR"}</p>
           {#if printingStatementId !== null}
             <div class="print-hidden">
-              <Alert tone="info" title="Impression" message="Préparation de la vue d'impression…" dismissible={false} />
+              <Alert tone="info" title="Printing" message="Preparing print view…" dismissible={false} />
             </div>
           {/if}
           {#if statementPrintError !== null}
@@ -4694,73 +4694,73 @@
           <Table title="Statements" columns={statementColumns} rows={statementRows} state={tableStateFor(statementsState.status, statements.length)} actionLabel="" rowActions={statementRowActions} pagination={statementsPagination} />
         </section>
       {:else if activePageId === "payments"}
-        <section class="filter-strip ehq-edge-surface" aria-label="Filtres de paiements">
-          <Select id="distribution-payment-status" label="Statut" value={paymentStatusFilter} options={paymentStatusOptions} state="default" message="" onchange={updatePaymentStatus} />
-          <Button label="Filtrer" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Appliquer les filtres de paiements" onclick={loadPayments} />
+        <section class="filter-strip ehq-edge-surface" aria-label="Payment filters">
+          <Select id="distribution-payment-status" label="Status" value={paymentStatusFilter} options={paymentStatusOptions} state="default" message="" onchange={updatePaymentStatus} />
+          <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Apply payment filters" onclick={loadPayments} />
         </section>
-        <section class="form-panel ehq-edge-surface" aria-label="Enregistrer un paiement">
+        <section class="form-panel ehq-edge-surface" aria-label="Record a payment">
           <Select id="distribution-record-statement" label="Statement" value={recordStatementId} options={openStatementSelectOptions} state="default" message="" onchange={updateRecordStatement} />
           <label>
-            <span>Montant (issu du statement)</span>
+            <span>Amount (from statement)</span>
             <input value={recordStatement === null ? "" : formatMoney(recordStatement.netPayableMicro, recordStatement.currency)} readonly />
           </label>
-          <Input id="distribution-record-reference" label="Référence" value={recordPaymentReference} placeholder="" type="text" state="default" message="" oninput={updateRecordPaymentReference} />
-          <Button label="Enregistrer le paiement" variant="primary" size="medium" type="button" disabled={!writesEnabled || recordStatement === null || recordPaymentReference.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Enregistrer le paiement" title={writesEnabled ? (recordStatement === null ? "Sélectionnez d'abord un statement ouvert" : recordPaymentReference.trim() === "" ? "Saisissez d'abord une référence de paiement" : "") : writeGateMessage} onclick={recordPayment} />
+          <Input id="distribution-record-reference" label="Reference" value={recordPaymentReference} placeholder="" type="text" state="default" message="" oninput={updateRecordPaymentReference} />
+          <Button label="Record payment" variant="primary" size="medium" type="button" disabled={!writesEnabled || recordStatement === null || recordPaymentReference.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Record payment" title={writesEnabled ? (recordStatement === null ? "Select an open statement first" : recordPaymentReference.trim() === "" ? "Enter a payment reference first" : "") : writeGateMessage} onclick={recordPayment} />
         </section>
         {#if selectedPayment !== null && paymentPanelMode !== null}
-          <section class="form-panel ehq-edge-surface" aria-label="Action sur paiement">
+          <section class="form-panel ehq-edge-surface" aria-label="Payment action">
             <div class="panel-context">
               <strong>{selectedPayment.payeeName}</strong>
-              <span>{formatMoney(selectedPayment.amountMicro, selectedPayment.currency)} · {selectedPayment.status} · {selectedPayment.reference ?? "sans référence"}</span>
+              <span>{formatMoney(selectedPayment.amountMicro, selectedPayment.currency)} · {selectedPayment.status} · {selectedPayment.reference ?? "no reference"}</span>
             </div>
             {#if paymentPanelMode === "edit"}
-              <Input id="distribution-payment-reference" label="Nouvelle référence" value={paymentReferenceInput} placeholder="" type="text" state="default" message="" oninput={updatePaymentReferenceInput} />
-              <Button label="Enregistrer la référence" variant="primary" size="medium" type="button" disabled={!writesEnabled || paymentReferenceInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Enregistrer la référence du paiement" title={writesEnabled ? (paymentReferenceInput.trim() === "" ? "Saisissez d'abord la nouvelle référence" : "") : writeGateMessage} onclick={editPayment} />
+              <Input id="distribution-payment-reference" label="New reference" value={paymentReferenceInput} placeholder="" type="text" state="default" message="" oninput={updatePaymentReferenceInput} />
+              <Button label="Save reference" variant="primary" size="medium" type="button" disabled={!writesEnabled || paymentReferenceInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Save payment reference" title={writesEnabled ? (paymentReferenceInput.trim() === "" ? "Enter the new reference first" : "") : writeGateMessage} onclick={editPayment} />
             {:else if paymentPanelMode === "reconcile"}
-              <Input id="distribution-payment-bank-transaction" label="ID transaction banque" value={paymentBankTransactionInput} placeholder="" type="text" state="default" message="" oninput={updatePaymentBankTransactionInput} />
-              <Button label="Rapprocher le paiement" variant="primary" size="medium" type="button" disabled={!writesEnabled || paymentBankTransactionInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Rapprocher le paiement" title={writesEnabled ? (paymentBankTransactionInput.trim() === "" ? "Saisissez d'abord l'ID de transaction banque" : "") : writeGateMessage} onclick={reconcilePayment} />
+              <Input id="distribution-payment-bank-transaction" label="Bank transaction ID" value={paymentBankTransactionInput} placeholder="" type="text" state="default" message="" oninput={updatePaymentBankTransactionInput} />
+              <Button label="Reconcile payment" variant="primary" size="medium" type="button" disabled={!writesEnabled || paymentBankTransactionInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Reconcile payment" title={writesEnabled ? (paymentBankTransactionInput.trim() === "" ? "Enter the bank transaction ID first" : "") : writeGateMessage} onclick={reconcilePayment} />
             {:else}
-              <Input id="distribution-payment-void-reason" label="Motif d'annulation" value={paymentReferenceInput} placeholder="" type="text" state="default" message="" oninput={updatePaymentReferenceInput} />
-              <Button label="Annuler le paiement" variant="danger" size="medium" type="button" disabled={!writesEnabled || paymentReferenceInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Annuler le paiement" title={writesEnabled ? (paymentReferenceInput.trim() === "" ? "Saisissez d'abord un motif d'annulation" : "") : writeGateMessage} onclick={voidPayment} />
+              <Input id="distribution-payment-void-reason" label="Void reason" value={paymentReferenceInput} placeholder="" type="text" state="default" message="" oninput={updatePaymentReferenceInput} />
+              <Button label="Void payment" variant="danger" size="medium" type="button" disabled={!writesEnabled || paymentReferenceInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Void payment" title={writesEnabled ? (paymentReferenceInput.trim() === "" ? "Enter a void reason first" : "") : writeGateMessage} onclick={voidPayment} />
             {/if}
-            <Button label="Annuler" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Fermer le panneau paiement" onclick={closePaymentPanel} />
+            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Close payment panel" onclick={closePaymentPanel} />
           </section>
         {/if}
-        <Table title="Paiements" columns={paymentColumns} rows={paymentRows} state={isLoadingStatus(paymentsState.status) ? "loading" : paymentsState.status === "error" ? "error" : payments.length === 0 ? "empty" : "default"} actionLabel="" rowActions={paymentRowActions} pagination={paymentsPagination} />
+        <Table title="Payments" columns={paymentColumns} rows={paymentRows} state={isLoadingStatus(paymentsState.status) ? "loading" : paymentsState.status === "error" ? "error" : payments.length === 0 ? "empty" : "default"} actionLabel="" rowActions={paymentRowActions} pagination={paymentsPagination} />
       {:else if activePageId === "revenue"}
-        <section class="filter-strip ehq-edge-surface" aria-label="Filtres revenus">
-          <Select id="distribution-revenue-group" label="Grouper par" value={revenueGroupBy} options={revenueGroupOptions} state="default" message="" onchange={updateRevenueGroup} />
-          <Button label="Exporter CSV" variant="secondary" size="medium" type="button" disabled={revenueRows.length === 0} loading={false} locked={false} focus={false} ariaLabel="Exporter les revenus en CSV" onclick={exportRevenueCsv} />
-          <Button label="Actualiser" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Actualiser les revenus" onclick={loadRevenue} />
+        <section class="filter-strip ehq-edge-surface" aria-label="Revenue filters">
+          <Select id="distribution-revenue-group" label="Group by" value={revenueGroupBy} options={revenueGroupOptions} state="default" message="" onchange={updateRevenueGroup} />
+          <Button label="Export CSV" variant="secondary" size="medium" type="button" disabled={revenueRows.length === 0} loading={false} locked={false} focus={false} ariaLabel="Export revenue as CSV" onclick={exportRevenueCsv} />
+          <Button label="Refresh" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Refresh revenue" onclick={loadRevenue} />
         </section>
         <section class="dashboard-grid">
-          <BarsChart title="Vue revenus groupée" points={revenueChartPoints} tone="active" />
-          <Table title="Détail des revenus" columns={revenueColumns} rows={revenueTableRows} state={tableStateFor(revenueState.status, revenueRows.length)} actionLabel="" pagination={revenuePagination} />
+          <BarsChart title="Grouped revenue view" points={revenueChartPoints} tone="active" />
+          <Table title="Revenue details" columns={revenueColumns} rows={revenueTableRows} state={tableStateFor(revenueState.status, revenueRows.length)} actionLabel="" pagination={revenuePagination} />
         </section>
       {:else if activePageId === "financial-reconciliation"}
         {#if isLoadingStatus(reconciliationState.status)}
-          <Loader label="Chargement du rapprochement" detail="Calcul des diagnostics en lecture seule." size="medium" />
+          <Loader label="Loading reconciliation" detail="Computing read-only diagnostics." size="medium" />
         {:else if reconciliationState.status === "error"}
           <section class="empty-state error ehq-edge-surface">
-            <strong>Rapprochement indisponible</strong>
-            <span>Le diagnostic en lecture seule n'a pas pu être chargé. Relancez la requête.</span>
-            <Button label="Réessayer" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Relancer le chargement du rapprochement" onclick={loadReconciliation} />
+            <strong>Reconciliation unavailable</strong>
+            <span>The read-only diagnostic could not be loaded. Try the request again.</span>
+            <Button label="Retry" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Retry reconciliation loading" onclick={loadReconciliation} />
           </section>
         {:else}
-          <section class="kpi-grid recon" aria-label="KPI de rapprochement">
+          <section class="kpi-grid recon" aria-label="Reconciliation KPIs">
             {#each reconciliationKpis as kpi (kpi.label)}
               <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state="default" accent={kpi.accent} />
             {/each}
           </section>
-          <Table title="Statements sans liens de paiement" columns={reconStatementColumns} rows={reconStatementRows} state={reconStatementRows.length === 0 ? "empty" : "default"} actionLabel="" />
-          <Table title="Termes de dépense sans ayant droit" columns={reconExpenseColumns} rows={reconExpenseRows} state={reconExpenseRows.length === 0 ? "empty" : "default"} actionLabel="" />
-          <Table title="Matched non alloués (échantillon)" columns={reconMatchedColumns} rows={reconMatchedRows} state={reconMatchedRows.length === 0 ? "empty" : "default"} actionLabel="" />
-          <Table title="Synthèse soldes ayants droit" columns={reconBalanceColumns} rows={reconBalanceRows} state={reconBalanceRows.length === 0 ? "empty" : "default"} actionLabel="" />
-          <section class="recon-actions ehq-edge-surface" aria-label="Actions de correction sécurisées">
+          <Table title="Statements without payment links" columns={reconStatementColumns} rows={reconStatementRows} state={reconStatementRows.length === 0 ? "empty" : "default"} actionLabel="" />
+          <Table title="Expense terms without a payee" columns={reconExpenseColumns} rows={reconExpenseRows} state={reconExpenseRows.length === 0 ? "empty" : "default"} actionLabel="" />
+          <Table title="Matched but unallocated (sample)" columns={reconMatchedColumns} rows={reconMatchedRows} state={reconMatchedRows.length === 0 ? "empty" : "default"} actionLabel="" />
+          <Table title="Payee balance summary" columns={reconBalanceColumns} rows={reconBalanceRows} state={reconBalanceRows.length === 0 ? "empty" : "default"} actionLabel="" />
+          <section class="recon-actions ehq-edge-surface" aria-label="Secure corrective actions">
             <SectionTemplate
               eyebrow="reconciliation"
-              title="Actions de correction sécurisées"
-              detail="Ces actions passent par la voie d'écriture API avec idempotence, audit et verrous."
+              title="Secure corrective actions"
+              detail="These actions use the API write path with idempotency, auditing and locks."
               state="ready"
             >
             <div class="recon-action-grid">
@@ -4769,10 +4769,10 @@
                   <strong>{action.label}</strong>
                   <p>{action.description}</p>
                   {#if action.maintenance}
-                    <span class="recon-action-flag">Maintenance ponctuelle · exécution sécurisée</span>
+                    <span class="recon-action-flag">One-off maintenance · secure execution</span>
                   {/if}
                   <Button
-                    label={action.maintenance ? "Exécuter maintenance" : "Exécuter l'action sécurisée"}
+                    label={action.maintenance ? "Run maintenance" : "Run secure action"}
                     variant="secondary"
                     size="medium"
                     type="button"
@@ -4780,7 +4780,7 @@
                     loading={false}
                     locked={false}
                     focus={false}
-                    ariaLabel={action.maintenance ? `Exécuter la maintenance: ${action.label}` : `Exécuter l'action sécurisée: ${action.label}`}
+                    ariaLabel={action.maintenance ? `Run maintenance: ${action.label}` : `Run secure action: ${action.label}`}
                     title={writeDisabledTitle()}
                     onclick={() => runReconciliationAction(action)}
                   />
@@ -4791,25 +4791,25 @@
           </section>
         {/if}
       {:else if activePageId === "aliases"}
-        <section class="form-panel ehq-edge-surface" aria-label="Éditeur d'alias">
+        <section class="form-panel ehq-edge-surface" aria-label="Alias editor">
           <header class="settings-editor-head">
-            <strong>{aliasEditorId === null ? "Créer un alias" : "Modifier un alias"}</strong>
-            <span>Route les noms importés vers les entités canoniques.</span>
+            <strong>{aliasEditorId === null ? "Create an alias" : "Edit an alias"}</strong>
+            <span>Route imported names to canonical entities.</span>
           </header>
           <div class="settings-editor-grid">
             <Input
               id="distribution-alias-text"
               label="Alias"
               value={aliasTextInput}
-              placeholder="Nom source exact"
+              placeholder="Exact source name"
               type="text"
               state={aliasTextInput.trim().length > 0 ? "default" : "error"}
-              message={aliasTextInput.trim().length > 0 ? "" : "Alias requis."}
+              message={aliasTextInput.trim().length > 0 ? "" : "Alias required."}
               oninput={updateAliasTextInput}
             />
             <Select
               id="distribution-alias-target-type"
-              label="Type cible"
+              label="Target type"
               value={aliasTargetTypeInput}
               options={aliasTargetTypeOptions}
               state="default"
@@ -4819,7 +4819,7 @@
             {#if aliasTargetRequiresId && aliasTargetIsSelect}
               <Select
                 id="distribution-alias-target-id"
-                label="Cible"
+                label="Target"
                 value={aliasTargetIdInput}
                 options={aliasTargetSelectOptions}
                 state="default"
@@ -4829,19 +4829,19 @@
             {:else if aliasTargetRequiresId}
               <Input
                 id="distribution-alias-target-id-free"
-                label="ID cible"
+                label="Target ID"
                 value={aliasTargetIdInput}
-                placeholder="ID canonique"
+                placeholder="Canonical ID"
                 type="text"
                 state={aliasTargetIdInput.trim().length > 0 ? "default" : "error"}
-                message={aliasTargetIdInput.trim().length > 0 ? "" : "ID cible requis."}
+                message={aliasTargetIdInput.trim().length > 0 ? "" : "Target ID required."}
                 oninput={updateAliasTargetId}
               />
             {/if}
           </div>
           <div class="settings-editor-actions">
             <Button
-              label={aliasEditorId === null ? "Créer alias" : "Mettre à jour alias"}
+              label={aliasEditorId === null ? "Create alias" : "Update alias"}
               variant="primary"
               size="medium"
               type="button"
@@ -4849,12 +4849,12 @@
               loading={false}
               locked={false}
               focus={false}
-              ariaLabel={aliasEditorId === null ? "Créer alias" : "Mettre à jour alias"}
-              title={writesEnabled ? (!aliasFormValid ? "Complétez les champs requis." : "") : writeGateMessage}
+              ariaLabel={aliasEditorId === null ? "Create alias" : "Update alias"}
+              title={writesEnabled ? (!aliasFormValid ? "Complete the required fields." : "") : writeGateMessage}
               onclick={saveAlias}
             />
             <Button
-              label="Nouveau"
+              label="New"
               variant="secondary"
               size="medium"
               type="button"
@@ -4862,11 +4862,11 @@
               loading={false}
               locked={false}
               focus={false}
-              ariaLabel="Préparer un nouvel alias"
+              ariaLabel="Prepare a new alias"
               onclick={openAliasCreatePanel}
             />
             <Button
-              label="Réinitialiser"
+              label="Reset"
               variant="secondary"
               size="medium"
               type="button"
@@ -4874,122 +4874,122 @@
               loading={false}
               locked={false}
               focus={false}
-              ariaLabel="Réinitialiser l'éditeur d'alias"
+              ariaLabel="Reset alias editor"
               onclick={closeAliasEditor}
             />
           </div>
         </section>
         {#if aliases.length === 0 && aliasesState.status === "success"}
           <section class="empty-state ehq-edge-surface">
-            <strong>Aucun alias catalogue</strong>
-            <span>Aucun alias n'est disponible pour ce workspace. Les alias routent les noms importés vers les entités canoniques une fois configurés.</span>
+            <strong>No catalog aliases</strong>
+            <span>No aliases are available for this workspace. Once configured, aliases route imported names to canonical entities.</span>
           </section>
         {:else}
-          <Table title="Alias catalogue" columns={aliasColumns} rows={aliasRows} state={tableStateFor(aliasesState.status, aliases.length)} actionLabel="" rowActions={aliasRowActions} pagination={aliasesPagination} />
+          <Table title="Catalog aliases" columns={aliasColumns} rows={aliasRows} state={tableStateFor(aliasesState.status, aliases.length)} actionLabel="" rowActions={aliasRowActions} pagination={aliasesPagination} />
         {/if}
       {:else if activePageId === "duplicates"}
-        <section class="recon-actions ehq-edge-surface" aria-label="Note doublons">
+        <section class="recon-actions ehq-edge-surface" aria-label="Duplicate note">
           <SectionTemplate
             eyebrow="duplicates"
-            title="Détection des doublons"
-            detail="Les enregistrements potentiellement dupliqués sont listés avec des libellés lisibles; utilisez l'action de résolution pour exclure les doublons.
+            title="Duplicate detection"
+            detail="Potential duplicate records are listed with readable labels; use the resolution action to exclude duplicates.
 "
             state="ready"
           />
         </section>
         {#if duplicates.length === 0 && duplicatesState.status === "success"}
           <section class="empty-state ehq-edge-surface">
-            <strong>Aucun doublon détecté</strong>
-            <span>Aucun enregistrement potentiellement dupliqué n'a été trouvé dans le catalogue.</span>
+            <strong>No duplicates detected</strong>
+            <span>No potentially duplicated records were found in the catalog.</span>
           </section>
         {:else}
-          <Table title="Doublons potentiels" columns={duplicateColumns} rows={duplicateRows} state={tableStateFor(duplicatesState.status, duplicates.length)} actionLabel="" rowActions={duplicateRowActions} pagination={duplicatesPagination} />
+          <Table title="Potential duplicates" columns={duplicateColumns} rows={duplicateRows} state={tableStateFor(duplicatesState.status, duplicates.length)} actionLabel="" rowActions={duplicateRowActions} pagination={duplicatesPagination} />
         {/if}
       {:else if activePageId === "audit-log"}
         {#if auditEntries.length === 0 && auditLogState.status === "success"}
           <section class="empty-state ehq-edge-surface">
-            <strong>Aucune entrée d'audit</strong>
-            <span>Aucun événement d'audit scope Distribution n'est enregistré pour ce workspace.</span>
+            <strong>No audit entries</strong>
+            <span>No Distribution-scoped audit events are recorded for this workspace.</span>
           </section>
         {:else}
-          <Table title="Journal d'audit" columns={auditColumns} rows={auditRows} state={tableStateFor(auditLogState.status, auditEntries.length)} actionLabel="" pagination={auditPagination} />
+          <Table title="Audit log" columns={auditColumns} rows={auditRows} state={tableStateFor(auditLogState.status, auditEntries.length)} actionLabel="" pagination={auditPagination} />
         {/if}
       {:else if activePageId === "settings"}
         {#if isLoadingStatus(settingsState.status)}
-          <Loader label="Chargement des paramètres" detail="Lecture de la configuration workspace." size="medium" />
+          <Loader label="Loading settings" detail="Reading workspace configuration." size="medium" />
         {:else if settingsState.status === "error"}
           <section class="empty-state error ehq-edge-surface">
-            <strong>Paramètres indisponibles</strong>
-            <span>La configuration du workspace n'a pas pu être chargée.</span>
-            <Button label="Réessayer" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Réessayer le chargement des paramètres" onclick={reloadSettingsPage} />
+            <strong>Settings unavailable</strong>
+            <span>The workspace configuration could not be loaded.</span>
+            <Button label="Retry" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Retry settings loading" onclick={reloadSettingsPage} />
           </section>
         {:else if settings !== null}
           <div class="settings-grid">
-            <section class="settings-panel ehq-edge-surface" aria-label="Paramètres Distribution">
+            <section class="settings-panel ehq-edge-surface" aria-label="Distribution settings">
               <dl>
                 <div><dt>Workspace</dt><dd>{settings.workspaceId}</dd></div>
                 <div><dt>Namespace API</dt><dd>{settings.namespace}</dd></div>
-                <div><dt>Lectures</dt><dd>{settings.reads}</dd></div>
-                <div><dt>Ayants droit</dt><dd>{settings.payeeCount}</dd></div>
-                <div><dt>Contrats</dt><dd>{settings.contractCount}</dd></div>
-                <div><dt>Devises</dt><dd>{settings.currencies.length === 0 ? "—" : settings.currencies.join(", ")}</dd></div>
-                <div><dt>Taux FX</dt><dd>{settings.fxRateCount}</dd></div>
-                <div><dt>Mutations</dt><dd>{settings.mutationsEnabled ? "activées" : "lecture seule"}</dd></div>
+                <div><dt>Reads</dt><dd>{settings.reads}</dd></div>
+                <div><dt>Payees</dt><dd>{settings.payeeCount}</dd></div>
+                <div><dt>Contracts</dt><dd>{settings.contractCount}</dd></div>
+                <div><dt>Currencies</dt><dd>{settings.currencies.length === 0 ? "—" : settings.currencies.join(", ")}</dd></div>
+                <div><dt>FX rates</dt><dd>{settings.fxRateCount}</dd></div>
+                <div><dt>Mutations</dt><dd>{settings.mutationsEnabled ? "enabled" : "read-only"}</dd></div>
               </dl>
             </section>
 
-            <section class="settings-panel ehq-edge-surface" aria-label="Enregistrer un taux FX">
+            <section class="settings-panel ehq-edge-surface" aria-label="Save an FX rate">
               <header class="settings-editor-head">
-                <strong>Enregistrer un taux FX</strong>
-                <span>Ajoute ou met à jour une paire devise + date effective.</span>
+                <strong>Save an FX rate</strong>
+                <span>Add or update a currency pair and effective date.</span>
               </header>
 
               <div class="settings-editor-grid">
                 <Input
                   id="distribution-fx-from"
-                  label="Devise source"
+                  label="Source currency"
                   value={fxFromCurrencyInput}
                   placeholder="EUR"
                   type="text"
                   state={fxFromCurrencyInput.trim().length > 0 && fxFromCurrencyNormalized === null ? "error" : "default"}
-                  message={fxFromCurrencyInput.trim().length > 0 && fxFromCurrencyNormalized === null ? "Code ISO attendu (EUR, USD...)." : ""}
+                  message={fxFromCurrencyInput.trim().length > 0 && fxFromCurrencyNormalized === null ? "ISO code required (EUR, USD...)." : ""}
                   oninput={updateFxFromCurrencyInput}
                 />
                 <Input
                   id="distribution-fx-to"
-                  label="Devise cible"
+                  label="Target currency"
                   value={fxToCurrencyInput}
                   placeholder="MUR"
                   type="text"
                   state={fxToCurrencyInput.trim().length > 0 && fxToCurrencyNormalized === null ? "error" : "default"}
-                  message={fxToCurrencyInput.trim().length > 0 && fxToCurrencyNormalized === null ? "Code ISO attendu (MUR, EUR...)." : ""}
+                  message={fxToCurrencyInput.trim().length > 0 && fxToCurrencyNormalized === null ? "ISO code required (MUR, EUR...)." : ""}
                   oninput={updateFxToCurrencyInput}
                 />
                 <Input
                   id="distribution-fx-date"
-                  label="Date effective"
+                  label="Effective date"
                   value={fxEffectiveDateInput}
                   placeholder="YYYY-MM-DD"
                   type="text"
                   state={fxEffectiveDateInput.trim().length > 0 && fxEffectiveDateNormalized === null ? "error" : "default"}
-                  message={fxEffectiveDateInput.trim().length > 0 && fxEffectiveDateNormalized === null ? "Format attendu : YYYY-MM-DD." : ""}
+                  message={fxEffectiveDateInput.trim().length > 0 && fxEffectiveDateNormalized === null ? "Required format: YYYY-MM-DD." : ""}
                   oninput={updateFxEffectiveDateInput}
                 />
                 <Input
                   id="distribution-fx-rate"
-                  label="Taux"
+                  label="Rate"
                   value={fxRateInput}
                   placeholder="53.941005"
                   type="text"
                   state={fxRateInput.trim().length > 0 && fxRateNormalized === null ? "error" : "default"}
-                  message={fxRateInput.trim().length > 0 && fxRateNormalized === null ? "Nombre positif, 10 décimales max." : ""}
+                  message={fxRateInput.trim().length > 0 && fxRateNormalized === null ? "Positive number, up to 10 decimal places." : ""}
                   oninput={updateFxRateInput}
                 />
               </div>
 
               <div class="settings-editor-actions">
                 <Button
-                  label="Enregistrer le taux"
+                  label="Save rate"
                   variant="primary"
                   size="medium"
                   type="button"
@@ -4997,7 +4997,7 @@
                   loading={fxRateSaveStatus === "loading"}
                   locked={false}
                   focus={false}
-                  ariaLabel="Enregistrer le taux FX"
+                  ariaLabel="Save FX rate"
                   onclick={saveFxRate}
                 />
               </div>
@@ -5008,7 +5008,7 @@
             </section>
           </div>
 
-          <Table title="Historique FX" columns={fxRateColumns} rows={fxRateRows} state={tableStateFor(fxRatesState.status, fxRateRows.length)} actionLabel="" />
+          <Table title="FX history" columns={fxRateColumns} rows={fxRateRows} state={tableStateFor(fxRatesState.status, fxRateRows.length)} actionLabel="" />
         {/if}
       {/if}
     </div>

@@ -59,7 +59,7 @@ export async function extractPdfText(
   onProgress?: (pageNumber: number, pageCount: number) => void
 ): Promise<string> {
   if (file.size > MAX_PDF_BYTES) {
-    throw new Error("Le PDF dépasse la taille maximale de 25 Mo.");
+    throw new Error("The PDF exceeds the maximum size of 25 MB.");
   }
 
   const pdfjs = await loadPdfjs();
@@ -67,7 +67,7 @@ export async function extractPdfText(
   const document = await pdfjs.getDocument({ data: buffer }).promise;
   if (document.numPages > MAX_PDF_PAGES) {
     await document.destroy();
-    throw new Error("Le PDF dépasse la limite de 500 pages.");
+    throw new Error("The PDF exceeds the 500-page limit.");
   }
 
   const pages = new Array<string>(document.numPages);

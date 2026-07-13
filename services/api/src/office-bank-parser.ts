@@ -117,10 +117,10 @@ export function parseOfficeBankImportText(input: OfficeBankParseInput): OfficeBa
     ),
     parsingNotes: fixedSbiDetected
       ? [
-          "Relevé SBI à colonnes fixes détecté et normalisé par l’API.",
+          "Fixed-column SBI statement detected and normalized by the API.",
           ...(fixedSbi?.totalsVerified === true
-            ? ["Les totaux imprimés et les soldes courants ont été vérifiés exactement."]
-            : ["Les soldes courants ont été vérifiés exactement ; aucun total général imprimé n’était disponible."])
+            ? ["Printed totals and running balances were verified exactly."]
+            : ["Running balances were verified exactly; no printed grand total was available."])
         ]
       : ["Parsed on API from extracted statement text and normalized before import preview."],
     validationIssues: fixedSbi?.validationIssues ?? []

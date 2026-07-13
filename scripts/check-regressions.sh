@@ -6,6 +6,8 @@
 #      (styling belongs to the var(--ehq-*) design tokens).
 #   3. Raw <button> elements in apps/hq must not exceed the recorded baseline
 #      (actions belong to the @ehq/ui Button; documented exceptions only).
+#   4. Financial source must not reintroduce float-money coercion.
+#   5. User-visible copy must remain English-only across the consolidated app.
 # Baselines live in scripts/regression-baseline.json. Lowering a baseline after
 # further cleanup is encouraged; raising one requires a deliberate, reviewed edit.
 # Current baselines: 3 colors = the distribution statement A4 print document
@@ -94,9 +96,14 @@ if [ "$FLOAT_HITS" -gt 0 ]; then
   FAILED=1
 fi
 
+# --- 5. English-only UI copy --------------------------------------------------
+if ! node scripts/check-english-ui-copy.mjs; then
+  FAILED=1
+fi
+
 if [ "$FAILED" -ne 0 ]; then
   echo "check-regressions: FAILED"
   exit 1
 fi
 
-echo "check-regressions: ok (colors $COLORS_NOW/$COLORS_BASE, raw buttons $BUTTONS_NOW/$BUTTONS_BASE, stubs 0, float-money 0)"
+echo "check-regressions: ok (colors $COLORS_NOW/$COLORS_BASE, raw buttons $BUTTONS_NOW/$BUTTONS_BASE, stubs 0, float-money 0, English UI copy)"
