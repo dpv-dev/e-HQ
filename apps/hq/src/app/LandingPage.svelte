@@ -14,10 +14,7 @@
     type WorkspaceAppId
   } from "@ehq/auth";
   import { Button, Checkbox, Loader } from "@ehq/ui";
-  import commandCenterPhoto from "../../../../packages/ui/assets/backgrounds/hq-card-command-center.jpg?url";
-  import distributionPhoto from "../../../../packages/ui/assets/backgrounds/hq-card-distribution.jpg?url";
   import landingBackground from "../../../../packages/ui/assets/backgrounds/hq-landing-command-room.webp?url";
-  import officePhoto from "../../../../packages/ui/assets/backgrounds/hq-card-office.jpg?url";
   import { createShellApiClient } from "./app-shell-data.js";
   import type { AppRoute } from "./routes.js";
   import { sendSupabasePasswordReset, signInWithSupabasePassword } from "./supabase.js";
@@ -37,7 +34,6 @@
     readonly eyebrow: string;
     readonly title: string;
     readonly description: string;
-    readonly image: string;
   }
 
   type MessageTone = "info" | "error";
@@ -68,22 +64,19 @@
       workspaceId: "office",
       eyebrow: "Finance Control",
       title: "Office",
-      description: "Manage transactions, payments and financial control.",
-      image: officePhoto
+      description: "Manage transactions and financial control."
     },
     {
       workspaceId: "distribution",
       eyebrow: "Royalty Operations",
       title: "Distribution",
-      description: "Manage royalties, imports, mapping and allocations.",
-      image: distributionPhoto
+      description: "Manage royalties and allocations."
     },
     {
       workspaceId: "command-center",
       eyebrow: "Command Center",
       title: "HQ",
-      description: "Manage overall operations and monitoring.",
-      image: commandCenterPhoto
+      description: "Manage overall operations and monitoring."
     }
   ];
 
@@ -327,10 +320,6 @@
   </div>
 
   <header class="landing-top">
-    <button class="brand" type="button" aria-label="ë • HQ home" onclick={() => onNavigate("/")}>
-      <span class="brand-e">ë</span>
-    </button>
-
     <div class="top-right">
       <button class="bell" type="button" aria-label="Notifications" aria-expanded={notificationsOpen} onclick={toggleNotifications}>
         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -442,7 +431,14 @@
 
   <section class="hero" aria-labelledby="landing-title">
     <div class="hero-copy">
-      <h1 id="landing-title">Welcome to <span>ë</span>-HQ</h1>
+      <h1 id="landing-title" aria-label="Welcome to ë-HQ">
+        Welcome to
+        <svg class="title-e" viewBox="0 0 50 72" aria-hidden="true">
+          <text x="25" y="59" text-anchor="middle" font-size="60">e</text>
+          <circle class="title-dot" cx="17" cy="17" r="4.6" />
+          <circle class="title-dot" cx="33" cy="17" r="4.6" />
+        </svg><span>-HQ</span>
+      </h1>
       <p class="lead">Select your workspace to continue</p>
       <i aria-hidden="true"></i>
     </div>
@@ -451,16 +447,20 @@
   <section class="workspace-grid" aria-label="Available workspaces">
     {#each cards as card (card.workspaceId)}
       {@const locked = isLocked(card.workspaceId)}
-        <article class:locked class:live={!locked} class={`workspace-card accent-${card.workspaceId}`} onmouseenter={() => onPrefetchWorkspace(card.workspaceId)} onfocusin={() => onPrefetchWorkspace(card.workspaceId)}>
+        <article
+          class:locked
+          class:live={!locked}
+          class={`workspace-card accent-${card.workspaceId}`}
+          onmouseenter={() => onPrefetchWorkspace(card.workspaceId)}
+          onfocusin={() => onPrefetchWorkspace(card.workspaceId)}
+        >
         {#if locked}
           <div class="cross" aria-label="Access denied">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
           </div>
+        {:else}
+          <span class="live-tag" aria-hidden="true"><i></i>LIVE</span>
         {/if}
-
-        <div class="photo">
-          <img src={card.image} alt="" />
-        </div>
 
         <div class="workspace-copy">
           <div class="card-head">
@@ -497,10 +497,7 @@
     {/each}
 
     <article class="workspace-card session-card accent-session">
-      <div class="session-visual" aria-hidden="true">
-        <span>{userInitials}</span>
-        <i></i>
-      </div>
+      <span class="live-tag session-tag" aria-hidden="true"><i></i>{isLoggedIn ? "ONLINE" : "OFFLINE"}</span>
 
       <div class="workspace-copy">
         <div class="card-head">
@@ -1035,25 +1032,15 @@
     position: relative;
   }
 
-  .brand,
+  .landing-top {
+    justify-content: flex-end;
+  }
+
   .user-chip {
     padding: 0;
     border: 0;
     background: transparent;
     color: var(--ehq-text);
-  }
-
-  .brand {
-    display: inline-flex;
-    align-items: baseline;
-    gap: var(--ehq-space-2);
-  }
-
-  .brand-e {
-    color: var(--ehq-yellow);
-    font-size: var(--ehq-h2);
-    font-weight: var(--ehq-type-display-weight);
-    line-height: 1;
   }
 
   .eyebrow,
@@ -1294,12 +1281,50 @@
     font-weight: var(--ehq-type-display-weight);
     line-height: 0.96;
     letter-spacing: 0;
+    white-space: nowrap;
     text-transform: none;
     text-shadow: 0 18px 44px color-mix(in srgb, var(--ehq-black) 62%, transparent);
   }
 
   h1 span {
     color: var(--ehq-yellow);
+  }
+
+  /* Animated ë: clean "e" glyph + two heartbeat trema, centered. */
+  .title-e {
+    display: inline-block;
+    width: 0.82em;
+    height: 1.12em;
+    margin-right: -0.16em;
+    transform: translateY(0.16em);
+  }
+
+  .title-e text {
+    font-family: var(--ehq-display);
+    font-weight: var(--ehq-type-display-weight);
+    fill: var(--ehq-yellow);
+  }
+
+  .title-dot {
+    fill: var(--ehq-yellow);
+    animation: dotFade 1.5s ease-in-out infinite;
+  }
+
+  @keyframes dotFade {
+    0% {
+      opacity: 1;
+    }
+
+    70%,
+    100% {
+      opacity: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .title-dot {
+      animation: none;
+    }
   }
 
   .lead {
@@ -1323,39 +1348,45 @@
   .workspace-grid {
     position: absolute;
     left: clamp(var(--ehq-space-4), 2.5vw, var(--ehq-space-6));
-    bottom: clamp(86px, 12vh, 118px);
+    right: clamp(var(--ehq-space-4), 2.5vw, var(--ehq-space-6));
+    bottom: clamp(70px, 9vh, 104px);
     z-index: 1;
-    width: min(590px, calc(100vw - var(--ehq-space-8)));
+    width: auto;
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 250px));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     align-items: stretch;
-    justify-content: space-between;
-    row-gap: clamp(48px, 7vh, 70px);
-    column-gap: var(--ehq-space-5);
+    gap: var(--ehq-space-4);
   }
 
   .workspace-card {
     position: relative;
     --card-accent: var(--ehq-yellow);
     min-width: 0;
-    min-height: clamp(136px, 17vh, 156px);
+    min-height: clamp(180px, 24vh, 220px);
     border: 1px solid var(--ehq-border);
-    border-radius: var(--ehq-radius-sm);
+    border-radius: var(--ehq-radius-lg);
     background:
       linear-gradient(180deg, color-mix(in srgb, var(--ehq-surface) 82%, transparent), color-mix(in srgb, var(--ehq-bg-main) 72%, transparent)),
       color-mix(in srgb, var(--ehq-surface) 78%, transparent);
     backdrop-filter: blur(18px);
-    box-shadow: 0 18px 46px color-mix(in srgb, var(--ehq-black) 36%, transparent);
+    box-shadow:
+      0 18px 46px color-mix(in srgb, var(--ehq-black) 36%, transparent),
+      0 0 22px -8px var(--card-accent);
     display: block;
     overflow: hidden;
+    cursor: default;
     transition:
       transform var(--ehq-transition-normal) var(--ehq-ease),
       border-color var(--ehq-transition-fast) var(--ehq-ease);
   }
 
+  .workspace-card.live {
+    cursor: pointer;
+  }
+
   .workspace-card.live:hover {
-    transform: translateY(calc(var(--ehq-space-1) * -1));
-    border-color: var(--ehq-yellow-border);
+    transform: translateY(calc(var(--ehq-space-3) * -1));
+    border-color: var(--card-accent);
   }
 
   .workspace-card.locked {
@@ -1363,59 +1394,21 @@
   }
 
   /* Per-workspace accent on the landing, sourced from the canonical workspace tokens. */
+  /* Landing accents (design direction): Office red · Distribution blue · HQ white · Session neutral. */
   .accent-office {
-    --card-accent: var(--ehq-workspace-office);
+    --card-accent: var(--ehq-error);
   }
 
   .accent-distribution {
-    --card-accent: var(--ehq-workspace-distribution);
+    --card-accent: var(--ehq-info);
+  }
+
+  .accent-command-center {
+    --card-accent: var(--ehq-text);
   }
 
   .accent-session {
-    --card-accent: var(--ehq-yellow);
-  }
-
-  .photo {
-    position: absolute;
-    inset: 0;
-    height: auto;
-    overflow: hidden;
-    background: transparent;
-  }
-
-  .photo img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    filter: brightness(0.6) saturate(0.9);
-    opacity: 0.78;
-    transform: scale(1.04);
-    -webkit-mask-image:
-      linear-gradient(to right, transparent 0, color-mix(in srgb, var(--ehq-black) 90%, transparent) 34px, var(--ehq-black) 72px, var(--ehq-black) calc(100% - 72px), color-mix(in srgb, var(--ehq-black) 90%, transparent) calc(100% - 34px), transparent 100%),
-      linear-gradient(to bottom, transparent 0, color-mix(in srgb, var(--ehq-black) 90%, transparent) 30px, var(--ehq-black) 66px, var(--ehq-black) calc(100% - 72px), color-mix(in srgb, var(--ehq-black) 90%, transparent) calc(100% - 34px), transparent 100%);
-    -webkit-mask-composite: source-in;
-    mask-image:
-      linear-gradient(to right, transparent 0, color-mix(in srgb, var(--ehq-black) 90%, transparent) 34px, var(--ehq-black) 72px, var(--ehq-black) calc(100% - 72px), color-mix(in srgb, var(--ehq-black) 90%, transparent) calc(100% - 34px), transparent 100%),
-      linear-gradient(to bottom, transparent 0, color-mix(in srgb, var(--ehq-black) 90%, transparent) 30px, var(--ehq-black) 66px, var(--ehq-black) calc(100% - 72px), color-mix(in srgb, var(--ehq-black) 90%, transparent) calc(100% - 34px), transparent 100%);
-    mask-composite: intersect;
-    transition:
-      transform var(--ehq-transition-normal) var(--ehq-ease),
-      filter var(--ehq-transition-normal) var(--ehq-ease);
-  }
-
-  .workspace-card.live:hover .photo img {
-    filter: brightness(0.8) saturate(1.04);
-    transform: scale(1.08);
-  }
-
-  .photo::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background:
-      linear-gradient(90deg, color-mix(in srgb, var(--ehq-surface) 94%, transparent), transparent 72px, transparent calc(100% - 72px), color-mix(in srgb, var(--ehq-surface) 94%, transparent)),
-      linear-gradient(180deg, color-mix(in srgb, var(--ehq-surface) 78%, transparent), transparent 62px, transparent 42%, color-mix(in srgb, var(--ehq-surface) 96%, transparent) 100%);
-    opacity: 0.96;
+    --card-accent: var(--ehq-text-soft);
   }
 
   .card-head {
@@ -1443,6 +1436,7 @@
   }
 
   .card-head h2 {
+    color: var(--card-accent);
     font-size: clamp(22px, 2.4vw, 30px);
     font-weight: var(--ehq-type-display-weight);
     line-height: 1;
@@ -1459,8 +1453,6 @@
   }
 
   .workspace-copy {
-    position: relative;
-    z-index: 1;
     min-height: clamp(136px, 17vh, 156px);
     padding: clamp(var(--ehq-space-2), 1vw, var(--ehq-space-3));
     display: flex;
@@ -1473,60 +1465,6 @@
       radial-gradient(circle at 76% 0%, color-mix(in srgb, var(--ehq-yellow) 18%, transparent), transparent 12rem),
       linear-gradient(180deg, color-mix(in srgb, var(--ehq-surface) 86%, transparent), color-mix(in srgb, var(--ehq-bg-main) 76%, transparent)),
       color-mix(in srgb, var(--ehq-surface) 78%, transparent);
-  }
-
-  .session-visual {
-    position: absolute;
-    inset: 0;
-    min-height: auto;
-    display: grid;
-    place-items: center;
-    overflow: hidden;
-    background:
-      radial-gradient(circle at center, color-mix(in srgb, var(--ehq-yellow) 18%, transparent), transparent 7rem),
-      linear-gradient(135deg, color-mix(in srgb, var(--ehq-yellow) 6%, transparent), color-mix(in srgb, var(--ehq-surface-raised) 18%, transparent));
-  }
-
-  .session-visual span {
-    position: absolute;
-    top: var(--ehq-space-3);
-    right: var(--ehq-space-3);
-    z-index: 1;
-    width: 42px;
-    height: 42px;
-    border: 1px solid color-mix(in srgb, var(--ehq-yellow) 52%, transparent);
-    border-radius: var(--ehq-radius-pill);
-    background: color-mix(in srgb, var(--ehq-bg-main) 68%, transparent);
-    color: var(--ehq-yellow);
-    display: grid;
-    place-items: center;
-    font-family: var(--ehq-mono);
-    font-size: var(--ehq-type-ui-size);
-    font-weight: var(--ehq-type-heading-weight);
-    box-shadow:
-      0 0 0 10px color-mix(in srgb, var(--ehq-yellow) 4%, transparent),
-      0 18px 42px color-mix(in srgb, var(--ehq-black) 42%, transparent);
-  }
-
-  .session-visual i {
-    position: absolute;
-    inset: 22%;
-    border: 1px solid color-mix(in srgb, var(--ehq-yellow) 28%, transparent);
-    border-radius: var(--ehq-radius-pill);
-    animation: sessionPulse 3.8s ease-in-out infinite;
-  }
-
-  @keyframes sessionPulse {
-    0%,
-    100% {
-      opacity: 0.24;
-      transform: scale(0.88);
-    }
-
-    48% {
-      opacity: 0.72;
-      transform: scale(1.05);
-    }
   }
 
   .card-desc {
@@ -1574,7 +1512,8 @@
 
   .workspace-card.live:hover .enter-button {
     border-color: var(--card-accent);
-    background: color-mix(in srgb, var(--card-accent) 16%, transparent);
+    background: var(--card-accent);
+    color: var(--ehq-text-on-yellow);
   }
 
   .enter-button span {
@@ -1583,6 +1522,14 @@
 
   .enter-button:hover span {
     transform: translateX(var(--ehq-space-1));
+  }
+
+  /* Stretched link: the CTA button is the click target for the whole card. */
+  .enter-button::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 1;
   }
 
   .cross svg {
@@ -1615,6 +1562,37 @@
     color: var(--ehq-error);
     display: grid;
     place-items: center;
+  }
+
+  /* Static status tag (no pulse). */
+  .live-tag {
+    position: absolute;
+    top: var(--ehq-space-3);
+    right: var(--ehq-space-3);
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--ehq-mono);
+    font-size: var(--ehq-type-label-size);
+    letter-spacing: 0.12em;
+    color: var(--ehq-success);
+    pointer-events: none;
+  }
+
+  .live-tag i {
+    width: 7px;
+    height: 7px;
+    border-radius: var(--ehq-radius-pill);
+    background: var(--ehq-success);
+  }
+
+  .session-tag {
+    color: var(--ehq-text-muted);
+  }
+
+  .session-tag i {
+    background: var(--ehq-text-muted);
   }
 
   footer {
@@ -1757,7 +1735,7 @@
     color: var(--ehq-error);
   }
 
-  @media (min-width: 921px) and (max-height: 760px) {
+  @media (min-width: 1181px) and (max-height: 760px) {
     .landing-shell {
       gap: var(--ehq-space-3);
     }
@@ -1775,7 +1753,7 @@
     }
   }
 
-  @media (max-width: 920px) {
+  @media (max-width: 1180px) {
     .landing-shell {
       padding: var(--ehq-space-3);
       gap: var(--ehq-space-3);
@@ -1814,23 +1792,19 @@
     .workspace-grid {
       position: relative;
       left: auto;
+      right: auto;
       bottom: auto;
       flex: 1 1 auto;
       width: 100%;
       margin-top: auto;
       display: grid;
-      grid-template-columns: 1fr;
-      row-gap: var(--ehq-space-2);
-      column-gap: 0;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: var(--ehq-space-3);
     }
 
     .workspace-card {
       min-height: 132px;
       max-width: none;
-    }
-
-    .photo {
-      inset: 0;
     }
 
     .workspace-copy {
@@ -1858,10 +1832,16 @@
     }
   }
 
-  @media (max-width: 920px) and (max-height: 640px) {
+  @media (max-width: 1180px) and (max-height: 640px) {
     .lead,
     footer {
       display: none;
+    }
+  }
+
+  @media (max-width: 600px) {
+    .workspace-grid {
+      grid-template-columns: 1fr;
     }
   }
 </style>
