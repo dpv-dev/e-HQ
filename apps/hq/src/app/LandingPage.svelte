@@ -1794,7 +1794,7 @@
       left: auto;
       right: auto;
       bottom: auto;
-      flex: 1 1 auto;
+      flex: 0 1 auto;
       width: 100%;
       margin-top: auto;
       display: grid;
@@ -1828,6 +1828,9 @@
     }
 
     footer {
+      position: relative;
+      left: auto;
+      bottom: auto;
       font-size: var(--ehq-type-label-size);
     }
   }
