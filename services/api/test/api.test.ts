@@ -2993,6 +2993,94 @@ test("bank import parse-preview parses CSV rows server-side and enforces preview
   assert.equal(json.rows[1]?.credit, "125.00");
 });
 
+test("bank import parse-preview rejects an SBI statement whose printed totals do not reconcile", async () => {
+  const app = createWriteEnabledFixtureApiService();
+  const statementText = [
+    "SBI (Mauritius) Ltd",
+    " DATE          PARTICULARS              CHQ.NO.     WITHDRAWALS        DEPOSITS          BALANCE",
+    " 01-01-2026 B/F                                                               1,000.00 Cr",
+    " 02-01-2026 BANK SERVICE FEE                     100.00                 900.00 Cr",
+    " Grand Total:                                   101.00            0.00         900.00 Cr"
+  ].join("\n");
+
+  const response = await app.request("/eof/v1/bank-import/parse-preview", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      fileName: "sbi-invalid.pdf",
+      sourceHint: "sbi",
+      contentText: statementText
+    })
+  });
+
+  assert.equal(response.status, 422);
+  const json = (await response.json()) as { readonly error: { readonly code: string } };
+  assert.equal(json.error.code, "bank_import_statement_validation_failed");
+});
+
+test("bank import preview excludes an existing line by balance even when the wording changed", async () => {
+  const app = createWriteEnabledFixtureApiService();
+  const response = await app.request("/eof/v1/bank-import/preview", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      accountId: "bank_mur",
+      source: "sbi",
+      fileName: "historical-sbi.pdf",
+      checksum: "historical-sbi-checksum",
+      rows: [{
+        date: "2026-02-15",
+        description: "Different wording from the new PDF",
+        debit: "85.00",
+        balance: "3715.00",
+        currency: "MUR"
+      }]
+    })
+  });
+
+  assert.equal(response.status, 200);
+  const json = (await response.json()) as {
+    readonly acceptedRowCount: number;
+    readonly rejectedRowCount: number;
+    readonly duplicateRowCount: number;
+    readonly rowResults: readonly { readonly status: string; readonly issues: readonly string[] }[];
+  };
+  assert.equal(json.acceptedRowCount, 0);
+  assert.equal(json.rejectedRowCount, 0);
+  assert.equal(json.duplicateRowCount, 1);
+  assert.equal(json.rowResults[0]?.status, "duplicate");
+  assert.ok(json.rowResults[0]?.issues.includes("duplicate_candidate"));
+});
+
+test("bank import preview keeps same-day same-amount movements when their balances differ", async () => {
+  const app = createWriteEnabledFixtureApiService();
+  const response = await app.request("/eof/v1/bank-import/preview", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      accountId: "bank_mur",
+      source: "sbi",
+      fileName: "new-sbi.pdf",
+      checksum: "new-sbi-checksum",
+      rows: [{
+        date: "2026-02-15",
+        description: "Legitimate second fee",
+        debit: "85.00",
+        balance: "3600.00",
+        currency: "MUR"
+      }]
+    })
+  });
+
+  assert.equal(response.status, 200);
+  const json = (await response.json()) as { readonly acceptedRowCount: number; readonly duplicateRowCount: number };
+  assert.equal(json.acceptedRowCount, 1);
+  assert.equal(json.duplicateRowCount, 0);
+});
+
 // Regression for the SBI MUR import that rejected all 2652 rows with no visible reason: when
 // no target account resolves (here a currency with no matching account, mirroring rows sent
 // without an accountId), every row is rejected and the cause must be surfaced — not swallowed.
@@ -3028,6 +3116,41 @@ test("bank import preview surfaces account_not_found when no target account reso
   assert.equal(json.rowResults.length, 2);
   assert.ok(json.rowResults.every((row) => row.status === "rejected"));
   assert.ok(json.rowResults.every((row) => row.issues.includes("account_not_found")));
+});
+
+test("bank import preview never guesses between two active accounts in the same currency", async () => {
+  const fixtures = createFixtureStore();
+  const baseAccount = fixtures.office.bankAccounts[0];
+  assert.ok(baseAccount !== undefined);
+  const app = createWriteEnabledFixtureApiServiceWithOverrides({
+    office: {
+      ...fixtures.office,
+      bankAccounts: [
+        ...fixtures.office.bankAccounts,
+        { ...baseAccount, id: "bank_sbi_mur", bankName: "SBI (Mauritius)", accountLabel: "SBI MUR" }
+      ]
+    }
+  });
+
+  const preview = await app.request("/eof/v1/bank-import/preview", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      source: "sbi",
+      fileName: "ambiguous-account.pdf",
+      checksum: "ambiguous-account-checksum",
+      rows: [{ date: "2026-05-27", description: "SBI row", debit: "40.00", currency: "MUR" }]
+    })
+  });
+
+  assert.equal(preview.status, 200);
+  const json = (await preview.json()) as {
+    readonly acceptedRowCount: number;
+    readonly rowResults: readonly { readonly issues: readonly string[] }[];
+  };
+  assert.equal(json.acceptedRowCount, 0);
+  assert.ok(json.rowResults[0]?.issues.includes("account_not_found"));
 });
 
 test("bank import preview rejects foreign rows when no FX rate can convert to MUR", async () => {
@@ -3644,6 +3767,110 @@ test("office bank import confirm persists lines once and replays idempotent resp
   assert.equal(rawPage.items.filter((item) => item.reference === "IMP-1").length, 1);
 });
 
+test("office bank import confirm cannot force a preview duplicate into accepted rows", async () => {
+  const app = createWriteEnabledFixtureApiService();
+  const preview = await app.request("/eof/v1/bank-import/preview", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      accountId: "bank_mur",
+      source: "sbi",
+      fileName: "forced-duplicate.pdf",
+      checksum: "forced-duplicate-checksum",
+      rows: [{
+        date: "2026-02-15",
+        description: "Changed description",
+        debit: "85.00",
+        balance: "3715.00",
+        currency: "MUR"
+      }]
+    })
+  });
+  assert.equal(preview.status, 200);
+  const previewJson = (await preview.json()) as { readonly previewId: string };
+
+  const confirm = await app.request("/eof/v1/bank-import/confirm", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "forced-duplicate-confirm" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      previewId: previewJson.previewId,
+      accountId: "bank_mur",
+      acceptedRowIds: ["row_1"],
+      rejectedRowIds: []
+    })
+  });
+
+  assert.equal(confirm.status, 409);
+  assert.equal(
+    ((await confirm.json()) as { readonly error: { readonly code: string } }).error.code,
+    "bank_import_preview_decision_changed"
+  );
+});
+
+test("office bank import confirm rejects a stale preview after another file imports the same line", async () => {
+  const app = createWriteEnabledFixtureApiService();
+  const rows = [{
+    date: "2026-03-10",
+    description: "New SBI movement",
+    debit: "45.00",
+    balance: "1250.00",
+    currency: "MUR",
+    reference: "SBI-STALE-1"
+  }];
+
+  const previewIds: string[] = [];
+  for (const checksum of ["stale-preview-a", "stale-preview-b"]) {
+    const preview = await app.request("/eof/v1/bank-import/preview", {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workspaceId: "workspace_1",
+        accountId: "bank_mur",
+        source: "sbi",
+        fileName: `${checksum}.pdf`,
+        checksum,
+        rows
+      })
+    });
+    assert.equal(preview.status, 200);
+    const json = (await preview.json()) as { readonly previewId: string; readonly acceptedRowCount: number };
+    assert.equal(json.acceptedRowCount, 1);
+    previewIds.push(json.previewId);
+  }
+
+  const first = await app.request("/eof/v1/bank-import/confirm", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "stale-preview-confirm-a" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      previewId: previewIds[0],
+      accountId: "bank_mur",
+      acceptedRowIds: ["row_1"],
+      rejectedRowIds: []
+    })
+  });
+  assert.equal(first.status, 200);
+
+  const second = await app.request("/eof/v1/bank-import/confirm", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "stale-preview-confirm-b" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      previewId: previewIds[1],
+      accountId: "bank_mur",
+      acceptedRowIds: ["row_1"],
+      rejectedRowIds: []
+    })
+  });
+  assert.equal(second.status, 409);
+  assert.equal(
+    ((await second.json()) as { readonly error: { readonly code: string } }).error.code,
+    "bank_import_preview_stale_duplicates"
+  );
+});
+
 test("office bank import confirm persists the account bound at preview", async () => {
   const app = createWriteEnabledFixtureApiService();
   const preview = await app.request("/eof/v1/bank-import/preview", {
@@ -4131,6 +4358,23 @@ test("office bank import confirm writes idempotency, audit, batch, and lines in 
     assert.equal(preview.status, 200);
     const previewJson = (await preview.json()) as { readonly previewId: string };
 
+    // Create a second accepted preview before the first confirmation. Its different
+    // fingerprint forces confirm to exercise transactional line-level dedupe.
+    const stalePreview = await app.request("/eof/v1/bank-import/preview", {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workspaceId: "workspace_1",
+        source: "csv",
+        fileName: "pglite-bank-renamed.csv",
+        checksum: "checksum-bank-pglite-renamed",
+        rows: [{ date: "2026-02-21", description: "PGlite line renamed", debit: "23.45", currency: "MUR", accountId: "bank_mur", reference: "PGL-1" }]
+      })
+    });
+    assert.equal(stalePreview.status, 200);
+    const stalePreviewJson = (await stalePreview.json()) as { readonly previewId: string; readonly acceptedRowCount: number };
+    assert.equal(stalePreviewJson.acceptedRowCount, 1);
+
     const confirm = await app.request("/eof/v1/bank-import/confirm", {
       method: "POST",
       headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "bank-confirm-pglite-1" },
@@ -4146,6 +4390,24 @@ test("office bank import confirm writes idempotency, audit, batch, and lines in 
 
     assert.equal(await pgliteCount(pglite, "api_idempotency_keys"), 1);
     assert.equal(await pgliteCount(pglite, "audit_logs"), 1);
+    assert.equal(await pgliteCount(pglite, "office_bank_import_batches"), 1);
+    assert.equal(await pgliteCount(pglite, "office_bank_statement_lines"), 1);
+
+    const staleConfirm = await app.request("/eof/v1/bank-import/confirm", {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "bank-confirm-pglite-stale" },
+      body: JSON.stringify({
+        workspaceId: "workspace_1",
+        previewId: stalePreviewJson.previewId,
+        acceptedRowIds: ["row_1"],
+        rejectedRowIds: []
+      })
+    });
+    assert.equal(staleConfirm.status, 409);
+    assert.equal(
+      ((await staleConfirm.json()) as { readonly error: { readonly code: string } }).error.code,
+      "bank_import_preview_stale_duplicates"
+    );
     assert.equal(await pgliteCount(pglite, "office_bank_import_batches"), 1);
     assert.equal(await pgliteCount(pglite, "office_bank_statement_lines"), 1);
 
@@ -4165,6 +4427,103 @@ test("office bank import confirm writes idempotency, audit, batch, and lines in 
     assert.equal(duplicateReceipt.importedTransactionCount, 1);
     assert.equal(await pgliteCount(pglite, "api_idempotency_keys"), 2);
     assert.equal(await pgliteCount(pglite, "audit_logs"), 2);
+    assert.equal(await pgliteCount(pglite, "office_bank_import_batches"), 1);
+    assert.equal(await pgliteCount(pglite, "office_bank_statement_lines"), 1);
+  } finally {
+    await pglite.close();
+  }
+});
+
+test("office bank import transactional dedupe crosses occurred and value dates in PGlite", async () => {
+  const pglite = new PGlite();
+  await createPgliteWriteTables(pglite);
+  const testNowIso = new Date(Date.now() + 60_000).toISOString();
+  const app = createApiService({
+    fixtures: createFixtureStore(),
+    persistence: createDrizzlePersistenceRuntime(drizzle(pglite) as Parameters<typeof createDrizzlePersistenceRuntime>[0], { WRITES_ENABLED: "true" }),
+    health: null,
+    nowIso: (): string => testNowIso,
+    auth: createTestAuthVerifier()
+  });
+
+  try {
+    const existingPreview = await app.request("/eof/v1/bank-import/preview", {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workspaceId: "workspace_1",
+        source: "csv",
+        fileName: "cross-date-existing.csv",
+        checksum: "cross-date-existing-checksum",
+        rows: [{
+          date: "2026-03-20",
+          valueDate: "2026-03-21",
+          description: "Cross-date source line",
+          debit: "31.25",
+          currency: "MUR",
+          accountId: "bank_mur",
+          reference: "CROSS-DATE-1"
+        }]
+      })
+    });
+    assert.equal(existingPreview.status, 200);
+    const existingPreviewJson = (await existingPreview.json()) as { readonly previewId: string };
+
+    // Preview before the first confirm so only the transactional revalidation can
+    // catch the duplicate. The shared value date sits between distinct occurred dates.
+    const crossedPreview = await app.request("/eof/v1/bank-import/preview", {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workspaceId: "workspace_1",
+        source: "csv",
+        fileName: "cross-date-candidate.csv",
+        checksum: "cross-date-candidate-checksum",
+        rows: [{
+          date: "2026-03-22",
+          valueDate: "2026-03-21",
+          description: "Cross-date candidate wording",
+          debit: "31.25",
+          currency: "MUR",
+          accountId: "bank_mur",
+          reference: "CROSS-DATE-1"
+        }]
+      })
+    });
+    assert.equal(crossedPreview.status, 200);
+    const crossedPreviewJson = (await crossedPreview.json()) as {
+      readonly previewId: string;
+      readonly acceptedRowCount: number;
+    };
+    assert.equal(crossedPreviewJson.acceptedRowCount, 1);
+
+    const existingConfirm = await app.request("/eof/v1/bank-import/confirm", {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "cross-date-confirm-existing" },
+      body: JSON.stringify({
+        workspaceId: "workspace_1",
+        previewId: existingPreviewJson.previewId,
+        acceptedRowIds: ["row_1"],
+        rejectedRowIds: []
+      })
+    });
+    assert.equal(existingConfirm.status, 200);
+
+    const crossedConfirm = await app.request("/eof/v1/bank-import/confirm", {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "cross-date-confirm-candidate" },
+      body: JSON.stringify({
+        workspaceId: "workspace_1",
+        previewId: crossedPreviewJson.previewId,
+        acceptedRowIds: ["row_1"],
+        rejectedRowIds: []
+      })
+    });
+    assert.equal(crossedConfirm.status, 409);
+    assert.equal(
+      ((await crossedConfirm.json()) as { readonly error: { readonly code: string } }).error.code,
+      "bank_import_preview_stale_duplicates"
+    );
     assert.equal(await pgliteCount(pglite, "office_bank_import_batches"), 1);
     assert.equal(await pgliteCount(pglite, "office_bank_statement_lines"), 1);
   } finally {

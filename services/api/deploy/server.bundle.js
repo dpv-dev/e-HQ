@@ -25130,6 +25130,89 @@ function toBasisPointValue(value) {
   return parseInt(value.toString(), 10);
 }
 
+// ../../packages/domain-office/src/bank-import-dedupe.ts
+function detectOfficeBankImportDuplicates(candidates, existingLines) {
+  const existingByBaseKey = indexExistingLines(existingLines);
+  const consumedExistingIds = /* @__PURE__ */ new Set();
+  return candidates.map((candidate) => {
+    const possibleMatches = possibleExistingMatches(candidate, existingByBaseKey, consumedExistingIds);
+    const balanceMatch = possibleMatches.find(
+      (existing) => candidate.balanceMinor !== null && existing.line.balanceMinor !== null && candidate.balanceMinor === existing.line.balanceMinor
+    );
+    if (balanceMatch !== void 0) {
+      consumedExistingIds.add(balanceMatch.line.id);
+      return matchedResult(candidate.id, balanceMatch.line.id, "balance");
+    }
+    const candidateReference = normalizeReference(candidate.reference);
+    if (candidateReference !== null) {
+      const referenceMatch = possibleMatches.find(
+        (existing) => (candidate.balanceMinor === null || existing.line.balanceMinor === null) && existing.normalizedReference === candidateReference
+      );
+      if (referenceMatch !== void 0) {
+        consumedExistingIds.add(referenceMatch.line.id);
+        return matchedResult(candidate.id, referenceMatch.line.id, "reference");
+      }
+    }
+    return { candidateId: candidate.id, match: null };
+  });
+}
+function indexExistingLines(existingLines) {
+  const index = /* @__PURE__ */ new Map();
+  for (const line of existingLines) {
+    const indexedLine = {
+      line,
+      normalizedReference: normalizeReference(line.reference)
+    };
+    for (const date of lineDates(line)) {
+      const key = baseKey(line, date);
+      const bucket = index.get(key);
+      if (bucket === void 0) {
+        index.set(key, [indexedLine]);
+      } else {
+        bucket.push(indexedLine);
+      }
+    }
+  }
+  return index;
+}
+function possibleExistingMatches(candidate, existingByBaseKey, consumedExistingIds) {
+  const matches = [];
+  const seenExistingIds = /* @__PURE__ */ new Set();
+  for (const date of lineDates(candidate)) {
+    for (const existing of existingByBaseKey.get(baseKey(candidate, date)) ?? []) {
+      if (consumedExistingIds.has(existing.line.id) || seenExistingIds.has(existing.line.id)) {
+        continue;
+      }
+      seenExistingIds.add(existing.line.id);
+      matches.push(existing);
+    }
+  }
+  return matches;
+}
+function lineDates(line) {
+  const dates = [];
+  for (const date of [line.occurredOn, line.valueOn]) {
+    const normalized = date?.trim() ?? "";
+    if (normalized !== "" && !dates.includes(normalized)) {
+      dates.push(normalized);
+    }
+  }
+  return dates;
+}
+function baseKey(line, date) {
+  return [line.accountId, date, line.direction, line.amountMinor.toString(), line.currency.trim().toUpperCase()].join("");
+}
+function normalizeReference(reference) {
+  const normalized = reference?.normalize("NFKC").toUpperCase().replace(/[^\p{L}\p{N}]/gu, "") ?? "";
+  return normalized.length < 4 ? null : normalized;
+}
+function matchedResult(candidateId, existingId, reason) {
+  return {
+    candidateId,
+    match: { existingId, reason }
+  };
+}
+
 // src/office-bank-parser.ts
 var MONTHS = {
   jan: 1,
@@ -25146,6 +25229,9 @@ var MONTHS = {
   dec: 12
 };
 var SBI_DATE_LINE = /^\s*(\d{1,2},[A-Za-z]{3,9},\d{4})\s+(.+?)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s*$/u;
+var SBI_FIXED_DATE_LINE = /^\s*(\d{1,2}-\d{1,2}-\d{4})\b/u;
+var MONEY_TOKEN = /[0-9][0-9,]*\.[0-9]{2}/gu;
+var TOTAL_MONEY_TOKEN = /(?:^|\s)([0-9][0-9,]*\.[0-9]{2}|0)(?=\s|$)/gu;
 var MCB_LINE = /^\s*(\d{2}\/\d{2}\/\d{4})\s+\d{2}\/\d{2}\/\d{4}\s+(.+?)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s*$/u;
 function parseOfficeBankImportText(input) {
   const parseAsCsv = input.sourceHint === "csv" || input.fileName.trim().toLowerCase().endsWith(".csv");
@@ -25161,12 +25247,15 @@ function parseOfficeBankImportText(input) {
       ),
       parsingNotes: [
         "Parsed on API from CSV content and normalized before import preview."
-      ]
+      ],
+      validationIssues: []
     };
   }
   const source = input.sourceHint === "mcb" || input.sourceHint === "sbi" ? input.sourceHint : detectBankFormat(input.text) === "mcb" ? "mcb" : "sbi";
-  const rows = source === "mcb" ? parseMcbStatementText(input.text) : parseSbiStatementText(input.text);
+  const fixedSbi = source === "sbi" ? parseFixedSbiStatementText(input.text) : null;
+  const rows = source === "mcb" ? parseMcbStatementText(input.text) : fixedSbi !== null && fixedSbi.rows.length > 0 ? fixedSbi.rows : parseSbiStatementText(input.text);
   const currency = detectStatementCurrency(input.text);
+  const fixedSbiDetected = fixedSbi !== null && fixedSbi.rows.length > 0;
   return {
     source,
     currency,
@@ -25174,9 +25263,11 @@ function parseOfficeBankImportText(input) {
     rows: rows.map(
       (row) => bankRowToRecord(row, currency)
     ),
-    parsingNotes: [
-      "Parsed on API from extracted statement text and normalized before import preview."
-    ]
+    parsingNotes: fixedSbiDetected ? [
+      "Relev\xE9 SBI \xE0 colonnes fixes d\xE9tect\xE9 et normalis\xE9 par l\u2019API.",
+      ...fixedSbi?.totalsVerified === true ? ["Les totaux imprim\xE9s et les soldes courants ont \xE9t\xE9 v\xE9rifi\xE9s exactement."] : ["Les soldes courants ont \xE9t\xE9 v\xE9rifi\xE9s exactement ; aucun total g\xE9n\xE9ral imprim\xE9 n\u2019\xE9tait disponible."]
+    ] : ["Parsed on API from extracted statement text and normalized before import preview."],
+    validationIssues: fixedSbi?.validationIssues ?? []
   };
 }
 function bankRowToRecord(row, currency) {
@@ -25231,6 +25322,155 @@ function parseDate(input) {
     return `${year2}-${pad2(Number.parseInt(dmyShort[2], 10))}-${pad2(Number.parseInt(dmyShort[1], 10))}`;
   }
   return null;
+}
+function parseFixedSbiStatementText(text) {
+  const rows = [];
+  const validationIssues = /* @__PURE__ */ new Set();
+  let chequeColumn = null;
+  let withdrawalsColumn = null;
+  let depositsColumn = null;
+  let fixedHeaderDetected = false;
+  let openingBalanceMinor = null;
+  let previousBalanceMinor = null;
+  let debitTotalMinor = 0n;
+  let creditTotalMinor = 0n;
+  let printedDebitTotalMinor = null;
+  let printedCreditTotalMinor = null;
+  let printedClosingBalanceMinor = null;
+  for (const rawLine of text.split(/\r\n|\r|\n/u)) {
+    const upper = rawLine.toUpperCase();
+    if (upper.includes("PARTICULARS") && upper.includes("WITHDRAWALS") && upper.includes("DEPOSITS") && upper.includes("BALANCE")) {
+      fixedHeaderDetected = true;
+      chequeColumn = positiveColumn(upper.indexOf("CHQ.NO."));
+      withdrawalsColumn = positiveColumn(upper.indexOf("WITHDRAWALS"));
+      depositsColumn = positiveColumn(upper.indexOf("DEPOSITS"));
+      continue;
+    }
+    if (!fixedHeaderDetected || depositsColumn === null) {
+      continue;
+    }
+    if (/\bGrand\s+Total\s*:/iu.test(rawLine)) {
+      const totals = totalMoneyTokens(rawLine);
+      if (totals.length >= 3) {
+        const debitToken = totals[totals.length - 3];
+        const creditToken = totals[totals.length - 2];
+        const balanceToken2 = totals[totals.length - 1];
+        printedDebitTotalMinor = debitToken === void 0 ? null : parseAmountUnits(debitToken.text);
+        printedCreditTotalMinor = creditToken === void 0 ? null : parseAmountUnits(creditToken.text);
+        printedClosingBalanceMinor = balanceToken2 === void 0 ? null : signedBalanceMinor(rawLine, balanceToken2);
+      }
+      continue;
+    }
+    const dateMatch = rawLine.match(SBI_FIXED_DATE_LINE);
+    if (dateMatch === null || dateMatch[1] === void 0) {
+      continue;
+    }
+    const tokens = moneyTokens(rawLine);
+    if (tokens.length === 1 && /\bB\s*\/\s*F\b/iu.test(rawLine)) {
+      const balanceToken2 = tokens[0];
+      openingBalanceMinor = balanceToken2 === void 0 ? null : signedBalanceMinor(rawLine, balanceToken2);
+      previousBalanceMinor = openingBalanceMinor;
+      continue;
+    }
+    if (tokens.length < 2) {
+      validationIssues.add("sbi_dated_row_unreadable");
+      continue;
+    }
+    const amountToken = tokens[tokens.length - 2];
+    const balanceToken = tokens[tokens.length - 1];
+    const date = parseDate(dateMatch[1]);
+    const amountMinor = amountToken === void 0 ? null : parseAmountUnits(amountToken.text);
+    const balanceMinor = balanceToken === void 0 ? null : signedBalanceMinor(rawLine, balanceToken);
+    if (date === null || amountMinor === null || balanceMinor === null || amountToken === void 0) {
+      validationIssues.add("sbi_dated_row_unreadable");
+      continue;
+    }
+    const direction = amountToken.end >= depositsColumn ? "credit" : "debit";
+    const absoluteAmountMinor = absBigInt2(amountMinor);
+    const signedMovementMinor = direction === "credit" ? absoluteAmountMinor : -absoluteAmountMinor;
+    if (previousBalanceMinor !== null && balanceMinor - previousBalanceMinor !== signedMovementMinor) {
+      validationIssues.add("sbi_running_balance_mismatch");
+    }
+    previousBalanceMinor = balanceMinor;
+    if (direction === "credit") {
+      creditTotalMinor += absoluteAmountMinor;
+    } else {
+      debitTotalMinor += absoluteAmountMinor;
+    }
+    const details = fixedSbiDetails(
+      rawLine,
+      dateMatch[0].length,
+      amountToken.start,
+      chequeColumn,
+      withdrawalsColumn
+    );
+    if (details.description.length === 0) {
+      validationIssues.add("sbi_description_missing");
+    }
+    rows.push({
+      date,
+      description: details.description,
+      amountMinor: absoluteAmountMinor,
+      direction,
+      balanceMinor,
+      reference: details.reference
+    });
+  }
+  const hasPrintedTotals = printedDebitTotalMinor !== null && printedCreditTotalMinor !== null && printedClosingBalanceMinor !== null;
+  if (fixedHeaderDetected && rows.length > 0 && !hasPrintedTotals) {
+    validationIssues.add("sbi_grand_total_missing");
+  }
+  if (hasPrintedTotals) {
+    if (printedDebitTotalMinor !== debitTotalMinor || printedCreditTotalMinor !== creditTotalMinor || printedClosingBalanceMinor !== previousBalanceMinor) {
+      validationIssues.add("sbi_grand_total_mismatch");
+    }
+    if (openingBalanceMinor !== null && openingBalanceMinor + creditTotalMinor - debitTotalMinor !== printedClosingBalanceMinor) {
+      validationIssues.add("sbi_opening_closing_mismatch");
+    }
+  }
+  return {
+    rows,
+    validationIssues: [...validationIssues],
+    totalsVerified: hasPrintedTotals && validationIssues.size === 0
+  };
+}
+function positiveColumn(index) {
+  return index >= 0 ? index : null;
+}
+function moneyTokens(line) {
+  return [...line.matchAll(MONEY_TOKEN)].flatMap((match2) => {
+    const text = match2[0];
+    const start = match2.index;
+    return text === void 0 || start === void 0 ? [] : [{ text, start, end: start + text.length }];
+  });
+}
+function totalMoneyTokens(line) {
+  return [...line.matchAll(TOTAL_MONEY_TOKEN)].flatMap((match2) => {
+    const text = match2[1];
+    const matchStart = match2.index;
+    if (text === void 0 || matchStart === void 0) {
+      return [];
+    }
+    const start = matchStart + match2[0].indexOf(text);
+    return [{ text, start, end: start + text.length }];
+  });
+}
+function signedBalanceMinor(line, token) {
+  const amountMinor = parseAmountUnits(token.text);
+  if (amountMinor === null) {
+    return null;
+  }
+  const marker = line.slice(token.end).match(/^\s*(Dr|Cr)\b/iu)?.[1]?.toLowerCase();
+  return marker === "dr" ? -absBigInt2(amountMinor) : absBigInt2(amountMinor);
+}
+function fixedSbiDetails(line, dateEnd, amountStart, chequeColumn, withdrawalsColumn) {
+  const detailsEnd = Math.min(amountStart, withdrawalsColumn ?? amountStart);
+  const safeChequeColumn = chequeColumn !== null && chequeColumn > dateEnd && chequeColumn < detailsEnd ? chequeColumn : null;
+  const descriptionSlice = line.slice(dateEnd, safeChequeColumn ?? detailsEnd).trim();
+  const referenceSlice = safeChequeColumn === null ? "" : line.slice(safeChequeColumn, detailsEnd).trim();
+  const reference = /^[A-Z0-9][A-Z0-9./-]{3,}$/iu.test(referenceSlice) ? referenceSlice : null;
+  const description = [descriptionSlice, reference === null ? referenceSlice : ""].filter((part) => part.length > 0).join(" ").replace(/\s+/gu, " ").trim();
+  return { description, reference };
 }
 function parseSbiStatementText(text) {
   const drafts = [];
@@ -25416,7 +25656,7 @@ function toRow(row, direction) {
 }
 function detectBankFormat(text) {
   const lower = text.toLowerCase();
-  if (lower.includes("transactions list") || lower.includes("particulars") || lower.includes("instrument id") || lower.includes("txn date") || lower.includes("narration") || lower.includes("state bank") || lower.includes("sbm")) {
+  if (lower.includes("transactions list") || lower.includes("particulars") || lower.includes("instrument id") || lower.includes("txn date") || lower.includes("narration") || lower.includes("sbi (mauritius)") || lower.includes("sbi mauritius") || lower.includes("state bank") || lower.includes("sbm")) {
     return "sbi";
   }
   if (lower.includes("current account statement") || /mcbl09\d/u.test(lower)) {
@@ -39074,6 +39314,7 @@ var SENSITIVE_ACTIONS = /* @__PURE__ */ new Set([
   "command_center_integration_toggle",
   "command_center_settings_update",
   "command_center_user_permission_update",
+  "distribution_alias_upsert",
   "distribution_allocations_preview",
   "distribution_allocations_run",
   "distribution_allocations_unpost",
@@ -39081,7 +39322,9 @@ var SENSITIVE_ACTIONS = /* @__PURE__ */ new Set([
   "distribution_contract_expense_update",
   "distribution_contract_rules_update",
   "distribution_contract_upsert",
+  "distribution_duplicate_resolve",
   "distribution_fx_rates_save",
+  "distribution_financial_reconciliation_action",
   "distribution_identity_link",
   "distribution_import_confirm",
   "distribution_import_preview",
@@ -39557,6 +39800,48 @@ async function findOfficeBankImportBatchByFingerprint(tx, workspaceId, idempoten
     duplicateRowCount: integerField(row, "duplicate_row_count")
   };
 }
+async function readExistingOfficeBankStatementLinesForDedupe(tx, workspaceId, accountId, periodStart, periodEnd) {
+  if (tx.kind === "memory") {
+    return [];
+  }
+  const rows = rowsFromQueryResult(await tx.executor.execute(sql`
+    select
+      line.id::text as id,
+      line.account_id::text as account_id,
+      line.occurred_on::text as occurred_on,
+      line.value_on::text as value_on,
+      line.description,
+      line.reference,
+      line.direction,
+      line.amount_minor::text as amount_minor,
+      line.balance_minor::text as balance_minor,
+      line.currency
+    from office_bank_statement_lines line
+    inner join office_bank_import_batches batch on batch.id = line.import_batch_id
+    where batch.workspace_id = ${workspaceId}
+      and line.account_id = ${accountId}
+      and (
+        line.occurred_on between ${periodStart} and ${periodEnd}
+        or line.value_on between ${periodStart} and ${periodEnd}
+      )
+      -- Void imports are still visible in current read projections, so treating them as
+      -- active here prevents a reverse/re-import from creating a second visible copy.
+      and batch.status in ('confirmed', 'void')
+    order by line.occurred_on, line.id
+  `));
+  return rows.map((row) => ({
+    id: stringField(row, "id"),
+    accountId: stringField(row, "account_id"),
+    occurredOn: stringField(row, "occurred_on"),
+    valueOn: nullableStringField(row, "value_on"),
+    description: stringField(row, "description"),
+    reference: nullableStringField(row, "reference"),
+    direction: officeBankDirectionField(row, "direction"),
+    amountMinor: bigintField(row, "amount_minor"),
+    balanceMinor: nullableBigintField(row, "balance_minor"),
+    currency: stringField(row, "currency")
+  }));
+}
 async function acquireAdvisoryLock(tx, lockKey) {
   if (tx.kind === "memory") {
     return;
@@ -39966,6 +40251,88 @@ async function persistDistributionFxRates(tx, input) {
     `);
   }
 }
+async function persistDistributionAliasUpsert(tx, input) {
+  if (tx.kind === "memory") {
+    return;
+  }
+  const artistId = input.targetType === "artist" ? input.targetId : null;
+  const payeeId = input.targetType === "payee" ? input.targetId : null;
+  const labelId = input.targetType === "label" ? input.targetId : null;
+  const releaseId = input.targetType === "release" ? input.targetId : null;
+  const trackId = input.targetType === "track" ? input.targetId : null;
+  await tx.executor.execute(sql`
+    delete from catalog_aliases
+    where id = ${input.aliasId}
+      or lower(alias_text) = lower(${input.aliasText})
+  `);
+  await tx.executor.execute(sql`
+    insert into catalog_aliases (
+      id,
+      alias_text,
+      artist_id,
+      payee_id,
+      label_id,
+      release_id,
+      track_id
+    )
+    values (
+      ${input.aliasId},
+      ${input.aliasText},
+      ${artistId},
+      ${payeeId},
+      ${labelId},
+      ${releaseId},
+      ${trackId}
+    )
+  `);
+}
+async function persistDistributionDuplicateResolve(tx, input) {
+  if (tx.kind === "memory") {
+    return;
+  }
+  if (input.earningIds.length === 0) {
+    return;
+  }
+  const earningIds = sql.join(input.earningIds.map((earningId) => sql`${earningId}`), sql`, `);
+  await tx.executor.execute(sql`
+    update normalized_earnings
+    set
+      calculation_status = 'excluded',
+      updated_at = now()
+    where id in (${earningIds})
+  `);
+}
+async function persistDistributionPayeeBalanceAdjustments(tx, input) {
+  if (tx.kind === "memory") {
+    return;
+  }
+  for (const row of input.rows) {
+    await tx.executor.execute(sql`
+      insert into payee_balances (
+        id,
+        payee_id,
+        statement_id,
+        currency,
+        opening_balance,
+        period_net,
+        closing_balance,
+        movement_type,
+        created_at
+      )
+      values (
+        ${row.id},
+        ${row.payeeId},
+        ${row.statementId},
+        ${row.currency},
+        ${row.openingBalance},
+        ${row.periodNet},
+        ${row.closingBalance},
+        ${row.movementType},
+        ${row.createdAt}
+      )
+    `);
+  }
+}
 async function persistIdentityLink(tx, input) {
   if (tx.kind === "memory") {
     return;
@@ -40249,6 +40616,37 @@ function integerField(row, key) {
   }
   throwPersistenceHttpError(500, "integer_field_invalid", "Database row field is not an integer.", [`field=${key}`]);
 }
+function nullableStringField(row, key) {
+  const value = row[key];
+  if (value === null || value === void 0) {
+    return null;
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  throwPersistenceHttpError(500, "string_field_invalid", "Database row field is not a string.", [`field=${key}`]);
+}
+function bigintField(row, key) {
+  const value = row[key];
+  if (typeof value === "bigint") {
+    return value;
+  }
+  if (typeof value === "string" && /^-?\d+$/u.test(value)) {
+    return BigInt(value);
+  }
+  throwPersistenceHttpError(500, "bigint_field_invalid", "Database row field is not an integer.", [`field=${key}`]);
+}
+function nullableBigintField(row, key) {
+  const value = row[key];
+  return value === null || value === void 0 ? null : bigintField(row, key);
+}
+function officeBankDirectionField(row, key) {
+  const value = row[key];
+  if (value === "credit" || value === "debit") {
+    return value;
+  }
+  throwPersistenceHttpError(500, "office_bank_direction_invalid", "Office bank statement direction is invalid.", [`field=${key}`]);
+}
 function officeBankImportStatusField(row, key) {
   const value = row[key];
   if (value === "previewed" || value === "confirmed" || value === "failed" || value === "void") {
@@ -40476,6 +40874,35 @@ var suspenseResolveSchema = workspaceBodySchema.extend({
   targetId: nullableStringSchema,
   note: external_exports.string().min(1)
 });
+var distributionAliasTargetTypeSchema = external_exports.enum(["artist", "payee", "label", "release", "track", "unassigned"]);
+var distributionAliasUpsertSchema = workspaceBodySchema.extend({
+  aliasText: external_exports.string().min(1),
+  targetType: distributionAliasTargetTypeSchema,
+  targetId: nullableStringSchema
+}).superRefine((value, refinementContext) => {
+  const requiresTarget = value.targetType !== "unassigned";
+  if (requiresTarget && value.targetId === null) {
+    refinementContext.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["targetId"],
+      message: "targetId is required when targetType is assigned."
+    });
+  }
+  if (!requiresTarget && value.targetId !== null) {
+    refinementContext.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["targetId"],
+      message: "targetId must be null when targetType is unassigned."
+    });
+  }
+});
+var distributionDuplicateResolveSchema = workspaceBodySchema.extend({
+  keepEarningId: nullableStringSchema,
+  reason: nullableStringSchema
+});
+var distributionReconciliationActionSchema = workspaceBodySchema.extend({
+  reason: nullableStringSchema
+});
 var ApiRouteError = class extends Error {
   status;
   code;
@@ -40541,7 +40968,7 @@ function createApiService(dependencies) {
         "http://127.0.0.1:5173"
       ],
       allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-      allowHeaders: ["Content-Type", "Authorization", "Idempotency-Key"]
+      allowHeaders: ["Content-Type", "Authorization", "Idempotency-Key", "Cache-Control", "Pragma"]
     })
   );
   app.onError((error, context) => {
@@ -40599,18 +41026,19 @@ function registerOfficeRoutes(app, dependencies) {
   app.get("/eof/v1/dashboard", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
     const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
     const filters = rangeFiltersFromContext(context, period, null);
-    const monthlyRows = readMonthlyPnl(dependencies.fixtures.office, filters);
+    const monthlyRows = readMonthlyPnl(dataset, filters);
     const runwayWindowMonths = filterRunwayWindowMonths(monthlyRows, ["2026-02"]);
-    const dashboard = readOfficeDashboardFull(dependencies.fixtures.office, period, filters, runwayWindowMonths);
-    const recentImports = dependencies.fixtures.office.bankImportBatches.filter((batch) => batch.workspaceId === workspaceId);
+    const dashboard = readOfficeDashboardFull(dataset, period, filters, runwayWindowMonths);
+    const recentImports = dataset.bankImportBatches;
     const response = {
       period,
       cashBalanceMicro: dashboard.cashRunway.cashBalanceMur,
       receivablesMicro: dashboard.pnl.income,
       payablesMicro: dashboard.pnl.expense,
       unreconciledTransactionCount: dashboard.bankQuality.unmatchedLineCount,
-      previous: readOfficeDashboardPrevious(dependencies, filters),
+      previous: readOfficeDashboardPrevious(dataset, filters),
       lastAuditEventId: dependencies.fixtures.officeAuditLog[0]?.id ?? null,
       recentImports: recentImports.map((batch) => ({
         id: batch.id,
@@ -40629,38 +41057,44 @@ function registerOfficeRoutes(app, dependencies) {
   app.get("/eof/v1/analytics/dashboard", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
     const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
     const filters = rangeFiltersFromContext(context, period, null);
-    return context.json(readOfficeDashboardAnalytics(dependencies, workspaceId, period, filters));
+    return context.json(readOfficeDashboardAnalytics(dependencies, dataset, workspaceId, period, filters));
   });
   app.get("/eof/v1/pl/global", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
-    resolveWorkspaceId(context);
-    const response = toOfficeGlobalPnl(dependencies.fixtures.office, period, rangeFiltersFromContext(context, period, null));
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
+    const response = toOfficeGlobalPnl(dataset, period, rangeFiltersFromContext(context, period, null));
     return context.json(response);
   });
   app.get("/eof/v1/pl/department/:departmentId", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
-    resolveWorkspaceId(context);
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
     const departmentId = context.req.param("departmentId");
-    const response = toOfficeDepartmentPnl(dependencies.fixtures.office, departmentId, period, rangeFiltersFromContext(context, period, departmentId));
+    const response = toOfficeDepartmentPnl(dataset, departmentId, period, rangeFiltersFromContext(context, period, departmentId));
     return context.json(response);
   });
   app.get("/eof/v1/pl/division", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
-    resolveWorkspaceId(context);
-    const divisions = readPnlByDivision(dependencies.fixtures.office, rangeFiltersFromContext(context, period, null)).map(toApiDivisionPnl);
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
+    const divisions = readPnlByDivision(dataset, rangeFiltersFromContext(context, period, null)).map(toApiDivisionPnl);
     return context.json(pageItems(context, divisions));
   });
   app.get("/eof/v1/pl/category", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
-    resolveWorkspaceId(context);
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
     const departmentId = nullableQuery(context, "departmentId");
     const filters = rangeFiltersFromContext(context, period, departmentId);
-    return context.json(pageItems(context, toOfficeCategoryPnlLines(dependencies.fixtures.office, filters)));
+    return context.json(pageItems(context, toOfficeCategoryPnlLines(dataset, filters)));
   });
   app.get("/eof/v1/transactions", (context) => {
-    resolveWorkspaceId(context);
-    const transactions = dependencies.fixtures.office.transactions.map((transaction) => toOfficeTransaction(dependencies.fixtures.office, transaction)).filter((transaction) => matchesOfficeTransactionQuery(context, transaction));
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
+    const transactions = dataset.transactions.map((transaction) => toOfficeTransaction(dataset, transaction)).filter((transaction) => matchesOfficeTransactionQuery(context, transaction));
     return context.json(pageItems(context, transactions));
   });
   app.post("/eof/v1/transactions", async (context) => {
@@ -40761,9 +41195,10 @@ function registerOfficeRoutes(app, dependencies) {
   app.get("/eof/v1/cashflow", (context) => {
     const from = requireCompatQuery(context, ["from", "fromDate"], "from");
     const to = requireCompatQuery(context, ["to", "toDate"], "to");
-    resolveWorkspaceId(context);
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
     const accountId = nullableQuery(context, "accountId");
-    const buckets = readOfficeCashflowProjection(dependencies.fixtures.office, from, to, accountId);
+    const buckets = readOfficeCashflowProjection(dataset, from, to, accountId);
     return context.json(toCashflowBuckets(buckets));
   });
   app.post("/eof/v1/cashflow/preview", async (context) => {
@@ -40834,14 +41269,16 @@ function registerOfficeRoutes(app, dependencies) {
   app.get("/eof/v1/partners", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
     const facet = requirePartnerFacet(context);
-    resolveWorkspaceId(context);
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
     const filters = rangeFiltersFromContext(context, period, null);
-    const partners = dependencies.fixtures.office.partners.map((partner) => toPartnerListItem(dependencies.fixtures, partner, filters)).filter((partner) => hasFacetActivity(partner, facet));
+    const partners = dataset.partners.map((partner) => toPartnerListItem({ ...dependencies.fixtures, office: dataset }, partner, filters)).filter((partner) => hasFacetActivity(partner, facet));
     return context.json(pageItems(context, partners));
   });
   app.get("/eof/v1/partners/:partnerId", (context) => {
-    resolveWorkspaceId(context);
-    const partner = requirePartner2(dependencies.fixtures.office, context.req.param("partnerId"));
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
+    const partner = requirePartner2(dataset, context.req.param("partnerId"));
     return context.json({
       id: partner.id,
       name: partner.name,
@@ -40855,9 +41292,11 @@ function registerOfficeRoutes(app, dependencies) {
   });
   app.get("/eof/v1/pl/partner/:partnerId", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
-    resolveWorkspaceId(context);
-    const partner = requirePartner2(dependencies.fixtures.office, context.req.param("partnerId"));
-    const response = toPartnerDetail(dependencies.fixtures, partner, period, rangeFiltersFromContext(context, period, null));
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
+    const scopedFixtures = { ...dependencies.fixtures, office: dataset };
+    const partner = requirePartner2(dataset, context.req.param("partnerId"));
+    const response = toPartnerDetail(scopedFixtures, partner, period, rangeFiltersFromContext(context, period, null));
     return context.json(response);
   });
   app.get("/eof/v1/classification/suggestions/:partnerId", (context) => {
@@ -40865,9 +41304,11 @@ function registerOfficeRoutes(app, dependencies) {
     return context.json(dependencies.fixtures.officeClassificationSuggestions[context.req.param("partnerId")] ?? []);
   });
   app.get("/eof/v1/partners/:partnerId/payee-link", (context) => {
-    resolveWorkspaceId(context);
-    const partner = requirePartner2(dependencies.fixtures.office, context.req.param("partnerId"));
-    return context.json(toPartnerPayeeLink(dependencies.fixtures, partner));
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
+    const scopedFixtures = { ...dependencies.fixtures, office: dataset };
+    const partner = requirePartner2(dataset, context.req.param("partnerId"));
+    return context.json(toPartnerPayeeLink(scopedFixtures, partner));
   });
   app.post("/eof/v1/partners", async (context) => {
     return officePartnerCreateResponse(context, dependencies);
@@ -40923,13 +41364,14 @@ function registerOfficeRoutes(app, dependencies) {
     return officeBankRawLineReassignResponse(context, dependencies);
   });
   app.get("/eof/v1/projects", (context) => {
-    resolveWorkspaceId(context);
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
     const period = optionalCompatQuery(context, ["period", "month"]);
     const dateFrom = optionalCompatQuery(context, ["dateFrom", "date_from", "from", "fromDate", "from_date"]);
     const dateTo = optionalCompatQuery(context, ["dateTo", "date_to", "to", "toDate", "to_date"]);
     const filters = period === null && !(isIsoDate(dateFrom) && isIsoDate(dateTo)) ? { dateFrom: null, dateTo: null, departmentId: null } : rangeFiltersFromContext(context, period ?? dependencies.nowIso().slice(0, 7), null);
     const status = nullableQuery(context, "status");
-    const projects = dependencies.fixtures.office.projects.map((project) => toProjectSummary(dependencies.fixtures.office, project, filters)).filter((project) => status === null || project.status === status);
+    const projects = dataset.projects.map((project) => toProjectSummary(dataset, project, filters)).filter((project) => status === null || project.status === status);
     return context.json(pageItems(context, projects));
   });
   app.post("/eof/v1/projects", async (context) => {
@@ -40945,18 +41387,21 @@ function registerOfficeRoutes(app, dependencies) {
   });
   app.get("/eof/v1/pl/project/:projectId", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
-    resolveWorkspaceId(context);
-    return context.json(toProjectPnl(dependencies.fixtures.office, context.req.param("projectId"), period, rangeFiltersFromContext(context, period, null)));
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
+    return context.json(toProjectPnl(dataset, context.req.param("projectId"), period, rangeFiltersFromContext(context, period, null)));
   });
   app.get("/eof/v1/integrity/check-all", (context) => {
-    resolveWorkspaceId(context);
-    return context.json(toOfficeIntegrity(dependencies.fixtures.office, dependencies.nowIso()));
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
+    return context.json(toOfficeIntegrity(dataset, dependencies.nowIso()));
   });
   app.get("/eof/v1/analytics/bank-quality", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
-    resolveWorkspaceId(context);
+    const workspaceId = resolveWorkspaceId(context);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
     const filters = rangeFiltersFromContext(context, period, null);
-    const result = readOfficeBankQualityForFilters(dependencies.fixtures.office, period, filters);
+    const result = readOfficeBankQualityForFilters(dataset, period, filters);
     const response = {
       period: result.period,
       matchedRateBp: result.matchedRateBp,
@@ -41342,13 +41787,26 @@ function registerDistributionRoutes(app, dependencies) {
     requireQuery(context, "workspaceId");
     return context.json(toDistributionReconciliation(dependencies.fixtures));
   });
+  app.post("/erh/v1/financial-reconciliation/actions/:actionId", async (context) => {
+    return distributionReconciliationActionResponse(context, dependencies);
+  });
   app.get("/erh/v1/aliases", (context) => {
     requireQuery(context, "workspaceId");
     return context.json(pageItems(context, toDistributionAliases(dependencies.fixtures)));
   });
+  app.post("/erh/v1/aliases", async (context) => {
+    return distributionAliasUpsertResponse(context, dependencies, null);
+  });
+  app.patch("/erh/v1/aliases/:aliasId", async (context) => {
+    const aliasId = requirePathParam(context, "aliasId");
+    return distributionAliasUpsertResponse(context, dependencies, aliasId);
+  });
   app.get("/erh/v1/duplicates", (context) => {
     requireQuery(context, "workspaceId");
     return context.json(pageItems(context, toDistributionDuplicates(dependencies.fixtures)));
+  });
+  app.post("/erh/v1/duplicates/:duplicateId/resolve", async (context) => {
+    return distributionDuplicateResolveResponse(context, dependencies);
   });
   app.get("/erh/v1/audit-log", (context) => {
     requireQuery(context, "workspaceId");
@@ -43522,6 +43980,229 @@ async function distributionTrackUpsertResponse(context, dependencies) {
   });
   return context.json(result.body, result.status);
 }
+async function distributionAliasUpsertResponse(context, dependencies, routeAliasId) {
+  const request = await readZodBody(context, distributionAliasUpsertSchema);
+  requirePermissionForWorkspace(context.get("authUser"), "distribution_alias_upsert", request.workspaceId);
+  const aliasId = routeAliasId ?? randomUUID2();
+  const normalizedAliasText = request.aliasText.trim();
+  requireDistributionAliasTarget(dependencies.fixtures, request.targetType, request.targetId);
+  const before = dependencies.fixtures.distributionAliases.find(
+    (alias) => alias.id === aliasId || alias.aliasText.trim().toLowerCase() === normalizedAliasText.toLowerCase()
+  ) ?? null;
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "distribution_alias_upsert",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `distribution:alias:${aliasId}`);
+      const persistInput = {
+        aliasId,
+        aliasText: normalizedAliasText,
+        targetType: request.targetType,
+        targetId: request.targetId
+      };
+      await persistDistributionAliasUpsert(tx, persistInput);
+      const after = distributionAliasFromUpsertRequest(dependencies.fixtures, aliasId, {
+        ...request,
+        aliasText: normalizedAliasText
+      });
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_alias_upsert",
+        targetType: "catalog_alias",
+        targetId: aliasId,
+        before: {
+          alias: before
+        },
+        after: {
+          alias: after
+        },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      upsertDistributionAliasFixture(dependencies.fixtures, after);
+      return {
+        ...mutationReceipt(aliasId, auditEventId),
+        alias: after
+      };
+    }
+  });
+  return context.json(result.body, result.status);
+}
+async function distributionDuplicateResolveResponse(context, dependencies) {
+  const duplicateId = requirePathParam(context, "duplicateId");
+  const request = await readZodBody(context, distributionDuplicateResolveSchema);
+  requirePermissionForWorkspace(context.get("authUser"), "distribution_duplicate_resolve", request.workspaceId);
+  const duplicateEarningIds = duplicateGroupEarningIds(dependencies.fixtures, duplicateId);
+  if (duplicateEarningIds.length < 2) {
+    throw new ApiRouteError(404, "distribution_duplicate_not_found", "Distribution duplicate group was not found.", [`duplicateId=${duplicateId}`]);
+  }
+  const keepEarningId = request.keepEarningId ?? duplicateEarningIds[0] ?? null;
+  if (keepEarningId === null || !duplicateEarningIds.includes(keepEarningId)) {
+    throw new ApiRouteError(422, "distribution_duplicate_keep_invalid", "keepEarningId must be part of the duplicate group.", [
+      `duplicateId=${duplicateId}`,
+      `keepEarningId=${request.keepEarningId ?? "null"}`
+    ]);
+  }
+  const resolvedEarningIds = duplicateEarningIds.filter((earningId) => earningId !== keepEarningId);
+  if (resolvedEarningIds.length === 0) {
+    throw new ApiRouteError(409, "distribution_duplicate_no_resolution", "Duplicate resolution requires at least one row to exclude.", [
+      `duplicateId=${duplicateId}`,
+      `keepEarningId=${keepEarningId}`
+    ]);
+  }
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "distribution_duplicate_resolve",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `distribution:duplicate:${duplicateId}`);
+      const persistInput = {
+        earningIds: resolvedEarningIds
+      };
+      await persistDistributionDuplicateResolve(tx, persistInput);
+      applyDistributionDuplicateResolutionFixture(dependencies.fixtures, resolvedEarningIds);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_duplicate_resolve",
+        targetType: "normalized_earning_duplicate",
+        targetId: duplicateId,
+        before: {
+          duplicateId,
+          keepEarningId,
+          groupEarningIds: duplicateEarningIds
+        },
+        after: {
+          duplicateId,
+          keepEarningId,
+          resolvedEarningIds,
+          reason: request.reason
+        },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      return {
+        ...mutationReceipt(duplicateId, auditEventId),
+        duplicateId,
+        keepEarningId,
+        resolvedEarningIds
+      };
+    }
+  });
+  return context.json(result.body, result.status);
+}
+async function distributionReconciliationActionResponse(context, dependencies) {
+  const actionId = requirePathParam(context, "actionId");
+  const request = await readZodBody(context, distributionReconciliationActionSchema);
+  requirePermissionForWorkspace(context.get("authUser"), "distribution_financial_reconciliation_action", request.workspaceId);
+  const action = toDistributionReconciliation(dependencies.fixtures).actions.find((candidate) => candidate.id === actionId);
+  if (action === void 0) {
+    throw new ApiRouteError(404, "distribution_reconciliation_action_not_found", "Distribution reconciliation action was not found.", [`actionId=${actionId}`]);
+  }
+  if (!action.maintenance) {
+    throw new ApiRouteError(409, "distribution_reconciliation_action_not_maintenance", "This action is not marked as maintenance and should run through its dedicated workflow.", [
+      `actionId=${actionId}`
+    ]);
+  }
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "distribution_financial_reconciliation_action",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `distribution:reconciliation:maintenance:${actionId}`);
+      let details = {
+        executed: true,
+        reason: request.reason,
+        maintenance: true
+      };
+      if (actionId === "recompute-payee-balance") {
+        const adjustmentRows = buildDistributionPayeeBalanceAdjustments(dependencies.fixtures, dependencies.nowIso());
+        const persistInput = {
+          rows: adjustmentRows
+        };
+        await persistDistributionPayeeBalanceAdjustments(tx, persistInput);
+        applyDistributionPayeeBalanceAdjustmentsFixture(dependencies.fixtures, adjustmentRows);
+        details = {
+          ...details,
+          adjustmentCount: adjustmentRows.length,
+          payeeCurrencyCount: adjustmentRows.map((row) => `${row.payeeId}:${row.currency}`).filter((value, index, values) => values.indexOf(value) === index).length
+        };
+      } else if (actionId === "repair-identity-link") {
+        const candidate = findIdentityRepairCandidate(dependencies.fixtures);
+        if (candidate === null) {
+          details = {
+            ...details,
+            repaired: false,
+            message: "No eligible office partner/payee pair found."
+          };
+        } else {
+          const persistInput = {
+            id: randomUUID2(),
+            payeeId: candidate.payee.id,
+            officePartnerId: candidate.partner.id,
+            confidence: "100.000000",
+            status: "linked"
+          };
+          await persistIdentityLink(tx, persistInput);
+          const officeLink = identityOfficeLink(candidate.partner, candidate.payee, persistInput.confidence);
+          applyIdentityLinkFixture(dependencies.fixtures, officeLink);
+          details = {
+            ...details,
+            repaired: true,
+            officePartnerId: candidate.partner.id,
+            payeeId: candidate.payee.id,
+            officePartnerName: candidate.partner.name,
+            payeeName: candidate.payee.name
+          };
+        }
+      } else if (actionId === "refresh-derived-summary") {
+        const refreshed = toDistributionReconciliation(dependencies.fixtures);
+        details = {
+          ...details,
+          refreshedAt: dependencies.nowIso(),
+          kpiCount: refreshed.kpis.length,
+          aliasCount: dependencies.fixtures.distributionAliases.length,
+          duplicateCount: toDistributionDuplicates(dependencies.fixtures).length
+        };
+      } else {
+        throw new ApiRouteError(409, "distribution_reconciliation_action_not_supported", "This maintenance action is not supported yet.", [`actionId=${actionId}`]);
+      }
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_financial_reconciliation_action",
+        targetType: "reconciliation_action",
+        targetId: actionId,
+        before: {
+          action
+        },
+        after: {
+          actionId,
+          details
+        },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      return {
+        ...mutationReceipt(actionId, auditEventId),
+        actionId,
+        details
+      };
+    }
+  });
+  return context.json(result.body, result.status);
+}
 async function distributionAllocationUnpostResponse(context, dependencies) {
   const runId = requirePathParam(context, "runId");
   const request = await readZodBody(context, allocationRunUnpostSchema);
@@ -45602,6 +46283,18 @@ async function officeBankImportParsePreviewResponse(context, dependencies) {
     fileName: request.fileName,
     sourceHint: request.sourceHint
   });
+  if (parsed.validationIssues.length > 0) {
+    throw new ApiRouteError(
+      422,
+      "bank_import_statement_validation_failed",
+      "Le relev\xE9 ne concorde pas avec ses soldes et totaux imprim\xE9s.",
+      [
+        `path=${context.req.path}`,
+        `fileName=${request.fileName}`,
+        `issues=${parsed.validationIssues.join(",")}`
+      ]
+    );
+  }
   if (parsed.rows.length === 0) {
     throw new ApiRouteError(
       422,
@@ -45624,44 +46317,61 @@ async function officeBankImportPreviewResponse(context, dependencies) {
   assertOfficeBankImportPreviewRequest(context, request);
   requirePermissionForWorkspace(context.get("authUser"), "office_bank_import_preview", request.workspaceId);
   const previewRows = previewRowsFromRecords(request.rows);
-  const allParsedRows = previewRows.map((row) => parseOfficeBankPreviewRow(row, request.workspaceId, dependencies.fixtures.office.bankAccounts, dependencies.fixtures.office.exchangeRates));
-  const parsedRows = allParsedRows.filter((row) => row.line !== null);
+  const accountIdOverride = request.accountId ?? null;
+  const parsedBeforeDedupe = previewRows.map((row) => parseOfficeBankPreviewRow(row, request.workspaceId, dependencies.fixtures.office.bankAccounts, dependencies.fixtures.office.exchangeRates, accountIdOverride));
+  const allParsedRows = applyOfficeBankDuplicateClassification(
+    parsedBeforeDedupe,
+    existingOfficeBankDedupeLines(dependencies.fixtures.office, request.workspaceId)
+  );
+  const validRows = allParsedRows.filter((row) => row.line !== null);
+  const acceptedRows = validRows.filter((row) => !row.line.isDuplicateCandidate);
+  const duplicateRows = validRows.filter((row) => row.line.isDuplicateCandidate);
+  const rejectedRows = allParsedRows.filter((row) => row.line === null);
+  const rowResults = allParsedRows.map(previewRowResult);
   const idempotencyFingerprint = `${request.source}:${request.checksum}:${hashRequestBody(request.rows)}`;
   const previewId = previewIdFor("office-bank", idempotencyFingerprint);
   const preview = {
     previewId,
     workspaceId: request.workspaceId,
+    accountId: validRows[0]?.line.accountId ?? null,
     source: request.source,
     fileName: request.fileName,
     checksum: request.checksum,
     idempotencyFingerprint,
     rows: previewRows,
+    rowDecisions: rowResults.map((result) => ({
+      id: result.id,
+      status: result.status,
+      issues: result.issues
+    })),
     createdAtIso: dependencies.nowIso()
   };
   await dependencies.persistence.storeOfficeBankImportPreview(preview);
-  const dateRange = officeDateRange(parsedRows.map((row) => row.line.occurredOn));
+  const dateRange = officeDateRange(validRows.map((row) => row.line.occurredOn));
   const response = {
     previewId,
+    accountId: validRows[0]?.line.accountId ?? null,
     source: request.source,
     detectedFormat: `${request.source}_structured_json`,
-    accountReference: parsedRows[0]?.line.accountId ?? null,
+    accountReference: validRows[0]?.line.accountId ?? null,
     periodLabel: dateRange.label,
-    currencyCodes: parsedRows.length === 0 ? currencyCodesFromRows(request.rows, "MUR") : uniqueStrings(parsedRows.map((row) => row.line.currency)),
+    currencyCodes: validRows.length === 0 ? currencyCodesFromRows(request.rows, "MUR") : uniqueStrings(validRows.map((row) => row.line.currency)),
     openingBalanceMicro: null,
     closingBalanceMicro: null,
     idempotencyFingerprint,
-    acceptedRowCount: parsedRows.length,
-    rejectedRowCount: previewRows.length - parsedRows.length,
-    duplicateRowCount: 0,
+    acceptedRowCount: acceptedRows.length,
+    rejectedRowCount: rejectedRows.length,
+    duplicateRowCount: duplicateRows.length,
     parsingNotes: [
-      "Preview accepts structured JSON rows only; raw PDF/XLS parsing is not implemented in services/api."
+      "Les lignes normalis\xE9es ont \xE9t\xE9 compar\xE9es \xE0 l\u2019historique bancaire existant."
     ],
     warnings: [
-      ...parsedRows.length === previewRows.length ? [] : ["Some rows could not be converted into bank statement lines and will remain in batch metadata instead of being fabricated."],
+      ...rejectedRows.length === 0 ? [] : ["Some rows could not be converted into bank statement lines and will remain in batch metadata instead of being fabricated."],
+      ...duplicateRows.length === 0 ? [] : [`${duplicateRows.length} ligne(s) bancaire(s) existante(s) d\xE9tect\xE9e(s) et exclue(s) de l\u2019import.`],
       ...bankImportAccountMismatchWarnings(request.rows, dependencies.fixtures.office.bankAccounts)
     ],
-    rejectionReasons: aggregateRejectionReasons(allParsedRows),
-    rowResults: allParsedRows.map(previewRowResult)
+    rejectionReasons: aggregateRejectionReasons(rejectedRows),
+    rowResults
   };
   return context.json(response);
 }
@@ -45759,6 +46469,27 @@ async function officeBankImportConfirmResponse(context, dependencies) {
     requestBody: request,
     write: async (tx, resolvedIdempotencyKey) => {
       const preview = await requireOfficeBankPreviewInWrite(context, dependencies, tx, request.previewId, request.workspaceId);
+      assertOfficeBankImportSelection(context, preview, request);
+      if (request.accountId !== void 0 && preview.accountId !== null && request.accountId !== preview.accountId) {
+        throw new ApiRouteError(409, "bank_import_account_changed", "The destination account changed after preview; analyze the statement again before importing.", [
+          `path=${context.req.path}`,
+          `previewId=${request.previewId}`,
+          `previewAccountId=${preview.accountId}`,
+          `confirmAccountId=${request.accountId}`
+        ]);
+      }
+      const accountIdOverride = request.accountId ?? preview.accountId;
+      const account = accountIdOverride === null ? null : dependencies.fixtures.office.bankAccounts.find(
+        (candidate) => candidate.id === accountIdOverride && officeBankAccountBelongsToWorkspace(candidate, request.workspaceId)
+      ) ?? null;
+      if (account === null) {
+        throw new ApiRouteError(400, "bank_import_account_invalid", "Le compte de destination est absent ou appartient \xE0 un autre espace.", [
+          `path=${context.req.path}`,
+          `previewId=${request.previewId}`,
+          `accountId=${String(accountIdOverride)}`
+        ]);
+      }
+      await acquireAdvisoryLock(tx, `office:bank-import:account:${request.workspaceId}:${account.id}`);
       await acquireAdvisoryLock(tx, `office:bank-import:fingerprint:${request.workspaceId}:${preview.idempotencyFingerprint}`);
       const existingBatch = await findOfficeBankImportBatchByFingerprint(tx, request.workspaceId, preview.idempotencyFingerprint);
       if (existingBatch !== null) {
@@ -45799,17 +46530,59 @@ async function officeBankImportConfirmResponse(context, dependencies) {
           status: "completed",
           auditEventId: auditEventId2,
           importedTransactionCount: existingBatch.acceptedRowCount,
-          rejectedRowCount: existingBatch.rejectedRowCount
+          rejectedRowCount: existingBatch.rejectedRowCount,
+          duplicateRowCount: existingBatch.duplicateRowCount
         };
       }
       const acceptedRowIds = new Set(request.acceptedRowIds);
-      const parsedRows = preview.rows.filter((row) => acceptedRowIds.has(row.id)).map((row) => parseOfficeBankPreviewRow(row, request.workspaceId, dependencies.fixtures.office.bankAccounts, dependencies.fixtures.office.exchangeRates));
-      const lines = parsedRows.map((row) => row.line).filter((line) => line !== null);
+      const parsedRows = preview.rows.filter((row) => acceptedRowIds.has(row.id)).map((row) => parseOfficeBankPreviewRow(row, request.workspaceId, dependencies.fixtures.office.bankAccounts, dependencies.fixtures.office.exchangeRates, account.id));
+      const parsedLines = parsedRows.map((row) => row.line).filter((line) => line !== null);
+      if (parsedLines.length !== request.acceptedRowIds.length) {
+        throw new ApiRouteError(409, "bank_import_preview_stale", "Les lignes accept\xE9es ne passent plus la validation ; relancez l\u2019analyse.", [
+          `path=${context.req.path}`,
+          `previewId=${request.previewId}`
+        ]);
+      }
+      const candidateDateRange = officeDateRange(parsedLines.flatMap(
+        (line) => line.valueOn === null ? [line.occurredOn] : [line.occurredOn, line.valueOn]
+      ));
+      if (candidateDateRange.start === null || candidateDateRange.end === null) {
+        throw new ApiRouteError(400, "bank_import_selection_empty", "S\xE9lectionnez au moins une nouvelle ligne bancaire.", [
+          `path=${context.req.path}`,
+          `previewId=${request.previewId}`
+        ]);
+      }
+      const existingLines = tx.kind === "memory" ? existingOfficeBankDedupeLines(dependencies.fixtures.office, request.workspaceId) : (await readExistingOfficeBankStatementLinesForDedupe(
+        tx,
+        request.workspaceId,
+        account.id,
+        candidateDateRange.start,
+        candidateDateRange.end
+      )).map((line) => officeBankDedupeLine(line.id, line));
+      const staleDuplicates = detectOfficeBankImportDuplicates(
+        parsedRows.flatMap(
+          (row) => row.line === null ? [] : [officeBankDedupeLine(row.row.id, row.line)]
+        ),
+        existingLines
+      ).filter((result2) => result2.match !== null);
+      if (staleDuplicates.length > 0) {
+        throw new ApiRouteError(409, "bank_import_preview_stale_duplicates", "L\u2019historique bancaire a chang\xE9 depuis l\u2019aper\xE7u ; relancez l\u2019analyse.", [
+          `path=${context.req.path}`,
+          `previewId=${request.previewId}`,
+          `duplicateCount=${String(staleDuplicates.length)}`
+        ]);
+      }
+      const lines = parsedLines.map((line) => ({
+        ...line,
+        isDuplicateCandidate: false
+      }));
       const suggestions = buildOfficeReconciliationSuggestions(dependencies.fixtures.office, request.workspaceId, lines);
       const batchId = randomUUID2();
       const importedAtIso = dependencies.nowIso();
       const dateRange = officeDateRange(lines.map((line) => line.occurredOn));
       const batchStatus = lines.length === 0 ? "failed" : "confirmed";
+      const duplicateRowCount = preview.rowDecisions.filter((decision) => decision.status === "duplicate").length;
+      const rejectedRowCount = preview.rows.length - lines.length - duplicateRowCount;
       await persistOfficeBankImportConfirmation(tx, {
         batchId,
         workspaceId: request.workspaceId,
@@ -45821,8 +46594,8 @@ async function officeBankImportConfirmResponse(context, dependencies) {
         periodEnd: dateRange.end,
         currency: lines[0]?.currency ?? null,
         acceptedRowCount: lines.length,
-        rejectedRowCount: preview.rows.length - lines.length,
-        duplicateRowCount: 0,
+        rejectedRowCount,
+        duplicateRowCount,
         idempotencyFingerprint: preview.idempotencyFingerprint,
         status: batchStatus,
         importedAtIso,
@@ -45830,6 +46603,7 @@ async function officeBankImportConfirmResponse(context, dependencies) {
           previewId: request.previewId,
           acceptedRowIds: request.acceptedRowIds,
           rejectedRowIds: request.rejectedRowIds,
+          rowDecisions: preview.rowDecisions,
           rowIssues: parsedRows.flatMap((row) => row.issues.map((issue) => ({ rowId: row.row.id, issue }))),
           rawRows: preview.rows
         },
@@ -45845,7 +46619,8 @@ async function officeBankImportConfirmResponse(context, dependencies) {
         after: {
           previewId: request.previewId,
           importedStatementLineCount: lines.length,
-          rejectedRowCount: preview.rows.length - lines.length,
+          rejectedRowCount,
+          duplicateRowCount,
           suggestedMatchCount: suggestions.length,
           status: batchStatus
         },
@@ -45862,15 +46637,16 @@ async function officeBankImportConfirmResponse(context, dependencies) {
         periodEnd: dateRange.end,
         currency: lines[0]?.currency ?? null,
         acceptedRowCount: lines.length,
-        rejectedRowCount: preview.rows.length - lines.length,
-        duplicateRowCount: 0,
+        rejectedRowCount,
+        duplicateRowCount,
         idempotencyFingerprint: preview.idempotencyFingerprint,
         status: batchStatus,
         importedAt: importedAtIso,
         metadata: {
           previewId: request.previewId,
           acceptedRowIds: request.acceptedRowIds,
-          rejectedRowIds: request.rejectedRowIds
+          rejectedRowIds: request.rejectedRowIds,
+          rowDecisions: preview.rowDecisions
         },
         lines
       });
@@ -45888,7 +46664,8 @@ async function officeBankImportConfirmResponse(context, dependencies) {
         status: "completed",
         auditEventId,
         importedTransactionCount: lines.length,
-        rejectedRowCount: preview.rows.length - lines.length
+        rejectedRowCount,
+        duplicateRowCount
       };
     }
   });
@@ -46353,6 +47130,9 @@ function assertOfficeBankImportParsePreviewRequest(context, request) {
 }
 function assertOfficeBankImportPreviewRequest(context, request) {
   assertStringField(context, request.workspaceId, "workspaceId");
+  if (request.accountId !== void 0) {
+    assertStringField(context, request.accountId, "accountId");
+  }
   assertStringField(context, request.fileName, "fileName");
   assertStringField(context, request.checksum, "checksum");
   if (request.source !== "sbi" && request.source !== "mcb" && request.source !== "csv" && request.source !== "cashflow" && request.source !== "pdf") {
@@ -46363,8 +47143,36 @@ function assertOfficeBankImportPreviewRequest(context, request) {
 function assertOfficeBankImportConfirmRequest(context, request) {
   assertStringField(context, request.workspaceId, "workspaceId");
   assertStringField(context, request.previewId, "previewId");
+  if (request.accountId !== void 0) {
+    assertStringField(context, request.accountId, "accountId");
+  }
   assertStringArray(context, request.acceptedRowIds, "acceptedRowIds");
   assertStringArray(context, request.rejectedRowIds, "rejectedRowIds");
+}
+function assertOfficeBankImportSelection(context, preview, request) {
+  const accepted = new Set(request.acceptedRowIds);
+  const rejected = new Set(request.rejectedRowIds);
+  const previewIds = new Set(preview.rows.map((row) => row.id));
+  const decisions = new Map(preview.rowDecisions.map((decision) => [decision.id, decision]));
+  const invalidPartition = accepted.size !== request.acceptedRowIds.length || rejected.size !== request.rejectedRowIds.length || [...accepted].some((id) => rejected.has(id)) || accepted.size + rejected.size !== previewIds.size || [...accepted, ...rejected].some((id) => !previewIds.has(id)) || [...previewIds].some((id) => !accepted.has(id) && !rejected.has(id));
+  if (invalidPartition) {
+    throw new ApiRouteError(400, "bank_import_selection_invalid", "La s\xE9lection doit couvrir tout l\u2019aper\xE7u avec des identifiants uniques et disjoints.", [
+      `path=${context.req.path}`,
+      `previewId=${preview.previewId}`
+    ]);
+  }
+  if (accepted.size === 0) {
+    throw new ApiRouteError(400, "bank_import_selection_empty", "S\xE9lectionnez au moins une nouvelle ligne bancaire.", [
+      `path=${context.req.path}`,
+      `previewId=${preview.previewId}`
+    ]);
+  }
+  if (decisions.size !== previewIds.size || [...accepted].some((id) => decisions.get(id)?.status !== "accepted")) {
+    throw new ApiRouteError(409, "bank_import_preview_decision_changed", "Une ligne rejet\xE9e ou en doublon ne peut pas \xEAtre forc\xE9e ; relancez l\u2019analyse.", [
+      `path=${context.req.path}`,
+      `previewId=${preview.previewId}`
+    ]);
+  }
 }
 function assertStringField(context, value, field) {
   if (typeof value !== "string" || value.trim().length === 0) {
@@ -46688,13 +47496,56 @@ function previewRowResult(parsed) {
   return {
     id: parsed.row.id,
     rowNumber: parsed.row.rowNumber,
-    status: parsed.line !== null ? "accepted" : "rejected",
+    status: parsed.line === null ? "rejected" : parsed.line.isDuplicateCandidate ? "duplicate" : "accepted",
     issues: parsed.issues
   };
 }
-function parseOfficeBankPreviewRow(row, workspaceId, accounts, exchangeRates) {
+function applyOfficeBankDuplicateClassification(rows, existingLines) {
+  const candidates = rows.flatMap(
+    (row) => row.line === null ? [] : [officeBankDedupeLine(row.row.id, row.line)]
+  );
+  const duplicateCandidateIds = new Set(
+    detectOfficeBankImportDuplicates(candidates, existingLines).filter((result) => result.match !== null).map((result) => result.candidateId)
+  );
+  return rows.map((row) => {
+    if (row.line === null || !duplicateCandidateIds.has(row.row.id)) {
+      return row;
+    }
+    return {
+      ...row,
+      line: { ...row.line, isDuplicateCandidate: true },
+      issues: [...row.issues, "duplicate_candidate"]
+    };
+  });
+}
+function officeBankDedupeLine(id, line) {
+  return {
+    id,
+    accountId: line.accountId,
+    occurredOn: line.occurredOn,
+    valueOn: line.valueOn,
+    description: line.description,
+    reference: line.reference,
+    direction: line.direction,
+    amountMinor: line.amountMinor,
+    balanceMinor: line.balanceMinor,
+    currency: line.currency
+  };
+}
+function existingOfficeBankDedupeLines(dataset, workspaceId) {
+  const accountIds = new Set(
+    dataset.bankAccounts.filter((account) => officeBankAccountBelongsToWorkspace(account, workspaceId)).map((account) => account.id)
+  );
+  return dataset.bankStatementLines.filter((line) => accountIds.has(line.accountId)).map((line) => officeBankDedupeLine(line.id, line));
+}
+function parseOfficeBankPreviewRow(row, workspaceId, accounts, exchangeRates, accountIdOverride = null) {
   const currency = normalizedCurrency2(rowValue2(row.rawData, ["currency", "currency_code", "Currency", "CURRENCY"])) ?? "MUR";
-  const account = accountForRow(row.rawData, workspaceId, currency, accounts);
+  const account = accountForRow(
+    accountIdOverride === null ? row.rawData : { ...row.rawData, accountId: accountIdOverride },
+    workspaceId,
+    currency,
+    accounts
+  );
   const occurredOn = isoDateValue(row.rawData, ["occurredOn", "occurred_on", "transactionDate", "transaction_date", "date", "DATE", "Date", "paid_on", "paidOn"]);
   const description = rowValue2(row.rawData, ["description", "label", "particulars", "details", "narrative", "memo"]);
   const amount = amountForBankRow(row.rawData);
@@ -46921,9 +47772,18 @@ function absoluteIsoDayDistance(leftDate, rightDate) {
 function accountForRow(row, workspaceId, currency, accounts) {
   const accountId = rowValue2(row, ["accountId", "account_id"]);
   if (accountId !== null) {
-    return accounts.find((account) => account.id === accountId) ?? null;
+    return accounts.find(
+      (account) => account.id === accountId && officeBankAccountBelongsToWorkspace(account, workspaceId)
+    ) ?? null;
   }
-  return accounts.find((account) => account.workspaceId === workspaceId && account.currency === currency && account.isActive) ?? null;
+  const matchingAccounts = accounts.filter(
+    (account) => officeBankAccountBelongsToWorkspace(account, workspaceId) && account.currency === currency && account.isActive
+  );
+  return matchingAccounts.length === 1 ? matchingAccounts[0] ?? null : null;
+}
+function officeBankAccountBelongsToWorkspace(account, workspaceId) {
+  const canonical = (value) => value === "office" ? DEFAULT_WORKSPACE_ID : value;
+  return canonical(account.workspaceId) === canonical(workspaceId);
 }
 function amountForBankRow(row) {
   const currency = normalizedCurrency2(rowValue2(row, ["currency", "currency_code", "Currency", "CURRENCY"])) ?? "MUR";
@@ -47167,6 +48027,12 @@ function requireOfficeBankPreviewRecord(context, preview, previewId, workspaceId
       `previewId=${previewId}`,
       `workspaceId=${workspaceId}`,
       `previewWorkspaceId=${preview.workspaceId}`
+    ]);
+  }
+  if (!Array.isArray(preview.rowDecisions)) {
+    throw new ApiRouteError(409, "bank_import_preview_schema_stale", "Cet aper\xE7u est ant\xE9rieur au contr\xF4le des doublons ; relancez l\u2019analyse.", [
+      `path=${context.req.path}`,
+      `previewId=${previewId}`
     ]);
   }
   return preview;
@@ -48095,15 +48961,15 @@ function previousRangeFilters(filters) {
     departmentId
   };
 }
-function readOfficeDashboardPrevious(dependencies, filters) {
+function readOfficeDashboardPrevious(dataset, filters) {
   const previousFilters = previousRangeFilters(filters);
   if (previousFilters === null || !isIsoDate(previousFilters.dateFrom) || !isIsoDate(previousFilters.dateTo)) {
     return null;
   }
   const previousPeriod = previousFilters.dateTo.slice(0, 7);
-  const monthlyRows = readMonthlyPnl(dependencies.fixtures.office, previousFilters);
+  const monthlyRows = readMonthlyPnl(dataset, previousFilters);
   const runwayWindowMonths = filterRunwayWindowMonths(monthlyRows, ["2026-02"]);
-  const dashboard = readOfficeDashboardFull(dependencies.fixtures.office, previousPeriod, previousFilters, runwayWindowMonths);
+  const dashboard = readOfficeDashboardFull(dataset, previousPeriod, previousFilters, runwayWindowMonths);
   return {
     dateFrom: previousFilters.dateFrom,
     dateTo: previousFilters.dateTo,
@@ -48113,8 +48979,7 @@ function readOfficeDashboardPrevious(dependencies, filters) {
     unreconciledTransactionCount: dashboard.bankQuality.unmatchedLineCount
   };
 }
-function readOfficeDashboardAnalytics(dependencies, workspaceId, period, filters) {
-  const dataset = dependencies.fixtures.office;
+function readOfficeDashboardAnalytics(dependencies, dataset, workspaceId, period, filters) {
   const monthlyRows = readMonthlyPnl(dataset, filters);
   const runwayWindowMonths = selectRunwayWindowMonths(monthlyRows);
   const runway = readDashboardRunwayV1(dataset, period, monthlyRows, runwayWindowMonths);
@@ -48135,6 +49000,39 @@ function readOfficeDashboardAnalytics(dependencies, workspaceId, period, filters
     oldestUnmatchedDays: oldestUnmatchedDayInAccounts(reconciliationByAccount),
     expenseTrendMonths,
     expenseTrendByDepartment
+  };
+}
+function officeDatasetForWorkspace(dataset, workspaceId) {
+  const transactions = dataset.transactions.filter((transaction) => transaction.workspaceId === workspaceId);
+  const transactionIds = new Set(transactions.map((transaction) => transaction.id));
+  const financialAllocations = dataset.financialAllocations.filter((allocation) => transactionIds.has(allocation.transactionId));
+  const projects = dataset.projects;
+  const projectBudgetLines = dataset.projectBudgetLines;
+  const partners = dataset.partners;
+  const bankAccounts = dataset.bankAccounts.filter((account) => account.workspaceId === workspaceId);
+  const accountIds = new Set(bankAccounts.map((account) => account.id));
+  const bankImportBatches = dataset.bankImportBatches.filter((batch) => batch.workspaceId === workspaceId);
+  const batchIds = new Set(bankImportBatches.map((batch) => batch.id));
+  const bankStatementLines = dataset.bankStatementLines.filter(
+    (line) => accountIds.has(line.accountId) || batchIds.has(line.importBatchId)
+  );
+  const bankLineIds = new Set(bankStatementLines.map((line) => line.id));
+  const bankReconciliationMatches = dataset.bankReconciliationMatches.filter(
+    (match2) => bankLineIds.has(match2.bankStatementLineId) && transactionIds.has(match2.transactionId)
+  );
+  const cashflowProjectionRows = dataset.cashflowProjectionRows.filter((row) => row.workspaceId === workspaceId);
+  return {
+    ...dataset,
+    partners,
+    projects,
+    projectBudgetLines,
+    transactions,
+    financialAllocations,
+    bankAccounts,
+    bankImportBatches,
+    bankStatementLines,
+    bankReconciliationMatches,
+    cashflowProjectionRows
   };
 }
 function readDashboardRunwayV1(dataset, period, monthlyRows, runwayWindowMonths) {
@@ -49478,12 +50376,12 @@ function toDistributionReconciliation(store) {
   }));
   const actions = [
     { id: "link-statement-payment", label: "Link statement payment", description: "Records and links a payment to the first open statement gap.", maintenance: false },
-    { id: "recompute-payee-balance", label: "Recompute payee balance", description: "Temporarily disabled until a dedicated recompute endpoint is implemented.", maintenance: true },
+    { id: "recompute-payee-balance", label: "Recompute payee balance", description: "Rebuilds payee balance ledger closings via guarded adjustment rows.", maintenance: true },
     { id: "assign-expense-payee", label: "Assign expense payee", description: "Creates a guarded contract expense with an explicit payee.", maintenance: false },
     { id: "allocate-matched-row", label: "Allocate matched row", description: "Runs the locked allocation engine for matched rows.", maintenance: false },
     { id: "void-statement", label: "Void statement", description: "Voids a statement and appends the reversal balance row.", maintenance: false },
-    { id: "repair-identity-link", label: "Repair identity link", description: "One-off backfill; kept as flagged maintenance.", maintenance: true },
-    { id: "refresh-derived-summary", label: "Refresh derived summary", description: "One-off derived summary rebuild; kept as flagged maintenance.", maintenance: true }
+    { id: "repair-identity-link", label: "Repair identity link", description: "Attempts a guarded partner/payee relink from canonical name matches.", maintenance: true },
+    { id: "refresh-derived-summary", label: "Refresh derived summary", description: "Refreshes reconciliation-derived counters and diagnostics snapshot.", maintenance: true }
   ];
   return {
     kpis,
@@ -49495,13 +50393,15 @@ function toDistributionReconciliation(store) {
   };
 }
 function toDistributionAliases(store) {
-  void store;
-  return [];
+  return store.distributionAliases;
 }
 function toDistributionDuplicates(store) {
   const dataset = store.distribution;
   const groups = /* @__PURE__ */ new Map();
   for (const earning of dataset.normalizedEarnings) {
+    if (earning.calculationStatus === "excluded") {
+      continue;
+    }
     if (earning.isrc === null) {
       continue;
     }
@@ -49522,6 +50422,156 @@ function toDistributionDuplicates(store) {
     sampleIds: group.ids.slice(0, distributionReconciliationSampleLimit),
     sampleLabels: group.labels.slice(0, distributionReconciliationSampleLimit)
   }));
+}
+function distributionAliasFromUpsertRequest(fixtures, aliasId, request) {
+  const targetType = request.targetType;
+  const targetId = request.targetId;
+  const target = resolveDistributionAliasTargetLabel(fixtures, targetType, targetId);
+  return {
+    id: aliasId,
+    aliasText: request.aliasText.trim(),
+    targetType,
+    target,
+    targetId
+  };
+}
+function resolveDistributionAliasTargetLabel(fixtures, targetType, targetId) {
+  if (targetType === "unassigned" || targetId === null) {
+    return "unassigned";
+  }
+  if (targetType === "payee") {
+    const payee = fixtures.distribution.payees.find((candidate) => candidate.id === targetId);
+    return payee?.name ?? targetId;
+  }
+  if (targetType === "release") {
+    const release = toReleaseSummaries(fixtures.distribution).find((candidate) => candidate.id === targetId);
+    return release?.title ?? targetId;
+  }
+  if (targetType === "track") {
+    const track = fixtures.distribution.tracks.find((candidate) => candidate.id === targetId);
+    return track?.title ?? targetId;
+  }
+  return targetId;
+}
+function upsertDistributionAliasFixture(fixtures, alias) {
+  const mutableFixtures = fixtures;
+  const withoutAlias = fixtures.distributionAliases.filter((candidate) => candidate.id !== alias.id).filter((candidate) => candidate.aliasText.trim().toLowerCase() !== alias.aliasText.trim().toLowerCase());
+  mutableFixtures.distributionAliases = [...withoutAlias, alias].sort(
+    (left, right) => left.aliasText.localeCompare(right.aliasText, void 0, { sensitivity: "base" })
+  );
+}
+function applyDistributionDuplicateResolutionFixture(fixtures, resolvedEarningIds) {
+  if (resolvedEarningIds.length === 0) {
+    return;
+  }
+  const resolvedSet = new Set(resolvedEarningIds);
+  const mutableDistribution = fixtures.distribution;
+  mutableDistribution.normalizedEarnings = fixtures.distribution.normalizedEarnings.map(
+    (earning) => resolvedSet.has(earning.id) ? { ...earning, calculationStatus: "excluded" } : earning
+  );
+}
+function requireDistributionAliasTarget(fixtures, targetType, targetId) {
+  if (targetType === "unassigned") {
+    return;
+  }
+  if (targetId === null) {
+    throw new ApiRouteError(422, "distribution_alias_target_required", "Alias targetId is required for assigned targets.", [`targetType=${targetType}`]);
+  }
+  if (targetType === "payee") {
+    requireDistributionPayee(fixtures.distribution, targetId);
+    return;
+  }
+  if (targetType === "release") {
+    const exists2 = toReleaseSummaries(fixtures.distribution).some((release) => release.id === targetId);
+    if (!exists2) {
+      throw new ApiRouteError(404, "distribution_alias_release_not_found", "Distribution release target was not found.", [`targetId=${targetId}`]);
+    }
+    return;
+  }
+  if (targetType === "track") {
+    const exists2 = fixtures.distribution.tracks.some((track) => track.id === targetId);
+    if (!exists2) {
+      throw new ApiRouteError(404, "distribution_alias_track_not_found", "Distribution track target was not found.", [`targetId=${targetId}`]);
+    }
+  }
+}
+function duplicateGroupEarningIds(fixtures, duplicateId) {
+  return fixtures.distribution.normalizedEarnings.filter((earning) => earning.isrc === duplicateId).filter((earning) => earning.calculationStatus !== "excluded").map((earning) => earning.id);
+}
+function applyDistributionPayeeBalanceAdjustmentsFixture(fixtures, rows) {
+  if (rows.length === 0) {
+    return;
+  }
+  const mutableFixtures = fixtures;
+  mutableFixtures.distributionPayeeBalances = [...fixtures.distributionPayeeBalances, ...rows];
+}
+function buildDistributionPayeeBalanceAdjustments(fixtures, createdAt) {
+  const targetByKey = /* @__PURE__ */ new Map();
+  for (const statement of fixtures.distribution.statements) {
+    if (statement.status === "void") {
+      continue;
+    }
+    const key = `${statement.payeeId}:${statement.currency}`;
+    const current = targetByKey.get(key) ?? 0n;
+    targetByKey.set(key, current + erhMoney.parse(statement.amountDue));
+  }
+  const knownKeys = /* @__PURE__ */ new Set([
+    ...[...targetByKey.keys()],
+    ...fixtures.distributionPayeeBalances.map((row) => `${row.payeeId}:${row.currency}`)
+  ]);
+  const adjustments = [];
+  for (const key of [...knownKeys].sort()) {
+    const [payeeId, currency] = key.split(":");
+    if (payeeId === void 0 || currency === void 0) {
+      continue;
+    }
+    const openingUnits = erhMoney.parse(lastPayeeClosing(fixtures.distributionPayeeBalances, payeeId, currency));
+    const targetUnits = targetByKey.get(key) ?? 0n;
+    const deltaUnits = targetUnits - openingUnits;
+    if (deltaUnits === 0n) {
+      continue;
+    }
+    adjustments.push({
+      id: randomUUID2(),
+      payeeId,
+      statementId: null,
+      currency,
+      openingBalance: erhMoney.format(openingUnits),
+      periodNet: erhMoney.format(deltaUnits),
+      closingBalance: erhMoney.format(targetUnits),
+      movementType: "adjustment",
+      createdAt
+    });
+  }
+  return adjustments;
+}
+function findIdentityRepairCandidate(fixtures) {
+  const linkedPayeeIds = new Set(
+    Object.values(fixtures.officePartnerPayeeLinks).filter((link) => link.status === "active").map((link) => link.payeeId)
+  );
+  const linkedPartnerIds = new Set(
+    Object.values(fixtures.officePartnerPayeeLinks).filter((link) => link.status === "active").map((link) => link.partnerId)
+  );
+  const partnerByKey = /* @__PURE__ */ new Map();
+  for (const partner of fixtures.office.partners) {
+    if (linkedPartnerIds.has(partner.id)) {
+      continue;
+    }
+    partnerByKey.set(normalizeIdentityName(partner.name), partner);
+  }
+  for (const payee of fixtures.distribution.payees) {
+    if (linkedPayeeIds.has(payee.id)) {
+      continue;
+    }
+    const partner = partnerByKey.get(normalizeIdentityName(payee.name));
+    if (partner !== void 0) {
+      return { partner, payee };
+    }
+  }
+  return null;
+}
+function normalizeIdentityName(value) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/gu, " ").replace(/\s+/gu, " ");
 }
 function toDistributionAuditLog(store) {
   return store.officeAuditLog.filter((entry) => entry.action.startsWith("distribution."));
@@ -49987,6 +51037,7 @@ async function readApiFixtureStoreFromPostgres(pool) {
     distributionExpenseApplications,
     distributionFxRates,
     distributionPayeeBalances,
+    distributionAliases,
     officePartnerPayeeLinks
   ] = await Promise.all([
     readOfficeDataset(pool),
@@ -49999,6 +51050,7 @@ async function readApiFixtureStoreFromPostgres(pool) {
     readDistributionExistingExpenseApplications(pool),
     readDistributionFxRates(pool),
     readDistributionPayeeBalances(pool),
+    readDistributionAliases(pool),
     readOfficePartnerPayeeLinks(pool)
   ]);
   return {
@@ -50015,7 +51067,8 @@ async function readApiFixtureStoreFromPostgres(pool) {
     distributionCostTerms,
     distributionExpenseApplications,
     distributionFxRates,
-    distributionPayeeBalances
+    distributionPayeeBalances,
+    distributionAliases
   };
 }
 async function readPostgresHealth(pool) {
@@ -50351,6 +51404,37 @@ async function readDistributionPayeeBalances(pool) {
     closingBalance: stringCell(row, "closing_balance"),
     movementType: enumCell(row, "movement_type", ["opening", "period", "statement", "void_reversal", "adjustment", "carry_forward"]),
     createdAt: timestampCell(row, "created_at")
+  }));
+}
+async function readDistributionAliases(pool) {
+  const rows = await queryRows(
+    pool,
+    `select ca.id::text, ca.alias_text,
+      case
+        when ca.track_id is not null then 'track'
+        when ca.release_id is not null then 'release'
+        when ca.label_id is not null then 'label'
+        when ca.artist_id is not null then 'artist'
+        when ca.payee_id is not null then 'payee'
+        else 'unassigned'
+      end as target_type,
+      coalesce(ca.track_id::text, ca.release_id::text, ca.label_id::text, ca.artist_id::text, ca.payee_id::text) as target_id,
+      coalesce(t.title, r.title, l.name, a.name, p.name, ca.alias_text) as target
+     from catalog_aliases ca
+     left join tracks t on t.id = ca.track_id
+     left join releases r on r.id = ca.release_id
+     left join labels l on l.id = ca.label_id
+     left join artists a on a.id = ca.artist_id
+     left join payees p on p.id = ca.payee_id
+     order by ca.alias_text, ca.id`,
+    []
+  );
+  return rows.map((row) => ({
+    id: stringCell(row, "id"),
+    aliasText: stringCell(row, "alias_text"),
+    target: stringCell(row, "target"),
+    targetType: enumCell(row, "target_type", ["artist", "payee", "label", "release", "track", "unassigned"]),
+    targetId: nullableStringCell(row, "target_id")
   }));
 }
 function toOfficeDepartment(row) {
@@ -50912,7 +51996,7 @@ async function bootServer() {
       if (corsOrigin.length > 0) {
         headers["Access-Control-Allow-Origin"] = corsOrigin;
         headers["Access-Control-Allow-Methods"] = "GET,POST,PATCH,DELETE,OPTIONS";
-        headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization,Idempotency-Key";
+        headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization,Idempotency-Key,Cache-Control,Pragma";
       }
       if (request.method === "OPTIONS") {
         response.writeHead(204, headers);

@@ -582,12 +582,12 @@ export interface OfficeImportRejectionReason {
   readonly count: number;
 }
 
-// Per-row outcome of a bank-import preview, so the UI can show a detected/rejected table
-// and let the user confirm only selected rows. `id` matches the confirm acceptedRowIds.
+// Per-row outcome of a bank-import preview, including duplicates excluded from confirm.
+// `id` matches the confirm acceptedRowIds/rejectedRowIds partition.
 export interface OfficeBankPreviewRowResult {
   readonly id: EntityId;
   readonly rowNumber: number;
-  readonly status: "accepted" | "rejected";
+  readonly status: "accepted" | "duplicate" | "rejected";
   readonly issues: readonly string[];
 }
 
@@ -601,6 +601,8 @@ export interface BankImportConfirmRequest {
 
 export interface BankImportConfirmResponse extends ApiMutationReceipt {
   readonly importedTransactionCount: number;
+  readonly rejectedRowCount: number;
+  readonly duplicateRowCount: number;
 }
 
 export interface OfficeLedgerBulkRow {

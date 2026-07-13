@@ -114,6 +114,66 @@ test("backend parser parity: SBI extracted text normalization matches frontend p
   assert.deepEqual(backend.rows, frontendRows);
 });
 
+test("SBI fixed-column parser ignores B/F and verifies explicit debit/credit totals", () => {
+  const statementText = [
+    "SBI (Mauritius) Ltd",
+    "Currency : MUR",
+    " DATE          PARTICULARS              CHQ.NO.     WITHDRAWALS        DEPOSITS          BALANCE",
+    " 01-01-2026 B/F                                                               1,000.00 Cr",
+    " 02-01-2026 BANK SERVICE FEE                     100.00                 900.00 Cr",
+    " 03-01-2026 CLIENT PAYMENT                                        250.00       1,150.00 Cr",
+    " Grand Total:                                   100.00          250.00       1,150.00 Cr"
+  ].join("\n");
+
+  const frontend = parseBankStatement(statementText);
+  const backend = parseOfficeBankImportText({
+    text: statementText,
+    fileName: "sbi-corporate.pdf",
+    sourceHint: null
+  });
+
+  assert.equal(frontend.length, 2);
+  assert.equal(frontend[0]?.direction, "debit");
+  assert.equal(frontend[1]?.direction, "credit");
+  assert.ok(frontend.every((row) => row.directionConfidence === "high"));
+  assert.equal(backend.parsedRowCount, 2);
+  assert.deepEqual(backend.validationIssues, []);
+  assert.ok(backend.parsingNotes.some((note) => note.includes("totaux")));
+});
+
+test("SBI fixed-column parser fails validation when printed totals drift", () => {
+  const statementText = [
+    "SBI (Mauritius) Ltd",
+    " DATE          PARTICULARS              CHQ.NO.     WITHDRAWALS        DEPOSITS          BALANCE",
+    " 01-01-2026 B/F                                                               1,000.00 Cr",
+    " 02-01-2026 BANK SERVICE FEE                     100.00                 900.00 Cr",
+    " Grand Total:                                   101.00            0.00         900.00 Cr"
+  ].join("\n");
+
+  const backend = parseOfficeBankImportText({
+    text: statementText,
+    fileName: "sbi-corporate-invalid.pdf",
+    sourceHint: "sbi"
+  });
+
+  assert.ok(backend.validationIssues.includes("sbi_grand_total_mismatch"));
+});
+
+test("SBI fixed-column parser rejects a truncated statement without its grand total", () => {
+  const backend = parseOfficeBankImportText({
+    text: [
+      "SBI (Mauritius) Ltd",
+      " DATE          PARTICULARS              CHQ.NO.     WITHDRAWALS        DEPOSITS          BALANCE",
+      " 01-01-2026 B/F                                                               1,000.00 Cr",
+      " 02-01-2026 BANK SERVICE FEE                     100.00                 900.00 Cr"
+    ].join("\n"),
+    fileName: "sbi-corporate-truncated.pdf",
+    sourceHint: "sbi"
+  });
+
+  assert.ok(backend.validationIssues.includes("sbi_grand_total_missing"));
+});
+
 test("backend parser parity corpus: production-like fixture cases remain aligned", async () => {
   const raw = await readFile(new URL("./fixtures/parser-parity/cases.json", import.meta.url), "utf8");
   const cases = JSON.parse(raw) as readonly ParityCase[];

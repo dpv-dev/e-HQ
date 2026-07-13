@@ -21,6 +21,10 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id: string): string | undefined {
+          if (id.includes("vite/preload-helper")) {
+            return "preload";
+          }
+
           if (id.includes("/packages/ui/")) {
             return "ui";
           }
@@ -39,6 +43,10 @@ export default defineConfig({
 
           if (id.includes("/src/app/canonical/command-center/")) {
             return "workspace-command-center";
+          }
+
+          if (id.includes("/pdfjs-dist/")) {
+            return "pdfjs";
           }
 
           if (id.includes("node_modules")) {

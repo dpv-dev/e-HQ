@@ -57,6 +57,7 @@ import {
   type StatementPaymentLinkInput
 } from "@ehq/domain-distribution";
 import {
+  detectOfficeBankImportDuplicates,
   readDepartmentPnl,
   readGlobalPnl,
   readOfficeBankQuality,
@@ -69,6 +70,7 @@ import {
   readPnlByDepartment,
   readProjectPnl,
   type OfficeBankAccountRow,
+  type OfficeBankDedupeLine,
   type OfficeBankQualityResult,
   type OfficeWriteExchangeRateRow,
   type OfficeAnalyticsDataset,
@@ -226,6 +228,7 @@ import {
   persistDistributionPayeeBalanceAdjustments,
   persistIdentityLink,
   persistOfficeBankImportConfirmation,
+  readExistingOfficeBankStatementLinesForDedupe,
   isBotApiUser,
   requirePermissionForWorkspace,
   runIdempotentMutation,
@@ -236,6 +239,7 @@ import {
   type DistributionImportPreviewRecord,
   type JsonRecord,
   type OfficeBankImportPreviewRecord,
+  type OfficeBankImportPreviewDecision,
   type OfficeBankStatementLineInsert,
   type PersistDistributionAllocationRunInput,
   type PersistDistributionAliasUpsertInput,
@@ -7134,6 +7138,19 @@ async function officeBankImportParsePreviewResponse(context: ApiContext, depende
     sourceHint: request.sourceHint
   });
 
+  if (parsed.validationIssues.length > 0) {
+    throw new ApiRouteError(
+      422,
+      "bank_import_statement_validation_failed",
+      "Le relevé ne concorde pas avec ses soldes et totaux imprimés.",
+      [
+        `path=${context.req.path}`,
+        `fileName=${request.fileName}`,
+        `issues=${parsed.validationIssues.join(",")}`
+      ]
+    );
+  }
+
   if (parsed.rows.length === 0) {
     throw new ApiRouteError(
       422,
@@ -7159,50 +7176,66 @@ async function officeBankImportPreviewResponse(context: ApiContext, dependencies
   requirePermissionForWorkspace(context.get("authUser"), "office_bank_import_preview", request.workspaceId);
   const previewRows = previewRowsFromRecords(request.rows);
   const accountIdOverride = request.accountId ?? null;
-  const allParsedRows = previewRows
+  const parsedBeforeDedupe = previewRows
     .map((row: ApiImportPreviewRow): ParsedOfficeBankPreviewRow => parseOfficeBankPreviewRow(row, request.workspaceId, dependencies.fixtures.office.bankAccounts, dependencies.fixtures.office.exchangeRates, accountIdOverride));
-  const parsedRows = allParsedRows
+  const allParsedRows = applyOfficeBankDuplicateClassification(
+    parsedBeforeDedupe,
+    existingOfficeBankDedupeLines(dependencies.fixtures.office, request.workspaceId)
+  );
+  const validRows = allParsedRows
     .filter((row: ParsedOfficeBankPreviewRow): row is ParsedOfficeBankPreviewRow & { readonly line: OfficeBankStatementLineInsert } => row.line !== null);
+  const acceptedRows = validRows.filter((row) => !row.line.isDuplicateCandidate);
+  const duplicateRows = validRows.filter((row) => row.line.isDuplicateCandidate);
+  const rejectedRows = allParsedRows.filter((row) => row.line === null);
+  const rowResults = allParsedRows.map(previewRowResult);
   const idempotencyFingerprint = `${request.source}:${request.checksum}:${hashRequestBody(request.rows)}`;
   const previewId = previewIdFor("office-bank", idempotencyFingerprint);
   const preview: OfficeBankImportPreviewRecord = {
     previewId,
     workspaceId: request.workspaceId,
-    accountId: accountIdOverride ?? parsedRows[0]?.line.accountId ?? null,
+    accountId: validRows[0]?.line.accountId ?? null,
     source: request.source,
     fileName: request.fileName,
     checksum: request.checksum,
     idempotencyFingerprint,
     rows: previewRows,
+    rowDecisions: rowResults.map((result): OfficeBankImportPreviewDecision => ({
+      id: result.id,
+      status: result.status,
+      issues: result.issues
+    })),
     createdAtIso: dependencies.nowIso()
   };
   await dependencies.persistence.storeOfficeBankImportPreview(preview);
-  const dateRange = officeDateRange(parsedRows.map((row) => row.line.occurredOn));
+  const dateRange = officeDateRange(validRows.map((row) => row.line.occurredOn));
   const response: BankImportPreviewResponse = {
     previewId,
-    accountId: accountIdOverride ?? parsedRows[0]?.line.accountId ?? null,
+    accountId: validRows[0]?.line.accountId ?? null,
     source: request.source,
     detectedFormat: `${request.source}_structured_json`,
-    accountReference: parsedRows[0]?.line.accountId ?? null,
+    accountReference: validRows[0]?.line.accountId ?? null,
     periodLabel: dateRange.label,
-    currencyCodes: parsedRows.length === 0 ? currencyCodesFromRows(request.rows, "MUR") : uniqueStrings(parsedRows.map((row) => row.line.currency)),
+    currencyCodes: validRows.length === 0 ? currencyCodesFromRows(request.rows, "MUR") : uniqueStrings(validRows.map((row) => row.line.currency)),
     openingBalanceMicro: null,
     closingBalanceMicro: null,
     idempotencyFingerprint,
-    acceptedRowCount: parsedRows.length,
-    rejectedRowCount: previewRows.length - parsedRows.length,
-    duplicateRowCount: 0,
+    acceptedRowCount: acceptedRows.length,
+    rejectedRowCount: rejectedRows.length,
+    duplicateRowCount: duplicateRows.length,
     parsingNotes: [
-      "Preview accepts structured JSON rows only; raw PDF/XLS parsing is not implemented in services/api."
+      "Les lignes normalisées ont été comparées à l’historique bancaire existant."
     ],
     warnings: [
-      ...(parsedRows.length === previewRows.length
+      ...(rejectedRows.length === 0
         ? []
         : ["Some rows could not be converted into bank statement lines and will remain in batch metadata instead of being fabricated."]),
+      ...(duplicateRows.length === 0
+        ? []
+        : [`${duplicateRows.length} ligne(s) bancaire(s) existante(s) détectée(s) et exclue(s) de l’import.`]),
       ...bankImportAccountMismatchWarnings(request.rows, dependencies.fixtures.office.bankAccounts)
     ],
-    rejectionReasons: aggregateRejectionReasons(allParsedRows),
-    rowResults: allParsedRows.map(previewRowResult)
+    rejectionReasons: aggregateRejectionReasons(rejectedRows),
+    rowResults
   };
   return context.json(response);
 }
@@ -7326,10 +7359,34 @@ async function officeBankImportConfirmResponse(context: ApiContext, dependencies
     requestBody: request,
     write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<OfficeBankImportConfirmMutationResponse> => {
       const preview = await requireOfficeBankPreviewInWrite(context, dependencies, tx, request.previewId, request.workspaceId);
-      // Two concurrent confirms of the same file (different idempotency keys) must not both
-      // pass the fingerprint check before either inserts: serialize on the fingerprint so the
-      // second request sees the first request's batch and returns a clean 409, not a raw
-      // unique-constraint database error.
+      assertOfficeBankImportSelection(context, preview, request);
+      if (request.accountId !== undefined && preview.accountId !== null && request.accountId !== preview.accountId) {
+        throw new ApiRouteError(409, "bank_import_account_changed", "The destination account changed after preview; analyze the statement again before importing.", [
+          `path=${context.req.path}`,
+          `previewId=${request.previewId}`,
+          `previewAccountId=${preview.accountId}`,
+          `confirmAccountId=${request.accountId}`
+        ]);
+      }
+      const accountIdOverride = request.accountId ?? preview.accountId;
+      const account = accountIdOverride === null
+        ? null
+        : dependencies.fixtures.office.bankAccounts.find(
+            (candidate) =>
+              candidate.id === accountIdOverride &&
+              officeBankAccountBelongsToWorkspace(candidate, request.workspaceId)
+          ) ?? null;
+      if (account === null) {
+        throw new ApiRouteError(400, "bank_import_account_invalid", "Le compte de destination est absent ou appartient à un autre espace.", [
+          `path=${context.req.path}`,
+          `previewId=${request.previewId}`,
+          `accountId=${String(accountIdOverride)}`
+        ]);
+      }
+
+      // Serialize every import for the destination account. Different files can contain the
+      // same lines, so fingerprint locking alone cannot close the preview/confirm race.
+      await acquireAdvisoryLock(tx, `office:bank-import:account:${request.workspaceId}:${account.id}`);
       await acquireAdvisoryLock(tx, `office:bank-import:fingerprint:${request.workspaceId}:${preview.idempotencyFingerprint}`);
       const existingBatch = await findOfficeBankImportBatchByFingerprint(tx, request.workspaceId, preview.idempotencyFingerprint);
       if (existingBatch !== null) {
@@ -7371,31 +7428,68 @@ async function officeBankImportConfirmResponse(context: ApiContext, dependencies
           status: "completed",
           auditEventId,
           importedTransactionCount: existingBatch.acceptedRowCount,
-          rejectedRowCount: existingBatch.rejectedRowCount
+          rejectedRowCount: existingBatch.rejectedRowCount,
+          duplicateRowCount: existingBatch.duplicateRowCount
         };
       }
 
       const acceptedRowIds = new Set<string>(request.acceptedRowIds);
-      if (request.accountId !== undefined && preview.accountId !== undefined && preview.accountId !== null && request.accountId !== preview.accountId) {
-        throw new ApiRouteError(409, "bank_import_account_changed", "The destination account changed after preview; analyze the statement again before importing.", [
-          `path=${context.req.path}`,
-          `previewId=${request.previewId}`,
-          `previewAccountId=${preview.accountId}`,
-          `confirmAccountId=${request.accountId}`
-        ]);
-      }
-      const accountIdOverride = request.accountId ?? preview.accountId ?? null;
       const parsedRows = preview.rows
         .filter((row: ApiImportPreviewRow): boolean => acceptedRowIds.has(row.id))
-        .map((row: ApiImportPreviewRow): ParsedOfficeBankPreviewRow => parseOfficeBankPreviewRow(row, request.workspaceId, dependencies.fixtures.office.bankAccounts, dependencies.fixtures.office.exchangeRates, accountIdOverride));
-      const lines = parsedRows
+        .map((row: ApiImportPreviewRow): ParsedOfficeBankPreviewRow => parseOfficeBankPreviewRow(row, request.workspaceId, dependencies.fixtures.office.bankAccounts, dependencies.fixtures.office.exchangeRates, account.id));
+      const parsedLines = parsedRows
         .map((row: ParsedOfficeBankPreviewRow): OfficeBankStatementLineInsert | null => row.line)
         .filter((line: OfficeBankStatementLineInsert | null): line is OfficeBankStatementLineInsert => line !== null);
+      if (parsedLines.length !== request.acceptedRowIds.length) {
+        throw new ApiRouteError(409, "bank_import_preview_stale", "Les lignes acceptées ne passent plus la validation ; relancez l’analyse.", [
+          `path=${context.req.path}`,
+          `previewId=${request.previewId}`
+        ]);
+      }
+
+      const candidateDateRange = officeDateRange(parsedLines.flatMap((line): readonly string[] =>
+        line.valueOn === null ? [line.occurredOn] : [line.occurredOn, line.valueOn]
+      ));
+      if (candidateDateRange.start === null || candidateDateRange.end === null) {
+        throw new ApiRouteError(400, "bank_import_selection_empty", "Sélectionnez au moins une nouvelle ligne bancaire.", [
+          `path=${context.req.path}`,
+          `previewId=${request.previewId}`
+        ]);
+      }
+      const existingLines = tx.kind === "memory"
+        ? existingOfficeBankDedupeLines(dependencies.fixtures.office, request.workspaceId)
+        : (await readExistingOfficeBankStatementLinesForDedupe(
+            tx,
+            request.workspaceId,
+            account.id,
+            candidateDateRange.start,
+            candidateDateRange.end
+          )).map((line) => officeBankDedupeLine(line.id, line));
+      const staleDuplicates = detectOfficeBankImportDuplicates(
+        parsedRows.flatMap((row): readonly OfficeBankDedupeLine[] =>
+          row.line === null ? [] : [officeBankDedupeLine(row.row.id, row.line)]
+        ),
+        existingLines
+      ).filter((result) => result.match !== null);
+      if (staleDuplicates.length > 0) {
+        throw new ApiRouteError(409, "bank_import_preview_stale_duplicates", "L’historique bancaire a changé depuis l’aperçu ; relancez l’analyse.", [
+          `path=${context.req.path}`,
+          `previewId=${request.previewId}`,
+          `duplicateCount=${String(staleDuplicates.length)}`
+        ]);
+      }
+
+      const lines = parsedLines.map((line): OfficeBankStatementLineInsert => ({
+        ...line,
+        isDuplicateCandidate: false
+      }));
       const suggestions = buildOfficeReconciliationSuggestions(dependencies.fixtures.office, request.workspaceId, lines);
       const batchId = randomUUID();
       const importedAtIso = dependencies.nowIso();
       const dateRange = officeDateRange(lines.map((line) => line.occurredOn));
       const batchStatus = lines.length === 0 ? "failed" : "confirmed";
+      const duplicateRowCount = preview.rowDecisions.filter((decision) => decision.status === "duplicate").length;
+      const rejectedRowCount = preview.rows.length - lines.length - duplicateRowCount;
       await persistOfficeBankImportConfirmation(tx, {
         batchId,
         workspaceId: request.workspaceId,
@@ -7407,8 +7501,8 @@ async function officeBankImportConfirmResponse(context: ApiContext, dependencies
         periodEnd: dateRange.end,
         currency: lines[0]?.currency ?? null,
         acceptedRowCount: lines.length,
-        rejectedRowCount: preview.rows.length - lines.length,
-        duplicateRowCount: 0,
+        rejectedRowCount,
+        duplicateRowCount,
         idempotencyFingerprint: preview.idempotencyFingerprint,
         status: batchStatus,
         importedAtIso,
@@ -7416,6 +7510,7 @@ async function officeBankImportConfirmResponse(context: ApiContext, dependencies
           previewId: request.previewId,
           acceptedRowIds: request.acceptedRowIds,
           rejectedRowIds: request.rejectedRowIds,
+          rowDecisions: preview.rowDecisions,
           rowIssues: parsedRows.flatMap((row) => row.issues.map((issue) => ({ rowId: row.row.id, issue }))),
           rawRows: preview.rows
         },
@@ -7431,7 +7526,8 @@ async function officeBankImportConfirmResponse(context: ApiContext, dependencies
         after: {
           previewId: request.previewId,
           importedStatementLineCount: lines.length,
-          rejectedRowCount: preview.rows.length - lines.length,
+          rejectedRowCount,
+          duplicateRowCount,
           suggestedMatchCount: suggestions.length,
           status: batchStatus
         },
@@ -7448,15 +7544,16 @@ async function officeBankImportConfirmResponse(context: ApiContext, dependencies
         periodEnd: dateRange.end,
         currency: lines[0]?.currency ?? null,
         acceptedRowCount: lines.length,
-        rejectedRowCount: preview.rows.length - lines.length,
-        duplicateRowCount: 0,
+        rejectedRowCount,
+        duplicateRowCount,
         idempotencyFingerprint: preview.idempotencyFingerprint,
         status: batchStatus,
         importedAt: importedAtIso,
         metadata: {
           previewId: request.previewId,
           acceptedRowIds: request.acceptedRowIds,
-          rejectedRowIds: request.rejectedRowIds
+          rejectedRowIds: request.rejectedRowIds,
+          rowDecisions: preview.rowDecisions
         },
         lines
       });
@@ -7474,7 +7571,8 @@ async function officeBankImportConfirmResponse(context: ApiContext, dependencies
         status: "completed",
         auditEventId,
         importedTransactionCount: lines.length,
-        rejectedRowCount: preview.rows.length - lines.length
+        rejectedRowCount,
+        duplicateRowCount
       };
     }
   });
@@ -8039,6 +8137,46 @@ function assertOfficeBankImportConfirmRequest(context: ApiContext, request: Bank
   assertStringArray(context, request.rejectedRowIds, "rejectedRowIds");
 }
 
+function assertOfficeBankImportSelection(
+  context: ApiContext,
+  preview: OfficeBankImportPreviewRecord,
+  request: BankImportConfirmRequest
+): void {
+  const accepted = new Set(request.acceptedRowIds);
+  const rejected = new Set(request.rejectedRowIds);
+  const previewIds = new Set(preview.rows.map((row) => row.id));
+  const decisions = new Map(preview.rowDecisions.map((decision) => [decision.id, decision]));
+  const invalidPartition =
+    accepted.size !== request.acceptedRowIds.length ||
+    rejected.size !== request.rejectedRowIds.length ||
+    [...accepted].some((id) => rejected.has(id)) ||
+    accepted.size + rejected.size !== previewIds.size ||
+    [...accepted, ...rejected].some((id) => !previewIds.has(id)) ||
+    [...previewIds].some((id) => !accepted.has(id) && !rejected.has(id));
+
+  if (invalidPartition) {
+    throw new ApiRouteError(400, "bank_import_selection_invalid", "La sélection doit couvrir tout l’aperçu avec des identifiants uniques et disjoints.", [
+      `path=${context.req.path}`,
+      `previewId=${preview.previewId}`
+    ]);
+  }
+  if (accepted.size === 0) {
+    throw new ApiRouteError(400, "bank_import_selection_empty", "Sélectionnez au moins une nouvelle ligne bancaire.", [
+      `path=${context.req.path}`,
+      `previewId=${preview.previewId}`
+    ]);
+  }
+  if (
+    decisions.size !== previewIds.size ||
+    [...accepted].some((id) => decisions.get(id)?.status !== "accepted")
+  ) {
+    throw new ApiRouteError(409, "bank_import_preview_decision_changed", "Une ligne rejetée ou en doublon ne peut pas être forcée ; relancez l’analyse.", [
+      `path=${context.req.path}`,
+      `previewId=${preview.previewId}`
+    ]);
+  }
+}
+
 function assertStringField(context: ApiContext, value: unknown, field: string): void {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new ApiRouteError(400, "body_field_required", "A required string body field is missing.", [`path=${context.req.path}`, `field=${field}`]);
@@ -8475,9 +8613,70 @@ function previewRowResult(parsed: ParsedOfficeBankPreviewRow): OfficeBankPreview
   return {
     id: parsed.row.id,
     rowNumber: parsed.row.rowNumber,
-    status: parsed.line !== null ? "accepted" : "rejected",
+    status: parsed.line === null
+      ? "rejected"
+      : parsed.line.isDuplicateCandidate
+        ? "duplicate"
+        : "accepted",
     issues: parsed.issues
   };
+}
+
+function applyOfficeBankDuplicateClassification(
+  rows: readonly ParsedOfficeBankPreviewRow[],
+  existingLines: readonly OfficeBankDedupeLine[]
+): readonly ParsedOfficeBankPreviewRow[] {
+  const candidates = rows.flatMap((row): readonly OfficeBankDedupeLine[] =>
+    row.line === null ? [] : [officeBankDedupeLine(row.row.id, row.line)]
+  );
+  const duplicateCandidateIds = new Set(
+    detectOfficeBankImportDuplicates(candidates, existingLines)
+      .filter((result) => result.match !== null)
+      .map((result) => result.candidateId)
+  );
+
+  return rows.map((row): ParsedOfficeBankPreviewRow => {
+    if (row.line === null || !duplicateCandidateIds.has(row.row.id)) {
+      return row;
+    }
+    return {
+      ...row,
+      line: { ...row.line, isDuplicateCandidate: true },
+      issues: [...row.issues, "duplicate_candidate"]
+    };
+  });
+}
+
+function officeBankDedupeLine(
+  id: string,
+  line: OfficeBankDedupeLine | OfficeBankStatementLineInsert | OfficeBankStatementLineRow
+): OfficeBankDedupeLine {
+  return {
+    id,
+    accountId: line.accountId,
+    occurredOn: line.occurredOn,
+    valueOn: line.valueOn,
+    description: line.description,
+    reference: line.reference,
+    direction: line.direction,
+    amountMinor: line.amountMinor,
+    balanceMinor: line.balanceMinor,
+    currency: line.currency
+  };
+}
+
+function existingOfficeBankDedupeLines(
+  dataset: OfficeAnalyticsDataset,
+  workspaceId: string
+): readonly OfficeBankDedupeLine[] {
+  const accountIds = new Set(
+    dataset.bankAccounts
+      .filter((account) => officeBankAccountBelongsToWorkspace(account, workspaceId))
+      .map((account) => account.id)
+  );
+  return dataset.bankStatementLines
+    .filter((line) => accountIds.has(line.accountId))
+    .map((line) => officeBankDedupeLine(line.id, line));
 }
 
 function parseOfficeBankPreviewRow(
@@ -8817,14 +9016,27 @@ function accountForRow(
 ): OfficeBankAccountRow | null {
   const accountId = rowValue(row, ["accountId", "account_id"]);
   if (accountId !== null) {
-    // Look up by ID only — workspace access is validated upstream by resolveWorkspaceId.
-    // Filtering by workspaceId here caused the same false-null as reassign-account:
-    // accounts with a mismatched stored workspace_id fell through to the currency
-    // fallback and landed on the wrong bank.
-    return accounts.find((account: OfficeBankAccountRow): boolean => account.id === accountId) ?? null;
+    return accounts.find(
+      (account: OfficeBankAccountRow): boolean =>
+        account.id === accountId && officeBankAccountBelongsToWorkspace(account, workspaceId)
+    ) ?? null;
   }
 
-  return accounts.find((account: OfficeBankAccountRow): boolean => account.workspaceId === workspaceId && account.currency === currency && account.isActive) ?? null;
+  const matchingAccounts = accounts.filter(
+    (account: OfficeBankAccountRow): boolean =>
+      officeBankAccountBelongsToWorkspace(account, workspaceId) &&
+      account.currency === currency &&
+      account.isActive
+  );
+  return matchingAccounts.length === 1 ? (matchingAccounts[0] ?? null) : null;
+}
+
+function officeBankAccountBelongsToWorkspace(
+  account: OfficeBankAccountRow,
+  workspaceId: string
+): boolean {
+  const canonical = (value: string): string => value === "office" ? DEFAULT_WORKSPACE_ID : value;
+  return canonical(account.workspaceId) === canonical(workspaceId);
 }
 
 function amountForBankRow(row: Readonly<Record<string, string>>): {
@@ -9197,6 +9409,13 @@ function requireOfficeBankPreviewRecord(
       `previewId=${previewId}`,
       `workspaceId=${workspaceId}`,
       `previewWorkspaceId=${preview.workspaceId}`
+    ]);
+  }
+
+  if (!Array.isArray((preview as { readonly rowDecisions?: unknown }).rowDecisions)) {
+    throw new ApiRouteError(409, "bank_import_preview_schema_stale", "Cet aperçu est antérieur au contrôle des doublons ; relancez l’analyse.", [
+      `path=${context.req.path}`,
+      `previewId=${previewId}`
     ]);
   }
 

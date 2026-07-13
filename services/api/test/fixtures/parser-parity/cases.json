@@ -35,6 +35,13 @@
     "text": "Transactions List\nCurrency : MUR\n\n23,Jan,2025 LOCAL TRANSFER 100.00 2,900.00\nID: HINT-SBI-1"
   },
   {
+    "id": "sbi_pdf_text_fixed_column_corporate",
+    "kind": "pdf-text",
+    "fileName": "sbi-corporate-statement.pdf",
+    "sourceHint": null,
+    "text": "SBI (Mauritius) Ltd\nCurrency : MUR\n DATE          PARTICULARS              CHQ.NO.     WITHDRAWALS        DEPOSITS          BALANCE\n 01-01-2026 B/F                                                               1,000.00 Cr\n 02-01-2026 BANK SERVICE FEE                     100.00                 900.00 Cr\n 03-01-2026 CLIENT PAYMENT                                        250.00       1,150.00 Cr\n Grand Total:                                   100.00          250.00       1,150.00 Cr"
+  },
+  {
     "id": "sbi_pdf_text_commission_and_kontor_reference",
     "kind": "pdf-text",
     "fileName": "bankStatement_1Oct2024 to 28Jan2025.pdf",

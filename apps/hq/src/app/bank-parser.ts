@@ -21,8 +21,11 @@ const MONTHS: Readonly<Record<string, number>> = {
   jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12
 };
 
-// Parse an amount string (US "1,234.56" or European "1.234,56", parentheses = negative).
-export function parseAmount(input: string): number | null {
+const MAX_SAFE_MINOR_UNITS = BigInt(Number.MAX_SAFE_INTEGER);
+
+// Parse money exactly into integer minor units. The public parser still exposes
+// numbers for UI compatibility, but only after a safe-integer boundary check.
+function parseAmountMinor(input: string): bigint | null {
   if (input.trim().length === 0) {
     return null;
   }
@@ -53,12 +56,44 @@ export function parseAmount(input: string): number | null {
     return null;
   }
 
-  const parsed = Number.parseFloat(value);
-  if (Number.isNaN(parsed)) {
+  const signedMatch = value.match(/^(-?)(\d*)(?:\.(\d*))?$/u);
+  if (signedMatch === null || signedMatch[2] === undefined) {
     return null;
   }
 
-  return Math.round((negative ? -parsed : parsed) * 100) / 100;
+  const wholeDigits = signedMatch[2];
+  const fractionDigits = signedMatch[3] ?? "";
+  if (wholeDigits.length === 0 && fractionDigits.length === 0) {
+    return null;
+  }
+
+  const wholeMinor = BigInt(wholeDigits.length > 0 ? wholeDigits : "0") * 100n;
+  const paddedFraction = `${fractionDigits}00`;
+  let absoluteMinor = wholeMinor + BigInt(paddedFraction.slice(0, 2));
+  if ((fractionDigits[2] ?? "0") >= "5") {
+    absoluteMinor += 1n;
+  }
+
+  const lexicalSign = signedMatch[1] === "-" ? -1n : 1n;
+  const sign = negative ? -lexicalSign : lexicalSign;
+  return sign * absoluteMinor;
+}
+
+function minorUnitsToNumber(minor: bigint): number | null {
+  if (minor > MAX_SAFE_MINOR_UNITS || minor < -MAX_SAFE_MINOR_UNITS) {
+    return null;
+  }
+  return Number(minor) / 100;
+}
+
+function absMinor(minor: bigint): bigint {
+  return minor < 0n ? -minor : minor;
+}
+
+// Parse an amount string (US "1,234.56" or European "1.234,56", parentheses = negative).
+export function parseAmount(input: string): number | null {
+  const minor = parseAmountMinor(input);
+  return minor === null ? null : minorUnitsToNumber(minor);
 }
 
 // Parse a date string into ISO "YYYY-MM-DD". Supports SBI "11,Sep,2024", ISO,
@@ -100,6 +135,14 @@ export function parseDate(input: string): string | null {
 // debit OR credit amount, then the running balance (the empty debit/credit column is
 // whitespace, so the last two numbers are always amount + balance).
 const SBI_DATE_LINE = /^\s*(\d{1,2},[A-Za-z]{3,9},\d{4})\s+(.+?)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s*$/u;
+const SBI_FIXED_DATE_LINE = /^\s*(\d{1,2}-\d{1,2}-\d{4})\b/u;
+const MONEY_TOKEN = /[0-9][0-9,]*\.[0-9]{2}/gu;
+
+interface MoneyToken {
+  readonly text: string;
+  readonly start: number;
+  readonly end: number;
+}
 
 interface StatementDraftRow {
   date: string;
@@ -109,6 +152,14 @@ interface StatementDraftRow {
   reference: string | null;
 }
 
+interface SbiStatementDraftRow {
+  readonly date: string;
+  readonly description: string;
+  readonly amountMinor: bigint;
+  readonly balanceMinor: bigint | null;
+  readonly reference: string | null;
+}
+
 // Parse SBI / SBM Mauritius bank-statement text (pdftotext -layout output) into rows.
 // The layout wraps each transaction's particulars ACROSS the date line (text above and
 // below it), with blank lines separating transactions — so we parse block by block:
@@ -116,7 +167,12 @@ interface StatementDraftRow {
 // footers form their own blocks with no date line and are skipped. Debit vs credit is
 // recovered from the running-balance movement (assignDirections).
 export function parseSbiStatementText(text: string): readonly ParsedBankRow[] {
-  const drafts: StatementDraftRow[] = [];
+  const fixedRows = parseFixedSbiStatementText(text);
+  if (fixedRows.length > 0) {
+    return fixedRows;
+  }
+
+  const drafts: SbiStatementDraftRow[] = [];
   for (const block of splitIntoBlocks(text)) {
     const draft = sbiDraftFromBlock(block);
     if (draft !== null) {
@@ -124,6 +180,132 @@ export function parseSbiStatementText(text: string): readonly ParsedBankRow[] {
     }
   }
   return assignDirections(drafts);
+}
+
+// SBI corporate statements expose explicit withdrawal/deposit columns. Read the
+// amount's fixed position instead of guessing direction from neighbouring rows.
+function parseFixedSbiStatementText(text: string): readonly ParsedBankRow[] {
+  const rows: ParsedBankRow[] = [];
+  let chequeColumn: number | null = null;
+  let withdrawalsColumn: number | null = null;
+  let depositsColumn: number | null = null;
+  let fixedHeaderDetected = false;
+
+  for (const rawLine of text.split(/\r\n|\r|\n/u)) {
+    const upper = rawLine.toUpperCase();
+    if (
+      upper.includes("PARTICULARS") &&
+      upper.includes("WITHDRAWALS") &&
+      upper.includes("DEPOSITS") &&
+      upper.includes("BALANCE")
+    ) {
+      fixedHeaderDetected = true;
+      chequeColumn = positiveColumn(upper.indexOf("CHQ.NO."));
+      withdrawalsColumn = positiveColumn(upper.indexOf("WITHDRAWALS"));
+      depositsColumn = positiveColumn(upper.indexOf("DEPOSITS"));
+      continue;
+    }
+
+    if (!fixedHeaderDetected || depositsColumn === null) {
+      continue;
+    }
+
+    const dateMatch = rawLine.match(SBI_FIXED_DATE_LINE);
+    if (dateMatch === null || dateMatch[1] === undefined) {
+      continue;
+    }
+
+    const tokens = moneyTokens(rawLine);
+    if (tokens.length === 1 && /\bB\s*\/\s*F\b/iu.test(rawLine)) {
+      continue;
+    }
+    if (tokens.length < 2) {
+      continue;
+    }
+
+    const amountToken = tokens[tokens.length - 2];
+    const balanceToken = tokens[tokens.length - 1];
+    const date = parseDate(dateMatch[1]);
+    const amountMinor = amountToken === undefined ? null : parseAmountMinor(amountToken.text);
+    const balanceMinor = balanceToken === undefined ? null : signedBalanceMinor(rawLine, balanceToken);
+    if (date === null || amountMinor === null || balanceMinor === null || amountToken === undefined) {
+      continue;
+    }
+
+    const amount = minorUnitsToNumber(absMinor(amountMinor));
+    const balance = minorUnitsToNumber(balanceMinor);
+    if (amount === null || balance === null) {
+      continue;
+    }
+
+    const details = fixedSbiDetails(
+      rawLine,
+      dateMatch[0].length,
+      amountToken.start,
+      chequeColumn,
+      withdrawalsColumn
+    );
+    rows.push({
+      date,
+      description: details.description,
+      amount,
+      direction: amountToken.end >= depositsColumn ? "credit" : "debit",
+      directionConfidence: "high",
+      balance,
+      reference: details.reference
+    });
+  }
+
+  return rows;
+}
+
+function positiveColumn(index: number): number | null {
+  return index >= 0 ? index : null;
+}
+
+function moneyTokens(line: string): readonly MoneyToken[] {
+  return [...line.matchAll(MONEY_TOKEN)].flatMap((match: RegExpMatchArray): readonly MoneyToken[] => {
+    const text = match[0];
+    const start = match.index;
+    return text === undefined || start === undefined
+      ? []
+      : [{ text, start, end: start + text.length }];
+  });
+}
+
+function signedBalanceMinor(line: string, token: MoneyToken): bigint | null {
+  const amountMinor = parseAmountMinor(token.text);
+  if (amountMinor === null) {
+    return null;
+  }
+  const marker = line.slice(token.end).match(/^\s*(Dr|Cr)\b/iu)?.[1]?.toLowerCase();
+  return marker === "dr" ? -absMinor(amountMinor) : absMinor(amountMinor);
+}
+
+function fixedSbiDetails(
+  line: string,
+  dateEnd: number,
+  amountStart: number,
+  chequeColumn: number | null,
+  withdrawalsColumn: number | null
+): { readonly description: string; readonly reference: string | null } {
+  const detailsEnd = Math.min(amountStart, withdrawalsColumn ?? amountStart);
+  const safeChequeColumn = chequeColumn !== null && chequeColumn > dateEnd && chequeColumn < detailsEnd
+    ? chequeColumn
+    : null;
+  const descriptionSlice = line.slice(dateEnd, safeChequeColumn ?? detailsEnd).trim();
+  const referenceSlice = safeChequeColumn === null
+    ? ""
+    : line.slice(safeChequeColumn, detailsEnd).trim();
+  const reference = /^[A-Z0-9][A-Z0-9./-]{3,}$/iu.test(referenceSlice)
+    ? referenceSlice
+    : null;
+  const description = [descriptionSlice, reference === null ? referenceSlice : ""]
+    .filter((part: string): boolean => part.length > 0)
+    .join(" ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  return { description, reference };
 }
 
 // Group non-empty lines into blocks delimited by blank lines.
@@ -146,7 +328,7 @@ function splitIntoBlocks(text: string): readonly (readonly string[])[] {
   return blocks;
 }
 
-function sbiDraftFromBlock(block: readonly string[]): StatementDraftRow | null {
+function sbiDraftFromBlock(block: readonly string[]): SbiStatementDraftRow | null {
   let dateLineIndex = -1;
   let match: RegExpMatchArray | null = null;
   for (let index = 0; index < block.length; index += 1) {
@@ -169,8 +351,8 @@ function sbiDraftFromBlock(block: readonly string[]): StatementDraftRow | null {
     return null;
   }
   const date = parseDate(dateStr);
-  const amount = parseAmount(amountStr);
-  if (date === null || amount === null) {
+  const amountMinor = parseAmountMinor(amountStr);
+  if (date === null || amountMinor === null) {
     return null;
   }
 
@@ -195,41 +377,68 @@ function sbiDraftFromBlock(block: readonly string[]): StatementDraftRow | null {
 
   return {
     date,
-    amount,
-    balance: balanceStr !== undefined ? parseAmount(balanceStr) : null,
+    amountMinor: absMinor(amountMinor),
+    balanceMinor: balanceStr !== undefined ? parseAmountMinor(balanceStr) : null,
     description: parts.join(" ").replace(/\s+/gu, " ").trim(),
     reference
   };
 }
 
-function assignDirections(drafts: readonly StatementDraftRow[]): readonly ParsedBankRow[] {
-  return drafts.map((row: StatementDraftRow, index: number): ParsedBankRow => {
-    if (row.balance === null) {
-      return toRow(row, "debit", "low");
+function assignDirections(drafts: readonly SbiStatementDraftRow[]): readonly ParsedBankRow[] {
+  return drafts.flatMap((row: SbiStatementDraftRow, index: number): readonly ParsedBankRow[] => {
+    if (row.balanceMinor === null) {
+      const parsed = toSbiRow(row, "debit", "low");
+      return parsed === null ? [] : [parsed];
     }
 
-    const candidates: number[] = [];
+    const candidates: bigint[] = [];
     const prev = drafts[index - 1];
     const next = drafts[index + 1];
-    if (prev !== undefined && prev.balance !== null) {
-      candidates.push(row.balance - prev.balance);
+    if (prev !== undefined && prev.balanceMinor !== null) {
+      candidates.push(row.balanceMinor - prev.balanceMinor);
     }
-    if (next !== undefined && next.balance !== null) {
-      candidates.push(row.balance - next.balance);
+    if (next !== undefined && next.balanceMinor !== null) {
+      candidates.push(row.balanceMinor - next.balanceMinor);
     }
 
-    const matched = candidates.find((delta: number): boolean => Math.abs(Math.abs(delta) - row.amount) <= 0.01);
+    const matched = candidates.find(
+      (delta: bigint): boolean => absMinor(absMinor(delta) - row.amountMinor) <= 1n
+    );
     if (matched !== undefined) {
-      return toRow(row, matched < 0 ? "debit" : "credit", "high");
+      const parsed = toSbiRow(row, matched < 0n ? "debit" : "credit", "high");
+      return parsed === null ? [] : [parsed];
     }
 
     const firstDelta = candidates[0];
     if (firstDelta !== undefined) {
-      return toRow(row, firstDelta > 0 ? "credit" : "debit", "low");
+      const parsed = toSbiRow(row, firstDelta > 0n ? "credit" : "debit", "low");
+      return parsed === null ? [] : [parsed];
     }
 
-    return toRow(row, "debit", "low");
+    const parsed = toSbiRow(row, "debit", "low");
+    return parsed === null ? [] : [parsed];
   });
+}
+
+function toSbiRow(
+  row: SbiStatementDraftRow,
+  direction: BankDirection,
+  confidence: "high" | "low"
+): ParsedBankRow | null {
+  const amount = minorUnitsToNumber(row.amountMinor);
+  const balance = row.balanceMinor === null ? null : minorUnitsToNumber(row.balanceMinor);
+  if (amount === null || (row.balanceMinor !== null && balance === null)) {
+    return null;
+  }
+  return {
+    date: row.date,
+    description: row.description,
+    amount,
+    direction,
+    directionConfidence: confidence,
+    balance,
+    reference: row.reference
+  };
 }
 
 function toRow(row: StatementDraftRow, direction: BankDirection, confidence: "high" | "low"): ParsedBankRow {
@@ -342,6 +551,8 @@ export function detectBankFormat(text: string): BankFormat {
     lower.includes("instrument id") ||
     lower.includes("txn date") ||
     lower.includes("narration") ||
+    lower.includes("sbi (mauritius)") ||
+    lower.includes("sbi mauritius") ||
     lower.includes("state bank") ||
     lower.includes("sbm")
   ) {

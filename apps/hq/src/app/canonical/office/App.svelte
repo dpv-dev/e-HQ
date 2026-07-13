@@ -69,6 +69,7 @@
     recentImportCancelDisabledReasonFor,
     recentImportDeleteDisabledReasonFor
   } from "./recent-import-actions.js";
+  import { suggestedImportAccountId } from "../../bank-import-account.js";
   import { extractPdfText } from "../../pdf-extract.js";
   import { parseCsvRecords } from "../../bank-parser.js";
   import { formatDateOnly } from "../../date-format.js";
@@ -136,7 +137,9 @@
     readonly status: RequestStatus;
     readonly source: ImportSource;
     readonly fileName: string;
+    readonly checksum: string;
     readonly rows: readonly Readonly<Record<string, string>>[];
+    readonly parsingNotes: readonly string[];
     readonly preview: BankImportPreviewResponse | null;
     readonly confirm: BankImportConfirmResponse | null;
     readonly message: string;
@@ -150,7 +153,7 @@
     readonly amount: string;
     readonly direction: string;
     readonly currency: string;
-    readonly status: "accepted" | "rejected";
+    readonly status: "accepted" | "duplicate" | "rejected";
     readonly reason: string;
   }
 
@@ -501,13 +504,16 @@
     status: "idle",
     source: "mcb",
     fileName: "",
+    checksum: "",
     rows: [],
+    parsingNotes: [],
     preview: null,
     confirm: null,
     message: "Choose a bank statement (PDF or CSV)."
   });
   let importAccounts = $state<readonly OfficeBankAccountSummary[]>([]);
   let selectedImportAccountId = $state<string>("");
+  let importAccountWasUserSelected = $state(false);
   let importRowSelection = $state<Record<string, boolean>>({});
   let editingImportRowNumber = $state<number | null>(null);
   let importEditDate = $state("");
@@ -1031,6 +1037,7 @@
   }
 
   function updateImportAccount(accountId: string): void {
+    importAccountWasUserSelected = true;
     if (accountId === selectedImportAccountId) {
       return;
     }
@@ -1055,16 +1062,14 @@
     };
   }
 
-  // Prefer an active account in the detected currency, then any active account, then any account.
+  // A known bank must match both bank and currency; ambiguous destinations stay empty.
   function defaultImportAccountId(
     accounts: readonly OfficeBankAccountSummary[],
-    currency: string | null
+    currency: string | null,
+    source: ImportSource | null = null,
+    currentAccountId = ""
   ): string {
-    const byCurrency = currency === null
-      ? null
-      : accounts.find((account: OfficeBankAccountSummary): boolean => account.isActive && account.currency === currency);
-    const anyActive = accounts.find((account: OfficeBankAccountSummary): boolean => account.isActive);
-    return (byCurrency ?? anyActive ?? accounts[0])?.id ?? "";
+    return suggestedImportAccountId(accounts, currency, source, currentAccountId);
   }
 
   async function loadWriteGate(): Promise<void> {
@@ -2289,8 +2294,9 @@
     await Promise.all(followUps);
   }
 
-  // Join the API's per-row verdict (accepted/rejected + issues) with the locally parsed rows so the
-  // import table shows date/amount/description alongside the reason. Rejected rows are listed first.
+  // Join the API's per-row verdict (accepted/duplicate/rejected + issues) with the locally parsed rows so the
+  // import table shows date/amount/description alongside the reason. New rows stay first so
+  // a long historical statement cannot hide them behind thousands of duplicates.
   function buildImportPreviewTableRows(state: ImportUiState): readonly ImportPreviewTableRow[] {
     const preview = state.preview;
     if (preview === null) {
@@ -2313,8 +2319,10 @@
         reason: result.issues.map(describeRejectionReason).join(", ")
       };
     });
+    const rank = (status: ImportPreviewTableRow["status"]): number =>
+      status === "accepted" ? 0 : status === "duplicate" ? 1 : 2;
     return [...rows].sort((left: ImportPreviewTableRow, right: ImportPreviewTableRow): number =>
-      left.status === right.status ? left.rowNumber - right.rowNumber : left.status === "rejected" ? -1 : 1
+      left.status === right.status ? left.rowNumber - right.rowNumber : rank(left.status) - rank(right.status)
     );
   }
 
@@ -2387,6 +2395,13 @@
     await previewImportRows(nextRows, importState.source, importState.fileName);
   }
 
+  async function sha256File(file: File): Promise<string> {
+    const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+    return [...new Uint8Array(digest)]
+      .map((byte: number): string => byte.toString(16).padStart(2, "0"))
+      .join("");
+  }
+
   async function handleStatementFile(event: Event): Promise<void> {
     const input = event.target instanceof HTMLInputElement ? event.target : null;
     const file = input?.files?.item(0) ?? null;
@@ -2398,7 +2413,9 @@
       ...importState,
       status: "loading",
       fileName: file.name,
+      checksum: "",
       rows: [],
+      parsingNotes: [],
       preview: null,
       confirm: null,
       message: "Reading the statement."
@@ -2406,7 +2423,15 @@
 
     try {
       const isCsv = file.name.toLowerCase().endsWith(".csv") || file.type === "text/csv" || file.type === "application/vnd.ms-excel";
-      const text = isCsv ? await file.text() : await extractPdfText(file);
+      const checksum = await sha256File(file);
+      const text = isCsv
+        ? await file.text()
+        : await extractPdfText(file, (pageNumber: number, pageCount: number): void => {
+            importState = {
+              ...importState,
+              message: `Lecture du PDF : page ${pageNumber} sur ${pageCount}.`
+            };
+          });
       const parsed = await client.office.parseBankImportPreview({
         workspaceId: officeWorkspaceId,
         fileName: file.name,
@@ -2416,13 +2441,17 @@
         idempotencyKey: createIdempotencyKey("import-parse-preview")
       });
 
-      await applyBackendParsedImportRows(file.name, parsed);
+      await applyBackendParsedImportRows(file.name, checksum, parsed);
     } catch (error: unknown) {
       importState = { ...importState, status: "error", rows: [], message: getErrorMessage(error) };
     }
   }
 
-  async function applyBackendParsedImportRows(fileName: string, parsed: BankImportParsePreviewResponse): Promise<void> {
+  async function applyBackendParsedImportRows(
+    fileName: string,
+    checksum: string,
+    parsed: BankImportParsePreviewResponse
+  ): Promise<void> {
     const source = parsed.source;
     const currency = parsed.currency;
     const rows = parsed.rows;
@@ -2430,8 +2459,13 @@
     if (importAccounts.length === 0) {
       await loadImportAccounts();
     }
-    if (selectedImportAccountId.length === 0) {
-      selectedImportAccountId = defaultImportAccountId(importAccounts, currency);
+    if (!importAccountWasUserSelected) {
+      selectedImportAccountId = defaultImportAccountId(
+        importAccounts,
+        currency,
+        source,
+        selectedImportAccountId
+      );
     }
 
     if (rows.length === 0) {
@@ -2449,14 +2483,16 @@
       ...importState,
       status: "loading",
       source,
+      checksum,
       rows,
+      parsingNotes: parsed.parsingNotes,
       message: `${rows.length} rows detected (${sourceLabel(source)}, ${currency}). Running API analysis.`
     };
-    await previewImportRows(rows, source, fileName);
+    await previewImportRows(rows, source, fileName, checksum);
   }
 
   async function previewImport(): Promise<void> {
-    await previewImportRows(importState.rows, importState.source, importState.fileName);
+    await previewImportRows(importState.rows, importState.source, importState.fileName, importState.checksum);
   }
 
   function describeRejectionReason(reason: string): string {
@@ -2471,29 +2507,26 @@
         return "missing or invalid amount";
       case "amount_mur_missing_for_foreign_currency":
         return "no MUR exchange rate for this date";
+      case "duplicate_candidate":
+        return "déjà présente dans l’historique bancaire";
       default:
         return reason;
     }
   }
 
   function previewSummaryMessage(preview: BankImportPreviewResponse): string {
-    if (preview.rejectedRowCount === 0) {
-      return "Preview ready. Check the detected rows then import to the database.";
-    }
     const topReason = preview.rejectionReasons[0];
     const reasonText = topReason === undefined
       ? ""
-      : ` Main reason: ${describeRejectionReason(topReason.reason)} (${topReason.count} rows).`;
-    if (preview.acceptedRowCount === 0) {
-      return `No row accepted out of ${preview.rejectedRowCount}.${reasonText}`;
-    }
-    return `Preview ready: ${preview.acceptedRowCount} ready, ${preview.rejectedRowCount} rejected.${reasonText}`;
+      : ` Raison principale : ${describeRejectionReason(topReason.reason)} (${topReason.count} ligne(s)).`;
+    return `Aperçu prêt : ${preview.acceptedRowCount} nouvelle(s), ${preview.duplicateRowCount} doublon(s) exclu(s), ${preview.rejectedRowCount} rejetée(s).${reasonText}`;
   }
 
   async function previewImportRows(
     rows: readonly Readonly<Record<string, string>>[],
     source: ImportSource,
-    fileName: string
+    fileName: string,
+    checksum = importState.checksum
   ): Promise<void> {
     if (rows.length === 0) {
       importState = { ...importState, status: "error", message: "Choose a bank statement first (PDF or CSV)." };
@@ -2523,6 +2556,7 @@
       status: "loading",
       source,
       fileName,
+      checksum,
       rows: stampedRows,
       message: "Running API analysis.",
       preview: null,
@@ -2535,7 +2569,7 @@
         accountId,
         source,
         fileName,
-        checksum: `checksum-${source}-${fileName}`,
+        checksum,
         rows: stampedRows
       };
       const preview = await client.office.previewBankImport(request, {
@@ -2611,7 +2645,7 @@
           ...importState,
           status: "success",
           confirm,
-          message: "Statement imported to the database."
+          message: `Relevé importé : ${confirm.importedTransactionCount} nouvelle(s) transaction(s), ${confirm.duplicateRowCount} doublon(s) exclu(s).`
         };
         await Promise.all([
           loadDashboard(),
@@ -4540,6 +4574,9 @@
               {#each importState.preview.warnings as warning (warning)}
                 <span>{warning}</span>
               {/each}
+              {#each importState.parsingNotes as note (note)}
+                <span>{note}</span>
+              {/each}
             {/if}
             {#if !writesEnabled}
               <span>To import to the database, the API must have WRITES_ENABLED=true and be restarted.</span>
@@ -4566,19 +4603,25 @@
                   <span role="columnheader" aria-label="Action"></span>
                 </div>
                 {#each importPreviewTableRows.slice(0, 200) as row (row.id)}
-                  <div class="import-row" class:import-row--rejected={row.status === "rejected"} role="row">
+                  <div class="import-row" class:import-row--rejected={row.status !== "accepted"} role="row">
                     <span role="cell">
                       {#if row.status === "accepted"}
                         <input type="checkbox" checked={importRowSelection[row.id] === true} onchange={() => toggleImportRow(row.id)} aria-label={`Import row ${String(row.rowNumber)}`} />
                       {:else}
-                        <span class="import-row-flag" aria-hidden="true">!</span>
+                        <span class="import-row-flag" aria-hidden="true">{row.status === "duplicate" ? "=" : "!"}</span>
                       {/if}
                     </span>
                     <span role="cell">{row.date}</span>
                     <span role="cell" class="import-row-desc">{row.description}</span>
                     <span role="cell">{row.amount} {row.currency}</span>
                     <span role="cell">{row.direction}</span>
-                    <span role="cell">{row.status === "accepted" ? "Accepted" : `Rejected — ${row.reason}`}</span>
+                    <span role="cell">
+                      {row.status === "accepted"
+                        ? "Nouvelle"
+                        : row.status === "duplicate"
+                          ? `Doublon — ${row.reason}`
+                          : `Rejetée — ${row.reason}`}
+                    </span>
                     <span role="cell">
                       {#if row.status === "rejected"}
                         <Button label="Fix" variant="secondary" size="small" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel={`Fix row ${String(row.rowNumber)}`} onclick={(): void => { startImportRowEdit(row.rowNumber); }} />

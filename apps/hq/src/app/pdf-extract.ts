@@ -1,11 +1,11 @@
-// Extract layout-preserved text from a PDF File in the browser, using pdf.js loaded
-// from a CDN at runtime (no npm dependency, nothing to install). Lines are rebuilt from
+// Extract layout-preserved text from a PDF File in the browser, using a lazy local PDF.js
+// chunk. Lines are rebuilt from
 // the text items' X/Y positions to approximate `pdftotext -layout`, which the bank
 // parsers in bank-parser.ts expect.
 
-const PDFJS_VERSION = "4.7.76";
-const PDFJS_CDN = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/build/pdf.min.mjs`;
-const PDFJS_WORKER = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/build/pdf.worker.min.mjs`;
+const MAX_PDF_BYTES = 25 * 1024 * 1024;
+const MAX_PDF_PAGES = 500;
+const PAGE_BATCH_SIZE = 4;
 
 interface PdfTextItem {
   readonly str: string;
@@ -25,6 +25,7 @@ interface PdfPage {
 interface PdfDocument {
   readonly numPages: number;
   getPage: (pageNumber: number) => Promise<PdfPage>;
+  destroy: () => Promise<void>;
 }
 
 interface PdfLoadingTask {
@@ -41,26 +42,54 @@ let pdfjsPromise: Promise<PdfJsLib> | null = null;
 async function loadPdfjs(): Promise<PdfJsLib> {
   if (pdfjsPromise === null) {
     pdfjsPromise = (async (): Promise<PdfJsLib> => {
-      const lib = (await import(/* @vite-ignore */ PDFJS_CDN)) as unknown as PdfJsLib;
-      lib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
+      const [pdfModule, workerModule] = await Promise.all([
+        import("pdfjs-dist"),
+        import("pdfjs-dist/build/pdf.worker.min.mjs?url")
+      ]);
+      const lib = pdfModule as unknown as PdfJsLib;
+      lib.GlobalWorkerOptions.workerSrc = workerModule.default;
       return lib;
     })();
   }
   return pdfjsPromise;
 }
 
-export async function extractPdfText(file: File): Promise<string> {
+export async function extractPdfText(
+  file: File,
+  onProgress?: (pageNumber: number, pageCount: number) => void
+): Promise<string> {
+  if (file.size > MAX_PDF_BYTES) {
+    throw new Error("Le PDF dépasse la taille maximale de 25 Mo.");
+  }
+
   const pdfjs = await loadPdfjs();
   const buffer = await file.arrayBuffer();
   const document = await pdfjs.getDocument({ data: buffer }).promise;
-
-  const pages: string[] = [];
-  for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
-    const page = await document.getPage(pageNumber);
-    const content = await page.getTextContent();
-    pages.push(reconstructLines(content.items));
+  if (document.numPages > MAX_PDF_PAGES) {
+    await document.destroy();
+    throw new Error("Le PDF dépasse la limite de 500 pages.");
   }
-  return pages.join("\n");
+
+  const pages = new Array<string>(document.numPages);
+  let completedPageCount = 0;
+  try {
+    for (let start = 1; start <= document.numPages; start += PAGE_BATCH_SIZE) {
+      const pageNumbers = Array.from(
+        { length: Math.min(PAGE_BATCH_SIZE, document.numPages - start + 1) },
+        (_value, index): number => start + index
+      );
+      await Promise.all(pageNumbers.map(async (pageNumber: number): Promise<void> => {
+        const page = await document.getPage(pageNumber);
+        const content = await page.getTextContent();
+        pages[pageNumber - 1] = reconstructLines(content.items);
+        completedPageCount += 1;
+        onProgress?.(completedPageCount, document.numPages);
+      }));
+    }
+    return pages.join("\n");
+  } finally {
+    await document.destroy();
+  }
 }
 
 // Rebuild text lines from positioned items, approximating `pdftotext -layout` closely

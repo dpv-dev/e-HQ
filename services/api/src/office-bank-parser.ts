@@ -31,6 +31,19 @@ export interface OfficeBankParseOutput {
   readonly parsedRowCount: number;
   readonly rows: readonly Readonly<Record<string, string>>[];
   readonly parsingNotes: readonly string[];
+  readonly validationIssues: readonly string[];
+}
+
+interface FixedSbiParseResult {
+  readonly rows: readonly ParsedBankRow[];
+  readonly validationIssues: readonly string[];
+  readonly totalsVerified: boolean;
+}
+
+interface MoneyToken {
+  readonly text: string;
+  readonly start: number;
+  readonly end: number;
 }
 
 const MONTHS: Readonly<Record<string, number>> = {
@@ -50,6 +63,10 @@ const MONTHS: Readonly<Record<string, number>> = {
 
 const SBI_DATE_LINE =
   /^\s*(\d{1,2},[A-Za-z]{3,9},\d{4})\s+(.+?)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s*$/u;
+
+const SBI_FIXED_DATE_LINE = /^\s*(\d{1,2}-\d{1,2}-\d{4})\b/u;
+const MONEY_TOKEN = /[0-9][0-9,]*\.[0-9]{2}/gu;
+const TOTAL_MONEY_TOKEN = /(?:^|\s)([0-9][0-9,]*\.[0-9]{2}|0)(?=\s|$)/gu;
 
 const MCB_LINE =
   /^\s*(\d{2}\/\d{2}\/\d{4})\s+\d{2}\/\d{2}\/\d{4}\s+(.+?)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s*$/u;
@@ -71,7 +88,8 @@ export function parseOfficeBankImportText(input: OfficeBankParseInput): OfficeBa
       ),
       parsingNotes: [
         "Parsed on API from CSV content and normalized before import preview."
-      ]
+      ],
+      validationIssues: []
     };
   }
 
@@ -81,11 +99,14 @@ export function parseOfficeBankImportText(input: OfficeBankParseInput): OfficeBa
       : detectBankFormat(input.text) === "mcb"
         ? "mcb"
         : "sbi";
-  const rows =
-    source === "mcb"
-      ? parseMcbStatementText(input.text)
+  const fixedSbi = source === "sbi" ? parseFixedSbiStatementText(input.text) : null;
+  const rows = source === "mcb"
+    ? parseMcbStatementText(input.text)
+    : fixedSbi !== null && fixedSbi.rows.length > 0
+      ? fixedSbi.rows
       : parseSbiStatementText(input.text);
   const currency = detectStatementCurrency(input.text);
+  const fixedSbiDetected = fixedSbi !== null && fixedSbi.rows.length > 0;
 
   return {
     source,
@@ -94,9 +115,15 @@ export function parseOfficeBankImportText(input: OfficeBankParseInput): OfficeBa
     rows: rows.map((row: ParsedBankRow): Readonly<Record<string, string>> =>
       bankRowToRecord(row, currency)
     ),
-    parsingNotes: [
-      "Parsed on API from extracted statement text and normalized before import preview."
-    ]
+    parsingNotes: fixedSbiDetected
+      ? [
+          "Relevé SBI à colonnes fixes détecté et normalisé par l’API.",
+          ...(fixedSbi?.totalsVerified === true
+            ? ["Les totaux imprimés et les soldes courants ont été vérifiés exactement."]
+            : ["Les soldes courants ont été vérifiés exactement ; aucun total général imprimé n’était disponible."])
+        ]
+      : ["Parsed on API from extracted statement text and normalized before import preview."],
+    validationIssues: fixedSbi?.validationIssues ?? []
   };
 }
 
@@ -170,6 +197,218 @@ function parseDate(input: string): string | null {
   }
 
   return null;
+}
+
+// SBI corporate statements use fixed columns instead of the legacy blank-line blocks.
+// Column position is authoritative for debit/credit; running balance and printed totals
+// then provide independent integer checks so a partially extracted PDF fails loudly.
+function parseFixedSbiStatementText(text: string): FixedSbiParseResult {
+  const rows: ParsedBankRow[] = [];
+  const validationIssues = new Set<string>();
+  let chequeColumn: number | null = null;
+  let withdrawalsColumn: number | null = null;
+  let depositsColumn: number | null = null;
+  let fixedHeaderDetected = false;
+  let openingBalanceMinor: bigint | null = null;
+  let previousBalanceMinor: bigint | null = null;
+  let debitTotalMinor = 0n;
+  let creditTotalMinor = 0n;
+  let printedDebitTotalMinor: bigint | null = null;
+  let printedCreditTotalMinor: bigint | null = null;
+  let printedClosingBalanceMinor: bigint | null = null;
+
+  for (const rawLine of text.split(/\r\n|\r|\n/u)) {
+    const upper = rawLine.toUpperCase();
+    if (
+      upper.includes("PARTICULARS") &&
+      upper.includes("WITHDRAWALS") &&
+      upper.includes("DEPOSITS") &&
+      upper.includes("BALANCE")
+    ) {
+      fixedHeaderDetected = true;
+      chequeColumn = positiveColumn(upper.indexOf("CHQ.NO."));
+      withdrawalsColumn = positiveColumn(upper.indexOf("WITHDRAWALS"));
+      depositsColumn = positiveColumn(upper.indexOf("DEPOSITS"));
+      continue;
+    }
+
+    if (!fixedHeaderDetected || depositsColumn === null) {
+      continue;
+    }
+
+    if (/\bGrand\s+Total\s*:/iu.test(rawLine)) {
+      const totals = totalMoneyTokens(rawLine);
+      if (totals.length >= 3) {
+        const debitToken = totals[totals.length - 3];
+        const creditToken = totals[totals.length - 2];
+        const balanceToken = totals[totals.length - 1];
+        printedDebitTotalMinor = debitToken === undefined ? null : parseAmountUnits(debitToken.text);
+        printedCreditTotalMinor = creditToken === undefined ? null : parseAmountUnits(creditToken.text);
+        printedClosingBalanceMinor = balanceToken === undefined
+          ? null
+          : signedBalanceMinor(rawLine, balanceToken);
+      }
+      continue;
+    }
+
+    const dateMatch = rawLine.match(SBI_FIXED_DATE_LINE);
+    if (dateMatch === null || dateMatch[1] === undefined) {
+      continue;
+    }
+
+    const tokens = moneyTokens(rawLine);
+    if (tokens.length === 1 && /\bB\s*\/\s*F\b/iu.test(rawLine)) {
+      const balanceToken = tokens[0];
+      openingBalanceMinor = balanceToken === undefined
+        ? null
+        : signedBalanceMinor(rawLine, balanceToken);
+      previousBalanceMinor = openingBalanceMinor;
+      continue;
+    }
+
+    if (tokens.length < 2) {
+      validationIssues.add("sbi_dated_row_unreadable");
+      continue;
+    }
+
+    const amountToken = tokens[tokens.length - 2];
+    const balanceToken = tokens[tokens.length - 1];
+    const date = parseDate(dateMatch[1]);
+    const amountMinor = amountToken === undefined ? null : parseAmountUnits(amountToken.text);
+    const balanceMinor = balanceToken === undefined ? null : signedBalanceMinor(rawLine, balanceToken);
+    if (date === null || amountMinor === null || balanceMinor === null || amountToken === undefined) {
+      validationIssues.add("sbi_dated_row_unreadable");
+      continue;
+    }
+
+    const direction: "debit" | "credit" = amountToken.end >= depositsColumn
+      ? "credit"
+      : "debit";
+    const absoluteAmountMinor = absBigInt(amountMinor);
+    const signedMovementMinor = direction === "credit" ? absoluteAmountMinor : -absoluteAmountMinor;
+    if (
+      previousBalanceMinor !== null &&
+      balanceMinor - previousBalanceMinor !== signedMovementMinor
+    ) {
+      validationIssues.add("sbi_running_balance_mismatch");
+    }
+    previousBalanceMinor = balanceMinor;
+
+    if (direction === "credit") {
+      creditTotalMinor += absoluteAmountMinor;
+    } else {
+      debitTotalMinor += absoluteAmountMinor;
+    }
+
+    const details = fixedSbiDetails(
+      rawLine,
+      dateMatch[0].length,
+      amountToken.start,
+      chequeColumn,
+      withdrawalsColumn
+    );
+    if (details.description.length === 0) {
+      validationIssues.add("sbi_description_missing");
+    }
+    rows.push({
+      date,
+      description: details.description,
+      amountMinor: absoluteAmountMinor,
+      direction,
+      balanceMinor,
+      reference: details.reference
+    });
+  }
+
+  const hasPrintedTotals =
+    printedDebitTotalMinor !== null &&
+    printedCreditTotalMinor !== null &&
+    printedClosingBalanceMinor !== null;
+  if (fixedHeaderDetected && rows.length > 0 && !hasPrintedTotals) {
+    validationIssues.add("sbi_grand_total_missing");
+  }
+  if (hasPrintedTotals) {
+    if (
+      printedDebitTotalMinor !== debitTotalMinor ||
+      printedCreditTotalMinor !== creditTotalMinor ||
+      printedClosingBalanceMinor !== previousBalanceMinor
+    ) {
+      validationIssues.add("sbi_grand_total_mismatch");
+    }
+    if (
+      openingBalanceMinor !== null &&
+      openingBalanceMinor + creditTotalMinor - debitTotalMinor !== printedClosingBalanceMinor
+    ) {
+      validationIssues.add("sbi_opening_closing_mismatch");
+    }
+  }
+
+  return {
+    rows,
+    validationIssues: [...validationIssues],
+    totalsVerified: hasPrintedTotals && validationIssues.size === 0
+  };
+}
+
+function positiveColumn(index: number): number | null {
+  return index >= 0 ? index : null;
+}
+
+function moneyTokens(line: string): readonly MoneyToken[] {
+  return [...line.matchAll(MONEY_TOKEN)].flatMap((match: RegExpMatchArray): readonly MoneyToken[] => {
+    const text = match[0];
+    const start = match.index;
+    return text === undefined || start === undefined
+      ? []
+      : [{ text, start, end: start + text.length }];
+  });
+}
+
+function totalMoneyTokens(line: string): readonly MoneyToken[] {
+  return [...line.matchAll(TOTAL_MONEY_TOKEN)].flatMap((match: RegExpMatchArray): readonly MoneyToken[] => {
+    const text = match[1];
+    const matchStart = match.index;
+    if (text === undefined || matchStart === undefined) {
+      return [];
+    }
+    const start = matchStart + match[0].indexOf(text);
+    return [{ text, start, end: start + text.length }];
+  });
+}
+
+function signedBalanceMinor(line: string, token: MoneyToken): bigint | null {
+  const amountMinor = parseAmountUnits(token.text);
+  if (amountMinor === null) {
+    return null;
+  }
+  const marker = line.slice(token.end).match(/^\s*(Dr|Cr)\b/iu)?.[1]?.toLowerCase();
+  return marker === "dr" ? -absBigInt(amountMinor) : absBigInt(amountMinor);
+}
+
+function fixedSbiDetails(
+  line: string,
+  dateEnd: number,
+  amountStart: number,
+  chequeColumn: number | null,
+  withdrawalsColumn: number | null
+): { readonly description: string; readonly reference: string | null } {
+  const detailsEnd = Math.min(amountStart, withdrawalsColumn ?? amountStart);
+  const safeChequeColumn = chequeColumn !== null && chequeColumn > dateEnd && chequeColumn < detailsEnd
+    ? chequeColumn
+    : null;
+  const descriptionSlice = line.slice(dateEnd, safeChequeColumn ?? detailsEnd).trim();
+  const referenceSlice = safeChequeColumn === null
+    ? ""
+    : line.slice(safeChequeColumn, detailsEnd).trim();
+  const reference = /^[A-Z0-9][A-Z0-9./-]{3,}$/iu.test(referenceSlice)
+    ? referenceSlice
+    : null;
+  const description = [descriptionSlice, reference === null ? referenceSlice : ""]
+    .filter((part: string): boolean => part.length > 0)
+    .join(" ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  return { description, reference };
 }
 
 function parseSbiStatementText(text: string): readonly ParsedBankRow[] {
@@ -414,6 +653,8 @@ function detectBankFormat(text: string): BankFormat {
     lower.includes("instrument id") ||
     lower.includes("txn date") ||
     lower.includes("narration") ||
+    lower.includes("sbi (mauritius)") ||
+    lower.includes("sbi mauritius") ||
     lower.includes("state bank") ||
     lower.includes("sbm")
   ) {

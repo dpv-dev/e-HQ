@@ -15,7 +15,8 @@
     "@ehq/api-client": "workspace:*",
     "@ehq/auth": "workspace:*",
     "@ehq/ui": "workspace:*",
-    "@supabase/supabase-js": "^2.108.2"
+    "@supabase/supabase-js": "^2.108.2",
+    "pdfjs-dist": "4.7.76"
   },
   "devDependencies": {
     "@types/node": "^26.0.0",

@@ -66,7 +66,14 @@ export interface OfficeBankImportPreviewRecord {
   readonly checksum: string;
   readonly idempotencyFingerprint: string;
   readonly rows: readonly ApiImportPreviewRow[];
+  readonly rowDecisions: readonly OfficeBankImportPreviewDecision[];
   readonly createdAtIso: string;
+}
+
+export interface OfficeBankImportPreviewDecision {
+  readonly id: string;
+  readonly status: "accepted" | "duplicate" | "rejected";
+  readonly issues: readonly string[];
 }
 
 export interface ApiPersistenceRuntime {
@@ -162,6 +169,19 @@ export interface OfficeBankStatementLineInsert {
   readonly balanceMurMinor: bigint | null;
   readonly isDuplicateCandidate: boolean;
   readonly rawData: JsonRecord;
+}
+
+export interface ExistingOfficeBankStatementLineForDedupe {
+  readonly id: string;
+  readonly accountId: string;
+  readonly occurredOn: string;
+  readonly valueOn: string | null;
+  readonly description: string;
+  readonly reference: string | null;
+  readonly direction: "credit" | "debit";
+  readonly amountMinor: bigint;
+  readonly balanceMinor: bigint | null;
+  readonly currency: string;
 }
 
 export interface PersistDistributionAllocationRunInput {
@@ -925,6 +945,57 @@ export async function findOfficeBankImportBatchByFingerprint(
     rejectedRowCount: integerField(row, "rejected_row_count"),
     duplicateRowCount: integerField(row, "duplicate_row_count")
   };
+}
+
+export async function readExistingOfficeBankStatementLinesForDedupe(
+  tx: ApiWriteTransaction,
+  workspaceId: string,
+  accountId: string,
+  periodStart: string,
+  periodEnd: string
+): Promise<readonly ExistingOfficeBankStatementLineForDedupe[]> {
+  if (tx.kind === "memory") {
+    return [];
+  }
+
+  const rows = rowsFromQueryResult(await tx.executor.execute(sql`
+    select
+      line.id::text as id,
+      line.account_id::text as account_id,
+      line.occurred_on::text as occurred_on,
+      line.value_on::text as value_on,
+      line.description,
+      line.reference,
+      line.direction,
+      line.amount_minor::text as amount_minor,
+      line.balance_minor::text as balance_minor,
+      line.currency
+    from office_bank_statement_lines line
+    inner join office_bank_import_batches batch on batch.id = line.import_batch_id
+    where batch.workspace_id = ${workspaceId}
+      and line.account_id = ${accountId}
+      and (
+        line.occurred_on between ${periodStart} and ${periodEnd}
+        or line.value_on between ${periodStart} and ${periodEnd}
+      )
+      -- Void imports are still visible in current read projections, so treating them as
+      -- active here prevents a reverse/re-import from creating a second visible copy.
+      and batch.status in ('confirmed', 'void')
+    order by line.occurred_on, line.id
+  `));
+
+  return rows.map((row): ExistingOfficeBankStatementLineForDedupe => ({
+    id: stringField(row, "id"),
+    accountId: stringField(row, "account_id"),
+    occurredOn: stringField(row, "occurred_on"),
+    valueOn: nullableStringField(row, "value_on"),
+    description: stringField(row, "description"),
+    reference: nullableStringField(row, "reference"),
+    direction: officeBankDirectionField(row, "direction"),
+    amountMinor: bigintField(row, "amount_minor"),
+    balanceMinor: nullableBigintField(row, "balance_minor"),
+    currency: stringField(row, "currency")
+  }));
 }
 
 export async function acquireAdvisoryLock(tx: ApiWriteTransaction, lockKey: string): Promise<void> {
@@ -1804,6 +1875,41 @@ function integerField(row: JsonRecord, key: string): number {
   }
 
   throwPersistenceHttpError(500, "integer_field_invalid", "Database row field is not an integer.", [`field=${key}`]);
+}
+
+function nullableStringField(row: JsonRecord, key: string): string | null {
+  const value = row[key];
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  throwPersistenceHttpError(500, "string_field_invalid", "Database row field is not a string.", [`field=${key}`]);
+}
+
+function bigintField(row: JsonRecord, key: string): bigint {
+  const value = row[key];
+  if (typeof value === "bigint") {
+    return value;
+  }
+  if (typeof value === "string" && /^-?\d+$/u.test(value)) {
+    return BigInt(value);
+  }
+  throwPersistenceHttpError(500, "bigint_field_invalid", "Database row field is not an integer.", [`field=${key}`]);
+}
+
+function nullableBigintField(row: JsonRecord, key: string): bigint | null {
+  const value = row[key];
+  return value === null || value === undefined ? null : bigintField(row, key);
+}
+
+function officeBankDirectionField(row: JsonRecord, key: string): "credit" | "debit" {
+  const value = row[key];
+  if (value === "credit" || value === "debit") {
+    return value;
+  }
+  throwPersistenceHttpError(500, "office_bank_direction_invalid", "Office bank statement direction is invalid.", [`field=${key}`]);
 }
 
 function officeBankImportStatusField(row: JsonRecord, key: string): ExistingOfficeBankImportBatch["status"] {
