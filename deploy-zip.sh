@@ -20,6 +20,12 @@ FRONT_HTACCESS_TEMPLATE="apps/hq/.htaccess"
 [ -f "$API_DIR/scripts/refresh-fx.mjs" ] || { echo "ERROR: $API_DIR/scripts/refresh-fx.mjs missing — run ./deploy-build.sh first"; exit 1; }
 [ -f "$FRONT_DIR/index.html" ] || { echo "ERROR: $FRONT_DIR/index.html missing — run ./deploy-build.sh first"; exit 1; }
 [ -f "$FRONT_HTACCESS_TEMPLATE" ] || { echo "ERROR: $FRONT_HTACCESS_TEMPLATE missing — create this deploy-time SPA fallback file."; exit 1; }
+grep -qE 'AddType[[:space:]]+application/javascript[[:space:]]+\.mjs' "$FRONT_HTACCESS_TEMPLATE" || {
+  echo "ERROR: $FRONT_HTACCESS_TEMPLATE must serve .mjs files as application/javascript."; exit 1
+}
+grep -qE 'FilesMatch.*mjs' "$FRONT_HTACCESS_TEMPLATE" || {
+  echo "ERROR: $FRONT_HTACCESS_TEMPLATE must include .mjs in immutable asset caching."; exit 1
+}
 
 # --- secret guard: never ship .env or real secret values ---
 echo "==> Secret guard"
