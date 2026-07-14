@@ -22,6 +22,7 @@
   const hasRowActions = $derived((props.rowActions?.length ?? 0) > 0);
   const pagination = $derived(props.pagination ?? null);
   const showPagination = $derived(pagination !== null && props.state === "default");
+  // Local pages keep the DOM bounded without assuming fixed row heights.
   const AUTO_ROWS_PER_PAGE = 15;
   let localPage = $state(1);
 
@@ -49,35 +50,17 @@
   let sortDirection = $state<"asc" | "desc">("asc");
 
   const sortedRows = $derived(sortRows(props.rows, sortColumnIndex, sortDirection));
-  const virtualize = $derived(props.state === "default" && sortedRows.length > 50);
-  const virtualRowHeight = 44;
-  const virtualOverscan = 8;
-  let virtualScrollTop = $state(0);
-  let virtualViewportHeight = $state(520);
-  const virtualStart = $derived(
-    virtualize ? Math.max(0, Math.floor(virtualScrollTop / virtualRowHeight) - virtualOverscan) : 0
-  );
-  const virtualEnd = $derived(
-    virtualize
-      ? Math.min(sortedRows.length, Math.ceil((virtualScrollTop + virtualViewportHeight) / virtualRowHeight) + virtualOverscan)
-      : sortedRows.length
-  );
-  const virtualTopSpacer = $derived(virtualize ? virtualStart * virtualRowHeight : 0);
-  const virtualBottomSpacer = $derived(virtualize ? Math.max(0, (sortedRows.length - virtualEnd) * virtualRowHeight) : 0);
-  const showNumberedPagination = $derived(props.state === "default" && !virtualize && sortedRows.length > AUTO_ROWS_PER_PAGE);
+  const showNumberedPagination = $derived(props.state === "default" && sortedRows.length > AUTO_ROWS_PER_PAGE);
   const totalLocalPages = $derived(Math.max(1, Math.ceil(sortedRows.length / AUTO_ROWS_PER_PAGE)));
   const localPageRows = $derived(
     showNumberedPagination
       ? sortedRows.slice((localPage - 1) * AUTO_ROWS_PER_PAGE, localPage * AUTO_ROWS_PER_PAGE)
       : sortedRows
   );
-  const visibleRows = $derived(virtualize ? sortedRows.slice(virtualStart, virtualEnd) : localPageRows);
   const localPageNumbers = $derived(Array.from({ length: totalLocalPages }, (_, index: number): number => index + 1));
   const showFooter = $derived(props.state === "default" && (showPagination || showNumberedPagination));
   const localPaginationDetail = $derived(
-    virtualize
-      ? `${String(sortedRows.length)} rows.`
-      : showNumberedPagination
+    showNumberedPagination
       ? `${String((localPage - 1) * AUTO_ROWS_PER_PAGE + 1)}–${String(Math.min(localPage * AUTO_ROWS_PER_PAGE, sortedRows.length))} of ${String(sortedRows.length)} rows.`
       : `${String(sortedRows.length)} rows.`
   );
@@ -116,16 +99,6 @@
     }
 
     localPage = page;
-  }
-
-  function handleTableScroll(event: Event): void {
-    const target = event.currentTarget;
-    if (!(target instanceof HTMLElement)) {
-      return;
-    }
-
-    virtualScrollTop = target.scrollTop;
-    virtualViewportHeight = target.clientHeight;
   }
 
   function sortRows(rows: readonly TableRow[], columnIndex: number | null, direction: "asc" | "desc"): readonly TableRow[] {
@@ -211,7 +184,7 @@
       <span>You can request access without leaving this workspace.</span>
     </div>
   {:else}
-    <div class:virtualized={virtualize} class="table-frame" onscroll={virtualize ? handleTableScroll : undefined}>
+    <div class="table-frame">
       <table>
         <thead>
           <tr>
@@ -228,15 +201,12 @@
               </th>
             {/each}
             {#if hasRowActions}
-              <th class="right" aria-label="Actions"></th>
+              <th class="actions-column right" aria-label="Actions"></th>
             {/if}
           </tr>
         </thead>
         <tbody>
-          {#if virtualTopSpacer > 0}
-            <tr class="virtual-spacer" aria-hidden="true"><td colspan={props.columns.length + (hasRowActions ? 1 : 0)} style={`height: ${String(virtualTopSpacer)}px`}></td></tr>
-          {/if}
-          {#each visibleRows as row, index (rowKey(row, virtualStart + index))}
+          {#each localPageRows as row, index (rowKey(row, index))}
             <tr>
               {#each row.cells as cell}
                 <td class:right={cell.kind === "money"}>
@@ -252,7 +222,7 @@
                 </td>
               {/each}
               {#if hasRowActions}
-                <td class="right">
+                <td class="actions-column right">
                   <div class="row-actions">
                     {#each props.rowActions ?? [] as action, actionIndex (`${action.label}-${String(actionIndex)}`)}
                       <button
@@ -272,9 +242,6 @@
               {/if}
             </tr>
           {/each}
-          {#if virtualBottomSpacer > 0}
-            <tr class="virtual-spacer" aria-hidden="true"><td colspan={props.columns.length + (hasRowActions ? 1 : 0)} style={`height: ${String(virtualBottomSpacer)}px`}></td></tr>
-          {/if}
         </tbody>
       </table>
     </div>
@@ -377,17 +344,6 @@
   .table-frame {
     width: 100%;
     overflow-x: auto;
-  }
-
-  .table-frame.virtualized {
-    height: 520px;
-    max-height: 520px;
-    overflow: auto;
-    contain: content;
-  }
-
-  .table-frame.virtualized table {
-    table-layout: fixed;
   }
 
   .table-pagination {
@@ -520,11 +476,6 @@
     border-bottom: 0;
   }
 
-  .virtual-spacer td {
-    padding: 0;
-    border: 0;
-  }
-
   .right {
     text-align: right;
   }
@@ -534,13 +485,24 @@
   }
 
   .row-actions {
+    width: max-content;
+    min-width: max-content;
     display: flex;
+    align-items: center;
     gap: var(--ehq-space-2);
     justify-content: flex-end;
+    white-space: nowrap;
+  }
+
+  .actions-column {
+    width: 1%;
+    min-width: max-content;
+    white-space: nowrap;
   }
 
   .ehq-row-action {
     appearance: none;
+    flex: 0 0 auto;
     cursor: pointer;
     border: 1px solid var(--ehq-border-soft);
     border-radius: var(--ehq-radius-sm);
