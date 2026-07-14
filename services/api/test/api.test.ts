@@ -1137,6 +1137,14 @@ test("Distribution reads migrated royalty results as fixture checksums, not reca
   assert.equal(dashboard.recoupedMicro, "10.0000000000");
   assert.equal(dashboard.netPayableMicro, "90.0000000000");
   assert.equal(dashboard.suspenseCount, 1);
+  assert.deepEqual(dashboard.importedRevenue, [{ currency: "USD", amountMicro: "250.0000000000" }]);
+  assert.deepEqual(dashboard.paidRoyalties, [{ currency: "USD", amountMicro: "15.1000000000" }]);
+  assert.equal(dashboard.contractCoverage.covered, 1);
+  assert.equal(dashboard.contractCoverage.total, 3);
+  assert.equal(dashboard.readiness.length, 7);
+  assert.equal(dashboard.diagnostics.length, 4);
+  assert.equal(dashboard.topArtists[0].label, "Alma");
+  assert.equal(dashboard.topStores[0].label, "Spotify");
 
   const statementsResponse = await app.request("/erh/v1/statements?workspaceId=workspace_1&period=2026-04&limit=10", {
     headers: authHeaders()

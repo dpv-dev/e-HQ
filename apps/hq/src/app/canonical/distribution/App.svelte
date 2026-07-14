@@ -17,6 +17,9 @@
     type DistributionContract,
     type DistributionContractExpense,
     type DistributionDashboardResponse,
+    type DistributionDashboardDiagnostic,
+    type DistributionDashboardReadinessItem,
+    type DistributionDashboardTopRoyalty,
     type DistributionDuplicate,
     type DistributionImportBatch,
     type DistributionImportConfirmResponse,
@@ -138,6 +141,7 @@
   type PaymentPanelMode = "edit" | "reconcile" | "void";
   type CatalogPanelMode = "release" | "track";
   type CatalogEntryStatus = "draft" | "released" | "archived";
+  type CatalogStatusFilter = "all" | CatalogEntryStatus;
   type ContractStatus = "draft" | "active" | "paused" | "ended";
 
   interface DistributionKpi {
@@ -235,6 +239,10 @@
     { label: "Released", value: "released" },
     { label: "Archived", value: "archived" }
   ];
+  const catalogFilterOptions: readonly SelectOption[] = [
+    { label: "All statuses", value: allValue },
+    ...catalogStatusOptions
+  ];
   const contractStatusOptions: readonly SelectOption[] = [
     { label: "Draft", value: "draft" },
     { label: "Active", value: "active" },
@@ -262,16 +270,35 @@
     { label: "Volume", align: "right", sortable: true },
     { label: "Resolution path", align: "left", sortable: true }
   ];
-  const importColumns: readonly TableColumn[] = [
-    { label: "File", align: "left", sortable: true },
-    { label: "Source", align: "left", sortable: true },
-    { label: "Statement", align: "left", sortable: true },
-    { label: "Rows", align: "right", sortable: true },
-    { label: "Payable", align: "right", sortable: true },
-    { label: "Unreconciled", align: "right", sortable: true },
-    { label: "Join keys", align: "left", sortable: true },
+  const dashboardReadinessColumns: readonly TableColumn[] = [
+    { label: "Workflow area", align: "left", sortable: true },
     { label: "Status", align: "left", sortable: true },
-    { label: "Exact action", align: "left", sortable: true }
+    { label: "Count", align: "right", sortable: true },
+    { label: "Why it matters", align: "left", sortable: true }
+  ];
+  const dashboardDiagnosticColumns: readonly TableColumn[] = [
+    { label: "Signal", align: "left", sortable: true },
+    { label: "Status", align: "left", sortable: true },
+    { label: "Detail", align: "left", sortable: true },
+    { label: "Last update", align: "left", sortable: true }
+  ];
+  const dashboardTopColumns: readonly TableColumn[] = [
+    { label: "Name", align: "left", sortable: true },
+    { label: "Context", align: "left", sortable: true },
+    { label: "Amount", align: "right", sortable: true }
+  ];
+  const importColumns: readonly TableColumn[] = [
+    { label: "ID", align: "left", sortable: true },
+    { label: "Distributor", align: "left", sortable: true },
+    { label: "File", align: "left", sortable: true },
+    { label: "Status", align: "left", sortable: true },
+    { label: "Rows", align: "right", sortable: true },
+    { label: "Normalized", align: "right", sortable: true },
+    { label: "Income", align: "right", sortable: true },
+    { label: "Issues", align: "right", sortable: true },
+    { label: "Skipped", align: "right", sortable: true },
+    { label: "Currency", align: "left", sortable: true },
+    { label: "Imported", align: "left", sortable: true }
   ];
   const mappingColumns: readonly TableColumn[] = [
     { label: "Source title", align: "left", sortable: true },
@@ -488,9 +515,16 @@
   let importStatusFilter = $state<ImportBatchStatusFilter>(allValue);
   let mappingStatusFilter = $state<MappingStatusFilter>("unmapped");
   let mappingBatchFilter = $state<string>(allValue);
+  let mappingSearch = $state("");
+  let catalogStatusFilter = $state<CatalogStatusFilter>(allValue);
   let suspenseStatusFilter = $state<SuspenseStatusFilter>("open");
   let paymentStatusFilter = $state<PaymentStatusFilter>(allValue);
+  let statementPayeeFilter = $state<string>(allValue);
+  let statementCurrencyFilter = $state<CurrencyCode | "all">(allValue);
+  let revenuePayeeFilter = $state<string>(allValue);
+  let revenueStoreFilter = $state<string>(allValue);
   let revenueGroupBy = $state<RevenueGroupBy>("store");
+  let revenueCurrencyFilter = $state<CurrencyCode | "all">(allValue);
   let importState = $state<ImportUiState>({
     status: "idle",
     source: "routenote",
@@ -563,6 +597,8 @@
   let aliasTargetIdInput = $state("");
   let fxRateSaveStatus = $state<RequestStatus>("idle");
   let fxRateSaveMessage = $state<string | null>(null);
+  let duplicateEditorId = $state<string | null>(null);
+  let duplicateMasterId = $state("");
   // Write failures land here (per page) so a transient mutation error never
   // clobbers the loaded list states rendered by the tables.
   let actionError = $state<string | null>(null);
@@ -573,9 +609,9 @@
   const activeRange = $derived(rangeForScope(periodScope, today, customRange));
   const periodControlVisible = $derived(pageUsesPeriodControl(activePageId));
   const allocationLockKey = $derived(`distribution:allocations:${distributionPeriod}`);
-  const dashboardKpis = $derived(createDashboardKpis(dashboardState));
   const importBatches = $derived(readPageItems(importBatchesState));
   const mappingRows = $derived(readPageItems(mappingState));
+  const filteredMappingRows = $derived(filterMappingRows(mappingRows, mappingSearch));
   const payees = $derived(readPageItems(payeesState));
   const releases = $derived(readPageItems(releasesState));
   const tracks = $derived(readPageItems(tracksState));
@@ -584,17 +620,26 @@
   const allocationRuns = $derived(readPageItems(allocationsState));
   const suspenseItems = $derived(readPageItems(suspenseState));
   const statements = $derived(readPageItems(statementsState));
+  const filteredStatements = $derived(
+    statements.filter((statement: StatementSummary): boolean => statementCurrencyFilter === allValue || statement.currency === statementCurrencyFilter)
+  );
   const payments = $derived(readPageItems(paymentsState));
   const revenueRows = $derived(readPageItems(revenueState));
   const dashboardRows = $derived(createDashboardRows(suspenseItems, statements, payments));
+  const dashboardReadinessRows = $derived(createDashboardReadinessRows(dashboardState));
+  const dashboardDiagnosticRows = $derived(createDashboardDiagnosticRows(dashboardState));
+  const dashboardArtistRows = $derived(createDashboardTopRows(dashboardState, "artists"));
+  const dashboardTrackRows = $derived(createDashboardTopRows(dashboardState, "tracks"));
+  const dashboardStoreRows = $derived(createDashboardTopRows(dashboardState, "stores"));
+  const dashboardMappingBlockerCount = $derived(dashboardReadinessCount(dashboardState, "mapping"));
   const importRows = $derived(createImportRows(importBatches));
-  const mappingTableRows = $derived(createMappingRows(mappingRows, selectedMappingRowIds));
+  const mappingTableRows = $derived(createMappingRows(filteredMappingRows, selectedMappingRowIds));
   const catalogRows = $derived(createCatalogRows(releases, tracks));
   const contractRows = $derived(createContractRows(contracts, payees));
   const expenseRows = $derived(createExpenseRows(expenses));
   const allocationRows = $derived(createAllocationRows(allocationRuns));
   const suspenseTableRows = $derived(createSuspenseRows(suspenseItems));
-  const statementRows = $derived(createStatementRows(statements));
+  const statementRows = $derived(createStatementRows(filteredStatements));
   const paymentRows = $derived(createPaymentRows(payments));
   const revenueTableRows = $derived(createRevenueRows(revenueRows));
   const revenueChartPoints = $derived(createRevenueChartPoints(revenueRows));
@@ -610,8 +655,25 @@
   const fxRates = $derived(readPageItems(fxRatesState));
   const aliasRows = $derived(createAliasRows(aliases));
   const duplicateRows = $derived(createDuplicateRows(duplicates));
+  const duplicateMasterOptions = $derived<readonly SelectOption[]>(createDuplicateMasterOptions(duplicates, duplicateEditorId));
   const auditRows = $derived(createAuditRows(auditEntries));
   const fxRateRows = $derived(createFxRateRows(fxRates));
+  const revenueCurrencyOptions = $derived<readonly SelectOption[]>([
+    { label: "All currencies", value: allValue },
+    ...Array.from(new Set(revenueRows.map((row: DistributionRevenueRow): CurrencyCode => row.currency))).map((currency: CurrencyCode): SelectOption => ({ label: currency, value: currency }))
+  ]);
+  const revenuePayeeOptions = $derived<readonly SelectOption[]>(sortOptionsAlphabetically([
+    { label: "All payees", value: allValue },
+    ...payees.map((payee: PayeeSummary): SelectOption => ({ label: payee.displayName, value: payee.id }))
+  ], 1));
+  const revenueStoreOptions = $derived<readonly SelectOption[]>(sortOptionsAlphabetically([
+    { label: "All stores", value: allValue },
+    ...(revenueGroupBy === "store"
+      ? Array.from(new Set(revenueRows.map((row: DistributionRevenueRow): string => row.label))).map((store: string): SelectOption => ({ label: store, value: store }))
+      : [])
+  ], 1));
+  const dashboardKpis = $derived(createDashboardKpis(dashboardState));
+  const contractKpis = $derived(createContractKpis(contracts, tracks));
   const importPagination = $derived<TablePagination | null>(
     createTablePagination(importBatchesState, tablePaginationLoading === "importBatches", tablePaginationError("importBatches"), loadMoreImportBatches, loadAllImportBatches)
   );
@@ -682,10 +744,12 @@
   const canPreviewImport = $derived(importState.rows.length > 0 && importState.status !== "loading");
   const canConfirmImport = $derived(importState.preview !== null && importState.status !== "loading");
   const canOpenImportAssistant = $derived((importState.preview !== null || importState.rows.length > 0) && importState.status !== "loading");
-  const statementPreview = $derived(statements[0] ?? null);
+  const statementPreview = $derived(
+    filteredStatements.find((statement: StatementSummary): boolean => statementPayeeFilter !== allValue && statement.payeeId === statementPayeeFilter) ?? filteredStatements[0] ?? null
+  );
   const selectedPayment = $derived(payments.find((payment: PaymentSummary): boolean => payment.id === selectedPaymentId) ?? null);
   const openStatements = $derived(
-    statements.filter((statement: StatementSummary): boolean => statement.status === "draft" || statement.status === "posted")
+    filteredStatements.filter((statement: StatementSummary): boolean => statement.status === "draft" || statement.status === "posted")
   );
   const recordStatement = $derived(openStatements.find((statement: StatementSummary): boolean => statement.id === recordStatementId) ?? null);
   const selectedSuspenseItem = $derived(suspenseItems.find((item: SuspenseItem): boolean => item.id === selectedSuspenseId) ?? null);
@@ -733,6 +797,14 @@
       value: statement.id
     }))
   ], 1));
+  const statementPayeeOptions = $derived<readonly SelectOption[]>(sortOptionsAlphabetically([
+    { label: "All payees", value: allValue },
+    ...payees.map((payee: PayeeSummary): SelectOption => ({ label: payee.displayName, value: payee.id }))
+  ], 1));
+  const statementCurrencyOptions = $derived<readonly SelectOption[]>([
+    { label: "All currencies", value: allValue },
+    ...Array.from(new Set(statements.map((statement: StatementSummary): CurrencyCode => statement.currency))).map((currency: CurrencyCode): SelectOption => ({ label: currency, value: currency }))
+  ]);
   // The dashboard action list derives from suspense, statements, and payments;
   // its table state must reflect those source requests instead of a frozen default.
   const dashboardActionListStatus = $derived(
@@ -742,6 +814,12 @@
     { label: "Edit reference", onAction: (rowId: string): void => openPaymentPanel(rowId, "edit") },
     { label: "Reconcile", onAction: (rowId: string): void => openPaymentPanel(rowId, "reconcile") },
     { label: "Void", onAction: (rowId: string): void => openPaymentPanel(rowId, "void"), danger: true }
+  ];
+  const dashboardRowActions: readonly TableRowAction[] = [
+    { label: "Open", onAction: openDashboardAction }
+  ];
+  const dashboardReadinessRowActions: readonly TableRowAction[] = [
+    { label: "Open", onAction: openDashboardReadiness }
   ];
   const contractRowActions: readonly TableRowAction[] = [
     { label: "Replace rule set", onAction: openContractRulePanel }
@@ -767,6 +845,9 @@
   const mappingRowActions: readonly TableRowAction[] = [
     { label: "Toggle selection", onAction: toggleMappingRowSelection }
   ];
+  const catalogRowActions: readonly TableRowAction[] = [
+    { label: "Review contributors", onAction: reviewCatalogRow }
+  ];
   const suspenseRowActions: readonly TableRowAction[] = [
     { label: "Resolve", onAction: openSuspenseResolution }
   ];
@@ -777,7 +858,7 @@
     { label: "Edit", onAction: openAliasEditor }
   ];
   const duplicateRowActions: readonly TableRowAction[] = [
-    { label: "Resolve", onAction: resolveDuplicateRow }
+    { label: "Merge into master", onAction: openDuplicateMerge }
   ];
 
   onMount((): (() => void) => {
@@ -824,6 +905,7 @@
         revenueGroupBy
       });
       applyScreenBundle(screen);
+      await loadCatalogPage("all");
     } catch {
       await Promise.all([
         loadWriteGate(),
@@ -1014,7 +1096,7 @@
             ? Promise.resolve(null)
             : client.distribution.listReleases({
                 workspaceId: distributionWorkspaceId,
-                status: null,
+                status: toNullableCatalogStatus(catalogStatusFilter),
                 cursor: releaseCursor,
                 limit: TABLE_PAGE_SIZE
               }),
@@ -1023,7 +1105,7 @@
             : client.distribution.listTracks({
                 workspaceId: distributionWorkspaceId,
                 releaseId: null,
-                status: null,
+                status: toNullableCatalogStatus(catalogStatusFilter),
                 cursor: trackCursor,
                 limit: TABLE_PAGE_SIZE
               })
@@ -1186,8 +1268,8 @@
       (cursor: string): Promise<PageResult<StatementSummary>> =>
         client.distribution.listStatements({
           workspaceId: distributionWorkspaceId,
-          period: null,
-          payeeId: null,
+          period: distributionPeriod,
+          payeeId: toNullablePayeeFilter(statementPayeeFilter),
           status: null,
           cursor,
           limit: TABLE_PAGE_SIZE
@@ -1245,9 +1327,9 @@
         client.distribution.getRevenue({
           workspaceId: distributionWorkspaceId,
           period: distributionPeriod,
-          payeeId: null,
-          store: null,
-          currency: null,
+          payeeId: toNullablePayeeFilter(revenuePayeeFilter),
+          store: toNullableStoreFilter(revenueStoreFilter),
+          currency: toNullableCurrency(revenueCurrencyFilter),
           groupBy: revenueGroupBy,
           dateFrom: activeRange.from,
           dateTo: activeRange.to,
@@ -1429,12 +1511,13 @@
 
     try {
       const [releasePage, trackPage] = await Promise.all([
-        client.distribution.listReleases({ workspaceId: distributionWorkspaceId, status: null, cursor: null, limit: TABLE_PAGE_SIZE }),
-        client.distribution.listTracks({ workspaceId: distributionWorkspaceId, releaseId: null, status: null, cursor: null, limit: TABLE_PAGE_SIZE })
+        client.distribution.listReleases({ workspaceId: distributionWorkspaceId, status: toNullableCatalogStatus(catalogStatusFilter), cursor: null, limit: TABLE_PAGE_SIZE }),
+        client.distribution.listTracks({ workspaceId: distributionWorkspaceId, releaseId: null, status: toNullableCatalogStatus(catalogStatusFilter), cursor: null, limit: TABLE_PAGE_SIZE })
       ]);
       releasesState = createSuccessState<PageResult<ReleaseSummary>>(releasePage);
       tracksState = createSuccessState<PageResult<TrackSummary>>(trackPage);
       setTablePaginationError("catalog", null);
+      await loadCatalogPage("all");
     } catch (error: unknown) {
       releasesState = createErrorState<PageResult<ReleaseSummary>>(error);
       tracksState = createErrorState<PageResult<TrackSummary>>(error);
@@ -1546,8 +1629,8 @@
       statementsState = createSuccessState<PageResult<StatementSummary>>(
         await client.distribution.listStatements({
           workspaceId: distributionWorkspaceId,
-          period: null,
-          payeeId: null,
+          period: distributionPeriod,
+          payeeId: toNullablePayeeFilter(statementPayeeFilter),
           status: null,
           cursor: null,
           limit: TABLE_PAGE_SIZE
@@ -1589,9 +1672,9 @@
         await client.distribution.getRevenue({
           workspaceId: distributionWorkspaceId,
           period: distributionPeriod,
-          payeeId: null,
-          store: null,
-          currency: null,
+          payeeId: toNullablePayeeFilter(revenuePayeeFilter),
+          store: toNullableStoreFilter(revenueStoreFilter),
+          currency: toNullableCurrency(revenueCurrencyFilter),
           groupBy: revenueGroupBy,
           dateFrom: activeRange.from,
           dateTo: activeRange.to,
@@ -2280,7 +2363,7 @@
   }
 
   function selectAllVisibleMappingRows(): void {
-    selectedMappingRowIds = mappingRows.map((row: DistributionMappingRow): string => row.id);
+    selectedMappingRowIds = filteredMappingRows.map((row: DistributionMappingRow): string => row.id);
   }
 
   function clearMappingSelection(): void {
@@ -2295,6 +2378,26 @@
     mappingBatchFilter = value;
   }
 
+  function updateMappingSearch(value: string): void {
+    mappingSearch = value;
+  }
+
+  function filterMappingRows(rows: readonly DistributionMappingRow[], query: string): readonly DistributionMappingRow[] {
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+
+    if (normalizedQuery === "") {
+      return rows;
+    }
+
+    return rows.filter((row: DistributionMappingRow): boolean =>
+      [row.sourceTitle, row.sourceArtist, row.sourceStore, row.suggestedTrackTitle ?? ""].some((value: string): boolean => value.toLocaleLowerCase().includes(normalizedQuery))
+    );
+  }
+
+  function updateCatalogStatus(value: string): void {
+    catalogStatusFilter = value as CatalogStatusFilter;
+  }
+
   function updateSuspenseStatus(value: string): void {
     suspenseStatusFilter = value as SuspenseStatusFilter;
   }
@@ -2303,8 +2406,28 @@
     paymentStatusFilter = value as PaymentStatusFilter;
   }
 
+  function updateStatementPayee(value: string): void {
+    statementPayeeFilter = value;
+  }
+
+  function updateStatementCurrency(value: string): void {
+    statementCurrencyFilter = value === allValue ? allValue : normalizeCurrencyCode(value) ?? allValue;
+  }
+
+  function updateRevenuePayee(value: string): void {
+    revenuePayeeFilter = value;
+  }
+
+  function updateRevenueStore(value: string): void {
+    revenueStoreFilter = value;
+  }
+
   function updateRevenueGroup(value: string): void {
     revenueGroupBy = value as RevenueGroupBy;
+  }
+
+  function updateRevenueCurrency(value: string): void {
+    revenueCurrencyFilter = value === allValue ? allValue : normalizeCurrencyCode(value) ?? allValue;
   }
 
   function updateRecordStatement(value: string): void {
@@ -2536,7 +2659,7 @@
 
   async function applyMappingRules(): Promise<void> {
     const selectedRows = mappingRows.filter((row: DistributionMappingRow): boolean => selectedMappingRowIds.includes(row.id));
-    const targetRows = selectedMappingRowIds.length > 0 ? selectedRows : mappingRows;
+    const targetRows = selectedMappingRowIds.length > 0 ? selectedRows : filteredMappingRows;
 
     if (targetRows.length === 0) {
       return;
@@ -3584,22 +3707,63 @@
     }
   }
 
-  async function resolveDuplicateRow(duplicateId: string): Promise<void> {
+  function openDuplicateMerge(duplicateId: string): void {
+    const duplicate = duplicates.find((candidate: DistributionDuplicate): boolean => candidate.id === duplicateId);
+
+    if (duplicate === undefined) {
+      return;
+    }
+
+    duplicateEditorId = duplicate.id;
+    duplicateMasterId = duplicate.sampleIds[0] ?? "";
+  }
+
+  function closeDuplicateMerge(): void {
+    duplicateEditorId = null;
+    duplicateMasterId = "";
+  }
+
+  function updateDuplicateMaster(value: string): void {
+    duplicateMasterId = value;
+  }
+
+  function createDuplicateMasterOptions(
+    items: readonly DistributionDuplicate[],
+    duplicateId: string | null
+  ): readonly SelectOption[] {
+    const duplicate = items.find((candidate: DistributionDuplicate): boolean => candidate.id === duplicateId);
+
+    if (duplicate === undefined) {
+      return [{ label: "Select a master", value: "" }];
+    }
+
+    return duplicate.sampleIds.map((sampleId: string, index: number): SelectOption => ({
+      label: duplicate.sampleLabels[index] ?? sampleId,
+      value: sampleId
+    }));
+  }
+
+  async function mergeDuplicate(): Promise<void> {
+    if (duplicateEditorId === null || duplicateMasterId === "") {
+      return;
+    }
+
     clearRunReceipt();
 
     try {
       mutationReceipt = await client.distribution.resolveDuplicate(
-        duplicateId,
+        duplicateEditorId,
         {
           workspaceId: distributionWorkspaceId,
-          keepEarningId: null,
+          keepEarningId: duplicateMasterId,
           reason: "Operator duplicate resolution from Distribution UI"
         },
         {
-          idempotencyKey: createIdempotencyKey(`duplicate-resolve-${duplicateId}`)
+          idempotencyKey: createIdempotencyKey(`duplicate-resolve-${duplicateEditorId}`)
         }
       );
       mutationReceiptPageId = activePageId;
+      closeDuplicateMerge();
       await Promise.all([loadDuplicates(), loadReconciliation(), loadAuditLog()]);
     } catch (error: unknown) {
       reportActionError(error);
@@ -3619,19 +3783,102 @@
   function createDashboardKpis(state: ApiRequestState<DistributionDashboardResponse>): readonly DistributionKpi[] {
     if (state.status !== "success") {
       return [
-        { label: "Gross", value: "—", detail: stateLabel(state), tone: "muted", accent: true },
-        { label: "Recouped", value: "—", detail: "engine", tone: "muted", accent: false },
-        { label: "Net payable", value: "—", detail: "statements", tone: "muted", accent: false },
-        { label: "Suspense", value: "—", detail: "blockers", tone: "muted", accent: false }
+        { label: "Imported revenue", value: "—", detail: stateLabel(state), tone: "muted", accent: true },
+        { label: "Paid royalties", value: "—", detail: "backend totals", tone: "muted", accent: false },
+        { label: "Open recoupments", value: "—", detail: "contract balances", tone: "muted", accent: false },
+        { label: "FX rates", value: "—", detail: "configured", tone: "muted", accent: false },
+        { label: "Contract coverage", value: "—", detail: "earning tracks", tone: "muted", accent: false }
       ];
     }
 
     return [
-      { label: "Gross royalties", value: formatMicro(state.data.grossRoyaltyMicro), detail: state.data.period, tone: "info", accent: true },
-      { label: "Recouped", value: formatMicro(state.data.recoupedMicro), detail: "audited sources", tone: "warning", accent: false },
-      { label: "Net payable", value: formatMicro(state.data.netPayableMicro), detail: `${String(state.data.openStatementCount)} statements`, tone: "success", accent: false },
-      { label: "Suspense", value: String(state.data.suspenseCount), detail: "grouped by reason", tone: "warning", accent: false }
+      {
+        label: "Imported revenue",
+        value: dashboardCurrencyTotalsValue(state.data.importedRevenue),
+        detail: "normalized imports",
+        tone: "info",
+        accent: true
+      },
+      { label: "Paid royalties", value: dashboardCurrencyTotalsValue(state.data.paidRoyalties), detail: "recorded payments", tone: "success", accent: false },
+      { label: "Open recoupments", value: dashboardCurrencyTotalsValue(state.data.openRecoupments), detail: "open by currency", tone: "warning", accent: false },
+      { label: "FX rates", value: String(state.data.fxRateCount), detail: "configured rates", tone: "info", accent: false },
+      { label: "Contract coverage", value: `${String(state.data.contractCoverage.covered)}/${String(state.data.contractCoverage.total)}`, detail: "earning tracks covered", tone: state.data.contractCoverage.covered === state.data.contractCoverage.total ? "success" : "warning", accent: false }
     ];
+  }
+
+  function dashboardCurrencyTotalsValue(totals: readonly { readonly currency: CurrencyCode; readonly amountMicro: string }[]): string {
+    if (totals.length === 0) {
+      return "—";
+    }
+
+    return totals.map((total): string => formatMoney(total.amountMicro, total.currency)).join(" · ");
+  }
+
+  function createDashboardReadinessRows(state: ApiRequestState<DistributionDashboardResponse>): readonly TableRow[] {
+    if (state.status !== "success") {
+      return [];
+    }
+
+    return state.data.readiness.map((item: DistributionDashboardReadinessItem): TableRow => ({
+      id: item.id,
+      cells: [
+        { kind: "text", value: item.label, strong: true },
+        { kind: "badge", value: item.status, tone: item.status === "clear" ? "success" : item.status === "review" ? "warning" : "error" },
+        { kind: "text", value: String(item.count), strong: false },
+        { kind: "text", value: item.detail, strong: false }
+      ]
+    }));
+  }
+
+  function createDashboardDiagnosticRows(state: ApiRequestState<DistributionDashboardResponse>): readonly TableRow[] {
+    if (state.status !== "success") {
+      return [];
+    }
+
+    return state.data.diagnostics.map((item: DistributionDashboardDiagnostic): TableRow => ({
+      id: item.id,
+      cells: [
+        { kind: "text", value: item.label, strong: true },
+        { kind: "badge", value: item.status, tone: item.status === "ok" || item.status === "idle" ? "success" : "warning" },
+        { kind: "text", value: item.detail, strong: false },
+        { kind: "text", value: item.lastUpdated === null ? "—" : formatDateOnly(item.lastUpdated), strong: false }
+      ]
+    }));
+  }
+
+  function createDashboardTopRows(
+    state: ApiRequestState<DistributionDashboardResponse>,
+    group: "artists" | "tracks" | "stores"
+  ): readonly TableRow[] {
+    if (state.status !== "success") {
+      return [];
+    }
+
+    const items: readonly DistributionDashboardTopRoyalty[] = group === "artists"
+      ? state.data.topArtists
+      : group === "tracks"
+        ? state.data.topTracks
+        : state.data.topStores;
+
+    return items.map((item: DistributionDashboardTopRoyalty): TableRow => ({
+      id: item.id,
+      cells: [
+        { kind: "text", value: item.label, strong: true },
+        { kind: "text", value: item.secondaryLabel, strong: false },
+        { kind: "money", value: formatMoney(item.amountMicro, item.currency), tone: "success" }
+      ]
+    }));
+  }
+
+  function dashboardReadinessCount(
+    state: ApiRequestState<DistributionDashboardResponse>,
+    itemId: string
+  ): number | null {
+    if (state.status !== "success") {
+      return null;
+    }
+
+    return state.data.readiness.find((item: DistributionDashboardReadinessItem): boolean => item.id === itemId)?.count ?? 0;
   }
 
   // Client-side CSV export keeps Distribution revenue extractable without adding
@@ -3680,6 +3927,24 @@
     );
   }
 
+  function exportSuspenseCsv(): void {
+    const rows = suspenseItems.map((item: SuspenseItem): readonly string[] => [
+      item.sourceReference,
+      suspenseReason(item.reason),
+      item.exactFixPath,
+      item.status,
+      item.currency,
+      item.amountMicro,
+      microToDecimalCsv(item.amountMicro),
+      item.period
+    ]);
+    downloadCsv(
+      `distribution-suspense-${suspenseStatusFilter}-${distributionPeriod}.csv`,
+      ["Source", "Reason", "Fix path", "Status", "Currency", "Amount (micro)", "Amount", "Period"],
+      rows
+    );
+  }
+
   function createDashboardRows(
     suspense: readonly SuspenseItem[],
     statementItems: readonly StatementSummary[],
@@ -3716,19 +3981,57 @@
     ];
   }
 
+  function openDashboardAction(rowId: string): void {
+    if (rowId === "dash_mapping") {
+      selectPage("mapping");
+      return;
+    }
+
+    if (rowId === "dash_statements") {
+      selectPage("statements");
+      return;
+    }
+
+    if (rowId === "dash_payments") {
+      selectPage("payments");
+    }
+  }
+
+  function openDashboardReadiness(rowId: string): void {
+    const item = dashboardState.status === "success"
+      ? dashboardState.data.readiness.find((candidate: DistributionDashboardReadinessItem): boolean => candidate.id === rowId)
+      : undefined;
+
+    if (item !== undefined) {
+      selectPage(item.actionPage);
+    }
+  }
+
+  function reviewCatalogRow(rowId: string): void {
+    const track = tracks.find((candidate: TrackSummary): boolean => candidate.id === rowId);
+
+    if (track === undefined || track.splitStatus !== "needs_review") {
+      return;
+    }
+
+    selectPage("mapping");
+  }
+
   function createImportRows(items: readonly DistributionImportBatch[]): readonly TableRow[] {
     return items.map((batch: DistributionImportBatch): TableRow => ({
       id: batch.id,
       cells: [
-        { kind: "text", value: batch.fileName, strong: true },
+        { kind: "text", value: batch.id, strong: false },
         { kind: "badge", value: batch.source, tone: batch.source === "kontor" ? "active" : "info" },
-        { kind: "text", value: `${batch.period} · ${batch.statementReference}`, strong: false },
-        { kind: "text", value: String(batch.rowCount), strong: false },
-        { kind: "money", value: formatMoney(batch.grossMicro, batch.currency), tone: "success" },
-        { kind: "text", value: String(batch.unmatchedRowCount), strong: false },
-        { kind: "text", value: batch.joinKeySummary, strong: false },
+        { kind: "text", value: batch.fileName, strong: true },
         { kind: "badge", value: batch.status, tone: distributionImportStatusTone(batch.status) },
-        { kind: "badge", value: distributionImportActionLabel(batch), tone: batch.status === "voided" ? "muted" : "warning" }
+        { kind: "text", value: String(batch.rowCount), strong: false },
+        { kind: "text", value: String(batch.normalizedRowCount), strong: false },
+        { kind: "money", value: formatMoney(batch.grossMicro, batch.currency), tone: "success" },
+        { kind: "text", value: String(batch.issueCount), strong: false },
+        { kind: "text", value: String(batch.skippedRowCount), strong: false },
+        { kind: "badge", value: batch.currency, tone: "muted" },
+        { kind: "text", value: formatDateOnly(batch.importedAt), strong: false }
       ]
     }));
   }
@@ -3786,6 +4089,20 @@
         { kind: "badge", value: contract.status, tone: contract.status === "active" ? "success" : "warning" }
       ]
     }));
+  }
+
+  function createContractKpis(
+    items: readonly DistributionContract[],
+    trackItems: readonly TrackSummary[]
+  ): readonly DistributionKpi[] {
+    const openRecoupments = items.filter((contract: DistributionContract): boolean => contract.openExpenseMicro !== "0.0000000000");
+    const unbalancedTrackCount = trackItems.filter((track: TrackSummary): boolean => track.splitStatus !== "balanced").length;
+
+    return [
+      { label: "Active contracts", value: String(items.filter((contract: DistributionContract): boolean => contract.status === "active").length), detail: "contracts", tone: "success", accent: true },
+      { label: "Open recoupments", value: String(openRecoupments.length), detail: "contract balances", tone: "warning", accent: false },
+      { label: "Unbalanced splits", value: String(unbalancedTrackCount), detail: "catalog review", tone: unbalancedTrackCount === 0 ? "success" : "warning", accent: false }
+    ];
   }
 
   function createExpenseRows(items: readonly DistributionContractExpense[]): readonly TableRow[] {
@@ -4075,6 +4392,18 @@
     return /^[A-Z]{3}$/u.test(normalized) ? normalized : null;
   }
 
+  function toNullableCurrency(value: CurrencyCode | "all"): CurrencyCode | null {
+    return value === allValue ? null : value;
+  }
+
+  function toNullablePayeeFilter(value: string): string | null {
+    return value === allValue || value.trim() === "" ? null : value;
+  }
+
+  function toNullableStoreFilter(value: string): string | null {
+    return value === allValue || value.trim() === "" ? null : value;
+  }
+
   function normalizeIsoDate(value: string): string | null {
     const normalized = value.trim();
     return /^\d{4}-\d{2}-\d{2}$/u.test(normalized) ? normalized : null;
@@ -4142,6 +4471,14 @@
     }
 
     return value;
+  }
+
+  function toNullableCatalogStatus(value: CatalogStatusFilter): "draft" | "released" | "archived" | null {
+    if (value === "draft" || value === "released" || value === "archived") {
+      return value;
+    }
+
+    return null;
   }
 
   function toNullableMappingStatus(value: MappingStatusFilter): "unmapped" | "suggested" | "mapped" | null {
@@ -4369,6 +4706,7 @@
     return pageId === "dashboard" ||
       pageId === "allocations" ||
       pageId === "suspense" ||
+      pageId === "statements" ||
       pageId === "payments" ||
       pageId === "revenue";
   }
@@ -4421,6 +4759,31 @@
         statusTone="muted"
       />
 
+      <section class="distribution-workflow-hero ehq-edge-surface" aria-label="Upload, exceptions, approval">
+        <div class="distribution-workflow-heading">
+          <p>Distribution</p>
+          <h2>Upload, exceptions, approval</h2>
+          <span>Move from distributor file delivery to sign-off while keeping financial controls in the backend.</span>
+        </div>
+        <div class="distribution-workflow-steps">
+          <article>
+            <span>Upload</span>
+            <strong>Upload</strong>
+            <small>Bring in the distributor file.</small>
+          </article>
+          <article>
+            <span>Map exceptions</span>
+            <strong>Map exceptions</strong>
+            <small>{dashboardMappingBlockerCount === null ? "Loading mapping queue." : `${String(dashboardMappingBlockerCount)} rows still need catalog mapping.`}</small>
+          </article>
+          <article>
+            <span>Stand by</span>
+            <strong>Stand by</strong>
+            <small>Approvals open once the queue is clean.</small>
+          </article>
+        </div>
+      </section>
+
       {#if periodControlVisible}
         <section class="period-control ehq-edge-surface" aria-label="Period controls">
           <Select
@@ -4466,10 +4829,41 @@
         </section>
         <section class="dashboard-grid">
           <BarsChart title="Revenue by source" points={revenueChartPoints} tone="active" />
-          <Table title="Action list" columns={dashboardColumns} rows={dashboardRows} state={tableStateFor(dashboardActionListStatus, dashboardRows.length)} actionLabel="" />
+          <Table title="Distribution readiness" columns={dashboardReadinessColumns} rows={dashboardReadinessRows} state={tableStateFor(dashboardState.status, dashboardReadinessRows.length)} actionLabel="" rowActions={dashboardReadinessRowActions} />
+        </section>
+        <section class="dashboard-grid">
+          <Table title="Health diagnostics" columns={dashboardDiagnosticColumns} rows={dashboardDiagnosticRows} state={tableStateFor(dashboardState.status, dashboardDiagnosticRows.length)} actionLabel="" />
+          <Table title="Action list" columns={dashboardColumns} rows={dashboardRows} state={tableStateFor(dashboardActionListStatus, dashboardRows.length)} actionLabel="" rowActions={dashboardRowActions} />
+        </section>
+        <section class="dashboard-top-grid">
+          <Table title="Top artists" columns={dashboardTopColumns} rows={dashboardArtistRows} state={tableStateFor(dashboardState.status, dashboardArtistRows.length)} actionLabel="" />
+          <Table title="Top tracks" columns={dashboardTopColumns} rows={dashboardTrackRows} state={tableStateFor(dashboardState.status, dashboardTrackRows.length)} actionLabel="" />
+          <Table title="Top stores" columns={dashboardTopColumns} rows={dashboardStoreRows} state={tableStateFor(dashboardState.status, dashboardStoreRows.length)} actionLabel="" />
         </section>
       {:else if activePageId === "imports"}
         <Toolbar label="Import Kontor RouteNote" filters={importToolbarFilters} actionLabel="" loading={isLoadingStatus(importState.status)} onFilterSelect={selectImportToolbarFilter} />
+        <section class="dashboard-grid import-parity-grid" aria-label="Import workflow">
+          <section class="command-card ehq-edge-surface">
+            <SectionTemplate
+              eyebrow="upload"
+              title="Upload capacity"
+              detail="The API accepts one or more distributor exports and processes each confirmed file as an auditable import batch."
+              state="ready"
+            >
+              <p>Preview and validation run before any import write.</p>
+            </SectionTemplate>
+          </section>
+          <section class="command-card ehq-edge-surface">
+            <SectionTemplate
+              eyebrow="assistant"
+              title="Import assistant"
+              detail="Review parser output, catalog mapping, payee and split readiness, and FX requirements before confirmation."
+              state="ready"
+            >
+              <Button label="Open assistant" variant="secondary" size="medium" type="button" disabled={!canOpenImportAssistant} loading={false} locked={false} focus={false} ariaLabel="Open import assistant" title={canOpenImportAssistant ? "" : "Run the preflight assistant first"} onclick={openImportAssistant} />
+            </SectionTemplate>
+          </section>
+        </section>
         <section class="form-panel ehq-edge-surface" aria-label="Import Kontor RouteNote">
           <Select id="distribution-import-source" label="Source" value={importState.source} options={importSourceOptions} state="default" message="" onchange={updateImportSource} />
           <label>
@@ -4496,19 +4890,25 @@
             <span>{importState.confirm.importedRoyaltyEventCount} royalty events imported.</span>
           {/if}
         </section>
-        <Table title="Batches Kontor / RouteNote" columns={importColumns} rows={importRows} rowActions={importRowActions} state={tableStateFor(importBatchesState.status, importBatches.length)} actionLabel="" pagination={importPagination} />
+        <Table title="Imported data batches" columns={importColumns} rows={importRows} rowActions={importRowActions} state={tableStateFor(importBatchesState.status, importBatches.length)} actionLabel="" pagination={importPagination} />
       {:else if activePageId === "mapping"}
         <section class="filter-strip ehq-edge-surface" aria-label="Mapping filters">
+          <Input id="distribution-mapping-search" label="Search" value={mappingSearch} placeholder="Title, artist or store" type="search" state="default" message="" oninput={updateMappingSearch} />
           <Select id="distribution-mapping-status" label="Status" value={mappingStatusFilter} options={mappingStatusOptions} state="default" message="" onchange={updateMappingStatus} />
           <Select id="distribution-mapping-batch" label="Batch" value={mappingBatchFilter} options={mappingBatchFilterOptions} state="default" message="" onchange={updateMappingBatchFilter} />
           <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Apply mapping filters" onclick={loadMappingRows} />
+          <Button label="Automate" variant="secondary" size="medium" type="button" disabled={!writesEnabled || filteredMappingRows.length === 0} loading={false} locked={false} focus={false} ariaLabel="Automate safe mapping matches" title={writeDisabledTitle()} onclick={applyMappingRules} />
           <Button label="Select all (page)" variant="secondary" size="medium" type="button" disabled={mappingRows.length === 0} loading={false} locked={false} focus={false} ariaLabel="Select all visible mapping rows" onclick={selectAllVisibleMappingRows} />
           <Button label="Clear selection" variant="secondary" size="medium" type="button" disabled={selectedMappingRowIds.length === 0} loading={false} locked={false} focus={false} ariaLabel="Clear mapping selection" onclick={clearMappingSelection} />
           <Button label="Apply reusable rules" variant="primary" size="medium" type="button" disabled={!writesEnabled || (mappingRows.length === 0 && selectedMappingRowIds.length === 0)} loading={false} locked={false} focus={false} ariaLabel="Apply reusable rules" title={writeDisabledTitle()} onclick={applyMappingRules} />
-          <span class="ehq-type-label-mono">{selectedMappingRowIds.length} selected</span>
+          <span class="ehq-type-label-mono">{selectedMappingRowIds.length} selected · {filteredMappingRows.length} visible</span>
         </section>
-        <Table title="Kontor / RouteNote rows to map" columns={mappingColumns} rows={mappingTableRows} state={isLoadingStatus(mappingState.status) ? "loading" : mappingState.status === "error" ? "error" : mappingRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={mappingRowActions} pagination={mappingPagination} />
+        <Table title="Rows to review" columns={mappingColumns} rows={mappingTableRows} state={isLoadingStatus(mappingState.status) ? "loading" : mappingState.status === "error" ? "error" : filteredMappingRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={mappingRowActions} pagination={mappingPagination} />
       {:else if activePageId === "catalog"}
+        <section class="filter-strip ehq-edge-surface" aria-label="Catalog filters">
+          <Select id="distribution-catalog-status" label="Status" value={catalogStatusFilter} options={catalogFilterOptions} state="default" message="" onchange={updateCatalogStatus} />
+          <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Apply catalog filters" onclick={loadCatalog} />
+        </section>
         <section class="contracts-actions ehq-edge-surface">
           <Button label="New release" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="New release" onclick={() => openCatalogPanel("release")} />
           <Button label="New track" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="New track" onclick={() => openCatalogPanel("track")} />
@@ -4539,7 +4939,7 @@
           </section>
         {/if}
         <section class="dashboard-grid">
-          <Table title="Canonical catalog + contributors" columns={catalogColumns} rows={catalogRows} state={tableStateFor(tracksState.status, catalogRows.length)} actionLabel="" pagination={catalogPagination} />
+          <Table title="Canonical catalog + contributors" columns={catalogColumns} rows={catalogRows} state={tableStateFor(tracksState.status, catalogRows.length)} actionLabel="" rowActions={catalogRowActions} pagination={catalogPagination} />
           <div class="command-card ehq-edge-surface">
             <SectionTemplate
               eyebrow="catalog"
@@ -4552,6 +4952,11 @@
           </div>
         </section>
       {:else if activePageId === "contracts"}
+        <section class="kpi-grid" aria-label="Contract KPIs">
+          {#each contractKpis as kpi (kpi.label)}
+            <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state={isLoadingStatus(contractsState.status) ? "loading" : "default"} accent={kpi.accent} />
+          {/each}
+        </section>
         <section class="contracts-actions ehq-edge-surface">
           <Button label="New contract" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="New contract" onclick={openContractPanel} />
           <Button label="Record recoupable expense" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Record recoupable expense" title={writeDisabledTitle()} onclick={openExpensePanel} />
@@ -4640,6 +5045,7 @@
         <section class="filter-strip ehq-edge-surface" aria-label="Suspense filters">
           <Select id="distribution-suspense-status" label="Status" value={suspenseStatusFilter} options={suspenseStatusOptions} state="default" message="" onchange={updateSuspenseStatus} />
           <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Apply suspense filters" onclick={loadSuspense} />
+          <Button label="Export CSV" variant="secondary" size="medium" type="button" disabled={suspenseItems.length === 0} loading={false} locked={false} focus={false} ariaLabel="Export suspense as CSV" onclick={exportSuspenseCsv} />
         </section>
         {#if selectedSuspenseItem !== null}
           <section class="form-panel ehq-edge-surface" aria-label="Resolve suspense item">
@@ -4659,6 +5065,11 @@
         {/if}
         <Table title="Suspense grouped by reason" columns={suspenseColumns} rows={suspenseTableRows} state={isLoadingStatus(suspenseState.status) ? "loading" : suspenseState.status === "error" ? "error" : suspenseItems.length === 0 ? "empty" : "default"} actionLabel="" rowActions={suspenseRowActions} pagination={suspensePagination} />
       {:else if activePageId === "statements"}
+        <section class="filter-strip ehq-edge-surface" aria-label="Statement filters">
+          <Select id="distribution-statement-payee" label="Payee" value={statementPayeeFilter} options={statementPayeeOptions} state="default" message="" onchange={updateStatementPayee} />
+          <Select id="distribution-statement-currency" label="Currency" value={statementCurrencyFilter} options={statementCurrencyOptions} state="default" message="" onchange={updateStatementCurrency} />
+          <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Apply statement filters" onclick={loadStatements} />
+        </section>
         <section class="statement-summary ehq-edge-surface">
           {#if statementPreview !== null}
             <div>
@@ -4730,6 +5141,9 @@
       {:else if activePageId === "revenue"}
         <section class="filter-strip ehq-edge-surface" aria-label="Revenue filters">
           <Select id="distribution-revenue-group" label="Group by" value={revenueGroupBy} options={revenueGroupOptions} state="default" message="" onchange={updateRevenueGroup} />
+          <Select id="distribution-revenue-payee" label="Payee" value={revenuePayeeFilter} options={revenuePayeeOptions} state="default" message="" onchange={updateRevenuePayee} />
+          <Select id="distribution-revenue-store" label="Store" value={revenueStoreFilter} options={revenueStoreOptions} state="default" message="" onchange={updateRevenueStore} />
+          <Select id="distribution-revenue-currency" label="Currency" value={revenueCurrencyFilter} options={revenueCurrencyOptions} state="default" message="" onchange={updateRevenueCurrency} />
           <Button label="Export CSV" variant="secondary" size="medium" type="button" disabled={revenueRows.length === 0} loading={false} locked={false} focus={false} ariaLabel="Export revenue as CSV" onclick={exportRevenueCsv} />
           <Button label="Refresh" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Refresh revenue" onclick={loadRevenue} />
         </section>
@@ -4897,6 +5311,13 @@
             state="ready"
           />
         </section>
+        {#if duplicateEditorId !== null}
+          <section class="form-panel ehq-edge-surface" aria-label="Merge duplicate into master">
+            <Select id="distribution-duplicate-master" label="Master record" value={duplicateMasterId} options={duplicateMasterOptions} state="default" message="" onchange={updateDuplicateMaster} />
+            <Button label="Merge into master" variant="primary" size="medium" type="button" disabled={!writesEnabled || duplicateMasterId === ""} loading={false} locked={false} focus={false} ariaLabel="Merge duplicate into selected master" title={writeDisabledTitle()} onclick={mergeDuplicate} />
+            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel duplicate merge" onclick={closeDuplicateMerge} />
+          </section>
+        {/if}
         {#if duplicates.length === 0 && duplicatesState.status === "success"}
           <section class="empty-state ehq-edge-surface">
             <strong>No duplicates detected</strong>
@@ -5040,6 +5461,69 @@
     overflow-x: auto;
   }
 
+  .distribution-workflow-hero {
+    display: grid;
+    grid-template-columns: minmax(220px, 0.9fr) minmax(0, 1.5fr);
+    gap: var(--ehq-space-4);
+    padding: var(--ehq-space-4);
+    border: 1px solid var(--ehq-border);
+    border-radius: var(--ehq-radius-md);
+    background: var(--ehq-surface-high);
+  }
+
+  .distribution-workflow-heading,
+  .distribution-workflow-steps,
+  .distribution-workflow-steps article {
+    display: grid;
+  }
+
+  .distribution-workflow-heading,
+  .distribution-workflow-steps article {
+    gap: var(--ehq-space-1);
+  }
+
+  .distribution-workflow-heading p,
+  .distribution-workflow-heading h2,
+  .distribution-workflow-heading span,
+  .distribution-workflow-steps article span,
+  .distribution-workflow-steps article strong,
+  .distribution-workflow-steps article small {
+    margin: 0;
+  }
+
+  .distribution-workflow-heading p,
+  .distribution-workflow-steps article span {
+    color: var(--ehq-workspace-distribution);
+    font-family: var(--ehq-mono);
+    font-size: var(--ehq-type-label-size);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .distribution-workflow-heading h2 {
+    font-size: var(--ehq-type-section-title-size);
+    font-weight: var(--ehq-type-heading-weight);
+  }
+
+  .distribution-workflow-heading span,
+  .distribution-workflow-steps article small {
+    color: var(--ehq-text-muted);
+    font-size: var(--ehq-type-caption-size);
+    line-height: var(--ehq-type-ui-line);
+  }
+
+  .distribution-workflow-steps {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--ehq-space-3);
+  }
+
+  .distribution-workflow-steps article {
+    align-content: start;
+    min-width: 0;
+    padding: var(--ehq-space-3);
+    border-left: 1px solid var(--ehq-border);
+  }
+
 
   .import-result {
     margin: 0;
@@ -5053,7 +5537,7 @@
 
   .kpi-grid {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: var(--ehq-space-3);
   }
 
@@ -5061,6 +5545,13 @@
     min-width: 0;
     display: grid;
     grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    gap: var(--ehq-space-3);
+  }
+
+  .dashboard-top-grid {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: var(--ehq-space-3);
   }
 
@@ -5446,8 +5937,13 @@
 
   @media (max-width: 1100px) {
     .kpi-grid,
-    .dashboard-grid {
+    .dashboard-grid,
+    .dashboard-top-grid {
       grid-template-columns: 1fr 1fr;
+    }
+
+    .distribution-workflow-hero {
+      grid-template-columns: 1fr;
     }
 
     .statement-summary dl {
@@ -5462,8 +5958,18 @@
 
     .kpi-grid,
     .dashboard-grid,
+    .dashboard-top-grid,
     .statement-summary dl {
       grid-template-columns: 1fr;
+    }
+
+    .distribution-workflow-steps {
+      grid-template-columns: 1fr;
+    }
+
+    .distribution-workflow-steps article {
+      border-left: 0;
+      border-top: 1px solid var(--ehq-border);
     }
   }
 </style>

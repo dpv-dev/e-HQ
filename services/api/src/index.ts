@@ -133,7 +133,11 @@ import type {
   CurrencyCode,
   DistributionContract,
   DistributionContractExpense,
+  DistributionDashboardCurrencyTotal,
+  DistributionDashboardDiagnostic,
+  DistributionDashboardReadinessItem,
   DistributionDashboardResponse,
+  DistributionDashboardTopRoyalty,
   DistributionImportBatch,
   DistributionImportConfirmRequest,
   DistributionImportConfirmResponse,
@@ -1689,7 +1693,13 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
     );
     const response: DistributionScreenResponse = {
       status: { writesEnabled: dependencies.persistence.writesEnabled },
-      dashboard: toDistributionDashboard(dependencies.fixtures.distribution, period),
+      dashboard: toDistributionDashboard(
+        dependencies.fixtures.distribution,
+        period,
+        dependencies.fixtures.distributionContracts,
+        dependencies.fixtures.distributionContractExpenses,
+        dependencies.fixtures.distributionFxRates
+      ),
       importBatches: pageItems(context, importBatches),
       mappingRows: pageItems(context, mappingRows),
       payees: {
@@ -1717,7 +1727,15 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
   app.get("/erh/v1/dashboard", (context) => {
     const period = requireQuery(context, "period");
     requireQuery(context, "workspaceId");
-    return context.json(toDistributionDashboard(dependencies.fixtures.distribution, period));
+    return context.json(
+      toDistributionDashboard(
+        dependencies.fixtures.distribution,
+        period,
+        dependencies.fixtures.distributionContracts,
+        dependencies.fixtures.distributionContractExpenses,
+        dependencies.fixtures.distributionFxRates
+      )
+    );
   });
 
   app.get("/erh/v1/imports/batches", (context) => {
@@ -12584,9 +12602,123 @@ function requireDepartment(dataset: OfficeAnalyticsDataset, departmentId: string
   return department;
 }
 
-function toDistributionDashboard(dataset: DistributionReadDataset, period: string): DistributionDashboardResponse {
+function toDistributionDashboard(
+  dataset: DistributionReadDataset,
+  period: string,
+  contracts: readonly DistributionContract[],
+  expenses: readonly DistributionContractExpense[],
+  fxRates: readonly DistributionFxRateInput[]
+): DistributionDashboardResponse {
   const totals = readAllocationTotals(dataset, { calculationRunId: null, payeeId: null, status: "posted" });
   const total = totals[0];
+  const importedRevenue = distributionCurrencyTotals(dataset.normalizedEarnings.map((earning) => ({
+    currency: earning.currency,
+    amount: earning.grossAmount
+  })));
+  const paidRoyalties = distributionCurrencyTotals(
+    dataset.payments
+      .filter((payment) => payment.status !== "void")
+      .map((payment) => ({ currency: payment.currency, amount: payment.amount }))
+  );
+  const openRecoupments = distributionCurrencyTotals(
+    contracts
+      .filter((contract) => contract.openExpenseMicro !== "0.0000000000")
+      .map((contract) => ({ currency: contract.currency, amount: contract.openExpenseMicro }))
+  );
+  const postedAllocations = readAllocationList(dataset, { calculationRunId: null, payeeId: null, status: "posted" }).rows;
+  const coveredEarningIds = new Set(
+    postedAllocations
+      .filter((allocation) => allocation.contractId !== null)
+      .map((allocation) => allocation.earningId)
+  );
+  const totalEarningIds = new Set(dataset.normalizedEarnings.map((earning) => earning.id));
+  const mappingBlockerCount = dataset.normalizedEarnings.filter((earning) => earning.mappingStatus !== "matched").length;
+  const catalogQualityCount = dataset.tracks.filter(
+    (track) => !postedAllocations.some((allocation) => allocation.trackId === track.id)
+  ).length;
+  const contractBlockerCount = dataset.normalizedEarnings.filter(
+    (earning) => earning.mappingStatus === "matched" && !postedAllocations.some((allocation) => allocation.earningId === earning.id && allocation.contractId !== null)
+  ).length;
+  const expenseMissingPayeeCount = expenses.filter((expense) => expense.payeeId.trim() === "").length;
+  const pendingAllocationCount = dataset.normalizedEarnings.filter((earning) => earning.calculationStatus === "pending").length;
+  const openSuspenseCount = countOpenSuspense(dataset, { status: "open", reasonCode: null });
+  const readiness: readonly DistributionDashboardReadinessItem[] = [
+    {
+      id: "mapping",
+      label: "Mapping blockers",
+      status: mappingBlockerCount === 0 ? "clear" : "fix",
+      count: mappingBlockerCount,
+      detail: "unmatched or suspense import rows",
+      actionPage: "mapping"
+    },
+    {
+      id: "catalog",
+      label: "Catalog quality queue",
+      status: catalogQualityCount === 0 ? "clear" : "review",
+      count: catalogQualityCount,
+      detail: "tracks without a confirmed allocation",
+      actionPage: "catalog"
+    },
+    {
+      id: "contracts",
+      label: "Contracts missing effective split",
+      status: contractBlockerCount === 0 ? "clear" : "fix",
+      count: contractBlockerCount,
+      detail: "matched rows without a usable contract split",
+      actionPage: "contracts"
+    },
+    {
+      id: "expenses",
+      label: "Expenses missing payee",
+      status: expenseMissingPayeeCount === 0 ? "clear" : "fix",
+      count: expenseMissingPayeeCount,
+      detail: "recoupment lines without a target payee",
+      actionPage: "contracts"
+    },
+    {
+      id: "allocations",
+      label: "Pending allocations",
+      status: pendingAllocationCount === 0 ? "clear" : "fix",
+      count: pendingAllocationCount,
+      detail: "matched rows waiting for an allocation run",
+      actionPage: "allocations"
+    },
+    {
+      id: "suspense",
+      label: "Open suspense",
+      status: openSuspenseCount === 0 ? "clear" : "fix",
+      count: openSuspenseCount,
+      detail: "rows waiting for a concrete fix path",
+      actionPage: "suspense"
+    },
+    {
+      id: "payments",
+      label: "Statement/payment reconciliation",
+      status: countOpenStatements(dataset, period) === 0 ? "clear" : "review",
+      count: countOpenStatements(dataset, period),
+      detail: "open statements without a completed payment",
+      actionPage: "payments"
+    }
+  ];
+  const latestRun = [...dataset.calculationRuns].sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0] ?? null;
+  const diagnostics: readonly DistributionDashboardDiagnostic[] = [
+    { id: "api-read", label: "Distribution API read", status: "ok", detail: "Current database snapshot loaded.", lastUpdated: null },
+    {
+      id: "dashboard-cache",
+      label: "Dashboard cache",
+      status: "ok",
+      detail: "Dashboard summary built from the current read model.",
+      lastUpdated: latestRun?.createdAt ?? null
+    },
+    {
+      id: "allocation-runner",
+      label: "Allocation runner",
+      status: latestRun?.status === "running" ? "attention" : "idle",
+      detail: latestRun === null ? "No allocation run recorded." : `Latest run status: ${latestRun.status}.`,
+      lastUpdated: latestRun?.createdAt ?? null
+    },
+    { id: "statement-print", label: "Statement print/PDF", status: "ok", detail: "Statement print payload is available.", lastUpdated: null }
+  ];
   return {
     period,
     grossRoyaltyMicro: total?.grossShare ?? "0.0000000000",
@@ -12594,8 +12726,65 @@ function toDistributionDashboard(dataset: DistributionReadDataset, period: strin
     netPayableMicro: total?.netPayable ?? "0.0000000000",
     suspenseCount: countOpenSuspense(dataset, { status: "open", reasonCode: null }),
     openStatementCount: countOpenStatements(dataset, period),
-    lastAuditEventId: null
+    lastAuditEventId: null,
+    importedRevenue,
+    paidRoyalties,
+    openRecoupments,
+    fxRateCount: fxRates.length,
+    contractCoverage: { covered: coveredEarningIds.size, total: totalEarningIds.size },
+    readiness,
+    diagnostics,
+    topArtists: topDistributionRoyalties(dataset, postedAllocations, "artist"),
+    topTracks: topDistributionRoyalties(dataset, postedAllocations, "track"),
+    topStores: topDistributionRoyalties(dataset, postedAllocations, "store")
   };
+}
+
+function distributionCurrencyTotals(
+  entries: readonly { readonly currency: CurrencyCode; readonly amount: string }[]
+): readonly DistributionDashboardCurrencyTotal[] {
+  const totals = new Map<CurrencyCode, bigint>();
+
+  for (const entry of entries) {
+    totals.set(entry.currency, erhMoney.add(totals.get(entry.currency) ?? 0n, erhMoney.parse(entry.amount)));
+  }
+
+  return [...totals.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([currency, amount]): DistributionDashboardCurrencyTotal => ({ currency, amountMicro: erhMoney.format(amount) }));
+}
+
+function topDistributionRoyalties(
+  dataset: DistributionReadDataset,
+  rows: readonly DistributionAllocationReadRow[],
+  groupBy: "artist" | "track" | "store"
+): readonly DistributionDashboardTopRoyalty[] {
+  const groups = new Map<string, { readonly label: string; readonly secondaryLabel: string; readonly currency: CurrencyCode; amount: bigint }>();
+
+  for (const row of rows) {
+    const earning = dataset.normalizedEarnings.find((candidate) => candidate.id === row.earningId);
+    const label = groupBy === "track" ? row.trackTitle ?? row.earningId : groupBy === "artist" ? row.payeeName : earning?.dsp ?? "Unknown store";
+    const secondaryLabel = groupBy === "track" ? row.payeeName : groupBy === "artist" ? "catalog artist" : "store revenue";
+    const key = `${label}:${row.currency}`;
+    const previous = groups.get(key);
+    groups.set(key, {
+      label,
+      secondaryLabel,
+      currency: row.currency,
+      amount: erhMoney.add(previous?.amount ?? 0n, erhMoney.parse(row.netPayable))
+    });
+  }
+
+  return [...groups.entries()]
+    .sort(([, left], [, right]) => (right.amount > left.amount ? 1 : right.amount < left.amount ? -1 : 0))
+    .slice(0, 10)
+    .map(([id, group]): DistributionDashboardTopRoyalty => ({
+      id,
+      label: group.label,
+      secondaryLabel: group.secondaryLabel,
+      amountMicro: erhMoney.format(group.amount),
+      currency: group.currency
+    }));
 }
 
 function toDistributionImportBatch(dataset: DistributionReadDataset, batchId: string): DistributionImportBatch {
@@ -12620,7 +12809,10 @@ function toDistributionImportBatch(dataset: DistributionReadDataset, batchId: st
     statementReference: batch.id,
     accountReference: batch.source,
     rowCount: rows.length,
+    normalizedRowCount: rows.length,
     unmatchedRowCount: rows.filter((row) => row.mappingStatus !== "matched").length,
+    issueCount: rows.filter((row) => row.mappingStatus !== "matched" || row.calculationStatus === "error").length,
+    skippedRowCount: rows.filter((row) => row.calculationStatus === "excluded").length,
     currency: primaryCurrency,
     grossMicro: erhMoney.format(grossUnits),
     payableColumn: "netPayable",

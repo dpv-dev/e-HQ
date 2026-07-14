@@ -1777,7 +1777,7 @@
 
     h1 {
       margin-top: var(--ehq-space-2);
-      font-size: clamp(34px, 12vw, 52px);
+      font-size: clamp(26px, 9.5vw, 52px);
     }
 
     .lead {

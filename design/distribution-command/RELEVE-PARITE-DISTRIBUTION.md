@@ -193,3 +193,63 @@ Decision de session: pas de deploy pour le moment, releve uniquement.
 - Fichier modifie: apps/hq/src/app/canonical/distribution/App.svelte
 - Build local frontend: OK
 - Deploy: non effectue sur cette etape
+
+## Mise A Jour Parite - 2026-07-15
+
+La reference live n'a pas pu etre relue dans cette session sans session WordPress partagee: les deux URLs redirigent vers leur formulaire de connexion. Les corrections ci-dessous sont donc alignees sur l'inventaire legacy deja capture dans ce releve et sur les contrats API canoniques existants.
+
+### Aligne Dans La Console
+
+- Dashboard: KPI Catalog tracks, Open royalties, Suspense et Last allocation; panneau Health derive des imports, splits, statements et allocations; actions de la liste navigables.
+- Catalog: filtre de statut serveur, chargement complet des releases/tracks et action de revue des contributeurs par ligne.
+- Contracts: KPI Active contracts, Open recoupments et Unbalanced splits.
+- Suspense: export CSV du filtre courant.
+- Statements: filtre Payee et periode partagee avec le contexte de la console.
+- Revenue: filtres Group by, Payee, Store et Currency transmis au endpoint canonique.
+
+### Restant A Verifier Ou A Completer
+
+- Mapping: les actions legacy Accept/Map manually et les operations bulk de reset/delete n'ont pas d'equivalent API complet dans le client actuel.
+- Duplicates: l'endpoint de resolution existe, mais le choix explicite du master doit etre confirme avec le comportement WordPress live.
+- Settings: FX est gere; les commandes legacy de configuration/imports/notifications ne sont pas exposees par le contrat API actuel.
+- Layout: la structure est modernisee et conserve les informations capturees, mais une comparaison pixel/ligne live reste necessaire apres connexion aux deux environnements.
+
+### Snapshot Live Authentifie - 2026-07-15
+
+La session partagee permet maintenant une comparaison directe.
+
+**Ancien site - Dashboard**
+
+- Revenus importes: `36,747.38 EUR` et `9,358.63 USD`.
+- Royalties payees: `0.00 EUR`.
+- Avances recoupables en cours: `2,533.34 EUR`.
+- Couverture contrats: `124 / 169`, soit `73.4%` des titres earning.
+- Blockers visibles: mapping `97,423`, catalog quality `608`, contrats sans split `162`, expenses sans payee `31`, allocations pending `29,044`, suspense `97,421`, reconciliation `0`.
+- Diagnostics visibles: migration guard, dashboard cache, allocation runner, statement print/PDF.
+- Top royalties visibles par artistes, tracks et stores, avec pagination entre les vues.
+
+**App live - Dashboard**
+
+- KPI affiches: Gross royalties `EUR 0.00`, Recouped `EUR 0.00`, Net payable `EUR 0.00`, Suspense `98,102`.
+- Le graphique Revenue by source est vide.
+- La table Action list contient seulement mapping `50`, statements `4`, payments `0`.
+- Les blocs readiness, diagnostics, avances, couverture contrats et top royalties ne sont pas visibles.
+
+Conclusion: l'ecart live est aussi un ecart de source/calcul dashboard. `toDistributionDashboard` et `toRevenueRows` utilisent uniquement les allocations `posted`, tandis que le legacy expose les revenus importes et les files operationnelles avant allocation. Une simple retouche CSS ou de shell ne peut pas resoudre cette difference.
+
+### Regle D'Implementation Confirmee
+
+- Les montants peuvent differer tant que les memes fichiers ne sont pas importes.
+- Les calculs restent dans `services/api` et `packages/domain-distribution`.
+- Le frontend ne touche ni la base ni les formules financieres: il affiche le contrat de lecture backend.
+- La separation API / frontend et le modele de performance restent inchanges.
+- La parite vise les zones visibles, colonnes, filtres, etats et actions du legacy; elle ne promet pas l'egalite numerique avant import equivalent.
+
+### Implementation Locale - Tranche 2026-07-15
+
+- `DistributionDashboardResponse` expose maintenant les KPI par devise, readiness, diagnostics et top royalties; ces blocs sont calcules par l'API.
+- Le dashboard moderne affiche le cockpit readiness, les diagnostics, les top artists/tracks/stores et le bandeau workflow persistant.
+- Imports expose les panneaux Upload/Assistant et la table de lots avec ID, distributor, status, rows, normalized, income, issues, skipped, currency et imported.
+- Mapping expose Search, Automate, Apply rules, selection et compteur visible.
+- Statements expose Payee, Currency et periode; Duplicates expose Merge into master avec choix explicite.
+- Aucun calcul financier n'a ete deplace dans Svelte et aucune route API existante n'a ete remplacee.

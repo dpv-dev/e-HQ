@@ -1198,6 +1198,38 @@ export interface OfficeVatReport {
 
 export interface DistributionDashboardQuery extends PeriodQuery {}
 
+export interface DistributionDashboardCurrencyTotal {
+  readonly currency: CurrencyCode;
+  readonly amountMicro: MoneyMicroString;
+}
+
+export type DistributionDashboardReadinessStatus = "clear" | "review" | "fix";
+
+export interface DistributionDashboardReadinessItem {
+  readonly id: string;
+  readonly label: string;
+  readonly status: DistributionDashboardReadinessStatus;
+  readonly count: number;
+  readonly detail: string;
+  readonly actionPage: "mapping" | "catalog" | "contracts" | "allocations" | "suspense" | "payments";
+}
+
+export interface DistributionDashboardDiagnostic {
+  readonly id: string;
+  readonly label: string;
+  readonly status: "ok" | "idle" | "attention";
+  readonly detail: string;
+  readonly lastUpdated: IsoDateTimeString | null;
+}
+
+export interface DistributionDashboardTopRoyalty {
+  readonly id: string;
+  readonly label: string;
+  readonly secondaryLabel: string;
+  readonly amountMicro: MoneyMicroString;
+  readonly currency: CurrencyCode;
+}
+
 export interface DistributionDashboardResponse {
   readonly period: IsoMonthString;
   readonly grossRoyaltyMicro: MoneyMicroString;
@@ -1206,6 +1238,19 @@ export interface DistributionDashboardResponse {
   readonly suspenseCount: number;
   readonly openStatementCount: number;
   readonly lastAuditEventId: EntityId | null;
+  readonly importedRevenue: readonly DistributionDashboardCurrencyTotal[];
+  readonly paidRoyalties: readonly DistributionDashboardCurrencyTotal[];
+  readonly openRecoupments: readonly DistributionDashboardCurrencyTotal[];
+  readonly fxRateCount: number;
+  readonly contractCoverage: {
+    readonly covered: number;
+    readonly total: number;
+  };
+  readonly readiness: readonly DistributionDashboardReadinessItem[];
+  readonly diagnostics: readonly DistributionDashboardDiagnostic[];
+  readonly topArtists: readonly DistributionDashboardTopRoyalty[];
+  readonly topTracks: readonly DistributionDashboardTopRoyalty[];
+  readonly topStores: readonly DistributionDashboardTopRoyalty[];
 }
 
 export interface DistributionScreenQuery {
@@ -1259,7 +1304,10 @@ export interface DistributionImportBatch {
   readonly statementReference: string;
   readonly accountReference: string;
   readonly rowCount: number;
+  readonly normalizedRowCount: number;
   readonly unmatchedRowCount: number;
+  readonly issueCount: number;
+  readonly skippedRowCount: number;
   readonly currency: CurrencyCode;
   readonly grossMicro: MoneyMicroString;
   readonly payableColumn: string;
