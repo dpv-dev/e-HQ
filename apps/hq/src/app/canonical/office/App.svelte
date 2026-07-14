@@ -3047,21 +3047,11 @@
       return [
         { label: "Runway", value: "—", detail: stateLabel(state), tone: "muted", accent: true },
         { label: "Top project", value: "—", detail: "net contribution", tone: "muted", accent: false },
-        { label: "Reconciliation", value: "—", detail: "health by account", tone: "muted", accent: false },
         { label: "Oldest unmatched", value: "—", detail: "ageing", tone: "muted", accent: false }
       ];
     }
 
     const topProject = state.data.projectProfitability[0] ?? null;
-    const totalLines = state.data.reconciliationByAccount.reduce(
-      (sum: number, row: { readonly lineCount: number }): number => sum + row.lineCount,
-      0
-    );
-    const totalUnmatched = state.data.reconciliationByAccount.reduce(
-      (sum: number, row: { readonly unmatchedLineCount: number }): number => sum + row.unmatchedLineCount,
-      0
-    );
-    const matchedBp = totalLines === 0 ? 0 : Math.round(((totalLines - totalUnmatched) * 10_000) / totalLines);
     const runwayMonths = state.data.runway.runwayMonths === null ? null : Number(state.data.runway.runwayMonths);
 
     return [
@@ -3077,13 +3067,6 @@
         value: topProject === null ? "—" : formatSignedMicro(topProject.netMicro, "MUR"),
         detail: topProject === null ? "no project activity" : topProject.projectLabel,
         tone: topProject === null ? "muted" : moneyTone(topProject.netMicro),
-        accent: false
-      },
-      {
-        label: "Reconciliation",
-        value: formatBasisPoints(matchedBp),
-        detail: `${String(totalUnmatched)} unmatched line(s)`,
-        tone: matchedBp >= 9000 ? "success" : matchedBp >= 7500 ? "info" : "warning",
         accent: false
       },
       {
