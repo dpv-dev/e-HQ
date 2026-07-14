@@ -27,6 +27,31 @@ export const officeBankImportSourceEnum = pgEnum("office_bank_import_source", ["
 export const officeBankImportStatusEnum = pgEnum("office_bank_import_status", ["previewed", "confirmed", "failed", "void"]);
 export const officeBankLineDirectionEnum = pgEnum("office_bank_line_direction", ["credit", "debit"]);
 export const officeBankReconciliationStatusEnum = pgEnum("office_bank_reconciliation_status", ["unmatched", "suggested", "matched", "rejected", "ignored"]);
+export const officeCashflowManualDirectionEnum = pgEnum("office_cashflow_manual_direction", ["inflow", "outflow"]);
+export const officeCashflowManualStatusEnum = pgEnum("office_cashflow_manual_status", ["planned", "confirmed", "cancelled"]);
+export const officeAdvanceBeneficiaryTypeEnum = pgEnum("office_advance_beneficiary_type", [
+  "staff",
+  "freelancer",
+  "artist",
+  "supplier",
+  "contractor",
+  "other"
+]);
+export const officeAdvanceStatusEnum = pgEnum("office_advance_status", [
+  "planned",
+  "paid",
+  "partially_applied",
+  "settled",
+  "refunded",
+  "waived",
+  "written_off"
+]);
+export const officeAdvanceApplicationKindEnum = pgEnum("office_advance_application_kind", [
+  "invoice",
+  "expense",
+  "refund",
+  "write_off"
+]);
 
 function createdAtColumn() {
   return timestamp("created_at", { withTimezone: true, mode: "string" }).notNull().defaultNow();
@@ -485,5 +510,96 @@ export const officeCashflowProjectionRows = pgTable(
     index("office_cashflow_projection_rows_import_batch_id_idx").on(table.importBatchId),
     index("office_cashflow_projection_rows_account_id_idx").on(table.accountId),
     index("office_cashflow_projection_rows_period_month_idx").on(table.periodMonth)
+  ]
+);
+
+export const officeCashflowManualEntries = pgTable(
+  "office_cashflow_manual_entries",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: text("workspace_id").notNull(),
+    accountId: uuid("account_id").references(() => officeBankAccounts.id, { onDelete: "set null", onUpdate: "cascade" }),
+    partnerId: uuid("partner_id").references(() => partners.id, { onDelete: "set null", onUpdate: "cascade" }),
+    projectId: uuid("project_id").references(() => projects.id, { onDelete: "set null", onUpdate: "cascade" }),
+    entryDate: date("entry_date", { mode: "string" }).notNull(),
+    direction: officeCashflowManualDirectionEnum("direction").notNull(),
+    amountMinor: bigint("amount_minor", { mode: "bigint" }).notNull(),
+    currency: char("currency", { length: 3 }).notNull().default("MUR"),
+    label: text("label").notNull(),
+    notes: text("notes"),
+    status: officeCashflowManualStatusEnum("status").notNull().default("planned"),
+    createdByUserId: text("created_by_user_id"),
+    createdAt: createdAtColumn(),
+    updatedAt: updatedAtColumn()
+  },
+  (table) => [
+    index("office_cashflow_manual_entries_account_id_idx").on(table.accountId),
+    index("office_cashflow_manual_entries_partner_id_idx").on(table.partnerId),
+    index("office_cashflow_manual_entries_project_id_idx").on(table.projectId),
+    index("office_cashflow_manual_entries_workspace_status_date_idx").on(table.workspaceId, table.status, table.entryDate),
+    check("office_cashflow_manual_entries_amount_minor_check", sql`${table.amountMinor} > 0`)
+  ]
+);
+
+export const officeAdvances = pgTable(
+  "office_advances",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: text("workspace_id").notNull(),
+    beneficiaryType: officeAdvanceBeneficiaryTypeEnum("beneficiary_type").notNull(),
+    beneficiaryName: text("beneficiary_name").notNull(),
+    partnerId: uuid("partner_id")
+      .references(() => partners.id, { onDelete: "set null", onUpdate: "cascade" }),
+    projectId: uuid("project_id").references(() => projects.id, { onDelete: "set null", onUpdate: "cascade" }),
+    bankStatementLineId: uuid("bank_statement_line_id").references(() => officeBankStatementLines.id, {
+      onDelete: "set null",
+      onUpdate: "cascade"
+    }),
+    transactionId: uuid("transaction_id").references(() => transactions.id, { onDelete: "set null", onUpdate: "cascade" }),
+    label: text("label").notNull(),
+    plannedPaymentOn: date("planned_payment_on", { mode: "string" }).notNull(),
+    paidOn: date("paid_on", { mode: "string" }),
+    originalAmountMinor: bigint("original_amount_minor", { mode: "bigint" }).notNull(),
+    currency: char("currency", { length: 3 }).notNull().default("MUR"),
+    status: officeAdvanceStatusEnum("status").notNull().default("planned"),
+    notes: text("notes"),
+    createdByUserId: text("created_by_user_id"),
+    createdAt: createdAtColumn(),
+    updatedAt: updatedAtColumn()
+  },
+  (table) => [
+    index("office_advances_partner_id_idx").on(table.partnerId),
+    index("office_advances_project_id_idx").on(table.projectId),
+    index("office_advances_bank_statement_line_id_idx").on(table.bankStatementLineId),
+    index("office_advances_transaction_id_idx").on(table.transactionId),
+    index("office_advances_workspace_beneficiary_idx").on(table.workspaceId, table.beneficiaryType, table.beneficiaryName),
+    index("office_advances_workspace_status_date_idx").on(table.workspaceId, table.status, table.plannedPaymentOn),
+    check("office_advances_original_amount_minor_check", sql`${table.originalAmountMinor} > 0`),
+    check(
+      "office_advances_paid_date_check",
+      sql`(${table.status} = 'planned' and ${table.paidOn} is null) or (${table.status} <> 'planned' and ${table.paidOn} is not null)`
+    )
+  ]
+);
+
+export const officeAdvanceApplications = pgTable(
+  "office_advance_applications",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    advanceId: uuid("advance_id")
+      .notNull()
+      .references(() => officeAdvances.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    appliedOn: date("applied_on", { mode: "string" }).notNull(),
+    amountMinor: bigint("amount_minor", { mode: "bigint" }).notNull(),
+    kind: officeAdvanceApplicationKindEnum("kind").notNull(),
+    reference: text("reference"),
+    notes: text("notes"),
+    createdByUserId: text("created_by_user_id"),
+    createdAt: createdAtColumn()
+  },
+  (table) => [
+    index("office_advance_applications_advance_id_idx").on(table.advanceId),
+    index("office_advance_applications_applied_on_idx").on(table.appliedOn),
+    check("office_advance_applications_amount_minor_check", sql`${table.amountMinor} > 0`)
   ]
 );

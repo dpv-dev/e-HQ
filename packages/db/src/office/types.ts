@@ -10,6 +10,9 @@ import {
   officeBankReconciliationMatches,
   officeBankStatementLines,
   officeCashflowProjectionRows,
+  officeCashflowManualEntries,
+  officeAdvanceApplications,
+  officeAdvances,
   partners,
   projectBudgetLines,
   projectDepartments,
@@ -69,3 +72,12 @@ export type NewOfficeBankReconciliationMatch = InferInsertModel<typeof officeBan
 
 export type OfficeCashflowProjectionRow = InferSelectModel<typeof officeCashflowProjectionRows>;
 export type NewOfficeCashflowProjectionRow = InferInsertModel<typeof officeCashflowProjectionRows>;
+
+export type OfficeCashflowManualEntry = InferSelectModel<typeof officeCashflowManualEntries>;
+export type NewOfficeCashflowManualEntry = InferInsertModel<typeof officeCashflowManualEntries>;
+
+export type OfficeAdvance = InferSelectModel<typeof officeAdvances>;
+export type NewOfficeAdvance = InferInsertModel<typeof officeAdvances>;
+
+export type OfficeAdvanceApplication = InferSelectModel<typeof officeAdvanceApplications>;
+export type NewOfficeAdvanceApplication = InferInsertModel<typeof officeAdvanceApplications>;

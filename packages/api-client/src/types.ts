@@ -766,6 +766,137 @@ export interface CashflowBucket {
   readonly outflowLevel: number;
 }
 
+export interface OfficeCashflowWorkbenchQuery extends CashflowQuery {}
+
+export interface OfficeCashflowWorkbenchBucket {
+  readonly period: IsoMonthString;
+  readonly actualInflowMicro: MoneyMicroString;
+  readonly actualOutflowMicro: MoneyMicroString;
+  readonly forecastInflowMicro: MoneyMicroString;
+  readonly forecastOutflowMicro: MoneyMicroString;
+  readonly varianceMicro: MoneyMicroString;
+  readonly forecastClosingMicro: MoneyMicroString;
+  readonly actualInflowLevel: number;
+  readonly actualOutflowLevel: number;
+  readonly forecastInflowLevel: number;
+  readonly forecastOutflowLevel: number;
+}
+
+export type OfficeCashflowManualEntryStatus = "planned" | "confirmed" | "cancelled";
+
+export interface OfficeCashflowManualEntry {
+  readonly id: EntityId;
+  readonly accountId: EntityId | null;
+  readonly partnerId: EntityId | null;
+  readonly projectId: EntityId | null;
+  readonly entryDate: IsoDateString;
+  readonly direction: "inflow" | "outflow";
+  readonly amountMicro: MoneyMicroString;
+  readonly currency: CurrencyCode;
+  readonly label: string;
+  readonly notes: string | null;
+  readonly status: OfficeCashflowManualEntryStatus;
+  readonly createdAt: IsoDateTimeString;
+}
+
+export interface OfficeCashflowWorkbenchResponse {
+  readonly buckets: readonly OfficeCashflowWorkbenchBucket[];
+  readonly manualEntries: readonly OfficeCashflowManualEntry[];
+}
+
+export interface OfficeCashflowManualEntryWriteRequest {
+  readonly workspaceId: EntityId;
+  readonly accountId: EntityId | null;
+  readonly partnerId: EntityId | null;
+  readonly projectId: EntityId | null;
+  readonly entryDate: IsoDateString;
+  readonly direction: "inflow" | "outflow";
+  readonly amountMicro: MoneyMicroString;
+  readonly currency: CurrencyCode;
+  readonly label: string;
+  readonly notes: string | null;
+  readonly status: Exclude<OfficeCashflowManualEntryStatus, "cancelled">;
+}
+
+export interface OfficeCashflowManualEntryCancelRequest {
+  readonly workspaceId: EntityId;
+  readonly reason: string | null;
+}
+
+export type OfficeAdvanceKind = "staff" | "freelancer" | "artist" | "supplier" | "contractor" | "other";
+export type OfficeAdvanceStatus =
+  | "planned"
+  | "open"
+  | "paid"
+  | "partially_applied"
+  | "settled"
+  | "recouped"
+  | "refunded"
+  | "waived"
+  | "written_off";
+
+export interface OfficeAdvanceRow {
+  readonly id: EntityId;
+  readonly kind: OfficeAdvanceKind;
+  readonly counterpartyId: EntityId | null;
+  readonly counterpartyLabel: string;
+  readonly contextId: EntityId | null;
+  readonly contextLabel: string | null;
+  readonly label: string;
+  readonly plannedOn: IsoDateString;
+  readonly paidOn: IsoDateString | null;
+  readonly originalAmountMicro: MoneyMicroString;
+  readonly appliedAmountMicro: MoneyMicroString;
+  readonly outstandingAmountMicro: MoneyMicroString;
+  readonly currency: CurrencyCode;
+  readonly status: OfficeAdvanceStatus;
+  readonly source: "distribution_contract" | "office_managed";
+}
+
+export interface OfficeAdvancesWorkbenchQuery extends PageQuery {
+  readonly workspaceId: EntityId;
+  readonly kind: OfficeAdvanceKind | null;
+  readonly status: OfficeAdvanceStatus | null;
+}
+
+export interface OfficeAdvancesWorkbenchResponse extends PageResult<OfficeAdvanceRow> {
+  readonly totalOutstandingMicro: MoneyMicroString;
+  readonly managedOutstandingMicro: MoneyMicroString;
+  readonly distributionOutstandingMicro: MoneyMicroString;
+  readonly plannedManagedMicro: MoneyMicroString;
+}
+
+export interface OfficeAdvanceWriteRequest {
+  readonly workspaceId: EntityId;
+  readonly beneficiaryType: OfficeAdvanceKind;
+  readonly beneficiaryName: string;
+  readonly partnerId: EntityId | null;
+  readonly projectId: EntityId | null;
+  readonly transactionId: EntityId | null;
+  readonly label: string;
+  readonly plannedPaymentOn: IsoDateString;
+  readonly paidOn: IsoDateString | null;
+  readonly originalAmountMicro: MoneyMicroString;
+  readonly currency: CurrencyCode;
+  readonly status: "planned" | "paid";
+  readonly notes: string | null;
+}
+
+export interface OfficeAdvanceApplicationRequest {
+  readonly workspaceId: EntityId;
+  readonly appliedOn: IsoDateString;
+  readonly amountMicro: MoneyMicroString;
+  readonly kind: "invoice" | "expense" | "refund" | "write_off";
+  readonly reference: string | null;
+  readonly notes: string | null;
+}
+
+export interface OfficeAdvanceMarkPaidRequest {
+  readonly workspaceId: EntityId;
+  readonly paidOn: IsoDateString;
+  readonly transactionId: EntityId | null;
+}
+
 export type OfficePartnerFacet = "client" | "supplier";
 
 export interface OfficePartnersQuery extends PageQuery {

@@ -925,6 +925,206 @@ test("Office partner facets are lenses over the same partner", async () => {
   assert.equal(detail.distributionPayeeLink.payeeId, "payee_alma");
 });
 
+test("Office cash-flow workbench and advances connect audited manual and beneficiary writes", async () => {
+  const app = createWriteEnabledFixtureApiService();
+
+  const manual = await jsonWrite(app, "/eof/v1/cashflow/manual-entries", "POST", "cashflow-manual-create-1", {
+    workspaceId: "workspace_1",
+    accountId: null,
+    partnerId: null,
+    projectId: null,
+    entryDate: "2026-07-10",
+    direction: "inflow",
+    amountMicro: "100.00",
+    currency: "MUR",
+    label: "Expected sponsor payment",
+    notes: null,
+    status: "planned"
+  });
+  assertReceipt(manual);
+
+  const plannedAdvance = await jsonWrite(app, "/eof/v1/advances", "POST", "staff-advance-planned-1", {
+    workspaceId: "workspace_1",
+    beneficiaryType: "staff",
+    beneficiaryName: "Alex Morgan",
+    partnerId: null,
+    projectId: "project_kaya",
+    transactionId: null,
+    label: "Venue deposit",
+    plannedPaymentOn: "2026-07-15",
+    paidOn: null,
+    originalAmountMicro: "50.00",
+    currency: "MUR",
+    status: "planned",
+    notes: null
+  });
+  assertReceipt(plannedAdvance);
+
+  const cashflowResponse = await app.request(
+    "/eof/v1/cashflow/workbench?workspaceId=workspace_1&from=2026-07-01&to=2026-07-31",
+    { headers: authHeaders() }
+  );
+  assert.equal(cashflowResponse.status, 200);
+  const cashflow = (await cashflowResponse.json()) as {
+    readonly buckets: readonly {
+      readonly forecastInflowMicro: string;
+      readonly forecastOutflowMicro: string;
+      readonly forecastClosingMicro: string;
+    }[];
+    readonly manualEntries: readonly { readonly id: string }[];
+  };
+  assert.equal(cashflow.buckets[0]?.forecastInflowMicro, "100.00");
+  assert.equal(cashflow.buckets[0]?.forecastOutflowMicro, "50.00");
+  assert.equal(cashflow.buckets[0]?.forecastClosingMicro, "50.00");
+  assert.ok(cashflow.manualEntries.some((entry) => entry.id === manual.id));
+
+  assertReceipt(await jsonWrite(
+    app,
+    `/eof/v1/advances/${plannedAdvance.id}/mark-paid`,
+    "POST",
+    "staff-advance-mark-paid-1",
+    { workspaceId: "workspace_1", paidOn: "2026-07-15", transactionId: null }
+  ));
+
+  const paidAdvance = await jsonWrite(app, "/eof/v1/advances", "POST", "beneficiary-advance-paid-1", {
+    workspaceId: "workspace_1",
+    beneficiaryType: "supplier",
+    beneficiaryName: "MCB Services",
+    partnerId: "partner_mcb",
+    projectId: null,
+    transactionId: null,
+    label: "Production prepayment",
+    plannedPaymentOn: "2026-06-20",
+    paidOn: "2026-06-21",
+    originalAmountMicro: "40.00",
+    currency: "MUR",
+    status: "paid",
+    notes: null
+  });
+  assertReceipt(paidAdvance);
+  assertReceipt(await jsonWrite(
+    app,
+    `/eof/v1/advances/${paidAdvance.id}/applications`,
+    "POST",
+    "beneficiary-advance-apply-1",
+    {
+      workspaceId: "workspace_1",
+      appliedOn: "2026-07-01",
+      amountMicro: "15.00",
+      kind: "expense",
+      reference: "BILL-001",
+      notes: null
+    }
+  ));
+
+  const advancesResponse = await app.request(
+    "/eof/v1/advances/workbench?workspaceId=workspace_1&kind=supplier&limit=100",
+    { headers: authHeaders() }
+  );
+  assert.equal(advancesResponse.status, 200);
+  const advances = (await advancesResponse.json()) as {
+    readonly items: readonly {
+      readonly id: string;
+      readonly appliedAmountMicro: string;
+      readonly outstandingAmountMicro: string;
+      readonly status: string;
+    }[];
+  };
+  const applied = advances.items.find((row) => row.id === paidAdvance.id);
+  assert.equal(applied?.appliedAmountMicro, "15.00");
+  assert.equal(applied?.outstandingAmountMicro, "25.00");
+  assert.equal(applied?.status, "partially_applied");
+
+  assertReceipt(await jsonWrite(
+    app,
+    `/eof/v1/cashflow/manual-entries/${manual.id}/cancel`,
+    "POST",
+    "cashflow-manual-cancel-1",
+    { workspaceId: "workspace_1", reason: "Sponsor timing changed" }
+  ));
+});
+
+test("Office cash-flow and beneficiary advance writes persist atomically in PGlite", async () => {
+  const pglite = new PGlite();
+  await createPgliteWriteTables(pglite);
+  await createPgliteCashflowAdvanceTables(pglite);
+  const app = createApiService({
+    fixtures: createFixtureStore(),
+    persistence: createDrizzlePersistenceRuntime(
+      drizzle(pglite) as Parameters<typeof createDrizzlePersistenceRuntime>[0],
+      { WRITES_ENABLED: "true" }
+    ),
+    health: null,
+    nowIso: (): string => "2026-07-14T12:00:00.000Z",
+    auth: createTestAuthVerifier()
+  });
+
+  try {
+    assertReceipt(await jsonWrite(app, "/eof/v1/cashflow/manual-entries", "POST", "pglite-cashflow-manual-1", {
+      workspaceId: "workspace_1",
+      accountId: null,
+      partnerId: null,
+      projectId: null,
+      entryDate: "2026-07-20",
+      direction: "outflow",
+      amountMicro: "12.34",
+      currency: "MUR",
+      label: "PGlite forecast",
+      notes: null,
+      status: "planned"
+    }));
+    const advance = await jsonWrite(app, "/eof/v1/advances", "POST", "pglite-freelancer-advance-1", {
+      workspaceId: "workspace_1",
+      beneficiaryType: "freelancer",
+      beneficiaryName: "Sam Rivera",
+      partnerId: null,
+      projectId: null,
+      transactionId: null,
+      label: "PGlite advance",
+      plannedPaymentOn: "2026-07-14",
+      paidOn: "2026-07-14",
+      originalAmountMicro: "40.00",
+      currency: "MUR",
+      status: "paid",
+      notes: null
+    });
+    assertReceipt(advance);
+    assertReceipt(await jsonWrite(
+      app,
+      `/eof/v1/advances/${advance.id}/applications`,
+      "POST",
+      "pglite-freelancer-advance-apply-1",
+      {
+        workspaceId: "workspace_1",
+        appliedOn: "2026-07-14",
+        amountMicro: "10.00",
+        kind: "expense",
+        reference: "EXP-PGLITE",
+        notes: null
+      }
+    ));
+
+    assert.equal(await pgliteCount(pglite, "office_cashflow_manual_entries"), 1);
+    assert.equal(await pgliteCount(pglite, "office_advances"), 1);
+    assert.equal(await pgliteCount(pglite, "office_advance_applications"), 1);
+    assert.equal(await pgliteCount(pglite, "api_idempotency_keys"), 3);
+    assert.equal(await pgliteCount(pglite, "audit_logs"), 3);
+    const status = await pglite.query("select status from office_advances where id = $1", [advance.id]);
+    assert.equal((status.rows[0] as { readonly status: string }).status, "partially_applied");
+    const beneficiary = await pglite.query(
+      "select beneficiary_type, beneficiary_name, partner_id from office_advances where id = $1",
+      [advance.id]
+    );
+    assert.deepEqual(beneficiary.rows[0], {
+      beneficiary_type: "freelancer",
+      beneficiary_name: "Sam Rivera",
+      partner_id: null
+    });
+  } finally {
+    await pglite.close();
+  }
+});
+
 test("Distribution reads migrated royalty results as fixture checksums, not recalculation", async () => {
   const app = createFixtureApiService();
 
@@ -4759,6 +4959,61 @@ async function createPgliteWriteTables(pglite: PGlite): Promise<void> {
       created_at timestamp with time zone default now() not null,
       updated_at timestamp with time zone default now() not null,
       primary key (workspace_id, user_id)
+    );
+  `);
+}
+
+async function createPgliteCashflowAdvanceTables(pglite: PGlite): Promise<void> {
+  await pglite.exec(`
+    create table office_cashflow_manual_entries (
+      id uuid primary key,
+      workspace_id text not null,
+      account_id uuid,
+      partner_id uuid,
+      project_id uuid,
+      entry_date date not null,
+      direction text not null,
+      amount_minor bigint not null check (amount_minor > 0),
+      currency char(3) not null default 'MUR',
+      label text not null,
+      notes text,
+      status text not null default 'planned',
+      created_by_user_id text,
+      created_at timestamp with time zone default now() not null,
+      updated_at timestamp with time zone default now() not null
+    );
+
+    create table office_advances (
+      id uuid primary key,
+      workspace_id text not null,
+      beneficiary_type text not null,
+      beneficiary_name text not null,
+      partner_id text,
+      project_id text,
+      bank_statement_line_id text,
+      transaction_id text,
+      label text not null,
+      planned_payment_on date not null,
+      paid_on date,
+      original_amount_minor bigint not null check (original_amount_minor > 0),
+      currency char(3) not null default 'MUR',
+      status text not null default 'planned',
+      notes text,
+      created_by_user_id text,
+      created_at timestamp with time zone default now() not null,
+      updated_at timestamp with time zone default now() not null
+    );
+
+    create table office_advance_applications (
+      id uuid primary key,
+      advance_id uuid not null references office_advances(id) on delete cascade,
+      applied_on date not null,
+      amount_minor bigint not null check (amount_minor > 0),
+      kind text not null,
+      reference text,
+      notes text,
+      created_by_user_id text,
+      created_at timestamp with time zone default now() not null
     );
   `);
 }

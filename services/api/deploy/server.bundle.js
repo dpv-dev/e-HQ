@@ -23475,6 +23475,63 @@ var coerce = {
 };
 var NEVER = INVALID;
 
+// ../../packages/api-contracts/src/index.ts
+var isoDatePattern = /^\d{4}-\d{2}-\d{2}$/u;
+var currencyCodePattern = /^[A-Z]{3}$/u;
+var moneyStringPattern = /^-?\d+(?:\.\d+)?$/u;
+var workspaceIdSchema = external_exports.string().min(1);
+var nullableIdSchema = external_exports.string().min(1).nullable();
+var nullableTextSchema = external_exports.string().min(1).nullable();
+var officeCashflowManualEntryWriteSchema = external_exports.object({
+  workspaceId: workspaceIdSchema,
+  accountId: nullableIdSchema,
+  partnerId: nullableIdSchema,
+  projectId: nullableIdSchema,
+  entryDate: external_exports.string().regex(isoDatePattern),
+  direction: external_exports.enum(["inflow", "outflow"]),
+  amountMicro: external_exports.string().regex(moneyStringPattern),
+  currency: external_exports.string().regex(currencyCodePattern),
+  label: external_exports.string().trim().min(1),
+  notes: nullableTextSchema,
+  status: external_exports.enum(["planned", "confirmed"])
+});
+var officeCashflowManualEntryCancelSchema = external_exports.object({
+  workspaceId: workspaceIdSchema,
+  reason: nullableTextSchema
+});
+var officeAdvanceWriteSchema = external_exports.object({
+  workspaceId: workspaceIdSchema,
+  beneficiaryType: external_exports.enum(["staff", "freelancer", "artist", "supplier", "contractor", "other"]),
+  beneficiaryName: external_exports.string().trim().min(1).max(160),
+  partnerId: nullableIdSchema,
+  projectId: nullableIdSchema,
+  transactionId: nullableIdSchema,
+  label: external_exports.string().trim().min(1),
+  plannedPaymentOn: external_exports.string().regex(isoDatePattern),
+  paidOn: external_exports.string().regex(isoDatePattern).nullable(),
+  originalAmountMicro: external_exports.string().regex(moneyStringPattern),
+  currency: external_exports.string().regex(currencyCodePattern),
+  status: external_exports.enum(["planned", "paid"]),
+  notes: nullableTextSchema
+});
+var officeAdvanceApplicationSchema = external_exports.object({
+  workspaceId: workspaceIdSchema,
+  appliedOn: external_exports.string().regex(isoDatePattern),
+  amountMicro: external_exports.string().regex(moneyStringPattern),
+  kind: external_exports.enum(["invoice", "expense", "refund", "write_off"]),
+  reference: nullableTextSchema,
+  notes: nullableTextSchema
+});
+var officeAdvanceMarkPaidSchema = external_exports.object({
+  workspaceId: workspaceIdSchema,
+  paidOn: external_exports.string().regex(isoDatePattern),
+  transactionId: nullableIdSchema
+});
+var todoMessage = "TODO(api-contracts): replace contract placeholders after endpoint approval.";
+var apiErrorEnvelopeSchema = external_exports.custom((input) => {
+  throw new Error(todoMessage);
+});
+
 // ../../packages/domain-finance/src/errors.ts
 function createFinanceDomainError(code, message2, context) {
   const error = new Error(message2);
@@ -25211,6 +25268,126 @@ function matchedResult(candidateId, existingId, reason) {
     candidateId,
     match: { existingId, reason }
   };
+}
+
+// ../../packages/domain-office/src/cashflow.ts
+function buildOfficeCashflowWorkbench(input) {
+  const buckets = /* @__PURE__ */ new Map();
+  const latestProjectionRows = latestProjectionRowsByAccountMonth(input);
+  for (const row of latestProjectionRows.values()) {
+    const bucket = requireBucket(buckets, row.periodMonth);
+    bucket.forecastInflowMinor = eofMoney.add(bucket.forecastInflowMinor, row.expectedInflowMinor);
+    bucket.forecastOutflowMinor = eofMoney.add(bucket.forecastOutflowMinor, row.expectedOutflowMinor);
+    bucket.baseClosingMinor = eofMoney.add(bucket.baseClosingMinor, row.expectedClosingBalanceMinor);
+  }
+  for (const transaction of input.transactions) {
+    if (transaction.workspaceId !== input.workspaceId || !transaction.isActive || transaction.status !== "validated" || input.accountId !== null && transaction.accountId !== input.accountId || !isDateInRange(transaction.transactionDate, input.dateFrom, input.dateTo)) {
+      continue;
+    }
+    const bucket = requireBucket(buckets, transaction.transactionDate.slice(0, 7));
+    const amountMinor = absoluteMinor(transaction.amountMinor);
+    if (transaction.type === "income") {
+      bucket.actualInflowMinor = eofMoney.add(bucket.actualInflowMinor, amountMinor);
+    } else {
+      bucket.actualOutflowMinor = eofMoney.add(bucket.actualOutflowMinor, amountMinor);
+    }
+  }
+  for (const entry of input.manualEntries) {
+    if (entry.workspaceId !== input.workspaceId || entry.status === "cancelled" || entry.currency !== "MUR" || input.accountId !== null && entry.accountId !== input.accountId || !isDateInRange(entry.entryDate, input.dateFrom, input.dateTo)) {
+      continue;
+    }
+    const bucket = requireBucket(buckets, entry.entryDate.slice(0, 7));
+    if (entry.direction === "inflow") {
+      bucket.forecastInflowMinor = eofMoney.add(bucket.forecastInflowMinor, entry.amountMinor);
+      bucket.forecastAdjustmentMinor = eofMoney.add(bucket.forecastAdjustmentMinor, entry.amountMinor);
+    } else {
+      bucket.forecastOutflowMinor = eofMoney.add(bucket.forecastOutflowMinor, entry.amountMinor);
+      bucket.forecastAdjustmentMinor = eofMoney.add(bucket.forecastAdjustmentMinor, -entry.amountMinor);
+    }
+  }
+  for (const advance of input.advances) {
+    if (advance.workspaceId !== input.workspaceId || advance.currency !== "MUR" || input.accountId !== null) {
+      continue;
+    }
+    if (advance.status === "planned" && isDateInRange(advance.plannedPaymentOn, input.dateFrom, input.dateTo)) {
+      const bucket = requireBucket(buckets, advance.plannedPaymentOn.slice(0, 7));
+      bucket.forecastOutflowMinor = eofMoney.add(bucket.forecastOutflowMinor, advance.originalAmountMinor);
+      bucket.forecastAdjustmentMinor = eofMoney.add(bucket.forecastAdjustmentMinor, -advance.originalAmountMinor);
+    } else if (isPaidAdvance(advance) && advance.transactionId === null && advance.paidOn !== null && isDateInRange(advance.paidOn, input.dateFrom, input.dateTo)) {
+      const bucket = requireBucket(buckets, advance.paidOn.slice(0, 7));
+      bucket.actualOutflowMinor = eofMoney.add(bucket.actualOutflowMinor, advance.originalAmountMinor);
+    }
+  }
+  let cumulativeForecastAdjustmentMinor = 0n;
+  return [...buckets.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([period, bucket]) => {
+    const forecastNetMinor = eofMoney.add(bucket.forecastInflowMinor, -bucket.forecastOutflowMinor);
+    cumulativeForecastAdjustmentMinor = eofMoney.add(cumulativeForecastAdjustmentMinor, bucket.forecastAdjustmentMinor);
+    const actualNetMinor = eofMoney.add(bucket.actualInflowMinor, -bucket.actualOutflowMinor);
+    return {
+      period,
+      actualInflowMinor: bucket.actualInflowMinor,
+      actualOutflowMinor: bucket.actualOutflowMinor,
+      forecastInflowMinor: bucket.forecastInflowMinor,
+      forecastOutflowMinor: bucket.forecastOutflowMinor,
+      varianceMinor: eofMoney.add(actualNetMinor, -forecastNetMinor),
+      forecastClosingMinor: eofMoney.add(bucket.baseClosingMinor, cumulativeForecastAdjustmentMinor)
+    };
+  });
+}
+function calculateAdvanceBalance(advance, applications, additionalApplicationMinor = 0n) {
+  if (additionalApplicationMinor < 0n) {
+    throw new Error("Advance application amount cannot be negative.");
+  }
+  const appliedMinor = applications.filter((application) => application.advanceId === advance.id).reduce((sum, application) => eofMoney.add(sum, application.amountMinor), additionalApplicationMinor);
+  if (appliedMinor > advance.originalAmountMinor) {
+    throw new Error("Advance application exceeds the outstanding amount.");
+  }
+  const outstandingMinor = eofMoney.add(advance.originalAmountMinor, -appliedMinor);
+  return {
+    appliedMinor,
+    outstandingMinor,
+    status: outstandingMinor === 0n ? "settled" : appliedMinor > 0n ? "partially_applied" : advance.status
+  };
+}
+function latestProjectionRowsByAccountMonth(input) {
+  const latest = /* @__PURE__ */ new Map();
+  for (const row of input.projectionRows) {
+    if (row.workspaceId !== input.workspaceId || row.currency !== "MUR" || input.accountId !== null && row.accountId !== input.accountId || !isDateInRange(`${row.periodMonth}-01`, input.dateFrom, input.dateTo)) {
+      continue;
+    }
+    const key = `${row.accountId ?? "none"}|${row.periodMonth}`;
+    const current = latest.get(key);
+    if (current === void 0 || row.createdAt > current.createdAt) {
+      latest.set(key, row);
+    }
+  }
+  return latest;
+}
+function requireBucket(buckets, period) {
+  const existing = buckets.get(period);
+  if (existing !== void 0) {
+    return existing;
+  }
+  const created = {
+    actualInflowMinor: 0n,
+    actualOutflowMinor: 0n,
+    forecastInflowMinor: 0n,
+    forecastOutflowMinor: 0n,
+    baseClosingMinor: 0n,
+    forecastAdjustmentMinor: 0n
+  };
+  buckets.set(period, created);
+  return created;
+}
+function isPaidAdvance(advance) {
+  return advance.status === "paid" || advance.status === "partially_applied" || advance.status === "settled";
+}
+function absoluteMinor(value) {
+  return value < 0n ? -value : value;
+}
+function isDateInRange(value, dateFrom, dateTo) {
+  const date = value.slice(0, 10);
+  return (dateFrom === null || date >= dateFrom.slice(0, 10)) && (dateTo === null || date <= dateTo.slice(0, 10));
 }
 
 // src/office-bank-parser.ts
@@ -39363,6 +39540,11 @@ var ALLOWED_MUTATING_ACTIONS = /* @__PURE__ */ new Set([
   "office_project_create",
   "office_project_update",
   "office_cashflow_import_confirm",
+  "office_cashflow_manual_entry_create",
+  "office_cashflow_manual_entry_cancel",
+  "office_advance_create",
+  "office_advance_mark_paid",
+  "office_advance_apply",
   "office_bank_import_preview",
   "office_bank_import_confirm",
   "office_reconciliation_approve",
@@ -39386,6 +39568,11 @@ var OFFICE_BOT_ACTIONS = /* @__PURE__ */ new Set([
   "office_project_create",
   "office_project_update",
   "office_cashflow_import_confirm",
+  "office_cashflow_manual_entry_create",
+  "office_cashflow_manual_entry_cancel",
+  "office_advance_create",
+  "office_advance_mark_paid",
+  "office_advance_apply",
   "office_reconciliation_approve",
   "office_reconciliation_match",
   "office_reconciliation_unmatch",
@@ -40677,10 +40864,10 @@ function canonicalJson(value) {
 
 // src/index.ts
 var DEFAULT_WORKSPACE_ID = "eeee-mu";
-var isoDatePattern = /^\d{4}-\d{2}-\d{2}$/u;
+var isoDatePattern2 = /^\d{4}-\d{2}-\d{2}$/u;
 var isoDateTimePattern = /^\d{4}-\d{2}-\d{2}T/u;
-var currencyCodePattern = /^[A-Z]{3}$/u;
-var moneyStringPattern = /^-?\d+(?:\.\d+)?$/u;
+var currencyCodePattern2 = /^[A-Z]{3}$/u;
+var moneyStringPattern2 = /^-?\d+(?:\.\d+)?$/u;
 var nullableStringSchema = external_exports.string().min(1).nullable();
 var optionalNullableStringSchema = external_exports.preprocess(
   (value) => value === void 0 || value === "" ? null : value,
@@ -40709,13 +40896,13 @@ var commandCenterUserPermissionUpdateSchema = workspaceBodySchema.extend({
   permissions: jsonRecordSchema
 });
 var officeTransactionWriteSchema = workspaceBodySchema.extend({
-  occurredOn: external_exports.string().regex(isoDatePattern),
+  occurredOn: external_exports.string().regex(isoDatePattern2),
   accountId: external_exports.string().min(1),
   categoryId: nullableStringSchema,
   projectId: nullableStringSchema,
   description: external_exports.string().min(1),
-  amountMicro: external_exports.string().regex(moneyStringPattern),
-  currency: external_exports.string().regex(currencyCodePattern),
+  amountMicro: external_exports.string().regex(moneyStringPattern2),
+  currency: external_exports.string().regex(currencyCodePattern2),
   // Income/expense is the transaction's own attribute; the category only files it
   // under division/department. Optional for backward compatibility: absent on
   // create defaults to "expense" (never category-derived), absent on update
@@ -40769,7 +40956,7 @@ var officePartnerWriteSchema = workspaceBodySchema.extend({
 var officeBankAccountWriteSchema = workspaceBodySchema.extend({
   bankName: external_exports.string().min(1),
   accountLabel: external_exports.string().min(1),
-  currency: external_exports.string().regex(currencyCodePattern),
+  currency: external_exports.string().regex(currencyCodePattern2),
   active: external_exports.boolean()
 });
 var officeProjectWriteSchema = workspaceBodySchema.extend({
@@ -40784,10 +40971,10 @@ var officeCashflowImportSchema = workspaceBodySchema.extend({
 var officeLedgerBulkRowSchema = external_exports.object({
   legacyId: external_exports.coerce.number().int().optional(),
   externalId: external_exports.coerce.number().int().optional(),
-  occurredOn: external_exports.string().regex(isoDatePattern),
+  occurredOn: external_exports.string().regex(isoDatePattern2),
   type: external_exports.enum(["income", "expense"]),
-  amount: external_exports.string().regex(moneyStringPattern),
-  currency: external_exports.string().regex(currencyCodePattern),
+  amount: external_exports.string().regex(moneyStringPattern2),
+  currency: external_exports.string().regex(currencyCodePattern2),
   description: external_exports.string().min(1),
   departmentId: optionalNullableStringSchema,
   divisionId: optionalNullableStringSchema,
@@ -40823,20 +41010,20 @@ var distributionMappingApplyRulesSchema = workspaceBodySchema.extend({
 var distributionContractExpenseRecordSchema = workspaceBodySchema.extend({
   contractId: external_exports.string().min(1),
   payeeId: external_exports.string().min(1),
-  incurredOn: external_exports.string().regex(isoDatePattern),
+  incurredOn: external_exports.string().regex(isoDatePattern2),
   label: external_exports.string().min(1),
-  amountMicro: external_exports.string().regex(moneyStringPattern),
-  currency: external_exports.string().regex(currencyCodePattern)
+  amountMicro: external_exports.string().regex(moneyStringPattern2),
+  currency: external_exports.string().regex(currencyCodePattern2)
 });
 var distributionContractUpsertSchema = workspaceBodySchema.extend({
   id: nullableStringSchema,
   payeeId: nullableStringSchema,
   title: external_exports.string().min(1),
   status: external_exports.enum(["draft", "active", "paused", "ended"]),
-  effectiveFrom: external_exports.string().regex(isoDatePattern),
-  effectiveTo: external_exports.string().regex(isoDatePattern).nullable(),
+  effectiveFrom: external_exports.string().regex(isoDatePattern2),
+  effectiveTo: external_exports.string().regex(isoDatePattern2).nullable(),
   splitBp: external_exports.number().int().min(0).max(1e4),
-  currency: external_exports.string().regex(currencyCodePattern)
+  currency: external_exports.string().regex(currencyCodePattern2)
 });
 var distributionContractExpenseUpdateSchema = distributionContractExpenseRecordSchema.extend({
   status: external_exports.enum(["open", "recouped", "waived"])
@@ -40846,7 +41033,7 @@ var distributionPayeeUpsertSchema = workspaceBodySchema.extend({
   displayName: external_exports.string().min(1),
   email: nullableStringSchema,
   status: external_exports.enum(["active", "inactive"]),
-  defaultCurrency: external_exports.string().regex(currencyCodePattern)
+  defaultCurrency: external_exports.string().regex(currencyCodePattern2)
 });
 var distributionReleaseUpsertSchema = workspaceBodySchema.extend({
   id: nullableStringSchema,
@@ -40854,7 +41041,7 @@ var distributionReleaseUpsertSchema = workspaceBodySchema.extend({
   artistName: external_exports.string().min(1),
   upc: nullableStringSchema,
   status: external_exports.enum(["draft", "released", "archived"]),
-  releaseDate: external_exports.string().regex(isoDatePattern).nullable()
+  releaseDate: external_exports.string().regex(isoDatePattern2).nullable()
 });
 var distributionTrackUpsertSchema = workspaceBodySchema.extend({
   id: nullableStringSchema,
@@ -41201,11 +41388,32 @@ function registerOfficeRoutes(app, dependencies) {
     const buckets = readOfficeCashflowProjection(dataset, from, to, accountId);
     return context.json(toCashflowBuckets(buckets));
   });
+  app.get("/eof/v1/cashflow/workbench", (context) => {
+    return context.json(officeCashflowWorkbenchResponse(context, dependencies));
+  });
+  app.post("/eof/v1/cashflow/manual-entries", async (context) => {
+    return officeCashflowManualEntryCreateResponse(context, dependencies);
+  });
+  app.post("/eof/v1/cashflow/manual-entries/:entryId/cancel", async (context) => {
+    return officeCashflowManualEntryCancelResponse(context, dependencies);
+  });
   app.post("/eof/v1/cashflow/preview", async (context) => {
     return officeCashflowPreviewResponse(context);
   });
   app.post("/eof/v1/cashflow/confirm", async (context) => {
     return officeCashflowConfirmResponse(context, dependencies);
+  });
+  app.get("/eof/v1/advances/workbench", (context) => {
+    return context.json(officeAdvancesWorkbenchResponse(context, dependencies));
+  });
+  app.post("/eof/v1/advances", async (context) => {
+    return officeAdvanceCreateResponse(context, dependencies);
+  });
+  app.post("/eof/v1/advances/:advanceId/mark-paid", async (context) => {
+    return officeAdvanceMarkPaidResponse(context, dependencies);
+  });
+  app.post("/eof/v1/advances/:advanceId/applications", async (context) => {
+    return officeAdvanceApplicationResponse(context, dependencies);
   });
   app.post("/eof/v1/transactions/bulk-preview", async (context) => {
     return officeLedgerBulkPreviewResponse(context, dependencies);
@@ -43403,6 +43611,492 @@ async function officeCashflowConfirmResponse(context, dependencies) {
     }
   });
   return context.json(result.body, result.status);
+}
+function officeCashflowWorkbenchResponse(context, dependencies) {
+  const workspaceId = resolveWorkspaceId(context);
+  const from = requireCompatQuery(context, ["from", "fromDate"], "from");
+  const to = requireCompatQuery(context, ["to", "toDate"], "to");
+  const accountId = nullableQuery(context, "accountId");
+  if (!isIsoDate(from) || !isIsoDate(to) || from > to) {
+    throw new ApiRouteError(400, "cashflow_date_range_invalid", "Cash-flow dates must be a valid inclusive range.", [
+      `from=${from}`,
+      `to=${to}`
+    ]);
+  }
+  const rows = buildOfficeCashflowWorkbench({
+    workspaceId,
+    dateFrom: from,
+    dateTo: to,
+    accountId,
+    transactions: dependencies.fixtures.office.transactions,
+    projectionRows: dependencies.fixtures.office.cashflowProjectionRows,
+    manualEntries: dependencies.fixtures.officeCashflowManualEntries,
+    advances: dependencies.fixtures.officeAdvances
+  });
+  const maxUnits = rows.reduce((max, row) => {
+    return [row.actualInflowMinor, row.actualOutflowMinor, row.forecastInflowMinor, row.forecastOutflowMinor].map(abs).reduce((innerMax, value) => value > innerMax ? value : innerMax, max);
+  }, 0n);
+  const buckets = rows.map((row) => ({
+    period: row.period,
+    actualInflowMicro: eofMoney.format(row.actualInflowMinor),
+    actualOutflowMicro: eofMoney.format(row.actualOutflowMinor),
+    forecastInflowMicro: eofMoney.format(row.forecastInflowMinor),
+    forecastOutflowMicro: eofMoney.format(row.forecastOutflowMinor),
+    varianceMicro: eofMoney.format(row.varianceMinor),
+    forecastClosingMicro: eofMoney.format(row.forecastClosingMinor),
+    actualInflowLevel: toBarLevel(row.actualInflowMinor, maxUnits),
+    actualOutflowLevel: toBarLevel(row.actualOutflowMinor, maxUnits),
+    forecastInflowLevel: toBarLevel(row.forecastInflowMinor, maxUnits),
+    forecastOutflowLevel: toBarLevel(row.forecastOutflowMinor, maxUnits)
+  }));
+  const manualEntries = dependencies.fixtures.officeCashflowManualEntries.filter((entry) => entry.workspaceId === workspaceId && entry.entryDate >= from && entry.entryDate <= to).filter((entry) => accountId === null || entry.accountId === accountId).sort((left, right) => right.entryDate.localeCompare(left.entryDate) || right.createdAt.localeCompare(left.createdAt)).slice(0, 200).map(toApiCashflowManualEntry);
+  return { buckets, manualEntries };
+}
+async function officeCashflowManualEntryCreateResponse(context, dependencies) {
+  const request = await readZodBody(context, officeCashflowManualEntryWriteSchema);
+  const amountMinor = normalizePositiveEofAmountField(context, request.amountMicro, "amountMicro");
+  assertMURCurrency(request.currency, "Manual cash-flow entries");
+  assertOfficeOptionalReferences(dependencies.fixtures.office, request.workspaceId, request.accountId, request.partnerId, request.projectId);
+  const entryId = randomUUID2();
+  const nowIso = dependencies.nowIso();
+  const actor = context.get("authUser");
+  const idempotencyKey = requireIdempotencyKey(context);
+  const entry = {
+    id: entryId,
+    workspaceId: request.workspaceId,
+    accountId: request.accountId,
+    partnerId: request.partnerId,
+    projectId: request.projectId,
+    entryDate: request.entryDate,
+    direction: request.direction,
+    amountMinor,
+    currency: request.currency,
+    label: request.label.trim(),
+    notes: request.notes,
+    status: request.status,
+    createdByUserId: actor.userId,
+    createdAt: nowIso,
+    updatedAt: nowIso
+  };
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_cashflow_manual_entry_create",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      if (tx.kind !== "memory") {
+        await tx.executor.execute(sql`
+          insert into office_cashflow_manual_entries (
+            id, workspace_id, account_id, partner_id, project_id, entry_date, direction, amount_minor,
+            currency, label, notes, status, created_by_user_id
+          ) values (
+            ${entry.id}, ${entry.workspaceId}, ${entry.accountId}, ${entry.partnerId}, ${entry.projectId}, ${entry.entryDate},
+            ${entry.direction}, ${entry.amountMinor.toString()}, ${entry.currency}, ${entry.label}, ${entry.notes}, ${entry.status}, ${entry.createdByUserId}
+          )
+        `);
+      }
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_cashflow_manual_entry_create",
+        targetType: "office_cashflow_manual_entry",
+        targetId: entry.id,
+        before: {},
+        after: { ...entry, amountMinor: entry.amountMinor.toString() },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      const mutableFixtures = dependencies.fixtures;
+      mutableFixtures.officeCashflowManualEntries = [...dependencies.fixtures.officeCashflowManualEntries, entry];
+      return mutationReceipt(entry.id, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+async function officeCashflowManualEntryCancelResponse(context, dependencies) {
+  const entryId = requirePathParam(context, "entryId");
+  const request = await readZodBody(context, officeCashflowManualEntryCancelSchema);
+  const before = dependencies.fixtures.officeCashflowManualEntries.find((entry) => entry.id === entryId && entry.workspaceId === request.workspaceId);
+  if (before === void 0) {
+    throw new ApiRouteError(404, "cashflow_manual_entry_not_found", "Manual cash-flow entry was not found.", [`entryId=${entryId}`]);
+  }
+  const after = {
+    ...before,
+    status: "cancelled",
+    notes: request.reason ?? before.notes,
+    updatedAt: dependencies.nowIso()
+  };
+  const actor = context.get("authUser");
+  const idempotencyKey = requireIdempotencyKey(context);
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_cashflow_manual_entry_cancel",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `office:cashflow-manual:${entryId}`);
+      if (tx.kind !== "memory") {
+        await tx.executor.execute(sql`
+          update office_cashflow_manual_entries
+          set status = 'cancelled', notes = ${after.notes}, updated_at = now()
+          where id = ${entryId} and workspace_id = ${request.workspaceId}
+        `);
+      }
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_cashflow_manual_entry_cancel",
+        targetType: "office_cashflow_manual_entry",
+        targetId: entryId,
+        before: { status: before.status, notes: before.notes },
+        after: { status: after.status, notes: after.notes },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      const mutableFixtures = dependencies.fixtures;
+      mutableFixtures.officeCashflowManualEntries = upsertById(dependencies.fixtures.officeCashflowManualEntries, after);
+      return mutationReceipt(entryId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+function officeAdvancesWorkbenchResponse(context, dependencies) {
+  const workspaceId = resolveWorkspaceId(context);
+  const kind = nullableQuery(context, "kind");
+  const status = nullableQuery(context, "status");
+  const supportedKinds = ["staff", "freelancer", "artist", "supplier", "contractor", "other"];
+  if (kind !== null && !supportedKinds.includes(kind)) {
+    throw new ApiRouteError(400, "advance_kind_invalid", "Advance beneficiary type is invalid.", [`kind=${kind}`]);
+  }
+  const artistRows = (workspaceId === DEFAULT_WORKSPACE_ID ? dependencies.fixtures.distributionContractExpenses : []).map((expense) => {
+    const contract = dependencies.fixtures.distributionContracts.find((candidate) => candidate.id === expense.contractId);
+    const payee = dependencies.fixtures.distribution.payees.find((candidate) => candidate.id === expense.payeeId);
+    const originalMinor = distributionMoneyToEofMinor(expense.originalAmountMicro);
+    const outstandingMinor = distributionMoneyToEofMinor(expense.openAmountMicro);
+    return {
+      id: expense.id,
+      kind: "artist",
+      counterpartyId: expense.payeeId,
+      counterpartyLabel: payee?.name ?? expense.payeeId,
+      contextId: expense.contractId,
+      contextLabel: contract?.title ?? null,
+      label: expense.label,
+      plannedOn: expense.incurredOn,
+      paidOn: expense.incurredOn,
+      originalAmountMicro: eofMoney.format(originalMinor),
+      appliedAmountMicro: eofMoney.format(originalMinor - outstandingMinor),
+      outstandingAmountMicro: eofMoney.format(outstandingMinor),
+      currency: expense.currency,
+      status: expense.status,
+      source: "distribution_contract"
+    };
+  });
+  const managedRows = dependencies.fixtures.officeAdvances.filter((advance) => advance.workspaceId === workspaceId).map((advance) => {
+    const applications = dependencies.fixtures.officeAdvanceApplications.filter((application) => application.advanceId === advance.id);
+    const balance = calculateAdvanceBalance(advance, applications);
+    const project = advance.projectId === null ? null : dependencies.fixtures.office.projects.find((candidate) => candidate.id === advance.projectId);
+    return {
+      id: advance.id,
+      kind: advance.beneficiaryType,
+      counterpartyId: advance.partnerId,
+      counterpartyLabel: advance.beneficiaryName,
+      contextId: advance.projectId,
+      contextLabel: project?.name ?? null,
+      label: advance.label,
+      plannedOn: advance.plannedPaymentOn,
+      paidOn: advance.paidOn,
+      originalAmountMicro: eofMoney.format(advance.originalAmountMinor),
+      appliedAmountMicro: eofMoney.format(balance.appliedMinor),
+      outstandingAmountMicro: eofMoney.format(balance.outstandingMinor),
+      currency: advance.currency,
+      status: balance.status,
+      source: "office_managed"
+    };
+  });
+  const rows = [...artistRows, ...managedRows].filter((row) => kind === null || row.kind === kind).filter((row) => status === null || row.status === status).sort((left, right) => right.plannedOn.localeCompare(left.plannedOn) || left.label.localeCompare(right.label));
+  const murRows = rows.filter((row) => row.currency === "MUR");
+  const sumOutstanding = (items) => items.reduce(
+    (sum, row) => eofMoney.add(sum, eofMoney.parse(row.outstandingAmountMicro)),
+    0n
+  );
+  const page = pageItems(context, rows);
+  return {
+    ...page,
+    totalOutstandingMicro: eofMoney.format(sumOutstanding(murRows)),
+    managedOutstandingMicro: eofMoney.format(sumOutstanding(murRows.filter((row) => row.source === "office_managed"))),
+    distributionOutstandingMicro: eofMoney.format(sumOutstanding(murRows.filter((row) => row.source === "distribution_contract"))),
+    plannedManagedMicro: eofMoney.format(sumOutstanding(murRows.filter((row) => row.source === "office_managed" && row.status === "planned")))
+  };
+}
+async function officeAdvanceCreateResponse(context, dependencies) {
+  const request = await readZodBody(context, officeAdvanceWriteSchema);
+  const amountMinor = normalizePositiveEofAmountField(context, request.originalAmountMicro, "originalAmountMicro");
+  assertMURCurrency(request.currency, "Advances");
+  if (request.partnerId !== null) {
+    requirePartner2(dependencies.fixtures.office, request.partnerId);
+  }
+  if (request.projectId !== null) {
+    requireProject2(dependencies.fixtures.office, request.projectId);
+  }
+  if (request.transactionId !== null) {
+    const transaction = requireOfficeTransaction(dependencies.fixtures.office, request.transactionId);
+    if (transaction.workspaceId !== request.workspaceId) {
+      throw new ApiRouteError(404, "office_transaction_not_found", "Office transaction was not found in this workspace.", [`transactionId=${request.transactionId}`]);
+    }
+  }
+  if (request.status === "planned" && request.paidOn !== null || request.status === "paid" && request.paidOn === null) {
+    throw new ApiRouteError(422, "advance_paid_date_invalid", "Paid advances require a paid date; planned advances cannot have one.", []);
+  }
+  const nowIso = dependencies.nowIso();
+  const actor = context.get("authUser");
+  const advance = {
+    id: randomUUID2(),
+    workspaceId: request.workspaceId,
+    beneficiaryType: request.beneficiaryType,
+    beneficiaryName: request.beneficiaryName.trim(),
+    partnerId: request.partnerId,
+    projectId: request.projectId,
+    bankStatementLineId: null,
+    transactionId: request.transactionId,
+    label: request.label.trim(),
+    plannedPaymentOn: request.plannedPaymentOn,
+    paidOn: request.paidOn,
+    originalAmountMinor: amountMinor,
+    currency: request.currency,
+    status: request.status,
+    notes: request.notes,
+    createdByUserId: actor.userId,
+    createdAt: nowIso,
+    updatedAt: nowIso
+  };
+  const idempotencyKey = requireIdempotencyKey(context);
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_advance_create",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      if (tx.kind !== "memory") {
+        await tx.executor.execute(sql`
+          insert into office_advances (
+            id, workspace_id, beneficiary_type, beneficiary_name, partner_id, project_id, transaction_id, label, planned_payment_on,
+            paid_on, original_amount_minor, currency, status, notes, created_by_user_id
+          ) values (
+            ${advance.id}, ${advance.workspaceId}, ${advance.beneficiaryType}, ${advance.beneficiaryName},
+            ${advance.partnerId}, ${advance.projectId}, ${advance.transactionId},
+            ${advance.label}, ${advance.plannedPaymentOn}, ${advance.paidOn}, ${advance.originalAmountMinor.toString()},
+            ${advance.currency}, ${advance.status}, ${advance.notes}, ${advance.createdByUserId}
+          )
+        `);
+      }
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_advance_create",
+        targetType: "office_advance",
+        targetId: advance.id,
+        before: {},
+        after: { ...advance, originalAmountMinor: advance.originalAmountMinor.toString() },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      const mutableFixtures = dependencies.fixtures;
+      mutableFixtures.officeAdvances = [...dependencies.fixtures.officeAdvances, advance];
+      return mutationReceipt(advance.id, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+async function officeAdvanceMarkPaidResponse(context, dependencies) {
+  const advanceId = requirePathParam(context, "advanceId");
+  const request = await readZodBody(context, officeAdvanceMarkPaidSchema);
+  const before = dependencies.fixtures.officeAdvances.find(
+    (advance) => advance.id === advanceId && advance.workspaceId === request.workspaceId
+  );
+  if (before === void 0) {
+    throw new ApiRouteError(404, "advance_not_found", "Advance was not found.", [`advanceId=${advanceId}`]);
+  }
+  if (before.status !== "planned") {
+    throw new ApiRouteError(409, "advance_not_planned", "Only a planned advance can be marked paid.", [
+      `advanceId=${advanceId}`,
+      `status=${before.status}`
+    ]);
+  }
+  if (request.transactionId !== null) {
+    const transaction = requireOfficeTransaction(dependencies.fixtures.office, request.transactionId);
+    if (transaction.workspaceId !== request.workspaceId) {
+      throw new ApiRouteError(404, "office_transaction_not_found", "Office transaction was not found in this workspace.", [
+        `transactionId=${request.transactionId}`
+      ]);
+    }
+  }
+  const after = {
+    ...before,
+    paidOn: request.paidOn,
+    transactionId: request.transactionId,
+    status: "paid",
+    updatedAt: dependencies.nowIso()
+  };
+  const actor = context.get("authUser");
+  const idempotencyKey = requireIdempotencyKey(context);
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_advance_mark_paid",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `office:advance:${advanceId}`);
+      if (tx.kind !== "memory") {
+        await tx.executor.execute(sql`
+          update office_advances
+          set status = 'paid', paid_on = ${request.paidOn}, transaction_id = ${request.transactionId}, updated_at = now()
+          where id = ${advanceId} and workspace_id = ${request.workspaceId} and status = 'planned'
+        `);
+      }
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_advance_mark_paid",
+        targetType: "office_advance",
+        targetId: advanceId,
+        before: { status: before.status, paidOn: before.paidOn, transactionId: before.transactionId },
+        after: { status: after.status, paidOn: after.paidOn, transactionId: after.transactionId },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      const mutableFixtures = dependencies.fixtures;
+      mutableFixtures.officeAdvances = upsertById(dependencies.fixtures.officeAdvances, after);
+      return mutationReceipt(advanceId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+async function officeAdvanceApplicationResponse(context, dependencies) {
+  const advanceId = requirePathParam(context, "advanceId");
+  const request = await readZodBody(context, officeAdvanceApplicationSchema);
+  const amountMinor = normalizePositiveEofAmountField(context, request.amountMicro, "amountMicro");
+  const before = dependencies.fixtures.officeAdvances.find(
+    (advance) => advance.id === advanceId && advance.workspaceId === request.workspaceId
+  );
+  if (before === void 0) {
+    throw new ApiRouteError(404, "advance_not_found", "Advance was not found.", [`advanceId=${advanceId}`]);
+  }
+  if (before.status === "planned" || before.status === "refunded" || before.status === "waived" || before.status === "written_off" || before.status === "settled") {
+    throw new ApiRouteError(409, "advance_not_applicable", "Only paid or partially applied advances can receive applications.", [
+      `advanceId=${advanceId}`,
+      `status=${before.status}`
+    ]);
+  }
+  const existing = dependencies.fixtures.officeAdvanceApplications.filter((application2) => application2.advanceId === advanceId);
+  let balance;
+  try {
+    balance = calculateAdvanceBalance(before, existing, amountMinor);
+  } catch (error) {
+    throw new ApiRouteError(409, "advance_over_applied", "Advance application exceeds the outstanding amount.", [
+      `advanceId=${advanceId}`,
+      `error=${error instanceof Error ? error.message : "unknown"}`
+    ]);
+  }
+  const terminalStatus = balance.outstandingMinor === 0n && request.kind === "refund" ? "refunded" : balance.outstandingMinor === 0n && request.kind === "write_off" ? "written_off" : balance.status;
+  const application = {
+    id: randomUUID2(),
+    advanceId,
+    appliedOn: request.appliedOn,
+    amountMinor,
+    kind: request.kind,
+    reference: request.reference,
+    notes: request.notes,
+    createdByUserId: context.get("authUser").userId,
+    createdAt: dependencies.nowIso()
+  };
+  const after = { ...before, status: terminalStatus, updatedAt: dependencies.nowIso() };
+  const actor = context.get("authUser");
+  const idempotencyKey = requireIdempotencyKey(context);
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_advance_apply",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `office:advance:${advanceId}`);
+      if (tx.kind !== "memory") {
+        await tx.executor.execute(sql`
+          insert into office_advance_applications (
+            id, advance_id, applied_on, amount_minor, kind, reference, notes, created_by_user_id
+          ) values (
+            ${application.id}, ${application.advanceId}, ${application.appliedOn}, ${application.amountMinor.toString()},
+            ${application.kind}, ${application.reference}, ${application.notes}, ${application.createdByUserId}
+          )
+        `);
+        await tx.executor.execute(sql`
+          update office_advances set status = ${after.status}, updated_at = now() where id = ${advanceId}
+        `);
+      }
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_advance_apply",
+        targetType: "office_advance",
+        targetId: advanceId,
+        before: { status: before.status, outstandingMinor: eofMoney.format(before.originalAmountMinor - balance.appliedMinor + amountMinor) },
+        after: { status: after.status, application: { ...application, amountMinor: application.amountMinor.toString() }, outstandingMinor: eofMoney.format(balance.outstandingMinor) },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      const mutableFixtures = dependencies.fixtures;
+      mutableFixtures.officeAdvanceApplications = [...dependencies.fixtures.officeAdvanceApplications, application];
+      mutableFixtures.officeAdvances = upsertById(dependencies.fixtures.officeAdvances, after);
+      return mutationReceipt(application.id, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+function toApiCashflowManualEntry(entry) {
+  return {
+    id: entry.id,
+    accountId: entry.accountId,
+    partnerId: entry.partnerId,
+    projectId: entry.projectId,
+    entryDate: entry.entryDate,
+    direction: entry.direction,
+    amountMicro: eofMoney.format(entry.amountMinor),
+    currency: entry.currency,
+    label: entry.label,
+    notes: entry.notes,
+    status: entry.status,
+    createdAt: entry.createdAt
+  };
+}
+function normalizePositiveEofAmountField(context, value, field) {
+  const amountMinor = normalizeEofAmountField(context, value, field);
+  if (amountMinor <= 0n) {
+    throw new ApiRouteError(400, "body_field_invalid", "A money amount must be greater than zero.", [`field=${field}`]);
+  }
+  return amountMinor;
+}
+function assertMURCurrency(currency, feature) {
+  if (currency !== "MUR") {
+    throw new ApiRouteError(422, "currency_not_supported", `${feature} currently require MUR until an explicit FX rate is supplied.`, [
+      `currency=${currency}`
+    ]);
+  }
+}
+function assertOfficeOptionalReferences(dataset, workspaceId, accountId, partnerId, projectId) {
+  if (accountId !== null) {
+    const account = dataset.bankAccounts.find((candidate) => candidate.id === accountId && candidate.workspaceId === workspaceId);
+    if (account === void 0) {
+      throw new ApiRouteError(404, "office_bank_account_not_found", "Office bank account was not found in this workspace.", [`accountId=${accountId}`]);
+    }
+  }
+  if (partnerId !== null) {
+    requirePartner2(dataset, partnerId);
+  }
+  if (projectId !== null) {
+    requireProject2(dataset, projectId);
+  }
+}
+function distributionMoneyToEofMinor(value) {
+  return roundRatioHalfUp(erhMoney.parse(value), 100000000n);
 }
 async function persistOfficeCashflowRows(tx, workspaceId, rows) {
   if (tx.kind === "memory" || rows.length === 0) {
@@ -51038,7 +51732,10 @@ async function readApiFixtureStoreFromPostgres(pool) {
     distributionFxRates,
     distributionPayeeBalances,
     distributionAliases,
-    officePartnerPayeeLinks
+    officePartnerPayeeLinks,
+    officeCashflowManualEntries,
+    officeAdvances,
+    officeAdvanceApplications
   ] = await Promise.all([
     readOfficeDataset(pool),
     readDistributionDataset(pool),
@@ -51051,7 +51748,10 @@ async function readApiFixtureStoreFromPostgres(pool) {
     readDistributionFxRates(pool),
     readDistributionPayeeBalances(pool),
     readDistributionAliases(pool),
-    readOfficePartnerPayeeLinks(pool)
+    readOfficePartnerPayeeLinks(pool),
+    readOfficeCashflowManualEntries(pool),
+    readOfficeAdvances(pool),
+    readOfficeAdvanceApplications(pool)
   ]);
   return {
     office,
@@ -51059,6 +51759,9 @@ async function readApiFixtureStoreFromPostgres(pool) {
     officeClassificationSuggestions: emptyRecord(),
     officePartnerPayeeLinks,
     officeProjectViolations: emptyRecord(),
+    officeCashflowManualEntries,
+    officeAdvances,
+    officeAdvanceApplications,
     distribution,
     distributionContracts,
     distributionContractExpenses,
@@ -51070,6 +51773,37 @@ async function readApiFixtureStoreFromPostgres(pool) {
     distributionPayeeBalances,
     distributionAliases
   };
+}
+async function readOfficeCashflowManualEntries(pool) {
+  const rows = await queryRows(
+    pool,
+    `select id::text, workspace_id, account_id::text, partner_id::text, project_id::text, entry_date,
+      direction, amount_minor::text, currency, label, notes, status, created_by_user_id, created_at, updated_at
+     from office_cashflow_manual_entries order by entry_date, id`,
+    []
+  );
+  return rows.map(toOfficeCashflowManualEntry);
+}
+async function readOfficeAdvances(pool) {
+  const rows = await queryRows(
+    pool,
+    `select id::text, workspace_id, beneficiary_type, beneficiary_name, partner_id::text, project_id::text, bank_statement_line_id::text,
+      transaction_id::text, label, planned_payment_on, paid_on, original_amount_minor::text, currency,
+      status, notes, created_by_user_id, created_at, updated_at
+     from office_advances order by planned_payment_on, id`,
+    []
+  );
+  return rows.map(toOfficeManagedAdvance);
+}
+async function readOfficeAdvanceApplications(pool) {
+  const rows = await queryRows(
+    pool,
+    `select id::text, advance_id::text, applied_on, amount_minor::text, kind, reference, notes,
+      created_by_user_id, created_at
+     from office_advance_applications order by applied_on, id`,
+    []
+  );
+  return rows.map(toOfficeAdvanceApplication);
 }
 async function readPostgresHealth(pool) {
   const officeTransactions = await readCount(pool, "transactions");
@@ -51607,6 +52341,60 @@ function toOfficeCashflowProjectionRow(row) {
     expectedOutflowMinor: bigintCell(row, "expected_outflow_minor"),
     expectedClosingBalanceMinor: bigintCell(row, "expected_closing_balance_minor"),
     currency: currencyCell(row, "currency"),
+    createdAt: timestampCell(row, "created_at")
+  };
+}
+function toOfficeCashflowManualEntry(row) {
+  return {
+    id: stringCell(row, "id"),
+    workspaceId: stringCell(row, "workspace_id"),
+    accountId: nullableStringCell(row, "account_id"),
+    partnerId: nullableStringCell(row, "partner_id"),
+    projectId: nullableStringCell(row, "project_id"),
+    entryDate: dateCell(row, "entry_date"),
+    direction: enumCell(row, "direction", ["inflow", "outflow"]),
+    amountMinor: bigintCell(row, "amount_minor"),
+    currency: currencyCell(row, "currency"),
+    label: stringCell(row, "label"),
+    notes: nullableStringCell(row, "notes"),
+    status: enumCell(row, "status", ["planned", "confirmed", "cancelled"]),
+    createdByUserId: nullableStringCell(row, "created_by_user_id"),
+    createdAt: timestampCell(row, "created_at"),
+    updatedAt: timestampCell(row, "updated_at")
+  };
+}
+function toOfficeManagedAdvance(row) {
+  return {
+    id: stringCell(row, "id"),
+    workspaceId: stringCell(row, "workspace_id"),
+    beneficiaryType: enumCell(row, "beneficiary_type", ["staff", "freelancer", "artist", "supplier", "contractor", "other"]),
+    beneficiaryName: stringCell(row, "beneficiary_name"),
+    partnerId: nullableStringCell(row, "partner_id"),
+    projectId: nullableStringCell(row, "project_id"),
+    bankStatementLineId: nullableStringCell(row, "bank_statement_line_id"),
+    transactionId: nullableStringCell(row, "transaction_id"),
+    label: stringCell(row, "label"),
+    plannedPaymentOn: dateCell(row, "planned_payment_on"),
+    paidOn: nullableDateCell(row, "paid_on"),
+    originalAmountMinor: bigintCell(row, "original_amount_minor"),
+    currency: currencyCell(row, "currency"),
+    status: enumCell(row, "status", ["planned", "paid", "partially_applied", "settled", "refunded", "waived", "written_off"]),
+    notes: nullableStringCell(row, "notes"),
+    createdByUserId: nullableStringCell(row, "created_by_user_id"),
+    createdAt: timestampCell(row, "created_at"),
+    updatedAt: timestampCell(row, "updated_at")
+  };
+}
+function toOfficeAdvanceApplication(row) {
+  return {
+    id: stringCell(row, "id"),
+    advanceId: stringCell(row, "advance_id"),
+    appliedOn: dateCell(row, "applied_on"),
+    amountMinor: bigintCell(row, "amount_minor"),
+    kind: enumCell(row, "kind", ["invoice", "expense", "refund", "write_off"]),
+    reference: nullableStringCell(row, "reference"),
+    notes: nullableStringCell(row, "notes"),
+    createdByUserId: nullableStringCell(row, "created_by_user_id"),
     createdAt: timestampCell(row, "created_at")
   };
 }

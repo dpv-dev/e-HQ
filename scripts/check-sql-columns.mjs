@@ -64,6 +64,30 @@ const REQUIRED_COLUMNS = {
     "amount_minor",
     "currency"
   ],
+  office_cashflow_manual_entries: [
+    "id",
+    "workspace_id",
+    "entry_date",
+    "direction",
+    "amount_minor",
+    "label"
+  ],
+  office_advances: [
+    "id",
+    "workspace_id",
+    "beneficiary_type",
+    "beneficiary_name",
+    "label",
+    "planned_payment_on",
+    "original_amount_minor"
+  ],
+  office_advance_applications: [
+    "id",
+    "advance_id",
+    "applied_on",
+    "amount_minor",
+    "kind"
+  ],
   calculation_runs: [
     "id",
     "status",

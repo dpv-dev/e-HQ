@@ -14,6 +14,15 @@ import type {
   OfficeCashflowImportRequest,
   OfficeCashflowPreviewResponse,
   CashflowQuery,
+  OfficeAdvancesWorkbenchQuery,
+  OfficeAdvancesWorkbenchResponse,
+  OfficeCashflowManualEntryCancelRequest,
+  OfficeCashflowManualEntryWriteRequest,
+  OfficeCashflowWorkbenchQuery,
+  OfficeCashflowWorkbenchResponse,
+  OfficeAdvanceApplicationRequest,
+  OfficeAdvanceMarkPaidRequest,
+  OfficeAdvanceWriteRequest,
   EntityId,
   OfficeBankAccountsQuery,
   OfficeBankAccountDeleteRequest,
@@ -191,8 +200,33 @@ export interface OfficeApiClient {
     options: WriteRequestOptions
   ) => Promise<ApiMutationReceipt>;
   readonly getCashflow: (query: CashflowQuery) => Promise<readonly CashflowBucket[]>;
+  readonly getCashflowWorkbench: (query: OfficeCashflowWorkbenchQuery) => Promise<OfficeCashflowWorkbenchResponse>;
+  readonly createCashflowManualEntry: (
+    request: OfficeCashflowManualEntryWriteRequest,
+    options: WriteRequestOptions
+  ) => Promise<ApiMutationReceipt>;
+  readonly cancelCashflowManualEntry: (
+    entryId: EntityId,
+    request: OfficeCashflowManualEntryCancelRequest,
+    options: WriteRequestOptions
+  ) => Promise<ApiMutationReceipt>;
   readonly previewCashflowImport: (request: OfficeCashflowImportRequest, options: WriteRequestOptions) => Promise<OfficeCashflowPreviewResponse>;
   readonly confirmCashflowImport: (request: OfficeCashflowImportRequest, options: WriteRequestOptions) => Promise<ApiMutationReceipt>;
+  readonly getAdvancesWorkbench: (query: OfficeAdvancesWorkbenchQuery) => Promise<OfficeAdvancesWorkbenchResponse>;
+  readonly createAdvance: (
+    request: OfficeAdvanceWriteRequest,
+    options: WriteRequestOptions
+  ) => Promise<ApiMutationReceipt>;
+  readonly applyAdvance: (
+    advanceId: EntityId,
+    request: OfficeAdvanceApplicationRequest,
+    options: WriteRequestOptions
+  ) => Promise<ApiMutationReceipt>;
+  readonly markAdvancePaid: (
+    advanceId: EntityId,
+    request: OfficeAdvanceMarkPaidRequest,
+    options: WriteRequestOptions
+  ) => Promise<ApiMutationReceipt>;
   readonly listAuditLog: (query: AuditLogQuery) => Promise<PageResult<AuditLogEntry>>;
   readonly listPartners: (query: OfficePartnersQuery) => Promise<PageResult<OfficePartnerListItem>>;
   readonly getPartnerRecord: (partnerId: EntityId, query: OfficePartnerRecordQuery) => Promise<OfficePartnerRecord>;
@@ -501,10 +535,65 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
         to: query.to,
         accountId: query.accountId
       }),
+    getCashflowWorkbench: (query: OfficeCashflowWorkbenchQuery): Promise<OfficeCashflowWorkbenchResponse> =>
+      transport.get<OfficeCashflowWorkbenchResponse>("cashflow/workbench", {
+        workspaceId: query.workspaceId,
+        from: query.from,
+        to: query.to,
+        accountId: query.accountId
+      }),
+    createCashflowManualEntry: (
+      request: OfficeCashflowManualEntryWriteRequest,
+      options: WriteRequestOptions
+    ): Promise<ApiMutationReceipt> =>
+      transport.post<ApiMutationReceipt>("cashflow/manual-entries", request, options.idempotencyKey),
+    cancelCashflowManualEntry: (
+      entryId: EntityId,
+      request: OfficeCashflowManualEntryCancelRequest,
+      options: WriteRequestOptions
+    ): Promise<ApiMutationReceipt> =>
+      transport.post<ApiMutationReceipt>(
+        `cashflow/manual-entries/${encodePathSegment(entryId)}/cancel`,
+        request,
+        options.idempotencyKey
+      ),
     previewCashflowImport: (request: OfficeCashflowImportRequest, options: WriteRequestOptions): Promise<OfficeCashflowPreviewResponse> =>
       transport.post<OfficeCashflowPreviewResponse>("cashflow/preview", request, options.idempotencyKey),
     confirmCashflowImport: (request: OfficeCashflowImportRequest, options: WriteRequestOptions): Promise<ApiMutationReceipt> =>
       transport.post<ApiMutationReceipt>("cashflow/confirm", request, options.idempotencyKey),
+    getAdvancesWorkbench: (query: OfficeAdvancesWorkbenchQuery): Promise<OfficeAdvancesWorkbenchResponse> =>
+      transport.get<OfficeAdvancesWorkbenchResponse>("advances/workbench", {
+        workspaceId: query.workspaceId,
+        kind: query.kind,
+        status: query.status,
+        cursor: query.cursor,
+        limit: query.limit
+      }),
+    createAdvance: (
+      request: OfficeAdvanceWriteRequest,
+      options: WriteRequestOptions
+    ): Promise<ApiMutationReceipt> =>
+      transport.post<ApiMutationReceipt>("advances", request, options.idempotencyKey),
+    applyAdvance: (
+      advanceId: EntityId,
+      request: OfficeAdvanceApplicationRequest,
+      options: WriteRequestOptions
+    ): Promise<ApiMutationReceipt> =>
+      transport.post<ApiMutationReceipt>(
+        `advances/${encodePathSegment(advanceId)}/applications`,
+        request,
+        options.idempotencyKey
+      ),
+    markAdvancePaid: (
+      advanceId: EntityId,
+      request: OfficeAdvanceMarkPaidRequest,
+      options: WriteRequestOptions
+    ): Promise<ApiMutationReceipt> =>
+      transport.post<ApiMutationReceipt>(
+        `advances/${encodePathSegment(advanceId)}/mark-paid`,
+        request,
+        options.idempotencyKey
+      ),
     listAuditLog: (query: AuditLogQuery): Promise<PageResult<AuditLogEntry>> =>
       transport.get<PageResult<AuditLogEntry>>("audit-log", {
         workspaceId: query.workspaceId,

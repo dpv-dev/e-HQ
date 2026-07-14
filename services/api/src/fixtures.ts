@@ -16,7 +16,12 @@ import type {
   DistributionReadDataset,
   DistributionRoyaltyRuleInput
 } from "@ehq/domain-distribution";
-import type { OfficeAnalyticsDataset } from "@ehq/domain-office";
+import type {
+  OfficeAnalyticsDataset,
+  OfficeCashflowManualEntryRow,
+  OfficeAdvanceApplicationRow,
+  OfficeManagedAdvanceRow
+} from "@ehq/domain-office";
 
 export interface ApiDistributionRoyaltyRuleInput extends DistributionRoyaltyRuleInput {
   readonly scopeType: string | null;
@@ -32,6 +37,9 @@ export interface ApiFixtureStore {
   readonly officeClassificationSuggestions: Readonly<Record<string, readonly OfficePartnerClassificationSuggestion[]>>;
   readonly officePartnerPayeeLinks: Readonly<Record<string, OfficePartnerPayeeLink>>;
   readonly officeProjectViolations: Readonly<Record<string, readonly OfficeProjectCoherenceViolation[]>>;
+  readonly officeCashflowManualEntries: readonly OfficeCashflowManualEntryRow[];
+  readonly officeAdvances: readonly OfficeManagedAdvanceRow[];
+  readonly officeAdvanceApplications: readonly OfficeAdvanceApplicationRow[];
   readonly distribution: DistributionReadDataset;
   readonly distributionContracts: readonly DistributionContract[];
   readonly distributionContractExpenses: readonly DistributionContractExpense[];
@@ -51,6 +59,9 @@ export function createFixtureStore(): ApiFixtureStore {
     officeClassificationSuggestions: createOfficeClassificationSuggestionsFixture(),
     officePartnerPayeeLinks: createOfficePartnerPayeeLinksFixture(),
     officeProjectViolations: createOfficeProjectViolationsFixture(),
+    officeCashflowManualEntries: [],
+    officeAdvances: [],
+    officeAdvanceApplications: [],
     distribution: createDistributionFixture(),
     distributionContracts: createDistributionContractsFixture(),
     distributionContractExpenses: createDistributionContractExpensesFixture(),

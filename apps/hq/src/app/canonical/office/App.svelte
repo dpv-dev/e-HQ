@@ -84,7 +84,9 @@
   import { sortOptionsAlphabetically } from "../../select-options.js";
   import { createTablePagination, loadPageResult, readPageItems, TABLE_PAGE_SIZE, type PageLoadMode } from "../../table-pagination.js";
   import BankView from "./BankView.svelte";
+  import CashflowView from "./CashflowView.svelte";
   import CeoView from "./CeoView.svelte";
+  import AdvancesView from "./AdvancesView.svelte";
   import MonitoringView from "./MonitoringView.svelte";
   import PartnersView from "./PartnersView.svelte";
   import ProjectsView from "./ProjectsView.svelte";
@@ -102,6 +104,7 @@
     | "reconciliation"
     | "pending"
     | "cashflow"
+    | "advances"
     | "clients"
     | "suppliers"
     | "projects"
@@ -225,6 +228,12 @@
           label: "Cash flow",
           title: "Cash flow",
           subtitle: "Inflows, outflows, and closing balances by period."
+        },
+        {
+          id: "advances",
+          label: "Advances",
+          title: "Advance payments",
+          subtitle: "Staff, freelancer, artist, supplier, contractor, and other prepayments in one controlled view."
         },
         {
           id: "vat",
@@ -396,6 +405,7 @@
     reconciliation: "check",
     pending: "clock",
     cashflow: "trending-up",
+    advances: "clock",
     clients: "users",
     suppliers: "users",
     projects: "folder",
@@ -730,8 +740,6 @@
   const dashboardExpenseCategoryRows = $derived(createDashboardExpenseCategoryRows(dashboardAnalyticsState));
   const dashboardProjectProfitabilityPoints = $derived(createDashboardProjectProfitabilityPoints(dashboardAnalyticsState));
   const dashboardProjectProfitabilityRows = $derived(createDashboardProjectProfitabilityRows(dashboardAnalyticsState));
-  const dashboardReconciliationPoints = $derived(createDashboardReconciliationPoints(dashboardAnalyticsState));
-  const dashboardReconciliationRows = $derived(createDashboardReconciliationRows(dashboardAnalyticsState));
   const dashboardExpenseTrendPoints = $derived(createDashboardExpenseTrendPoints(dashboardAnalyticsState));
   const dashboardExpenseTrendRows = $derived(createDashboardExpenseTrendRows(dashboardAnalyticsState));
   const coaStructurePoints = $derived(createCoaStructurePoints(planTableNodes));
@@ -1888,6 +1896,10 @@
       return "cashflow";
     }
 
+    if (normalizedPath.endsWith("/console/advances")) {
+      return "advances";
+    }
+
     if (normalizedPath.endsWith("/console/clients")) {
       return "clients";
     }
@@ -1996,6 +2008,10 @@
       return "cashflow";
     }
 
+    if (normalizedPath.endsWith("/console/office/advances")) {
+      return "advances";
+    }
+
     if (normalizedPath.endsWith("/console/office/coa")) {
       return "coa";
     }
@@ -2067,6 +2083,10 @@
 
     if (pageId === "cashflow") {
       return "/console/office/cashflow";
+    }
+
+    if (pageId === "advances") {
+      return "/console/office/advances";
     }
 
     if (pageId === "coa") {
@@ -3026,14 +3046,12 @@
     if (state.status !== "success") {
       return [
         { label: "Runway", value: "—", detail: stateLabel(state), tone: "muted", accent: true },
-        { label: "Top expense", value: "—", detail: "category", tone: "muted", accent: false },
         { label: "Top project", value: "—", detail: "net contribution", tone: "muted", accent: false },
         { label: "Reconciliation", value: "—", detail: "health by account", tone: "muted", accent: false },
         { label: "Oldest unmatched", value: "—", detail: "ageing", tone: "muted", accent: false }
       ];
     }
 
-    const topExpense = state.data.topExpenseCategories[0] ?? null;
     const topProject = state.data.projectProfitability[0] ?? null;
     const totalLines = state.data.reconciliationByAccount.reduce(
       (sum: number, row: { readonly lineCount: number }): number => sum + row.lineCount,
@@ -3053,13 +3071,6 @@
         detail: `cash ${formatMicro(state.data.runway.cashBalanceMicro)} · burn ${formatMicro(state.data.runway.averageMonthlyBurnMicro)}`,
         tone: runwayMonths === null ? "info" : runwayMonths < 3 ? "warning" : "success",
         accent: true
-      },
-      {
-        label: "Top expense",
-        value: topExpense === null ? "—" : formatMicro(topExpense.expenseMicro),
-        detail: topExpense === null ? "no expense" : `${compactChartLabel(topExpense.label)} · ${formatBasisPoints(topExpense.shareBp)}`,
-        tone: topExpense === null ? "muted" : "warning",
-        accent: false
       },
       {
         label: "Top project",
@@ -3197,36 +3208,6 @@
         { kind: "money", value: formatMicro(row.expenseMicro), tone: "error" },
         { kind: "money", value: formatSignedMicro(row.netMicro, "MUR"), tone: moneyTone(row.netMicro) },
         { kind: "badge", value: row.marginBp === null ? "—" : formatSignedBasisPoints(row.marginBp), tone: row.marginBp === null ? "muted" : row.marginBp >= 0 ? "success" : "warning" }
-      ]
-    }));
-  }
-
-  function createDashboardReconciliationPoints(state: ApiRequestState<OfficeDashboardAnalyticsResponse>): readonly ChartPoint[] {
-    if (state.status !== "success") {
-      return createNormalizedCountChartPoints([], 6);
-    }
-
-    return createNormalizedCountChartPoints(
-      state.data.reconciliationByAccount.slice(0, 6).map((row) => ({
-        label: compactChartLabel(`${row.bankName} ${row.accountLabel}`),
-        count: row.unmatchedLineCount
-      })),
-      6
-    );
-  }
-
-  function createDashboardReconciliationRows(state: ApiRequestState<OfficeDashboardAnalyticsResponse>): readonly TableRow[] {
-    if (state.status !== "success") {
-      return [];
-    }
-
-    return state.data.reconciliationByAccount.map((row): TableRow => ({
-      id: row.accountId,
-      cells: [
-        { kind: "text", value: `${row.bankName} · ${row.accountLabel}`, strong: true },
-        { kind: "text", value: String(row.unmatchedLineCount), strong: false },
-        { kind: "badge", value: formatBasisPoints(row.matchedRateBp), tone: row.matchedRateBp >= 9000 ? "success" : row.matchedRateBp >= 7500 ? "info" : "warning" },
-        { kind: "text", value: row.oldestUnmatchedDays === null ? "—" : `${String(row.oldestUnmatchedDays)} day(s)`, strong: false }
       ]
     }));
   }
@@ -4044,6 +4025,7 @@
       pageId === "reconciliation" ||
       pageId === "pending" ||
       pageId === "cashflow" ||
+      pageId === "advances" ||
       pageId === "clients" ||
       pageId === "suppliers" ||
       pageId === "projects" ||
@@ -4244,7 +4226,7 @@
         </section>
 
         <section class="dashboard-grid">
-          <div class="panel-card ehq-edge-surface">
+          <div class="panel-card ehq-edge-surface dashboard-wide-panel">
             <SectionTemplate eyebrow="PROMPT 1 · runway — months of cash left" title="Runway" detail="Cash left and average burn based on selected period." state={isLoadingState(dashboardAnalyticsState) ? "loading" : dashboardAnalyticsState.status === "error" ? "error" : "ready"}>
               <KPI label="Runway" value={dashboardRunwayPanel.value} detail={dashboardRunwayPanel.detail} tone={dashboardRunwayPanel.tone} state={isLoadingState(dashboardAnalyticsState) ? "loading" : "default"} accent={true} />
               <div class="runway-meta">
@@ -4261,12 +4243,6 @@
             </SectionTemplate>
           </div>
 
-          <div class="panel-card ehq-edge-surface">
-            <SectionTemplate eyebrow="PROMPT 4 · reconciliation health — by account" title="Reconciliation health" detail="Matched rate, unmatched pressure, and ageing by bank account." state={isLoadingState(dashboardAnalyticsState) ? "loading" : dashboardAnalyticsState.status === "error" ? "error" : "ready"}>
-              <BarsChart title="Unmatched lines by account" points={dashboardReconciliationPoints} tone="info" />
-              <Table title="Account reconciliation health" columns={dashboardReconciliationColumns} rows={dashboardReconciliationRows} state={isLoadingState(dashboardAnalyticsState) ? "loading" : dashboardAnalyticsState.status === "error" ? "error" : dashboardReconciliationRows.length === 0 ? "empty" : "default"} actionLabel="" />
-            </SectionTemplate>
-          </div>
         </section>
 
         <section class="dashboard-grid">
@@ -4775,30 +4751,9 @@
 
         <Table title="Pending items" columns={pendingColumns} rows={pendingTableRows} state={isLoadingState(pendingState) ? "loading" : pendingState.status === "error" ? "error" : pendingRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={pendingPagination} />
       {:else if activePageId === "cashflow"}
-        <section class="filter-strip ehq-edge-surface" aria-label="Cash flow filters">
-          <Select id="office-cashflow-account" label="Account" value={accountFilter} options={accountOptions} state="default" message="" onchange={updateAccountFilter} />
-          <Button label="Filter" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Refresh cash flow" onclick={applyCashflowFilters} />
-        </section>
-
-        <section class="office-edit-panel ehq-edge-surface" aria-label="Import a cashflow">
-          <div class="office-edit-grid">
-            <label class="office-edit-wide">
-              <span class="ehq-type-label-mono">Import a cashflow CSV (Month, Inflow, Outflow, ClosingBalance, Currency)</span>
-              <input type="file" accept="text/csv,.csv" onchange={handleCashflowFile} />
-            </label>
-          </div>
-          <div class="office-edit-actions">
-            <span class="ehq-type-label-mono">{cashflowImportMessage}</span>
-            <Button label="Import to database" variant="primary" size="medium" type="button" disabled={!writesEnabled || cashflowImportRecords.length === 0} loading={false} locked={false} focus={false} ariaLabel="Import the cashflow to the database" title={writeDisabledTitle()} onclick={confirmCashflowFileImport} />
-          </div>
-        </section>
-
-        <section class="dashboard-grid">
-          <BarsChart title="Cash inflows" points={cashflowInflowPoints} tone="success" />
-          <BarsChart title="Cash outflows" points={cashflowOutflowPoints} tone="error" />
-        </section>
-
-        <Table title="Monthly cash flow" columns={cashflowColumns} rows={cashflowTableRows} state={isLoadingState(cashflowState) ? "loading" : cashflowState.status === "error" ? "error" : cashflowTableRows.length === 0 ? "empty" : "default"} actionLabel="" />
+        <CashflowView client={client.office} workspaceId={officeWorkspaceId} dateFrom={activeRange.from} dateTo={activeRange.to} {writesEnabled} />
+      {:else if activePageId === "advances"}
+        <AdvancesView client={client.office} workspaceId={officeWorkspaceId} {period} dateFrom={activeRange.from} dateTo={activeRange.to} {writesEnabled} />
       {:else if activePageId === "ceo"}
         <CeoView client={client.office} workspaceId={officeWorkspaceId} {period} dateFrom={activeRange.from} dateTo={activeRange.to} />
       {:else if activePageId === "bank"}
@@ -4876,12 +4831,6 @@
     { label: "Expense", align: "right", sortable: true },
     { label: "Net", align: "right", sortable: true },
     { label: "Margin", align: "left", sortable: true }
-  ];
-  const dashboardReconciliationColumns: readonly TableColumn[] = [
-    { label: "Account", align: "left", sortable: true },
-    { label: "Unmatched", align: "right", sortable: true },
-    { label: "Matched", align: "left", sortable: true },
-    { label: "Oldest", align: "left", sortable: true }
   ];
   const dashboardExpenseTrendColumns: readonly TableColumn[] = [
     { label: "Department", align: "left", sortable: true },

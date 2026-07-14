@@ -21,6 +21,7 @@ import type {
   OfficeBankImportBatchRow,
   OfficeBankReconciliationMatchRow,
   OfficeBankStatementLineRow,
+  OfficeCashflowManualEntryRow,
   OfficeCashflowProjectionRowInput,
   OfficeCategoryRow,
   OfficeDepartmentRow,
@@ -29,6 +30,8 @@ import type {
   OfficePartnerRow,
   OfficeProjectBudgetLineRow,
   OfficeProjectRow,
+  OfficeAdvanceApplicationRow,
+  OfficeManagedAdvanceRow,
   OfficeTransactionRow
 } from "@ehq/domain-office";
 import type { ApiDistributionRoyaltyRuleInput, ApiFixtureStore } from "./fixtures.js";
@@ -126,7 +129,10 @@ export async function readApiFixtureStoreFromPostgres(pool: Pool): Promise<ApiFi
     distributionFxRates,
     distributionPayeeBalances,
     distributionAliases,
-    officePartnerPayeeLinks
+    officePartnerPayeeLinks,
+    officeCashflowManualEntries,
+    officeAdvances,
+    officeAdvanceApplications
   ] = await Promise.all([
     readOfficeDataset(pool),
     readDistributionDataset(pool),
@@ -139,7 +145,10 @@ export async function readApiFixtureStoreFromPostgres(pool: Pool): Promise<ApiFi
     readDistributionFxRates(pool),
     readDistributionPayeeBalances(pool),
     readDistributionAliases(pool),
-    readOfficePartnerPayeeLinks(pool)
+    readOfficePartnerPayeeLinks(pool),
+    readOfficeCashflowManualEntries(pool),
+    readOfficeAdvances(pool),
+    readOfficeAdvanceApplications(pool)
   ]);
   return {
     office,
@@ -147,6 +156,9 @@ export async function readApiFixtureStoreFromPostgres(pool: Pool): Promise<ApiFi
     officeClassificationSuggestions: emptyRecord<readonly OfficePartnerClassificationSuggestion[]>(),
     officePartnerPayeeLinks,
     officeProjectViolations: emptyRecord<readonly OfficeProjectCoherenceViolation[]>(),
+    officeCashflowManualEntries,
+    officeAdvances,
+    officeAdvanceApplications,
     distribution,
     distributionContracts,
     distributionContractExpenses,
@@ -158,6 +170,40 @@ export async function readApiFixtureStoreFromPostgres(pool: Pool): Promise<ApiFi
     distributionPayeeBalances,
     distributionAliases
   };
+}
+
+async function readOfficeCashflowManualEntries(pool: Pool): Promise<readonly OfficeCashflowManualEntryRow[]> {
+  const rows = await queryRows(
+    pool,
+    `select id::text, workspace_id, account_id::text, partner_id::text, project_id::text, entry_date,
+      direction, amount_minor::text, currency, label, notes, status, created_by_user_id, created_at, updated_at
+     from office_cashflow_manual_entries order by entry_date, id`,
+    []
+  );
+  return rows.map(toOfficeCashflowManualEntry);
+}
+
+async function readOfficeAdvances(pool: Pool): Promise<readonly OfficeManagedAdvanceRow[]> {
+  const rows = await queryRows(
+    pool,
+    `select id::text, workspace_id, beneficiary_type, beneficiary_name, partner_id::text, project_id::text, bank_statement_line_id::text,
+      transaction_id::text, label, planned_payment_on, paid_on, original_amount_minor::text, currency,
+      status, notes, created_by_user_id, created_at, updated_at
+     from office_advances order by planned_payment_on, id`,
+    []
+  );
+  return rows.map(toOfficeManagedAdvance);
+}
+
+async function readOfficeAdvanceApplications(pool: Pool): Promise<readonly OfficeAdvanceApplicationRow[]> {
+  const rows = await queryRows(
+    pool,
+    `select id::text, advance_id::text, applied_on, amount_minor::text, kind, reference, notes,
+      created_by_user_id, created_at
+     from office_advance_applications order by applied_on, id`,
+    []
+  );
+  return rows.map(toOfficeAdvanceApplication);
 }
 
 async function readPostgresHealth(pool: Pool): Promise<ApiPostgresHealth> {
@@ -726,6 +772,63 @@ function toOfficeCashflowProjectionRow(row: PgRow): OfficeCashflowProjectionRowI
     expectedOutflowMinor: bigintCell(row, "expected_outflow_minor"),
     expectedClosingBalanceMinor: bigintCell(row, "expected_closing_balance_minor"),
     currency: currencyCell(row, "currency"),
+    createdAt: timestampCell(row, "created_at")
+  };
+}
+
+function toOfficeCashflowManualEntry(row: PgRow): OfficeCashflowManualEntryRow {
+  return {
+    id: stringCell(row, "id"),
+    workspaceId: stringCell(row, "workspace_id"),
+    accountId: nullableStringCell(row, "account_id"),
+    partnerId: nullableStringCell(row, "partner_id"),
+    projectId: nullableStringCell(row, "project_id"),
+    entryDate: dateCell(row, "entry_date"),
+    direction: enumCell(row, "direction", ["inflow", "outflow"]),
+    amountMinor: bigintCell(row, "amount_minor"),
+    currency: currencyCell(row, "currency"),
+    label: stringCell(row, "label"),
+    notes: nullableStringCell(row, "notes"),
+    status: enumCell(row, "status", ["planned", "confirmed", "cancelled"]),
+    createdByUserId: nullableStringCell(row, "created_by_user_id"),
+    createdAt: timestampCell(row, "created_at"),
+    updatedAt: timestampCell(row, "updated_at")
+  };
+}
+
+function toOfficeManagedAdvance(row: PgRow): OfficeManagedAdvanceRow {
+  return {
+    id: stringCell(row, "id"),
+    workspaceId: stringCell(row, "workspace_id"),
+    beneficiaryType: enumCell(row, "beneficiary_type", ["staff", "freelancer", "artist", "supplier", "contractor", "other"]),
+    beneficiaryName: stringCell(row, "beneficiary_name"),
+    partnerId: nullableStringCell(row, "partner_id"),
+    projectId: nullableStringCell(row, "project_id"),
+    bankStatementLineId: nullableStringCell(row, "bank_statement_line_id"),
+    transactionId: nullableStringCell(row, "transaction_id"),
+    label: stringCell(row, "label"),
+    plannedPaymentOn: dateCell(row, "planned_payment_on"),
+    paidOn: nullableDateCell(row, "paid_on"),
+    originalAmountMinor: bigintCell(row, "original_amount_minor"),
+    currency: currencyCell(row, "currency"),
+    status: enumCell(row, "status", ["planned", "paid", "partially_applied", "settled", "refunded", "waived", "written_off"]),
+    notes: nullableStringCell(row, "notes"),
+    createdByUserId: nullableStringCell(row, "created_by_user_id"),
+    createdAt: timestampCell(row, "created_at"),
+    updatedAt: timestampCell(row, "updated_at")
+  };
+}
+
+function toOfficeAdvanceApplication(row: PgRow): OfficeAdvanceApplicationRow {
+  return {
+    id: stringCell(row, "id"),
+    advanceId: stringCell(row, "advance_id"),
+    appliedOn: dateCell(row, "applied_on"),
+    amountMinor: bigintCell(row, "amount_minor"),
+    kind: enumCell(row, "kind", ["invoice", "expense", "refund", "write_off"]),
+    reference: nullableStringCell(row, "reference"),
+    notes: nullableStringCell(row, "notes"),
+    createdByUserId: nullableStringCell(row, "created_by_user_id"),
     createdAt: timestampCell(row, "created_at")
   };
 }

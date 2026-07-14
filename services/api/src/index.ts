@@ -6,6 +6,13 @@ import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { getAuthRoleProfile, type WorkspaceAppId } from "@ehq/auth";
 import {
+  officeCashflowManualEntryCancelSchema,
+  officeCashflowManualEntryWriteSchema,
+  officeAdvanceApplicationSchema,
+  officeAdvanceMarkPaidSchema,
+  officeAdvanceWriteSchema
+} from "@ehq/api-contracts";
+import {
   calculateVat,
   convertMoney,
   createBasisPoints,
@@ -57,6 +64,8 @@ import {
   type StatementPaymentLinkInput
 } from "@ehq/domain-distribution";
 import {
+  buildOfficeCashflowWorkbench,
+  calculateAdvanceBalance,
   detectOfficeBankImportDuplicates,
   readDepartmentPnl,
   readGlobalPnl,
@@ -84,8 +93,11 @@ import {
   type OfficePnlCategoryRow,
   type OfficePnlDepartmentRow,
   type OfficePnlFilters,
+  type OfficeCashflowManualEntryRow,
   type OfficePnlMonthlyRow,
   type OfficeProjectRow,
+  type OfficeAdvanceApplicationRow,
+  type OfficeManagedAdvanceRow,
   type OfficeTransactionRow
 } from "@ehq/domain-office";
 import type {
@@ -105,6 +117,13 @@ import type {
   OfficeImportRejectionReason,
   OfficeBankPreviewRowResult,
   CashflowBucket,
+  OfficeAdvanceRow,
+  OfficeAdvancesWorkbenchResponse,
+  OfficeCashflowManualEntry,
+  OfficeCashflowManualEntryCancelRequest,
+  OfficeCashflowManualEntryWriteRequest,
+  OfficeCashflowWorkbenchBucket,
+  OfficeCashflowWorkbenchResponse,
   CommandCenterOverviewIntegration,
   CommandCenterOverviewResponse,
   CommandCenterOverviewSetting,
@@ -177,6 +196,10 @@ import type {
   OfficeTransaction,
   OfficeTransactionStatus,
   OfficeTransactionWriteRequest,
+  OfficeAdvanceKind,
+  OfficeAdvanceApplicationRequest,
+  OfficeAdvanceMarkPaidRequest,
+  OfficeAdvanceWriteRequest,
   PageResult,
   PayeeSummary,
   PaymentRecordRequest,
@@ -1296,12 +1319,40 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
     return context.json(toCashflowBuckets(buckets));
   });
 
+  app.get("/eof/v1/cashflow/workbench", (context) => {
+    return context.json(officeCashflowWorkbenchResponse(context, dependencies));
+  });
+
+  app.post("/eof/v1/cashflow/manual-entries", async (context) => {
+    return officeCashflowManualEntryCreateResponse(context, dependencies);
+  });
+
+  app.post("/eof/v1/cashflow/manual-entries/:entryId/cancel", async (context) => {
+    return officeCashflowManualEntryCancelResponse(context, dependencies);
+  });
+
   app.post("/eof/v1/cashflow/preview", async (context) => {
     return officeCashflowPreviewResponse(context);
   });
 
   app.post("/eof/v1/cashflow/confirm", async (context) => {
     return officeCashflowConfirmResponse(context, dependencies);
+  });
+
+  app.get("/eof/v1/advances/workbench", (context) => {
+    return context.json(officeAdvancesWorkbenchResponse(context, dependencies));
+  });
+
+  app.post("/eof/v1/advances", async (context) => {
+    return officeAdvanceCreateResponse(context, dependencies);
+  });
+
+  app.post("/eof/v1/advances/:advanceId/mark-paid", async (context) => {
+    return officeAdvanceMarkPaidResponse(context, dependencies);
+  });
+
+  app.post("/eof/v1/advances/:advanceId/applications", async (context) => {
+    return officeAdvanceApplicationResponse(context, dependencies);
   });
 
   app.post("/eof/v1/transactions/bulk-preview", async (context) => {
@@ -3831,6 +3882,529 @@ async function officeCashflowConfirmResponse(context: ApiContext, dependencies: 
     }
   });
   return context.json(result.body, result.status);
+}
+
+function officeCashflowWorkbenchResponse(context: ApiContext, dependencies: ApiServiceDependencies): OfficeCashflowWorkbenchResponse {
+  const workspaceId = resolveWorkspaceId(context);
+  const from = requireCompatQuery(context, ["from", "fromDate"], "from");
+  const to = requireCompatQuery(context, ["to", "toDate"], "to");
+  const accountId = nullableQuery(context, "accountId");
+  if (!isIsoDate(from) || !isIsoDate(to) || from > to) {
+    throw new ApiRouteError(400, "cashflow_date_range_invalid", "Cash-flow dates must be a valid inclusive range.", [
+      `from=${from}`,
+      `to=${to}`
+    ]);
+  }
+  const rows = buildOfficeCashflowWorkbench({
+    workspaceId,
+    dateFrom: from,
+    dateTo: to,
+    accountId,
+    transactions: dependencies.fixtures.office.transactions,
+    projectionRows: dependencies.fixtures.office.cashflowProjectionRows,
+    manualEntries: dependencies.fixtures.officeCashflowManualEntries,
+    advances: dependencies.fixtures.officeAdvances
+  });
+  const maxUnits = rows.reduce((max, row) => {
+    return [row.actualInflowMinor, row.actualOutflowMinor, row.forecastInflowMinor, row.forecastOutflowMinor]
+      .map(abs)
+      .reduce((innerMax, value) => value > innerMax ? value : innerMax, max);
+  }, 0n);
+  const buckets: OfficeCashflowWorkbenchBucket[] = rows.map((row) => ({
+    period: row.period,
+    actualInflowMicro: eofMoney.format(row.actualInflowMinor),
+    actualOutflowMicro: eofMoney.format(row.actualOutflowMinor),
+    forecastInflowMicro: eofMoney.format(row.forecastInflowMinor),
+    forecastOutflowMicro: eofMoney.format(row.forecastOutflowMinor),
+    varianceMicro: eofMoney.format(row.varianceMinor),
+    forecastClosingMicro: eofMoney.format(row.forecastClosingMinor),
+    actualInflowLevel: toBarLevel(row.actualInflowMinor, maxUnits),
+    actualOutflowLevel: toBarLevel(row.actualOutflowMinor, maxUnits),
+    forecastInflowLevel: toBarLevel(row.forecastInflowMinor, maxUnits),
+    forecastOutflowLevel: toBarLevel(row.forecastOutflowMinor, maxUnits)
+  }));
+  const manualEntries = dependencies.fixtures.officeCashflowManualEntries
+    .filter((entry) => entry.workspaceId === workspaceId && entry.entryDate >= from && entry.entryDate <= to)
+    .filter((entry) => accountId === null || entry.accountId === accountId)
+    .sort((left, right) => right.entryDate.localeCompare(left.entryDate) || right.createdAt.localeCompare(left.createdAt))
+    .slice(0, 200)
+    .map(toApiCashflowManualEntry);
+  return { buckets, manualEntries };
+}
+
+async function officeCashflowManualEntryCreateResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const request: OfficeCashflowManualEntryWriteRequest = await readZodBody(context, officeCashflowManualEntryWriteSchema);
+  const amountMinor = normalizePositiveEofAmountField(context, request.amountMicro, "amountMicro");
+  assertMURCurrency(request.currency, "Manual cash-flow entries");
+  assertOfficeOptionalReferences(dependencies.fixtures.office, request.workspaceId, request.accountId, request.partnerId, request.projectId);
+  const entryId = randomUUID();
+  const nowIso = dependencies.nowIso();
+  const actor = context.get("authUser");
+  const idempotencyKey = requireIdempotencyKey(context);
+  const entry: OfficeCashflowManualEntryRow = {
+    id: entryId,
+    workspaceId: request.workspaceId,
+    accountId: request.accountId,
+    partnerId: request.partnerId,
+    projectId: request.projectId,
+    entryDate: request.entryDate,
+    direction: request.direction,
+    amountMinor,
+    currency: request.currency,
+    label: request.label.trim(),
+    notes: request.notes,
+    status: request.status,
+    createdByUserId: actor.userId,
+    createdAt: nowIso,
+    updatedAt: nowIso
+  };
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_cashflow_manual_entry_create",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      if (tx.kind !== "memory") {
+        await tx.executor.execute(sql`
+          insert into office_cashflow_manual_entries (
+            id, workspace_id, account_id, partner_id, project_id, entry_date, direction, amount_minor,
+            currency, label, notes, status, created_by_user_id
+          ) values (
+            ${entry.id}, ${entry.workspaceId}, ${entry.accountId}, ${entry.partnerId}, ${entry.projectId}, ${entry.entryDate},
+            ${entry.direction}, ${entry.amountMinor.toString()}, ${entry.currency}, ${entry.label}, ${entry.notes}, ${entry.status}, ${entry.createdByUserId}
+          )
+        `);
+      }
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_cashflow_manual_entry_create",
+        targetType: "office_cashflow_manual_entry",
+        targetId: entry.id,
+        before: {},
+        after: { ...entry, amountMinor: entry.amountMinor.toString() },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      const mutableFixtures = dependencies.fixtures as Mutable<ApiFixtureStore>;
+      mutableFixtures.officeCashflowManualEntries = [...dependencies.fixtures.officeCashflowManualEntries, entry];
+      return mutationReceipt(entry.id, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function officeCashflowManualEntryCancelResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const entryId = requirePathParam(context, "entryId");
+  const request: OfficeCashflowManualEntryCancelRequest = await readZodBody(context, officeCashflowManualEntryCancelSchema);
+  const before = dependencies.fixtures.officeCashflowManualEntries.find((entry) => entry.id === entryId && entry.workspaceId === request.workspaceId);
+  if (before === undefined) {
+    throw new ApiRouteError(404, "cashflow_manual_entry_not_found", "Manual cash-flow entry was not found.", [`entryId=${entryId}`]);
+  }
+  const after: OfficeCashflowManualEntryRow = {
+    ...before,
+    status: "cancelled",
+    notes: request.reason ?? before.notes,
+    updatedAt: dependencies.nowIso()
+  };
+  const actor = context.get("authUser");
+  const idempotencyKey = requireIdempotencyKey(context);
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_cashflow_manual_entry_cancel",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `office:cashflow-manual:${entryId}`);
+      if (tx.kind !== "memory") {
+        await tx.executor.execute(sql`
+          update office_cashflow_manual_entries
+          set status = 'cancelled', notes = ${after.notes}, updated_at = now()
+          where id = ${entryId} and workspace_id = ${request.workspaceId}
+        `);
+      }
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_cashflow_manual_entry_cancel",
+        targetType: "office_cashflow_manual_entry",
+        targetId: entryId,
+        before: { status: before.status, notes: before.notes },
+        after: { status: after.status, notes: after.notes },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      const mutableFixtures = dependencies.fixtures as Mutable<ApiFixtureStore>;
+      mutableFixtures.officeCashflowManualEntries = upsertById(dependencies.fixtures.officeCashflowManualEntries, after);
+      return mutationReceipt(entryId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+function officeAdvancesWorkbenchResponse(context: ApiContext, dependencies: ApiServiceDependencies): OfficeAdvancesWorkbenchResponse {
+  const workspaceId = resolveWorkspaceId(context);
+  const kind = nullableQuery(context, "kind");
+  const status = nullableQuery(context, "status");
+  const supportedKinds: readonly OfficeAdvanceKind[] = ["staff", "freelancer", "artist", "supplier", "contractor", "other"];
+  if (kind !== null && !supportedKinds.includes(kind as OfficeAdvanceKind)) {
+    throw new ApiRouteError(400, "advance_kind_invalid", "Advance beneficiary type is invalid.", [`kind=${kind}`]);
+  }
+
+  // Distribution fixtures currently represent the canonical eeee-mu workspace.
+  // Do not expose them through another workspace until workspaceId is part of the read model.
+  const artistRows = (workspaceId === DEFAULT_WORKSPACE_ID ? dependencies.fixtures.distributionContractExpenses : []).map((expense): OfficeAdvanceRow => {
+    const contract = dependencies.fixtures.distributionContracts.find((candidate) => candidate.id === expense.contractId);
+    const payee = dependencies.fixtures.distribution.payees.find((candidate) => candidate.id === expense.payeeId);
+    const originalMinor = distributionMoneyToEofMinor(expense.originalAmountMicro);
+    const outstandingMinor = distributionMoneyToEofMinor(expense.openAmountMicro);
+    return {
+      id: expense.id,
+      kind: "artist",
+      counterpartyId: expense.payeeId,
+      counterpartyLabel: payee?.name ?? expense.payeeId,
+      contextId: expense.contractId,
+      contextLabel: contract?.title ?? null,
+      label: expense.label,
+      plannedOn: expense.incurredOn,
+      paidOn: expense.incurredOn,
+      originalAmountMicro: eofMoney.format(originalMinor),
+      appliedAmountMicro: eofMoney.format(originalMinor - outstandingMinor),
+      outstandingAmountMicro: eofMoney.format(outstandingMinor),
+      currency: expense.currency,
+      status: expense.status,
+      source: "distribution_contract"
+    };
+  });
+  const managedRows = dependencies.fixtures.officeAdvances
+    .filter((advance) => advance.workspaceId === workspaceId)
+    .map((advance): OfficeAdvanceRow => {
+      const applications = dependencies.fixtures.officeAdvanceApplications.filter((application) => application.advanceId === advance.id);
+      const balance = calculateAdvanceBalance(advance, applications);
+      const project = advance.projectId === null ? null : dependencies.fixtures.office.projects.find((candidate) => candidate.id === advance.projectId);
+      return {
+        id: advance.id,
+        kind: advance.beneficiaryType,
+        counterpartyId: advance.partnerId,
+        counterpartyLabel: advance.beneficiaryName,
+        contextId: advance.projectId,
+        contextLabel: project?.name ?? null,
+        label: advance.label,
+        plannedOn: advance.plannedPaymentOn,
+        paidOn: advance.paidOn,
+        originalAmountMicro: eofMoney.format(advance.originalAmountMinor),
+        appliedAmountMicro: eofMoney.format(balance.appliedMinor),
+        outstandingAmountMicro: eofMoney.format(balance.outstandingMinor),
+        currency: advance.currency,
+        status: balance.status,
+        source: "office_managed"
+      };
+    });
+  const rows = [...artistRows, ...managedRows]
+    .filter((row) => kind === null || row.kind === kind)
+    .filter((row) => status === null || row.status === status)
+    .sort((left, right) => right.plannedOn.localeCompare(left.plannedOn) || left.label.localeCompare(right.label));
+  const murRows = rows.filter((row) => row.currency === "MUR");
+  const sumOutstanding = (items: readonly OfficeAdvanceRow[]): bigint => items.reduce(
+    (sum, row) => eofMoney.add(sum, eofMoney.parse(row.outstandingAmountMicro)),
+    0n
+  );
+  const page = pageItems(context, rows);
+  return {
+    ...page,
+    totalOutstandingMicro: eofMoney.format(sumOutstanding(murRows)),
+    managedOutstandingMicro: eofMoney.format(sumOutstanding(murRows.filter((row) => row.source === "office_managed"))),
+    distributionOutstandingMicro: eofMoney.format(sumOutstanding(murRows.filter((row) => row.source === "distribution_contract"))),
+    plannedManagedMicro: eofMoney.format(sumOutstanding(murRows.filter((row) => row.source === "office_managed" && row.status === "planned")))
+  };
+}
+
+async function officeAdvanceCreateResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const request: OfficeAdvanceWriteRequest = await readZodBody(context, officeAdvanceWriteSchema);
+  const amountMinor = normalizePositiveEofAmountField(context, request.originalAmountMicro, "originalAmountMicro");
+  assertMURCurrency(request.currency, "Advances");
+  if (request.partnerId !== null) {
+    requirePartner(dependencies.fixtures.office, request.partnerId);
+  }
+  if (request.projectId !== null) {
+    requireProject(dependencies.fixtures.office, request.projectId);
+  }
+  if (request.transactionId !== null) {
+    const transaction = requireOfficeTransaction(dependencies.fixtures.office, request.transactionId);
+    if (transaction.workspaceId !== request.workspaceId) {
+      throw new ApiRouteError(404, "office_transaction_not_found", "Office transaction was not found in this workspace.", [`transactionId=${request.transactionId}`]);
+    }
+  }
+  if ((request.status === "planned" && request.paidOn !== null) || (request.status === "paid" && request.paidOn === null)) {
+    throw new ApiRouteError(422, "advance_paid_date_invalid", "Paid advances require a paid date; planned advances cannot have one.", []);
+  }
+  const nowIso = dependencies.nowIso();
+  const actor = context.get("authUser");
+  const advance: OfficeManagedAdvanceRow = {
+    id: randomUUID(),
+    workspaceId: request.workspaceId,
+    beneficiaryType: request.beneficiaryType,
+    beneficiaryName: request.beneficiaryName.trim(),
+    partnerId: request.partnerId,
+    projectId: request.projectId,
+    bankStatementLineId: null,
+    transactionId: request.transactionId,
+    label: request.label.trim(),
+    plannedPaymentOn: request.plannedPaymentOn,
+    paidOn: request.paidOn,
+    originalAmountMinor: amountMinor,
+    currency: request.currency,
+    status: request.status,
+    notes: request.notes,
+    createdByUserId: actor.userId,
+    createdAt: nowIso,
+    updatedAt: nowIso
+  };
+  const idempotencyKey = requireIdempotencyKey(context);
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_advance_create",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      if (tx.kind !== "memory") {
+        await tx.executor.execute(sql`
+          insert into office_advances (
+            id, workspace_id, beneficiary_type, beneficiary_name, partner_id, project_id, transaction_id, label, planned_payment_on,
+            paid_on, original_amount_minor, currency, status, notes, created_by_user_id
+          ) values (
+            ${advance.id}, ${advance.workspaceId}, ${advance.beneficiaryType}, ${advance.beneficiaryName},
+            ${advance.partnerId}, ${advance.projectId}, ${advance.transactionId},
+            ${advance.label}, ${advance.plannedPaymentOn}, ${advance.paidOn}, ${advance.originalAmountMinor.toString()},
+            ${advance.currency}, ${advance.status}, ${advance.notes}, ${advance.createdByUserId}
+          )
+        `);
+      }
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_advance_create",
+        targetType: "office_advance",
+        targetId: advance.id,
+        before: {},
+        after: { ...advance, originalAmountMinor: advance.originalAmountMinor.toString() },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      const mutableFixtures = dependencies.fixtures as Mutable<ApiFixtureStore>;
+      mutableFixtures.officeAdvances = [...dependencies.fixtures.officeAdvances, advance];
+      return mutationReceipt(advance.id, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function officeAdvanceMarkPaidResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const advanceId = requirePathParam(context, "advanceId");
+  const request: OfficeAdvanceMarkPaidRequest = await readZodBody(context, officeAdvanceMarkPaidSchema);
+  const before = dependencies.fixtures.officeAdvances.find(
+    (advance) => advance.id === advanceId && advance.workspaceId === request.workspaceId
+  );
+  if (before === undefined) {
+    throw new ApiRouteError(404, "advance_not_found", "Advance was not found.", [`advanceId=${advanceId}`]);
+  }
+  if (before.status !== "planned") {
+    throw new ApiRouteError(409, "advance_not_planned", "Only a planned advance can be marked paid.", [
+      `advanceId=${advanceId}`,
+      `status=${before.status}`
+    ]);
+  }
+  if (request.transactionId !== null) {
+    const transaction = requireOfficeTransaction(dependencies.fixtures.office, request.transactionId);
+    if (transaction.workspaceId !== request.workspaceId) {
+      throw new ApiRouteError(404, "office_transaction_not_found", "Office transaction was not found in this workspace.", [
+        `transactionId=${request.transactionId}`
+      ]);
+    }
+  }
+  const after: OfficeManagedAdvanceRow = {
+    ...before,
+    paidOn: request.paidOn,
+    transactionId: request.transactionId,
+    status: "paid",
+    updatedAt: dependencies.nowIso()
+  };
+  const actor = context.get("authUser");
+  const idempotencyKey = requireIdempotencyKey(context);
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_advance_mark_paid",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `office:advance:${advanceId}`);
+      if (tx.kind !== "memory") {
+        await tx.executor.execute(sql`
+          update office_advances
+          set status = 'paid', paid_on = ${request.paidOn}, transaction_id = ${request.transactionId}, updated_at = now()
+          where id = ${advanceId} and workspace_id = ${request.workspaceId} and status = 'planned'
+        `);
+      }
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_advance_mark_paid",
+        targetType: "office_advance",
+        targetId: advanceId,
+        before: { status: before.status, paidOn: before.paidOn, transactionId: before.transactionId },
+        after: { status: after.status, paidOn: after.paidOn, transactionId: after.transactionId },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      const mutableFixtures = dependencies.fixtures as Mutable<ApiFixtureStore>;
+      mutableFixtures.officeAdvances = upsertById(dependencies.fixtures.officeAdvances, after);
+      return mutationReceipt(advanceId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function officeAdvanceApplicationResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const advanceId = requirePathParam(context, "advanceId");
+  const request: OfficeAdvanceApplicationRequest = await readZodBody(context, officeAdvanceApplicationSchema);
+  const amountMinor = normalizePositiveEofAmountField(context, request.amountMicro, "amountMicro");
+  const before = dependencies.fixtures.officeAdvances.find(
+    (advance) => advance.id === advanceId && advance.workspaceId === request.workspaceId
+  );
+  if (before === undefined) {
+    throw new ApiRouteError(404, "advance_not_found", "Advance was not found.", [`advanceId=${advanceId}`]);
+  }
+  if (before.status === "planned" || before.status === "refunded" || before.status === "waived" || before.status === "written_off" || before.status === "settled") {
+    throw new ApiRouteError(409, "advance_not_applicable", "Only paid or partially applied advances can receive applications.", [
+      `advanceId=${advanceId}`,
+      `status=${before.status}`
+    ]);
+  }
+  const existing = dependencies.fixtures.officeAdvanceApplications.filter((application) => application.advanceId === advanceId);
+  let balance;
+  try {
+    balance = calculateAdvanceBalance(before, existing, amountMinor);
+  } catch (error: unknown) {
+    throw new ApiRouteError(409, "advance_over_applied", "Advance application exceeds the outstanding amount.", [
+      `advanceId=${advanceId}`,
+      `error=${error instanceof Error ? error.message : "unknown"}`
+    ]);
+  }
+  const terminalStatus = balance.outstandingMinor === 0n && request.kind === "refund"
+    ? "refunded"
+    : balance.outstandingMinor === 0n && request.kind === "write_off"
+      ? "written_off"
+      : balance.status;
+  const application: OfficeAdvanceApplicationRow = {
+    id: randomUUID(),
+    advanceId,
+    appliedOn: request.appliedOn,
+    amountMinor,
+    kind: request.kind,
+    reference: request.reference,
+    notes: request.notes,
+    createdByUserId: context.get("authUser").userId,
+    createdAt: dependencies.nowIso()
+  };
+  const after: OfficeManagedAdvanceRow = { ...before, status: terminalStatus, updatedAt: dependencies.nowIso() };
+  const actor = context.get("authUser");
+  const idempotencyKey = requireIdempotencyKey(context);
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_advance_apply",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `office:advance:${advanceId}`);
+      if (tx.kind !== "memory") {
+        await tx.executor.execute(sql`
+          insert into office_advance_applications (
+            id, advance_id, applied_on, amount_minor, kind, reference, notes, created_by_user_id
+          ) values (
+            ${application.id}, ${application.advanceId}, ${application.appliedOn}, ${application.amountMinor.toString()},
+            ${application.kind}, ${application.reference}, ${application.notes}, ${application.createdByUserId}
+          )
+        `);
+        await tx.executor.execute(sql`
+          update office_advances set status = ${after.status}, updated_at = now() where id = ${advanceId}
+        `);
+      }
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_advance_apply",
+        targetType: "office_advance",
+        targetId: advanceId,
+        before: { status: before.status, outstandingMinor: eofMoney.format(before.originalAmountMinor - balance.appliedMinor + amountMinor) },
+        after: { status: after.status, application: { ...application, amountMinor: application.amountMinor.toString() }, outstandingMinor: eofMoney.format(balance.outstandingMinor) },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      const mutableFixtures = dependencies.fixtures as Mutable<ApiFixtureStore>;
+      mutableFixtures.officeAdvanceApplications = [...dependencies.fixtures.officeAdvanceApplications, application];
+      mutableFixtures.officeAdvances = upsertById(dependencies.fixtures.officeAdvances, after);
+      return mutationReceipt(application.id, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+function toApiCashflowManualEntry(entry: OfficeCashflowManualEntryRow): OfficeCashflowManualEntry {
+  return {
+    id: entry.id,
+    accountId: entry.accountId,
+    partnerId: entry.partnerId,
+    projectId: entry.projectId,
+    entryDate: entry.entryDate,
+    direction: entry.direction,
+    amountMicro: eofMoney.format(entry.amountMinor),
+    currency: entry.currency,
+    label: entry.label,
+    notes: entry.notes,
+    status: entry.status,
+    createdAt: entry.createdAt
+  };
+}
+
+function normalizePositiveEofAmountField(context: ApiContext, value: string, field: string): bigint {
+  const amountMinor = normalizeEofAmountField(context, value, field);
+  if (amountMinor <= 0n) {
+    throw new ApiRouteError(400, "body_field_invalid", "A money amount must be greater than zero.", [`field=${field}`]);
+  }
+  return amountMinor;
+}
+
+function assertMURCurrency(currency: string, feature: string): void {
+  if (currency !== "MUR") {
+    throw new ApiRouteError(422, "currency_not_supported", `${feature} currently require MUR until an explicit FX rate is supplied.`, [
+      `currency=${currency}`
+    ]);
+  }
+}
+
+function assertOfficeOptionalReferences(
+  dataset: OfficeAnalyticsDataset,
+  workspaceId: string,
+  accountId: string | null,
+  partnerId: string | null,
+  projectId: string | null
+): void {
+  if (accountId !== null) {
+    const account = dataset.bankAccounts.find((candidate) => candidate.id === accountId && candidate.workspaceId === workspaceId);
+    if (account === undefined) {
+      throw new ApiRouteError(404, "office_bank_account_not_found", "Office bank account was not found in this workspace.", [`accountId=${accountId}`]);
+    }
+  }
+  if (partnerId !== null) {
+    requirePartner(dataset, partnerId);
+  }
+  if (projectId !== null) {
+    requireProject(dataset, projectId);
+  }
+}
+
+function distributionMoneyToEofMinor(value: string): bigint {
+  return roundRatioHalfUp(erhMoney.parse(value), 100_000_000n);
 }
 
 async function persistOfficeCashflowRows(tx: ApiWriteTransaction, workspaceId: string, rows: readonly ParsedCashflowRow[]): Promise<void> {

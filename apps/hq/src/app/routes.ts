@@ -214,6 +214,9 @@ const exactConsoleTargets: Readonly<Record<string, ConsoleTarget>> = {
     workspaceId: "office",
     pageId: "of_cash"
   },
+  "/console/office/advances": {
+    workspaceId: "office"
+  },
   "/console/office/clients": {
     workspaceId: "office"
   },

@@ -582,6 +582,15 @@
   }
 }
 
+@media (max-width: 980px) {
+  /* The search is hidden by WorkspaceShell at this breakpoint, so its themed
+     280px track must collapse instead of widening the whole mobile canvas. */
+  .ehq-workspace-shell:is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .shell-topbar {
+    min-width: 0;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+}
+
 @media (max-width: 760px) {
   :is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .kpi-grid,
   :is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .dashboard-grid,

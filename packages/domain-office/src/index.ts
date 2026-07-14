@@ -3,6 +3,7 @@ import type { LedgerTransaction, ReconciliationResult } from "@ehq/domain-financ
 export * from "./allocations.js";
 export * from "./analytics.js";
 export * from "./bank-import-dedupe.js";
+export * from "./cashflow.js";
 export * from "./etl.js";
 export * from "./pl.js";
 
