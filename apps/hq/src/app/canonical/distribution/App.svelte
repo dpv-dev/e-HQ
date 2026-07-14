@@ -17,7 +17,6 @@
     type DistributionContract,
     type DistributionContractExpense,
     type DistributionDashboardResponse,
-    type DistributionDashboardDiagnostic,
     type DistributionDashboardReadinessItem,
     type DistributionDashboardTopRoyalty,
     type DistributionDuplicate,
@@ -264,23 +263,11 @@
     { label: "Artist", value: "artist" },
     { label: "Label", value: "label" }
   ];
-  const dashboardColumns: readonly TableColumn[] = [
-    { label: "Action", align: "left", sortable: true },
-    { label: "Context", align: "left", sortable: true },
-    { label: "Volume", align: "right", sortable: true },
-    { label: "Resolution path", align: "left", sortable: true }
-  ];
   const dashboardReadinessColumns: readonly TableColumn[] = [
     { label: "Workflow area", align: "left", sortable: true },
     { label: "Status", align: "left", sortable: true },
     { label: "Count", align: "right", sortable: true },
     { label: "Why it matters", align: "left", sortable: true }
-  ];
-  const dashboardDiagnosticColumns: readonly TableColumn[] = [
-    { label: "Signal", align: "left", sortable: true },
-    { label: "Status", align: "left", sortable: true },
-    { label: "Detail", align: "left", sortable: true },
-    { label: "Last update", align: "left", sortable: true }
   ];
   const dashboardTopColumns: readonly TableColumn[] = [
     { label: "Name", align: "left", sortable: true },
@@ -625,9 +612,7 @@
   );
   const payments = $derived(readPageItems(paymentsState));
   const revenueRows = $derived(readPageItems(revenueState));
-  const dashboardRows = $derived(createDashboardRows(suspenseItems, statements, payments));
   const dashboardReadinessRows = $derived(createDashboardReadinessRows(dashboardState));
-  const dashboardDiagnosticRows = $derived(createDashboardDiagnosticRows(dashboardState));
   const dashboardArtistRows = $derived(createDashboardTopRows(dashboardState, "artists"));
   const dashboardTrackRows = $derived(createDashboardTopRows(dashboardState, "tracks"));
   const dashboardStoreRows = $derived(createDashboardTopRows(dashboardState, "stores"));
@@ -805,18 +790,10 @@
     { label: "All currencies", value: allValue },
     ...Array.from(new Set(statements.map((statement: StatementSummary): CurrencyCode => statement.currency))).map((currency: CurrencyCode): SelectOption => ({ label: currency, value: currency }))
   ]);
-  // The dashboard action list derives from suspense, statements, and payments;
-  // its table state must reflect those source requests instead of a frozen default.
-  const dashboardActionListStatus = $derived(
-    combineRequestStatuses([suspenseState.status, statementsState.status, paymentsState.status])
-  );
   const paymentRowActions: readonly TableRowAction[] = [
     { label: "Edit reference", onAction: (rowId: string): void => openPaymentPanel(rowId, "edit") },
     { label: "Reconcile", onAction: (rowId: string): void => openPaymentPanel(rowId, "reconcile") },
     { label: "Void", onAction: (rowId: string): void => openPaymentPanel(rowId, "void"), danger: true }
-  ];
-  const dashboardRowActions: readonly TableRowAction[] = [
-    { label: "Open", onAction: openDashboardAction }
   ];
   const dashboardReadinessRowActions: readonly TableRowAction[] = [
     { label: "Open", onAction: openDashboardReadiness }
@@ -3786,7 +3763,6 @@
         { label: "Imported revenue", value: "—", detail: stateLabel(state), tone: "muted", accent: true },
         { label: "Paid royalties", value: "—", detail: "backend totals", tone: "muted", accent: false },
         { label: "Open recoupments", value: "—", detail: "contract balances", tone: "muted", accent: false },
-        { label: "FX rates", value: "—", detail: "configured", tone: "muted", accent: false },
         { label: "Contract coverage", value: "—", detail: "earning tracks", tone: "muted", accent: false }
       ];
     }
@@ -3801,7 +3777,6 @@
       },
       { label: "Paid royalties", value: dashboardCurrencyTotalsValue(state.data.paidRoyalties), detail: "recorded payments", tone: "success", accent: false },
       { label: "Open recoupments", value: dashboardCurrencyTotalsValue(state.data.openRecoupments), detail: "open by currency", tone: "warning", accent: false },
-      { label: "FX rates", value: String(state.data.fxRateCount), detail: "configured rates", tone: "info", accent: false },
       { label: "Contract coverage", value: `${String(state.data.contractCoverage.covered)}/${String(state.data.contractCoverage.total)}`, detail: "earning tracks covered", tone: state.data.contractCoverage.covered === state.data.contractCoverage.total ? "success" : "warning", accent: false }
     ];
   }
@@ -3826,22 +3801,6 @@
         { kind: "badge", value: item.status, tone: item.status === "clear" ? "success" : item.status === "review" ? "warning" : "error" },
         { kind: "text", value: String(item.count), strong: false },
         { kind: "text", value: item.detail, strong: false }
-      ]
-    }));
-  }
-
-  function createDashboardDiagnosticRows(state: ApiRequestState<DistributionDashboardResponse>): readonly TableRow[] {
-    if (state.status !== "success") {
-      return [];
-    }
-
-    return state.data.diagnostics.map((item: DistributionDashboardDiagnostic): TableRow => ({
-      id: item.id,
-      cells: [
-        { kind: "text", value: item.label, strong: true },
-        { kind: "badge", value: item.status, tone: item.status === "ok" || item.status === "idle" ? "success" : "warning" },
-        { kind: "text", value: item.detail, strong: false },
-        { kind: "text", value: item.lastUpdated === null ? "—" : formatDateOnly(item.lastUpdated), strong: false }
       ]
     }));
   }
@@ -3943,58 +3902,6 @@
       ["Source", "Reason", "Fix path", "Status", "Currency", "Amount (micro)", "Amount", "Period"],
       rows
     );
-  }
-
-  function createDashboardRows(
-    suspense: readonly SuspenseItem[],
-    statementItems: readonly StatementSummary[],
-    paymentItems: readonly PaymentSummary[]
-  ): readonly TableRow[] {
-    return [
-      {
-        id: "dash_mapping",
-        cells: [
-          { kind: "text", value: "Review RouteNote mapping", strong: true },
-          { kind: "text", value: "Imports · RouteNote", strong: false },
-          { kind: "text", value: String(suspense.filter((item: SuspenseItem): boolean => item.reason === "unmapped_track").length), strong: false },
-          { kind: "badge", value: "mapping", tone: "warning" }
-        ]
-      },
-      {
-        id: "dash_statements",
-        cells: [
-          { kind: "text", value: "Generate posted statements", strong: true },
-          { kind: "text", value: "Statements", strong: false },
-          { kind: "text", value: String(statementItems.length), strong: false },
-          { kind: "badge", value: "statements", tone: "info" }
-        ]
-      },
-      {
-        id: "dash_payments",
-        cells: [
-          { kind: "text", value: "Reconcile queued payments", strong: true },
-          { kind: "text", value: "Payments", strong: false },
-          { kind: "text", value: String(paymentItems.filter((payment: PaymentSummary): boolean => payment.status === "queued").length), strong: false },
-          { kind: "badge", value: "payments", tone: "active" }
-        ]
-      }
-    ];
-  }
-
-  function openDashboardAction(rowId: string): void {
-    if (rowId === "dash_mapping") {
-      selectPage("mapping");
-      return;
-    }
-
-    if (rowId === "dash_statements") {
-      selectPage("statements");
-      return;
-    }
-
-    if (rowId === "dash_payments") {
-      selectPage("payments");
-    }
   }
 
   function openDashboardReadiness(rowId: string): void {
@@ -4363,24 +4270,6 @@
         { kind: "text", value: rate.rate, strong: true }
       ]
     }));
-  }
-
-  // Combines several request statuses into one: any error wins, then any
-  // loading, then idle while nothing has succeeded yet, else success.
-  function combineRequestStatuses(statuses: readonly RequestStatus[]): RequestStatus {
-    if (statuses.includes("error")) {
-      return "error";
-    }
-
-    if (statuses.includes("loading")) {
-      return "loading";
-    }
-
-    if (statuses.every((status: RequestStatus): boolean => status === "idle")) {
-      return "idle";
-    }
-
-    return "success";
   }
 
   function isLoadingStatus(status: RequestStatus): boolean {
@@ -4832,8 +4721,6 @@
           <Table title="Distribution readiness" columns={dashboardReadinessColumns} rows={dashboardReadinessRows} state={tableStateFor(dashboardState.status, dashboardReadinessRows.length)} actionLabel="" rowActions={dashboardReadinessRowActions} />
         </section>
         <section class="dashboard-grid">
-          <Table title="Health diagnostics" columns={dashboardDiagnosticColumns} rows={dashboardDiagnosticRows} state={tableStateFor(dashboardState.status, dashboardDiagnosticRows.length)} actionLabel="" />
-          <Table title="Action list" columns={dashboardColumns} rows={dashboardRows} state={tableStateFor(dashboardActionListStatus, dashboardRows.length)} actionLabel="" rowActions={dashboardRowActions} />
         </section>
         <section class="dashboard-top-grid">
           <Table title="Top artists" columns={dashboardTopColumns} rows={dashboardArtistRows} state={tableStateFor(dashboardState.status, dashboardArtistRows.length)} actionLabel="" />
@@ -5537,7 +5424,7 @@
 
   .kpi-grid {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: var(--ehq-space-3);
   }
 
