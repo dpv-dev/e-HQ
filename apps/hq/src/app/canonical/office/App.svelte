@@ -736,8 +736,6 @@
   const dashboardImportRows = $derived(recentImportRows.slice(0, 6));
   const dashboardAnalyticsKpis = $derived(createDashboardAnalyticsKpis(dashboardAnalyticsState));
   const dashboardRunwayPanel = $derived(createDashboardRunwayPanel(dashboardAnalyticsState));
-  const dashboardExpenseCategoryPoints = $derived(createDashboardExpenseCategoryPoints(dashboardAnalyticsState));
-  const dashboardExpenseCategoryRows = $derived(createDashboardExpenseCategoryRows(dashboardAnalyticsState));
   const dashboardProjectProfitabilityPoints = $derived(createDashboardProjectProfitabilityPoints(dashboardAnalyticsState));
   const dashboardProjectProfitabilityRows = $derived(createDashboardProjectProfitabilityRows(dashboardAnalyticsState));
   const dashboardExpenseTrendPoints = $derived(createDashboardExpenseTrendPoints(dashboardAnalyticsState));
@@ -3108,50 +3106,6 @@
     };
   }
 
-  function createDashboardExpenseCategoryPoints(state: ApiRequestState<OfficeDashboardAnalyticsResponse>): readonly ChartPoint[] {
-    if (state.status !== "success") {
-      return createNormalizedCountChartPoints([], 6);
-    }
-
-    const topRows = state.data.topExpenseCategories.slice(0, 6);
-    let maxUnits = 0n;
-    for (const row of topRows) {
-      const units = absBigInt(apiMoneyToMicroUnits(row.expenseMicro));
-      if (units > maxUnits) {
-        maxUnits = units;
-      }
-    }
-
-    const points = topRows.map((row): ChartPoint => {
-      const units = absBigInt(apiMoneyToMicroUnits(row.expenseMicro));
-      return {
-        label: compactChartLabel(row.label),
-        value: maxUnits === 0n ? 0 : Number((units * 100n) / maxUnits)
-      };
-    });
-
-    while (points.length < 6) {
-      points.push({ label: "-", value: 0 });
-    }
-
-    return points;
-  }
-
-  function createDashboardExpenseCategoryRows(state: ApiRequestState<OfficeDashboardAnalyticsResponse>): readonly TableRow[] {
-    if (state.status !== "success") {
-      return [];
-    }
-
-    return state.data.topExpenseCategories.map((row): TableRow => ({
-      id: row.categoryId,
-      cells: [
-        { kind: "text", value: row.label, strong: true },
-        { kind: "money", value: formatMicro(row.expenseMicro), tone: "error" },
-        { kind: "badge", value: formatBasisPoints(row.shareBp), tone: "warning" }
-      ]
-    }));
-  }
-
   function createDashboardProjectProfitabilityPoints(state: ApiRequestState<OfficeDashboardAnalyticsResponse>): readonly ChartPoint[] {
     if (state.status !== "success") {
       return createNormalizedCountChartPoints([], 6);
@@ -4229,14 +4183,7 @@
         </section>
 
         <section class="dashboard-grid">
-          <div class="panel-card ehq-edge-surface">
-            <SectionTemplate eyebrow="PROMPT 2 · top categories by expense" title="Top categories by expense" detail="Reliable by category. Supplier ranking requires a structured counterparty field." state={isLoadingState(dashboardAnalyticsState) ? "loading" : dashboardAnalyticsState.status === "error" ? "error" : "ready"}>
-              <BarsChart title="Expense concentration" points={dashboardExpenseCategoryPoints} tone="warning" />
-              <Table title="Top expense categories" columns={dashboardExpenseCategoryColumns} rows={dashboardExpenseCategoryRows} state={isLoadingState(dashboardAnalyticsState) ? "loading" : dashboardAnalyticsState.status === "error" ? "error" : dashboardExpenseCategoryRows.length === 0 ? "empty" : "default"} actionLabel="" />
-            </SectionTemplate>
-          </div>
-
-          <div class="panel-card ehq-edge-surface">
+          <div class="panel-card ehq-edge-surface dashboard-wide-panel">
             <SectionTemplate eyebrow="PROMPT 3 · project profitability — worst first" title="Project profitability" detail="Net contribution ranking over the selected period." state={isLoadingState(dashboardAnalyticsState) ? "loading" : dashboardAnalyticsState.status === "error" ? "error" : "ready"}>
               <BarsChart title="Top project net contribution" points={dashboardProjectProfitabilityPoints} tone="success" />
               <Table title="Project profitability" columns={dashboardProjectProfitabilityColumns} rows={dashboardProjectProfitabilityRows} state={isLoadingState(dashboardAnalyticsState) ? "loading" : dashboardAnalyticsState.status === "error" ? "error" : dashboardProjectProfitabilityRows.length === 0 ? "empty" : "default"} actionLabel="" />
@@ -4802,11 +4749,6 @@
     { label: "Rows", align: "right", sortable: true },
     { label: "Period", align: "left", sortable: true },
     { label: "Status", align: "left", sortable: true }
-  ];
-  const dashboardExpenseCategoryColumns: readonly TableColumn[] = [
-    { label: "Category", align: "left", sortable: true },
-    { label: "Expense", align: "right", sortable: true },
-    { label: "Share", align: "left", sortable: true }
   ];
   const dashboardProjectProfitabilityColumns: readonly TableColumn[] = [
     { label: "Project", align: "left", sortable: true },
