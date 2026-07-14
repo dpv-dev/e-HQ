@@ -198,6 +198,10 @@ const exactConsoleTargets: Readonly<Record<string, ConsoleTarget>> = {
     workspaceId: "office",
     pageId: "of_imports"
   },
+  "/console/office/pdf-import": {
+    workspaceId: "office",
+    pageId: "of_imports"
+  },
   "/console/office/reconciliation": {
     workspaceId: "office",
     pageId: "of_recon"

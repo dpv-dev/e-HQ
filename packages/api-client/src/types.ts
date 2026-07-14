@@ -429,11 +429,16 @@ export interface OfficeTransactionBase {
   readonly id: EntityId;
   readonly occurredOn: IsoDateString;
   readonly accountId: EntityId | null;
+  readonly partnerId: EntityId | null;
+  readonly partnerLabel: string | null;
   readonly projectId: EntityId | null;
   readonly projectLabel: string | null;
   readonly description: string;
   readonly amountMicro: MoneyMicroString;
   readonly currency: CurrencyCode;
+  readonly vatApplicable: boolean;
+  readonly vatRateBp: BasisPoints | null;
+  readonly vatAmountMicro: MoneyMicroString | null;
   readonly sourceAuditEventId: EntityId | null;
 }
 
@@ -927,6 +932,9 @@ export interface OfficePartnerActivity {
 export interface OfficePartnerListItem {
   readonly id: EntityId;
   readonly name: string;
+  readonly email: string | null;
+  readonly phone: string | null;
+  readonly taxId: string | null;
   readonly status: "active" | "inactive";
   readonly activity: OfficePartnerActivity;
   readonly distributionPayeeLink: OfficePartnerPayeeLink | null;

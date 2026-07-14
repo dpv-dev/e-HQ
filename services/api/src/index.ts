@@ -11871,11 +11871,16 @@ function toOfficeTransaction(dataset: OfficeAnalyticsDataset, transaction: Offic
     id: transaction.id,
     occurredOn: transaction.transactionDate.slice(0, 10),
     accountId: transaction.accountId,
+    partnerId: transaction.partnerId,
+    partnerLabel: transaction.partnerId === null ? null : requirePartner(dataset, transaction.partnerId).name,
     projectId: transaction.projectId,
     projectLabel: transaction.projectId === null ? null : requireProject(dataset, transaction.projectId).name,
     description: transaction.description ?? "",
     amountMicro: eofMoney.format(transaction.amountMinor),
     currency: transaction.originalCurrency ?? "MUR",
+    vatApplicable: transaction.vatApplicable === true,
+    vatRateBp: transaction.vatRateBp ?? null,
+    vatAmountMicro: transaction.vatAmountMinor === null || transaction.vatAmountMinor === undefined ? null : eofMoney.format(transaction.vatAmountMinor),
     sourceAuditEventId: null
   };
 
@@ -12285,6 +12290,9 @@ function toPartnerListItem(fixtures: ApiFixtureStore, partner: OfficePartnerRow,
   return {
     id: partner.id,
     name: partner.name,
+    email: null,
+    phone: null,
+    taxId: null,
     status: partner.isActive ? "active" : "inactive",
     activity: toPartnerActivity(fixtures.office, partner.id, filters),
     distributionPayeeLink: toPartnerPayeeLink(fixtures, partner)

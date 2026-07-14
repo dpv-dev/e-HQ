@@ -41,6 +41,7 @@
     type CashflowBucket,
     type OfficeDashboardResponse,
     type OfficeDashboardAnalyticsResponse,
+    type OfficeDashboardReconciliationAccountKpi,
     type OfficeDepartmentPnl,
     type OfficeDivisionPnl,
     type OfficeGlobalPnl,
@@ -100,6 +101,7 @@
     | "coa"
     | "transactions"
     | "imports"
+    | "pdfImport"
     | "waveInvoices"
     | "reconciliation"
     | "pending"
@@ -202,141 +204,34 @@
   const periodOptions = createPeriodOptions();
   const officeNavGroups: readonly OfficeNavGroup[] = [
     {
-      id: "finance",
-      label: "Finance",
+      id: "office",
+      label: "Office",
       items: [
-        {
-          id: "dashboard",
-          label: "Dashboard",
-          title: "Office dashboard",
-          subtitle: "Overview of finance, banking, monitoring, and projects."
-        },
-        {
-          id: "ceo",
-          label: "Executive view",
-          title: "Executive view",
-          subtitle: "Executive summary based on the dashboard and validated P&L."
-        },
-        {
-          id: "pnl",
-          label: "P&L",
-          title: "P&L · income statement",
-          subtitle: "Validated projections by department, division, and category."
-        },
-        {
-          id: "cashflow",
-          label: "Cash flow",
-          title: "Cash flow",
-          subtitle: "Inflows, outflows, and closing balances by period."
-        },
-        {
-          id: "advances",
-          label: "Advances",
-          title: "Advance payments",
-          subtitle: "Staff, freelancer, artist, supplier, contractor, and other prepayments in one controlled view."
-        },
-        {
-          id: "vat",
-          label: "VAT",
-          title: "VAT report",
-          subtitle: "VAT by period, calculated from existing typed data."
-        },
-        {
-          id: "coa",
-          label: "Chart of accounts",
-          title: "Chart of accounts",
-          subtitle: "Department → division → category."
-        }
+        { id: "dashboard", label: "Dashboard", title: "Office dashboard", subtitle: "Overview of finance, banking, monitoring, and projects." },
+        { id: "ceo", label: "CEO View", title: "CEO View", subtitle: "Executive summary based on the dashboard and validated P&L." },
+        { id: "transactions", label: "Transactions", title: "Transactions", subtitle: "General ledger filtered by Office dimension." },
+        { id: "pending", label: "Pending", title: "Pending items", subtitle: "Bulk classification and validation." },
+        { id: "pnl", label: "P&L", title: "P&L · income statement", subtitle: "Validated projections by department, division, and category." },
+        { id: "clients", label: "Clients", title: "Clients", subtitle: "Partners with customer activity." },
+        { id: "suppliers", label: "Suppliers", title: "Suppliers", subtitle: "Partners with supplier activity." },
+        { id: "projects", label: "Projects", title: "Projects", subtitle: "Project P&L and Office projection consistency checks." },
+        { id: "vat", label: "VAT", title: "VAT report", subtitle: "VAT by period, calculated from existing typed data." },
+        { id: "waveInvoices", label: "Wave Invoices", title: "Wave Invoices", subtitle: "Dedicated workspace for Wave invoice operations and tracking." },
+        { id: "bank", label: "Bank", title: "Bank", subtitle: "Bank accounts, raw lines, and data quality." },
+        { id: "pdfImport", label: "PDF Import", title: "PDF Import", subtitle: "Upload · Scan · Review · Import." },
+        { id: "cashflow", label: "Cash Flow", title: "Cash Flow", subtitle: "Inflows, outflows, and closing balances by period." },
+        { id: "reconciliation", label: "Reconciliation", title: "Bank reconciliation", subtitle: "Match bank lines to the general ledger and approve suggestions." },
+        { id: "monitoring", label: "Monitoring", title: "Monitoring", subtitle: "Integrity checks, bank quality, pending items, imports, and audit." },
+        { id: "audit", label: "Audit Log", title: "Audit Log", subtitle: "Read-only history of Office audit events." },
+        { id: "settings", label: "Settings", title: "Settings", subtitle: "Read-only Office configuration: reference currency and maintenance." }
       ]
     },
     {
-      id: "operations",
-      label: "Operations",
+      id: "additional",
+      label: "Additional Office",
       items: [
-        {
-          id: "imports",
-          label: "Imports",
-          title: "Bank imports",
-          subtitle: "Bank statements are parsed automatically and imported after validation."
-        },
-        {
-          id: "waveInvoices",
-          label: "Wave invoices",
-          title: "Wave invoices",
-          subtitle: "Dedicated workspace for Wave invoice operations and tracking."
-        },
-        {
-          id: "bank",
-          label: "Bank",
-          title: "Bank",
-          subtitle: "Bank accounts, raw lines, and data quality."
-        },
-        {
-          id: "transactions",
-          label: "Transactions",
-          title: "Transactions",
-          subtitle: "General ledger filtered by Office dimension."
-        },
-        {
-          id: "pending",
-          label: "Pending",
-          title: "Pending items",
-          subtitle: "Bulk classification and validation."
-        },
-        {
-          id: "reconciliation",
-          label: "Reconciliation",
-          title: "Bank reconciliation",
-          subtitle: "Match bank lines to the general ledger and approve suggestions."
-        }
-      ]
-    },
-    {
-      id: "reference",
-      label: "Reference",
-      items: [
-        {
-          id: "clients",
-          label: "Clients",
-          title: "Clients",
-          subtitle: "Partners with customer activity."
-        },
-        {
-          id: "suppliers",
-          label: "Suppliers",
-          title: "Suppliers",
-          subtitle: "Partners with supplier activity."
-        },
-        {
-          id: "projects",
-          label: "Projects",
-          title: "Projects",
-          subtitle: "Project P&L and Office projection consistency checks."
-        }
-      ]
-    },
-    {
-      id: "administration",
-      label: "Administration",
-      items: [
-        {
-          id: "audit",
-          label: "Audit log",
-          title: "Audit log",
-          subtitle: "Read-only history of Office audit events."
-        },
-        {
-          id: "monitoring",
-          label: "Monitoring",
-          title: "Monitoring",
-          subtitle: "Integrity checks, bank quality, pending items, imports, and audit."
-        },
-        {
-          id: "settings",
-          label: "Settings",
-          title: "Settings",
-          subtitle: "Read-only Office configuration: reference currency and maintenance."
-        }
+        { id: "advances", label: "Advances", title: "Advance payments", subtitle: "Staff, freelancer, artist, supplier, contractor, and other prepayments in one controlled view." },
+        { id: "coa", label: "Chart of accounts", title: "Chart of accounts", subtitle: "Department → division → category." }
       ]
     }
   ];
@@ -401,6 +296,7 @@
     coa: "layout-grid",
     transactions: "file-text",
     imports: "upload",
+    pdfImport: "file-text",
     waveInvoices: "upload",
     reconciliation: "check",
     pending: "clock",
@@ -740,6 +636,8 @@
   const dashboardProjectProfitabilityRows = $derived(createDashboardProjectProfitabilityRows(dashboardAnalyticsState));
   const dashboardExpenseTrendPoints = $derived(createDashboardExpenseTrendPoints(dashboardAnalyticsState));
   const dashboardExpenseTrendRows = $derived(createDashboardExpenseTrendRows(dashboardAnalyticsState));
+  const dashboardRecentTransactionRows = $derived(createDashboardRecentTransactionRows(transactionRows));
+  const dashboardBankQualityRows = $derived(createDashboardBankQualityRows(dashboardAnalyticsState));
   const coaStructurePoints = $derived(createCoaStructurePoints(planTableNodes));
   const transactionTypePoints = $derived(createTransactionTypePoints(transactionRows));
   const transactionStatusPoints = $derived(createTransactionStatusPoints(transactionRows));
@@ -1986,6 +1884,10 @@
       return "imports";
     }
 
+    if (normalizedPath.endsWith("/console/office/pdf-import")) {
+      return "pdfImport";
+    }
+
     if (normalizedPath.endsWith("/console/office/wave-invoices")) {
       return "waveInvoices";
     }
@@ -2067,6 +1969,10 @@
       return "/console/office/imports";
     }
 
+    if (pageId === "pdfImport") {
+      return "/console/office/pdf-import";
+    }
+
     if (pageId === "waveInvoices") {
       return "/console/office/wave-invoices";
     }
@@ -2136,6 +2042,35 @@
       customRange = activeRange;
     }
     void reloadPeriodScopedData();
+  }
+
+  function applyQuickDatePreset(preset: "today" | "week" | "month" | "year"): void {
+    const end = new Date(`${today}T00:00:00Z`);
+    const start = new Date(end.getTime());
+
+    if (preset === "week") {
+      const day = end.getUTCDay();
+      const daysSinceMonday = day === 0 ? 6 : day - 1;
+      start.setUTCDate(start.getUTCDate() - daysSinceMonday);
+    } else if (preset === "month") {
+      start.setUTCDate(1);
+    } else if (preset === "year") {
+      start.setUTCMonth(0, 1);
+    }
+
+    periodScope = "custom";
+    customRange = { from: isoDate(start), to: today };
+    void reloadPeriodScopedData();
+  }
+
+  function clearDateRange(): void {
+    periodScope = "all";
+    customRange = null;
+    void reloadPeriodScopedData();
+  }
+
+  function isoDate(value: Date): string {
+    return value.toISOString().slice(0, 10);
   }
 
   function updateCustomFrom(event: Event): void {
@@ -3707,14 +3642,49 @@
         cells: [
           { kind: "text", value: formatDateOnly(transaction.occurredOn), strong: false },
           { kind: "text", value: transaction.description, strong: true },
-          { kind: "text", value: transactionPathLabel(transaction), strong: false },
           { kind: "badge", value: transaction.type ?? "unvalidated", tone: transaction.type === "income" ? "success" : transaction.type === "expense" ? "warning" : "muted" },
-          { kind: "text", value: transaction.projectLabel ?? "—", strong: false },
           { kind: "money", value: formatSignedMicro(signedAmountMicro, transaction.currency), tone: moneyTone(signedAmountMicro) },
+          { kind: "money", value: transaction.vatApplicable && transaction.vatAmountMicro !== null ? formatMoney(transaction.vatAmountMicro, transaction.currency) : "—", tone: transaction.vatApplicable ? "info" : "muted" },
+          { kind: "text", value: transactionPathLabel(transaction), strong: false },
+          { kind: "text", value: transaction.partnerLabel ?? "—", strong: false },
+          { kind: "text", value: transaction.projectLabel ?? "—", strong: false },
           { kind: "badge", value: transaction.status, tone: transactionStatusTone(transaction.status) }
         ]
       };
     });
+  }
+
+  function createDashboardRecentTransactionRows(rows: readonly OfficeTransaction[]): readonly TableRow[] {
+    return rows
+      .filter((transaction: OfficeTransaction): boolean => transaction.status === "posted" || transaction.status === "reconciled")
+      .slice(0, 10)
+      .map((transaction: OfficeTransaction): TableRow => ({
+        id: transaction.id,
+        cells: [
+          { kind: "text", value: formatDateOnly(transaction.occurredOn), strong: false },
+          { kind: "text", value: transaction.description, strong: true },
+          { kind: "badge", value: transaction.type ?? "unvalidated", tone: transaction.type === "income" ? "success" : "warning" },
+          { kind: "money", value: formatSignedMicro(typedSignedAmountMicro(transaction), transaction.currency), tone: moneyTone(typedSignedAmountMicro(transaction)) },
+          { kind: "badge", value: transaction.status, tone: transactionStatusTone(transaction.status) }
+        ]
+      }));
+  }
+
+  function createDashboardBankQualityRows(state: ApiRequestState<OfficeDashboardAnalyticsResponse>): readonly TableRow[] {
+    if (state.status !== "success") {
+      return [];
+    }
+
+    return state.data.reconciliationByAccount.map((account: OfficeDashboardReconciliationAccountKpi): TableRow => ({
+      id: account.accountId,
+      cells: [
+        { kind: "text", value: `${account.bankName} · ${account.accountLabel}`, strong: true },
+        { kind: "text", value: String(account.lineCount), strong: false },
+        { kind: "text", value: String(account.unmatchedLineCount), strong: false },
+        { kind: "text", value: formatBasisPoints(account.matchedRateBp), strong: false },
+        { kind: "text", value: account.oldestUnmatchedDays === null ? "—" : `${String(account.oldestUnmatchedDays)} day(s)`, strong: false }
+      ]
+    }));
   }
 
   function createPendingTableRows(rows: readonly OfficeTransaction[], selectedIds: readonly string[]): readonly TableRow[] {
@@ -4109,6 +4079,13 @@
 
       {#if periodControlVisible}
         <section class="period-control ehq-edge-surface" aria-label="Period control">
+          <div class="period-presets" aria-label="Quick date presets">
+            <Button label="Today" variant="secondary" size="small" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Set period to today" onclick={() => applyQuickDatePreset("today")} />
+            <Button label="This Week" variant="secondary" size="small" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Set period to this week" onclick={() => applyQuickDatePreset("week")} />
+            <Button label="This Month" variant="secondary" size="small" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Set period to this month" onclick={() => applyQuickDatePreset("month")} />
+            <Button label="This Year" variant="secondary" size="small" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Set period to this year" onclick={() => applyQuickDatePreset("year")} />
+            <Button label="Clear" variant="secondary" size="small" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Clear date range" onclick={clearDateRange} />
+          </div>
           <Select
             id="office-period-scope"
             label="Period"
@@ -4199,6 +4176,18 @@
             </SectionTemplate>
           </div>
         </section>
+
+        <section class="dashboard-grid">
+          <BarsChart title="Monthly cashflow income" points={cashflowInflowPoints} tone="success" />
+          <BarsChart title="Monthly cashflow expense" points={cashflowOutflowPoints} tone="error" />
+        </section>
+
+        <section class="dashboard-grid">
+          <Table title="Recent validated transactions" columns={dashboardRecentTransactionColumns} rows={dashboardRecentTransactionRows} state={isLoadingState(transactionsState) ? "loading" : dashboardRecentTransactionRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={ledgerRowActions} />
+          <Table title="Recent imports" columns={importColumns} rows={dashboardImportRows} state={isLoadingState(dashboardState) ? "loading" : dashboardImportRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={importRowActions} />
+        </section>
+
+        <Table title="Bank data quality" columns={dashboardBankQualityColumns} rows={dashboardBankQualityRows} state={isLoadingState(dashboardAnalyticsState) ? "loading" : dashboardBankQualityRows.length === 0 ? "empty" : "default"} actionLabel="" />
       {:else if activePageId === "pnl"}
         <section class="kpi-grid" aria-label="P&L indicators">
           {#each pnlKpis as kpi (kpi.label)}
@@ -4402,13 +4391,13 @@
         </section>
 
         <Table title="Recent batches" columns={importColumns} rows={recentImportRows} state={isLoadingState(dashboardState) ? "loading" : dashboardState.status === "error" ? "error" : recentImportRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={importRowActions} />
-      {:else if activePageId === "imports"}
+      {:else if activePageId === "imports" || activePageId === "pdfImport"}
         <section class="statement-import-panel ehq-edge-surface" aria-label="Import a bank statement">
           <header>
             <div>
-              <span class="ehq-type-label-mono">Monthly bank import</span>
-              <h2>Import a statement</h2>
-              <p>Drop an MCB or SBI/SBM PDF. The app detects the bank, reads the rows, runs the API preview, then you confirm the import.</p>
+              <span class="ehq-type-label-mono">{activePageId === "pdfImport" ? "PDF import" : "Monthly bank import"}</span>
+              <h2>{activePageId === "pdfImport" ? "Upload a PDF" : "Import a statement"}</h2>
+              <p>{activePageId === "pdfImport" ? "Upload · Scan · Review · Import. The same typed API preview protects every database write." : "Drop an MCB or SBI/SBM PDF. The app detects the bank, reads the rows, runs the API preview, then you confirm the import."}</p>
             </div>
             <strong>{writesEnabled ? "Entries enabled" : "Entries locked"}</strong>
           </header>
@@ -4447,7 +4436,7 @@
               <span class="ehq-type-label-mono">Bank statement PDF or CSV</span>
               <input type="file" accept="application/pdf,.pdf,text/csv,.csv" onchange={handleStatementFile} />
             </label>
-            <Button label="Analyze" variant="secondary" size="medium" type="button" disabled={!canPreviewImport} loading={false} locked={false} focus={false} ariaLabel="Analyze the statement" onclick={previewImport} />
+            <Button label={activePageId === "pdfImport" ? "Scan PDF" : "Analyze"} variant="secondary" size="medium" type="button" disabled={!canPreviewImport} loading={false} locked={false} focus={false} ariaLabel={activePageId === "pdfImport" ? "Scan PDF" : "Analyze the statement"} onclick={previewImport} />
             <Button label="Import to database" variant="primary" size="medium" type="button" disabled={!canConfirmImport || !writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Import the statement to the database" title={writeDisabledTitle()} onclick={confirmImport} />
           </div>
 
@@ -4736,12 +4725,28 @@
   ];
   const transactionColumns: readonly TableColumn[] = [
     { label: "Date", align: "left", sortable: true },
-    { label: "Label", align: "left", sortable: true },
-    { label: "Department · Division · Category", align: "left", sortable: true },
+    { label: "Description", align: "left", sortable: true },
     { label: "Type", align: "left", sortable: true },
+    { label: "Amount", align: "right", sortable: true },
+    { label: "VAT", align: "right", sortable: true },
+    { label: "Category", align: "left", sortable: true },
+    { label: "Partner", align: "left", sortable: true },
     { label: "Project", align: "left", sortable: true },
+    { label: "Status", align: "left", sortable: true }
+  ];
+  const dashboardRecentTransactionColumns: readonly TableColumn[] = [
+    { label: "Date", align: "left", sortable: true },
+    { label: "Description", align: "left", sortable: true },
+    { label: "Type", align: "left", sortable: true },
     { label: "Amount", align: "right", sortable: true },
     { label: "Status", align: "left", sortable: true }
+  ];
+  const dashboardBankQualityColumns: readonly TableColumn[] = [
+    { label: "Account", align: "left", sortable: true },
+    { label: "Total lines", align: "right", sortable: true },
+    { label: "Unmatched", align: "right", sortable: true },
+    { label: "Match rate", align: "right", sortable: true },
+    { label: "Oldest unmatched", align: "right", sortable: true }
   ];
   const importColumns: readonly TableColumn[] = [
     { label: "File", align: "left", sortable: true },
@@ -4969,6 +4974,12 @@
     margin: 0;
     color: var(--ehq-text-muted);
     font-size: var(--ehq-type-caption-size);
+  }
+
+  .period-presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ehq-space-2);
   }
 
   .kpi-grid {

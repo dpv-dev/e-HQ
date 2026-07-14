@@ -119,7 +119,7 @@
   const partnerTableRows = $derived(createPartnerTableRows(partners, copy));
   const partnerActivityPoints = $derived(createPartnerActivityPoints(partners));
   const partnerRowActions = $derived<readonly TableRowAction[]>([
-    { label: "Open", onAction: openPartner }
+    { label: "Edit", onAction: openPartner }
   ]);
   const partnersPagination = $derived<TablePagination | null>(
     createTablePagination(partnersState, partnersLoadingMore, partnersLoadMoreError, loadMorePartners, loadAllPartners)
@@ -565,7 +565,10 @@
     return rows.map((partner: OfficePartnerListItem): TableRow => ({
       id: partner.id,
       cells: [
-        { kind: "text", value: partner.name, strong: false },
+        { kind: "text", value: partner.name, strong: true },
+        { kind: "text", value: partner.email ?? "—", strong: false },
+        { kind: "text", value: partner.phone ?? "—", strong: false },
+        { kind: "text", value: partner.taxId ?? "—", strong: false },
         { kind: "money", value: formatMoneyMicro(facetActivity(partner).periodTotalMicro), tone: netTone(facetActivity(partner).periodTotalMicro) },
         { kind: "money", value: formatMoneyMicro(facetActivity(partner).openBalanceMicro), tone: netTone(facetActivity(partner).openBalanceMicro) },
         { kind: "text", value: lastActivityLabel(partner), strong: false },
@@ -651,6 +654,9 @@
   function partnerColumns(facetCopy: FacetCopy): readonly TableColumn[] {
     return [
       { label: "Name", align: "left", sortable: true },
+      { label: "Email", align: "left", sortable: true },
+      { label: "Phone", align: "left", sortable: true },
+      { label: "Tax ID", align: "left", sortable: true },
       { label: facetCopy.amountLabel, align: "right", sortable: true },
       { label: facetCopy.balanceLabel, align: "right", sortable: true },
       { label: "Last activity", align: "left", sortable: true },

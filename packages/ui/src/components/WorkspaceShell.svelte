@@ -106,10 +106,37 @@
     </nav>
 
     <div class="shell-foot">
-      <section class="shell-status" aria-label="Workspace status">
-        <span>{props.statusLabel}</span>
-        <strong>{props.statusValue}</strong>
-      </section>
+      {#if props.workspace === "office" || props.workspace === "distribution"}
+        <nav class="workspace-switcher" aria-label="Switch workspace">
+          <a
+            class="workspace-shortcut workspace-shortcut-office"
+            class:active={props.workspace === "office"}
+            href="/console/office/dashboard"
+            aria-label="Open Office"
+            aria-current={props.workspace === "office" ? "page" : undefined}
+            title="Office"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6 20.5 7.3v9.4L12 21.4 3.5 16.7V7.3Z" /></svg>
+            <strong aria-hidden="true">O</strong>
+          </a>
+          <a
+            class="workspace-shortcut workspace-shortcut-distribution"
+            class:active={props.workspace === "distribution"}
+            href="/console/distribution/dashboard"
+            aria-label="Open Distribution"
+            aria-current={props.workspace === "distribution" ? "page" : undefined}
+            title="Distribution"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6 20.5 7.3v9.4L12 21.4 3.5 16.7V7.3Z" /></svg>
+            <strong aria-hidden="true">D</strong>
+          </a>
+        </nav>
+      {:else}
+        <section class="shell-status" aria-label="Workspace status">
+          <span>{props.statusLabel}</span>
+          <strong>{props.statusValue}</strong>
+        </section>
+      {/if}
       {#if props.footer}
         {@render props.footer()}
       {/if}
@@ -296,6 +323,78 @@
     font-family: var(--ehq-font);
     font-size: var(--ehq-type-ui-size);
     font-weight: var(--ehq-type-heading-weight);
+  }
+
+  .workspace-switcher {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--ehq-space-2);
+    overflow: visible;
+  }
+
+  .workspace-shortcut {
+    --workspace-shortcut-accent: var(--ehq-text-muted);
+    min-width: 0;
+    min-height: 52px;
+    padding: var(--ehq-space-2);
+    border: 1px solid var(--ehq-border-soft);
+    border-radius: var(--ehq-radius-sm);
+    background: var(--ehq-state-empty-bg);
+    color: var(--ehq-text-muted);
+    display: grid;
+    grid-template-columns: 28px;
+    grid-template-rows: 28px;
+    justify-content: center;
+    align-items: center;
+    text-decoration: none;
+    transition:
+      border-color var(--ehq-transition-fast) var(--ehq-ease),
+      color var(--ehq-transition-fast) var(--ehq-ease),
+      background var(--ehq-transition-fast) var(--ehq-ease);
+  }
+
+  .workspace-shortcut-office {
+    --workspace-shortcut-accent: var(--ehq-error);
+  }
+
+  .workspace-shortcut-distribution {
+    --workspace-shortcut-accent: var(--ehq-info);
+  }
+
+  .workspace-shortcut:hover,
+  .workspace-shortcut:focus-visible,
+  .workspace-shortcut.active {
+    border-color: var(--workspace-shortcut-accent);
+    background: color-mix(in srgb, var(--workspace-shortcut-accent) 9%, var(--ehq-state-empty-bg));
+    color: var(--ehq-text);
+  }
+
+  .workspace-shortcut:focus-visible {
+    outline: 2px solid var(--ehq-focus-ring);
+    outline-offset: 2px;
+  }
+
+  .workspace-shortcut svg,
+  .workspace-shortcut strong {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .workspace-shortcut svg {
+    width: 28px;
+    height: 28px;
+    fill: none;
+    stroke: var(--workspace-shortcut-accent);
+    stroke-width: 1.5;
+    stroke-linejoin: round;
+  }
+
+  .workspace-shortcut strong {
+    color: var(--workspace-shortcut-accent);
+    font-family: var(--ehq-mono);
+    font-size: 9px;
+    line-height: 1;
+    place-self: center;
   }
 
   .shell-main {
@@ -496,6 +595,15 @@
       display: none;
     }
 
+    .workspace-switcher {
+      grid-template-columns: 1fr;
+    }
+
+    .workspace-shortcut {
+      min-height: 42px;
+      padding: var(--ehq-space-1);
+    }
+
     .shell-topbar {
       grid-template-columns: auto 1fr;
       padding: 0 var(--ehq-space-4);
@@ -530,6 +638,10 @@
 
     .nav-label {
       display: block;
+    }
+
+    .workspace-switcher {
+      grid-template-columns: repeat(2, 42px);
     }
 
     .shell-main {
