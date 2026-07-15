@@ -102,7 +102,6 @@
     | "transactions"
     | "imports"
     | "pdfImport"
-    | "waveInvoices"
     | "reconciliation"
     | "pending"
     | "cashflow"
@@ -216,7 +215,6 @@
         { id: "suppliers", label: "Suppliers", title: "Suppliers", subtitle: "Partners with supplier activity." },
         { id: "projects", label: "Projects", title: "Projects", subtitle: "Project P&L and Office projection consistency checks." },
         { id: "vat", label: "VAT", title: "VAT report", subtitle: "VAT by period, calculated from existing typed data." },
-        { id: "waveInvoices", label: "Wave Invoices", title: "Wave Invoices", subtitle: "Dedicated workspace for Wave invoice operations and tracking." },
         { id: "bank", label: "Bank", title: "Bank", subtitle: "Bank accounts, raw lines, and data quality." },
         { id: "pdfImport", label: "PDF Import", title: "PDF Import", subtitle: "Upload · Scan · Review · Import." },
         { id: "cashflow", label: "Cash Flow", title: "Cash Flow", subtitle: "Inflows, outflows, and closing balances by period." },
@@ -297,7 +295,6 @@
     transactions: "file-text",
     imports: "upload",
     pdfImport: "file-text",
-    waveInvoices: "upload",
     reconciliation: "check",
     pending: "clock",
     cashflow: "trending-up",
@@ -354,6 +351,9 @@
     createIdleState<PageResult<OfficeTransaction>>()
   );
   let reconciliationState = $state<ApiRequestState<PageResult<OfficeReconciliationCandidate>>>(
+    createIdleState<PageResult<OfficeReconciliationCandidate>>()
+  );
+  let reliableSuggestionsState = $state<ApiRequestState<PageResult<OfficeReconciliationCandidate>>>(
     createIdleState<PageResult<OfficeReconciliationCandidate>>()
   );
   let reconciliationOperationsState = $state<ApiRequestState<OfficeReconciliationOperationsResponse>>(
@@ -444,6 +444,7 @@
   const transactionRows = $derived(readPageItems(transactionsState));
   const pendingRows = $derived(readPageItems(pendingState));
   const reconciliationRows = $derived(readPageItems(reconciliationState));
+  const reliableSuggestionRows = $derived(readPageItems(reliableSuggestionsState));
   const cashflowRows = $derived(readArrayState(cashflowState));
   const auditRows = $derived(readPageItems(auditState));
   const auditTableRows = $derived(createAuditTableRows(auditRows));
@@ -479,7 +480,7 @@
     ...editProjectOptions
   ]);
   const reconcileCategoryOptions = $derived<readonly SelectOption[]>([
-    { label: "Draft — to classify", value: "" },
+    { label: "Choose a category…", value: "" },
     ...editCategoryOptions
   ]);
   const reconcileProjectOptions = $derived<readonly SelectOption[]>([
@@ -498,6 +499,16 @@
     importAccounts.length === 0
       ? [{ label: "No bank account loaded", value: "" }]
       : sortOptionsAlphabetically(importAccounts.map(bankAccountSelectOption), 0)
+  );
+  const editAccountSelectOptions = $derived<readonly SelectOption[]>(
+    editingTransaction === null
+      ? createAccountSelectOptions
+      : sortOptionsAlphabetically(
+          importAccounts
+            .filter((account: OfficeBankAccountSummary): boolean => account.currency === editingTransaction?.currency)
+            .map(bankAccountSelectOption),
+          0
+        )
   );
   const importAccountSelectOptions = $derived<readonly SelectOption[]>(
     importAccounts.length === 0
@@ -521,9 +532,28 @@
     createAccountId.length > 0 &&
     createAmount.trim().length > 0
   );
+  const selectedPendingRows = $derived(
+    pendingRows.filter((transaction: OfficeTransaction): boolean => selectedPendingIds.includes(transaction.id))
+  );
+  const canApproveSelectedPending = $derived(
+    selectedPendingRows.length > 0 &&
+    selectedPendingRows.length === selectedPendingIds.length &&
+    selectedPendingRows.every((transaction: OfficeTransaction): boolean => transaction.categoryId !== null)
+  );
   const ledgerRowActions = $derived<readonly TableRowAction[]>([
-    { label: "Edit", onAction: openTransactionEditor },
-    { label: "Cancel", onAction: cancelTransactionById, danger: true }
+    {
+      label: "Edit",
+      onAction: openTransactionEditor,
+      isEnabled: canMutateTransaction,
+      disabledReason: transactionMutationDisabledReason
+    },
+    {
+      label: "Cancel",
+      onAction: cancelTransactionById,
+      danger: true,
+      isEnabled: canMutateTransaction,
+      disabledReason: transactionMutationDisabledReason
+    }
   ]);
   const importRowActions = $derived<readonly TableRowAction[]>(
     session.roleId === "administrator"
@@ -558,18 +588,24 @@
     { label: "Delete", onAction: deletePlanNode, danger: true }
   ]);
   const reconciliationRowActions = $derived<readonly TableRowAction[]>([
+    { label: "Approve", onAction: acceptReconciliation, isEnabled: canApproveReconciliation, disabledReason: approveReconciliationDisabledReason },
+    { label: "Match", onAction: openReconcileMatch, isEnabled: canManuallyMatchReconciliation },
+    { label: "Create entry", onAction: openReconcileCreate, isEnabled: canManuallyMatchReconciliation },
+    { label: "Unmatch", onAction: unmatchReconciliationById, isEnabled: isMatchedReconciliation },
+    { label: "Reject", onAction: rejectReconciliationById, danger: true, isEnabled: canRejectReconciliation }
+  ]);
+  const reliableSuggestionRowActions = $derived<readonly TableRowAction[]>([
     { label: "Approve", onAction: acceptReconciliation },
-    { label: "Match", onAction: openReconcileMatch },
-    { label: "Create entry", onAction: openReconcileCreate },
-    { label: "Unmatch", onAction: unmatchReconciliationById },
     { label: "Reject", onAction: rejectReconciliationById, danger: true }
   ]);
   const reconcileTransactionOptions = $derived(
     sortOptionsAlphabetically(
-      transactionRows.map((transaction: OfficeTransaction): SelectOption => ({
-        value: transaction.id,
-        label: `${transaction.description} · ${formatSignedMicro(transaction.amountMicro, transaction.currency)}`
-      })),
+      transactionRows
+        .filter((transaction: OfficeTransaction): boolean => transaction.categoryId !== null && transaction.status !== "voided")
+        .map((transaction: OfficeTransaction): SelectOption => ({
+          value: transaction.id,
+          label: `${transaction.description} · ${formatSignedMicro(transaction.amountMicro, transaction.currency)}`
+        })),
       0
     )
   );
@@ -589,6 +625,7 @@
   const transactionTableRows = $derived(createTransactionTableRows(transactionRows));
   const pendingTableRows = $derived(createPendingTableRows(pendingRows, selectedPendingIds));
   const reconciliationTableRows = $derived(createReconciliationTableRows(reconciliationRows));
+  const reliableSuggestionTableRows = $derived(createReliableSuggestionTableRows(reliableSuggestionRows));
   const divisionPnlPagination = $derived<TablePagination | null>(
     createTablePagination(divisionPnlState, tablePaginationLoading === "divisionPnl", tablePaginationError("divisionPnl"), loadMoreDivisionPnl, loadAllDivisionPnl)
   );
@@ -662,7 +699,7 @@
     // path (older API without /screen/office, or a transient bundle failure).
     const seeded = await loadOfficeScreen();
     if (seeded) {
-      await Promise.all([loadDashboardAnalytics(), loadReconciliationOperations()]);
+      await Promise.all([loadDashboardAnalytics(), loadReliableSuggestions(), loadReconciliationOperations()]);
       return;
     }
     await Promise.all([
@@ -674,6 +711,7 @@
       loadTransactions(),
       loadPendingTransactions(),
       loadReconciliations(),
+      loadReliableSuggestions(),
       loadReconciliationOperations(),
       loadCashflow(),
       loadAuditLog(),
@@ -1146,7 +1184,23 @@
     }
   }
 
+  function transactionForId(transactionId: string): OfficeTransaction | null {
+    return transactionRows.find((transaction: OfficeTransaction): boolean => transaction.id === transactionId) ?? null;
+  }
+
+  function canMutateTransaction(transactionId: string): boolean {
+    const transaction = transactionForId(transactionId);
+    return transaction !== null && transaction.status !== "voided";
+  }
+
+  function transactionMutationDisabledReason(transactionId: string): string | null {
+    return canMutateTransaction(transactionId) ? null : "Cancelled transactions are read-only.";
+  }
+
   async function cancelTransactionById(transactionId: string): Promise<void> {
+    if (!canMutateTransaction(transactionId)) {
+      return;
+    }
     if (!window.confirm("Cancel this transaction? It will be marked “cancelled” (excluded from figures, kept for audit).")) {
       return;
     }
@@ -1164,17 +1218,15 @@
     }
   }
 
-  // Always interprets the input as a DECIMAL money value → micro units (10^6); never as
-  // raw micro (avoids the apiMoneyToMicroUnits integer-passthrough footgun on form input).
-  function decimalAmountToMicro(input: string): string {
-    const match = /^([+-]?)(\d+)(?:[.,](\d+))?$/u.exec(input.trim().replace(",", "."));
+  // Office write routes accept decimal MUR/EUR/USD strings and apply the canonical
+  // scale-2 conversion server-side. Keep this boundary textual so money never crosses a float.
+  function normalizeOfficeAmountInput(input: string): string {
+    const normalized = input.trim().replace(",", ".");
+    const match = /^([+-]?)(\d+)(?:\.(\d+))?$/u.exec(normalized);
     if (match === null) {
       throw new Error(`Invalid amount: ${input}`);
     }
-    const sign = match[1] === "-" ? -1n : 1n;
-    const whole = BigInt(match[2] ?? "0");
-    const fraction = (match[3] ?? "").padEnd(6, "0").slice(0, 6);
-    return (sign * (whole * 1_000_000n + BigInt(fraction))).toString();
+    return normalized;
   }
 
   // The edit/create panels render ABOVE the ledger table in DOM order, so when the user
@@ -1189,15 +1241,15 @@
   }
 
   function openTransactionEditor(transactionId: string): void {
-    const transaction = transactionRows.find((row: OfficeTransaction): boolean => row.id === transactionId);
-    if (transaction === undefined) {
+    const transaction = transactionForId(transactionId);
+    if (transaction === null || transaction.status === "voided") {
       return;
     }
     creatingTransaction = false;
     editingTransaction = transaction;
     editOccurredOn = transaction.occurredOn.slice(0, 10);
     editDescription = transaction.description;
-    editAmount = (Number(transaction.amountMicro) / 1_000_000).toFixed(2);
+    editAmount = transaction.amountMicro;
     editCategoryId = transaction.categoryId ?? "";
     editProjectId = transaction.projectId ?? "";
     editAccountId = transaction.accountId ?? defaultImportAccountId(importAccounts, transaction.currency);
@@ -1208,6 +1260,28 @@
     editingTransaction = null;
   }
 
+  function buildTransactionEditRequest(transaction: OfficeTransaction): OfficeTransactionWriteRequest {
+    const account = importAccounts.find((candidate: OfficeBankAccountSummary): boolean => candidate.id === editAccountId);
+    if (account === undefined) {
+      throw new Error("Choose a bank account for this transaction.");
+    }
+    if (account.currency !== transaction.currency) {
+      throw new Error("Choose an account with the same currency as the transaction.");
+    }
+
+    return {
+      workspaceId: officeWorkspaceId,
+      occurredOn: editOccurredOn,
+      accountId: account.id,
+      categoryId: editCategoryId.length > 0 ? editCategoryId : null,
+      projectId: editProjectId.length > 0 ? editProjectId : null,
+      description: editDescription,
+      amountMicro: normalizeOfficeAmountInput(editAmount),
+      currency: transaction.currency,
+      type: transaction.type
+    };
+  }
+
   async function saveTransactionEdit(): Promise<void> {
     const transaction = editingTransaction;
     if (transaction === null) {
@@ -1215,22 +1289,9 @@
     }
 
     try {
-      if (editAccountId.length === 0) {
-        throw new Error("Choose a bank account for this transaction.");
-      }
       const receipt = await client.office.updateTransaction(
         transaction.id,
-        {
-          workspaceId: officeWorkspaceId,
-          occurredOn: editOccurredOn,
-          accountId: editAccountId,
-          categoryId: editCategoryId.length > 0 ? editCategoryId : null,
-          projectId: editProjectId.length > 0 ? editProjectId : null,
-          description: editDescription,
-          amountMicro: decimalAmountToMicro(editAmount),
-          currency: transaction.currency,
-          type: transaction.type
-        },
+        buildTransactionEditRequest(transaction),
         { idempotencyKey: createIdempotencyKey("transaction-update") }
       );
       actionReceipt = receipt;
@@ -1248,6 +1309,16 @@
     }
 
     try {
+      if (editCategoryId.length === 0) {
+        throw new Error("Choose a category before approval.");
+      }
+      // Persist the visible editor values first, then execute the explicit validation
+      // action. If validation fails, the classified draft remains safely retryable.
+      await client.office.updateTransaction(
+        transaction.id,
+        buildTransactionEditRequest(transaction),
+        { idempotencyKey: createIdempotencyKey("transaction-update-before-validate") }
+      );
       const receipt = await client.office.validateTransaction(
         transaction.id,
         { workspaceId: officeWorkspaceId },
@@ -1311,6 +1382,40 @@
     }
   }
 
+  function reconciliationCandidateFor(candidateId: string): OfficeReconciliationCandidate | null {
+    return reconciliationRows.find((candidate: OfficeReconciliationCandidate): boolean => candidate.id === candidateId)
+      ?? reliableSuggestionRows.find((candidate: OfficeReconciliationCandidate): boolean => candidate.id === candidateId)
+      ?? null;
+  }
+
+  function canApproveReconciliation(candidateId: string): boolean {
+    const candidate = reconciliationCandidateFor(candidateId);
+    return candidate?.status === "suggested" && candidate.categoryId !== null;
+  }
+
+  function approveReconciliationDisabledReason(candidateId: string): string | null {
+    const candidate = reconciliationCandidateFor(candidateId);
+    if (candidate === null || candidate.status !== "suggested") {
+      return "Only suggested matches can be approved.";
+    }
+
+    return candidate.categoryId === null ? "Classify the ledger entry before approval." : null;
+  }
+
+  function canManuallyMatchReconciliation(candidateId: string): boolean {
+    const status = reconciliationCandidateFor(candidateId)?.status;
+    return status === "unmatched" || status === "suggested" || status === "rejected";
+  }
+
+  function isMatchedReconciliation(candidateId: string): boolean {
+    return reconciliationCandidateFor(candidateId)?.status === "matched";
+  }
+
+  function canRejectReconciliation(candidateId: string): boolean {
+    const status = reconciliationCandidateFor(candidateId)?.status;
+    return status === "unmatched" || status === "suggested";
+  }
+
   async function acceptReconciliation(candidateId: string): Promise<void> {
     try {
       const receipt = await client.office.approveReconciliations(
@@ -1331,12 +1436,12 @@
   // Reconciliation candidate rows are keyed by candidate id, but the match/unmatch/reject/create
   // endpoints address the bank line — so resolve the line id from the candidate before each call.
   function reconcileLineIdFor(candidateId: string): string | null {
-    return reconciliationRows.find((candidate: OfficeReconciliationCandidate): boolean => candidate.id === candidateId)?.statementLineId ?? null;
+    return reconciliationCandidateFor(candidateId)?.statementLineId ?? null;
   }
 
   function openReconcileMatch(candidateId: string): void {
-    const candidate = reconciliationRows.find((item: OfficeReconciliationCandidate): boolean => item.id === candidateId);
-    if (candidate === undefined) {
+    const candidate = reconciliationCandidateFor(candidateId);
+    if (candidate === null) {
       return;
     }
     reconcileDrawerLineId = candidate.statementLineId;
@@ -1346,8 +1451,8 @@
   }
 
   function openReconcileCreate(candidateId: string): void {
-    const candidate = reconciliationRows.find((item: OfficeReconciliationCandidate): boolean => item.id === candidateId);
-    if (candidate === undefined) {
+    const candidate = reconciliationCandidateFor(candidateId);
+    if (candidate === null) {
       return;
     }
     reconcileDrawerLineId = candidate.statementLineId;
@@ -1381,7 +1486,7 @@
 
   async function submitReconcileCreate(): Promise<void> {
     const statementLineId = reconcileDrawerLineId;
-    if (statementLineId === null) {
+    if (statementLineId === null || reconcileCreateCategoryId.length === 0) {
       return;
     }
     try {
@@ -1389,7 +1494,7 @@
         {
           workspaceId: officeWorkspaceId,
           statementLineId,
-          categoryId: reconcileCreateCategoryId.length > 0 ? reconcileCreateCategoryId : null,
+          categoryId: reconcileCreateCategoryId,
           projectId: reconcileCreateProjectId.length > 0 ? reconcileCreateProjectId : null,
           matchedAt: new Date().toISOString()
         },
@@ -1546,7 +1651,7 @@
       transaction.categoryLabel ?? "",
       transaction.projectLabel ?? "",
       transaction.type ?? "",
-      (Number(typedSignedAmountMicro(transaction)) / 1_000_000).toFixed(2),
+      typedSignedAmountMicro(transaction),
       transaction.currency,
       transaction.status
     ]);
@@ -1603,6 +1708,28 @@
     }
   }
 
+  async function loadReliableSuggestions(): Promise<void> {
+    reliableSuggestionsState = beginReload<PageResult<OfficeReconciliationCandidate>>(reliableSuggestionsState);
+
+    try {
+      const page = await client.office.listReconciliations({
+        workspaceId: officeWorkspaceId,
+        accountId: toNullableFilter(accountFilter),
+        period,
+        dateFrom: activeRange.from,
+        dateTo: activeRange.to,
+        minConfidenceBp: 9500,
+        classifiedOnly: true,
+        status: "suggested",
+        cursor: null,
+        limit: TABLE_PAGE_SIZE
+      });
+      reliableSuggestionsState = createSuccessState<PageResult<OfficeReconciliationCandidate>>(page);
+    } catch (error: unknown) {
+      reliableSuggestionsState = createErrorState<PageResult<OfficeReconciliationCandidate>>(error);
+    }
+  }
+
   async function loadReconciliationOperations(): Promise<void> {
     reconciliationOperationsState = beginReload<OfficeReconciliationOperationsResponse>(reconciliationOperationsState);
 
@@ -1621,7 +1748,7 @@
   }
 
   async function refreshReconciliationViews(): Promise<void> {
-    await Promise.all([loadReconciliations(), loadReconciliationOperations()]);
+    await Promise.all([loadReconciliations(), loadReliableSuggestions(), loadReconciliationOperations()]);
   }
 
   async function loadCashflow(): Promise<void> {
@@ -1725,11 +1852,6 @@
 
     if (normalizedPath.endsWith("/console/office-imports")) {
       return "imports";
-    }
-
-    // Legacy Office route now has its own dedicated page.
-    if (normalizedPath.endsWith("/console/wave-invoices")) {
-      return "waveInvoices";
     }
 
     if (normalizedPath.endsWith("/console/pl")) {
@@ -1888,10 +2010,6 @@
       return "pdfImport";
     }
 
-    if (normalizedPath.endsWith("/console/office/wave-invoices")) {
-      return "waveInvoices";
-    }
-
     if (normalizedPath.endsWith("/console/office/reconciliation")) {
       return "reconciliation";
     }
@@ -1971,10 +2089,6 @@
 
     if (pageId === "pdfImport") {
       return "/console/office/pdf-import";
-    }
-
-    if (pageId === "waveInvoices") {
-      return "/console/office/wave-invoices";
     }
 
     if (pageId === "reconciliation") {
@@ -2224,6 +2338,7 @@
         loadTransactions(),
         loadPendingTransactions(),
         loadReconciliations(),
+        loadReliableSuggestions(),
         loadReconciliationOperations(),
         loadCashflow()
       ]);
@@ -2231,7 +2346,7 @@
     }
 
     // The bundle used default filters — refetch only the sections whose active filter differs.
-    const followUps: Promise<void>[] = [loadDashboardAnalytics(), loadReconciliationOperations()];
+    const followUps: Promise<void>[] = [loadDashboardAnalytics(), loadReliableSuggestions(), loadReconciliationOperations()];
     if (departmentFilter !== allValue) {
       followUps.push(loadPnlProjection());
     }
@@ -2716,11 +2831,12 @@
       if (account === undefined) {
         throw new Error("Choose a bank account for the new entry.");
       }
-      const magnitudeMicro = BigInt(decimalAmountToMicro(createAmount));
-      const absoluteMicro = magnitudeMicro < 0n ? -magnitudeMicro : magnitudeMicro;
-      if (absoluteMicro === 0n) {
+      const normalizedAmount = normalizeOfficeAmountInput(createAmount);
+      const amountUnits = apiMoneyToMicroUnits(normalizedAmount);
+      if (amountUnits === 0n) {
         throw new Error("The amount must not be zero.");
       }
+      const absoluteAmount = normalizedAmount.replace(/^[+-]/u, "");
       const request: OfficeTransactionWriteRequest = {
         workspaceId: officeWorkspaceId,
         occurredOn: createOccurredOn,
@@ -2728,7 +2844,7 @@
         categoryId: createCategoryId.length > 0 ? createCategoryId : null,
         projectId: createProjectId.length > 0 ? createProjectId : null,
         description: createDescription.trim(),
-        amountMicro: (createDirection === "expense" ? -absoluteMicro : absoluteMicro).toString(),
+        amountMicro: createDirection === "expense" ? `-${absoluteAmount}` : absoluteAmount,
         currency: account.currency,
         type: createDirection
       };
@@ -2756,6 +2872,9 @@
         {
           workspaceId: officeWorkspaceId,
           approvedAt: new Date().toISOString(),
+          accountId: toNullableFilter(accountFilter),
+          dateFrom: activeRange.from,
+          dateTo: activeRange.to,
           minConfidenceBp: 9500,
           limit: 500
         },
@@ -3710,10 +3829,33 @@
         // not its original currency — MUR is the correct label, not a hardcoding bug.
         { kind: "money", value: formatSignedMicro(candidate.amountMicro, "MUR"), tone: moneyTone(candidate.amountMicro) },
         { kind: "text", value: candidate.ledgerDescription, strong: false },
+        { kind: "text", value: reconciliationClassificationLabel(candidate), strong: false },
+        { kind: "text", value: candidate.projectLabel ?? "—", strong: false },
         { kind: "badge", value: formatConfidence(candidate.confidenceBp), tone: confidenceTone(candidate.confidenceBp) },
         { kind: "badge", value: candidate.status, tone: reconciliationTone(candidate.status) }
       ]
     }));
+  }
+
+  function createReliableSuggestionTableRows(rows: readonly OfficeReconciliationCandidate[]): readonly TableRow[] {
+    return rows.map((candidate: OfficeReconciliationCandidate): TableRow => ({
+      id: candidate.id,
+      cells: [
+        { kind: "text", value: candidate.bankDescription, strong: true },
+        { kind: "text", value: formatDateOnly(candidate.occurredOn), strong: false },
+        { kind: "text", value: candidate.ledgerDescription, strong: true },
+        { kind: "text", value: reconciliationClassificationLabel(candidate), strong: false },
+        { kind: "text", value: candidate.projectLabel ?? "—", strong: false },
+        { kind: "money", value: formatSignedMicro(candidate.amountMicro, "MUR"), tone: moneyTone(candidate.amountMicro) },
+        { kind: "badge", value: formatConfidence(candidate.confidenceBp), tone: "success" }
+      ]
+    }));
+  }
+
+  function reconciliationClassificationLabel(candidate: OfficeReconciliationCandidate): string {
+    const labels = [candidate.departmentLabel, candidate.divisionLabel, candidate.categoryLabel]
+      .filter((label: string | null | undefined): label is string => typeof label === "string" && label.trim().length > 0);
+    return labels.length === 0 ? "Not classified" : labels.join(" · ");
   }
 
   function createCashflowPoints(rows: readonly CashflowBucket[], mode: "inflow" | "outflow"): readonly ChartPoint[] {
@@ -4305,8 +4447,8 @@
                 id="office-edit-account"
                 label="Account"
                 value={editAccountId}
-                options={createAccountSelectOptions}
-                state={importAccounts.length === 0 ? "disabled" : "default"}
+                options={editAccountSelectOptions}
+                state={editAccountSelectOptions.length === 0 ? "disabled" : "default"}
                 message=""
                 onchange={(value: string): void => { editAccountId = value; }}
               />
@@ -4316,7 +4458,7 @@
             </div>
             <div class="office-edit-actions">
               <Button label="Save" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Save transaction" title={writeDisabledTitle()} onclick={saveTransactionEdit} />
-              <Button label="Approve" variant="secondary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Approve transaction" title={writeDisabledTitle()} onclick={validateEditingTransaction} />
+              <Button label="Save & approve" variant="secondary" size="medium" type="button" disabled={!writesEnabled || editCategoryId.length === 0 || (editingTransaction.status !== "pending" && editingTransaction.status !== "draft")} loading={false} locked={false} focus={false} ariaLabel="Save and approve transaction" title={writeDisabledTitle()} onclick={validateEditingTransaction} />
               <Button label="Close" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Close editor" onclick={closeTransactionEditor} />
             </div>
           </section>
@@ -4349,48 +4491,6 @@
         <ProjectsView client={client.office} workspaceId={officeWorkspaceId} {period} dateFrom={activeRange.from} dateTo={activeRange.to} writesEnabled={writesEnabled} />
       {:else if activePageId === "monitoring"}
         <MonitoringView client={client.office} workspaceId={officeWorkspaceId} {period} dateFrom={activeRange.from} dateTo={activeRange.to} />
-      {:else if activePageId === "waveInvoices"}
-        <section class="statement-import-panel ehq-edge-surface" aria-label="Wave invoices lane">
-          <header>
-            <div>
-              <span class="ehq-type-label-mono">Wave invoices</span>
-              <h2>Dedicated Wave lane</h2>
-              <p>This page is dedicated to Wave invoice operations while keeping bank-statement imports in their existing workspace.</p>
-            </div>
-            <strong>{writesEnabled ? "Entries enabled" : "Entries locked"}</strong>
-          </header>
-
-          <div class="import-steps" aria-label="Wave invoices actions">
-            <article class:complete={recentImportRows.length > 0}>
-              <b>1</b>
-              <span>Review latest imports</span>
-              <small>{recentImportRows.length > 0 ? `${recentImportRows.length} batch(es) visible` : "No batch loaded"}</small>
-            </article>
-            <article class:complete={reconciliationRows.length > 0}>
-              <b>2</b>
-              <span>Check reconciliation queue</span>
-              <small>{reconciliationRows.length > 0 ? `${reconciliationRows.length} row(s) in scope` : "No row in current scope"}</small>
-            </article>
-            <article class:complete={pendingRows.length > 0}>
-              <b>3</b>
-              <span>Classify pending transactions</span>
-              <small>{pendingRows.length > 0 ? `${pendingRows.length} pending row(s)` : "No pending row in current scope"}</small>
-            </article>
-          </div>
-
-          <div class="import-actions">
-            <Button label="Open imports workflow" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Open imports workflow" onclick={(): void => { selectPage("imports"); }} />
-            <Button label="Open reconciliation" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Open reconciliation" onclick={(): void => { selectPage("reconciliation"); }} />
-            <Button label="Open pending" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Open pending" onclick={(): void => { selectPage("pending"); }} />
-          </div>
-        </section>
-
-        <section class="dashboard-grid">
-          <BarsChart title="Import quality" points={importQualityPoints} tone="warning" />
-          <BarsChart title="Reconciliation status" points={reconciliationStatusPoints} tone="info" />
-        </section>
-
-        <Table title="Recent batches" columns={importColumns} rows={recentImportRows} state={isLoadingState(dashboardState) ? "loading" : dashboardState.status === "error" ? "error" : recentImportRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={importRowActions} />
       {:else if activePageId === "imports" || activePageId === "pdfImport"}
         <section class="statement-import-panel ehq-edge-surface" aria-label="Import a bank statement">
           <header>
@@ -4554,7 +4654,6 @@
           <Select id="office-reconciliation-account" label="Account" value={accountFilter} options={accountOptions} state="default" message="" onchange={updateAccountFilter} />
           <Select id="office-reconciliation-status" label="Status" value={reconciliationStatusFilter} options={reconciliationStatusOptions} state="default" message="" onchange={updateReconciliationStatusFilter} />
           <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Apply reconciliation filters" onclick={applyReconciliationFilters} />
-          <Button label="Approve reliable suggestions" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Approve suggestions above the confidence threshold" title={writeDisabledTitle()} onclick={approveSuggestedReconciliations} />
         </section>
 
         <section class="kpi-grid" aria-label="Reconciliation indicators">
@@ -4574,7 +4673,33 @@
           <BarsChart title="Reconciliation status mix" points={reconciliationStatusPoints} tone="info" />
         </section>
 
-        <Table title="Bank ↔ general ledger reconciliation" columns={reconciliationColumns} rows={reconciliationTableRows} state={isLoadingState(reconciliationState) ? "loading" : reconciliationState.status === "error" ? "error" : reconciliationRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={reconciliationRowActions} pagination={reconciliationPagination} />
+        <section class="panel-card ehq-edge-surface">
+          <SectionTemplate
+            eyebrow="RELIABLE SUGGESTIONS · 95%+ CONFIDENCE"
+            title="Reliable suggestions"
+            detail="High-confidence bank ↔ ledger matches with a complete category path. Category determines division and department; project remains optional."
+            state={isLoadingState(reliableSuggestionsState) ? "loading" : reliableSuggestionsState.status === "error" ? "error" : reliableSuggestionRows.length === 0 ? "empty" : "ready"}
+          >
+            {#snippet action()}
+              <Button
+                label={`Approve all (${String(reliableSuggestionRows.length)})`}
+                variant="primary"
+                size="medium"
+                type="button"
+                disabled={!writesEnabled || reliableSuggestionRows.length === 0}
+                loading={isLoadingState(reliableSuggestionsState)}
+                locked={false}
+                focus={false}
+                ariaLabel="Approve all reliable suggestions in the current account and date filters"
+                title={writeDisabledTitle()}
+                onclick={approveSuggestedReconciliations}
+              />
+            {/snippet}
+            <Table title="Review before approval" columns={reliableSuggestionColumns} rows={reliableSuggestionTableRows} state="default" actionLabel="" rowActions={reliableSuggestionRowActions} />
+          </SectionTemplate>
+        </section>
+
+        <Table title="Reconciliation workbench" columns={reconciliationColumns} rows={reconciliationTableRows} state={isLoadingState(reconciliationState) ? "loading" : reconciliationState.status === "error" ? "error" : reconciliationRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={reconciliationRowActions} pagination={reconciliationPagination} />
 
         {#if reconcileDrawerLineId !== null}
           <Drawer
@@ -4586,7 +4711,7 @@
             primaryAction={reconcileDrawerMode === "match" ? "Match" : "Create and match"}
             secondaryAction="Cancel"
             state="default"
-            primaryDisabled={!writesEnabled || (reconcileDrawerMode === "match" && reconcileMatchTransactionId.length === 0)}
+            primaryDisabled={!writesEnabled || (reconcileDrawerMode === "match" ? reconcileMatchTransactionId.length === 0 : reconcileCreateCategoryId.length === 0)}
             primaryTitle={writeDisabledTitle()}
             onPrimary={reconcileDrawerMode === "match" ? submitReconcileMatch : submitReconcileCreate}
             onSecondary={closeReconcileDrawer}
@@ -4605,11 +4730,11 @@
               {:else}
                 <Select
                   id="office-reconcile-category"
-                  label="Category (opt.)"
+                  label="Category"
                   value={reconcileCreateCategoryId}
                   options={reconcileCategoryOptions}
                   state="default"
-                  message=""
+                  message="Required. Division and department are derived from this category."
                   onchange={(value: string): void => { reconcileCreateCategoryId = value; }}
                 />
                 <Select
@@ -4646,7 +4771,7 @@
             onchange={(value: string): void => { pendingClassifyProjectId = value; }}
           />
           <Button label="Classify selection" variant="secondary" size="medium" type="button" disabled={!writesEnabled || selectedPendingIds.length === 0 || pendingClassifyCategoryId.length === 0} loading={false} locked={false} focus={false} ariaLabel="Classify selection" title={writeDisabledTitle()} onclick={classifySelectedPending} />
-          <Button label="Approve selection" variant="primary" size="medium" type="button" disabled={!writesEnabled || selectedPendingIds.length === 0} loading={false} locked={false} focus={false} ariaLabel="Approve selection" title={writeDisabledTitle()} onclick={bulkValidatePending} />
+          <Button label="Approve selection" variant="primary" size="medium" type="button" disabled={!writesEnabled || !canApproveSelectedPending} loading={false} locked={false} focus={false} ariaLabel="Approve selection" title={!writesEnabled ? writeDisabledTitle() : !canApproveSelectedPending ? "Classify every selected transaction before approval." : ""} onclick={bulkValidatePending} />
           <span class="ehq-type-label-mono">{selectedPendingIds.length} selected</span>
         </section>
 
@@ -4676,7 +4801,7 @@
       {:else if activePageId === "ceo"}
         <CeoView client={client.office} workspaceId={officeWorkspaceId} {period} dateFrom={activeRange.from} dateTo={activeRange.to} />
       {:else if activePageId === "bank"}
-        <BankView client={client.office} workspaceId={officeWorkspaceId} {period} dateFrom={activeRange.from} dateTo={activeRange.to} writesEnabled={writesEnabled} />
+        <BankView client={client.office} workspaceId={officeWorkspaceId} {period} dateFrom={activeRange.from} dateTo={activeRange.to} writesEnabled={writesEnabled} isAdministrator={session.roleId === "administrator"} />
       {:else if activePageId === "audit"}
         <section class="dashboard-grid">
           <BarsChart title="Top audit actions" points={auditActionPoints} tone="muted" />
@@ -4769,12 +4894,23 @@
     { label: "Window", align: "left", sortable: true }
   ];
   const reconciliationColumns: readonly TableColumn[] = [
-    { label: "Label", align: "left", sortable: true },
+    { label: "Bank line", align: "left", sortable: true },
     { label: "Date", align: "left", sortable: true },
     { label: "Amount", align: "right", sortable: true },
-    { label: "Suggestion", align: "left", sortable: true },
+    { label: "Ledger entry", align: "left", sortable: true },
+    { label: "Department · Division · Category", align: "left", sortable: true },
+    { label: "Project", align: "left", sortable: true },
     { label: "Confidence", align: "left", sortable: true },
     { label: "Status", align: "left", sortable: true }
+  ];
+  const reliableSuggestionColumns: readonly TableColumn[] = [
+    { label: "Bank line", align: "left", sortable: true },
+    { label: "Date", align: "left", sortable: true },
+    { label: "Suggested ledger entry", align: "left", sortable: true },
+    { label: "Department · Division · Category", align: "left", sortable: true },
+    { label: "Project", align: "left", sortable: true },
+    { label: "Amount", align: "right", sortable: true },
+    { label: "Confidence", align: "left", sortable: true }
   ];
   const pendingColumns: readonly TableColumn[] = [
     { label: "Selection", align: "left", sortable: true },

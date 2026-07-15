@@ -39,7 +39,7 @@
     type CanonicalRequestStatus
   } from "../request-state.js";
   import { formatDateOnly } from "../../date-format.js";
-  import { formatMoneyValue, moneyToneForValue } from "../../money-format.js";
+  import { apiMoneyToMicroUnits, formatMoneyValue, moneyToneForValue } from "../../money-format.js";
   import { createTablePagination, loadPageResult, readPageItems, TABLE_PAGE_SIZE, type PageLoadMode } from "../../table-pagination.js";
   import { untrack } from "svelte";
 
@@ -264,7 +264,6 @@
 
   async function selectProject(projectId: EntityId): Promise<void> {
     const token = ++selectProjectToken;
-    selectedProjectId = projectId;
     untrack((): void => {
       projectPnlState = beginReload<OfficeProjectPnl>(projectPnlState);
       violationsState = beginReload<PageResult<OfficeProjectCoherenceViolation>>(violationsState);
@@ -526,7 +525,7 @@
 
   function absoluteMicro(value: string): bigint {
     try {
-      const parsed = BigInt(value);
+      const parsed = apiMoneyToMicroUnits(value);
       return parsed < 0n ? -parsed : parsed;
     } catch {
       return 0n;

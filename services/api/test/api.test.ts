@@ -1363,6 +1363,9 @@ test("Bank accounts expose source labels and workspace fallback resolves eeee-mu
       readonly bankName?: string;
       readonly accountLabel?: string;
       readonly currentBalanceMicro: string;
+      readonly importedLineCount: number;
+      readonly linkedRecordCount: number;
+      readonly canDelete: boolean;
     }[];
   };
   const account = page.items.find((item) => item.id === "bank_mur");
@@ -1370,6 +1373,41 @@ test("Bank accounts expose source labels and workspace fallback resolves eeee-mu
   assert.equal(account?.bankName, "Mauritius Commercial Bank");
   assert.equal(account?.accountLabel, "MCB MUR");
   assert.equal(account?.currentBalanceMicro, "2500.00");
+  assert.equal(account?.importedLineCount, 3);
+  assert.ok((account?.linkedRecordCount ?? 0) > 0);
+  assert.equal(account?.canDelete, false);
+});
+
+test("bank account delete only removes empty accounts and never cascades financial data", async () => {
+  const app = createWriteEnabledFixtureApiService();
+
+  const blocked = await app.request("/eof/v1/bank/accounts/bank_mur", {
+    method: "DELETE",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "bank-account-delete-linked-1" },
+    body: JSON.stringify({ workspaceId: "workspace_1" })
+  });
+  assert.equal(blocked.status, 409);
+  assert.equal((await blocked.json()).error.code, "office_bank_account_has_dependencies");
+
+  const created = await jsonWrite(app, "/eof/v1/bank/accounts", "POST", "bank-account-create-empty-1", {
+    workspaceId: "workspace_1",
+    bankName: "Fixture Bank",
+    accountLabel: "Unused",
+    currency: "MUR",
+    active: true
+  });
+  assertReceipt(created);
+
+  const accounts = await app.request("/eof/v1/bank/accounts?workspaceId=workspace_1&limit=100", { headers: authHeaders() });
+  const emptyAccount = ((await accounts.json()) as {
+    readonly items: readonly { readonly id: string; readonly linkedRecordCount: number; readonly canDelete: boolean }[];
+  }).items.find((account) => account.id === created.id);
+  assert.equal(emptyAccount?.linkedRecordCount, 0);
+  assert.equal(emptyAccount?.canDelete, true);
+
+  assertReceipt(await jsonWrite(app, `/eof/v1/bank/accounts/${created.id}`, "DELETE", "bank-account-delete-empty-1", {
+    workspaceId: "workspace_1"
+  }));
 });
 
 test("Bank accounts derive balance from latest bank line when snapshot is missing", async () => {
@@ -3449,6 +3487,113 @@ test("classification files a transaction without flipping its income/expense typ
   assert.equal(classified.type, "income", `classification flipped the type to ${classified.type}`);
 });
 
+test("pending classification remains draft until the explicit validation action", async () => {
+  const app = createWriteEnabledFixtureApiService();
+  const created = await jsonWrite(app, "/eof/v1/transactions", "POST", "pending-two-step-create", {
+    workspaceId: "workspace_1",
+    occurredOn: "2026-02-23",
+    accountId: "bank_mur",
+    categoryId: null,
+    projectId: null,
+    description: "Classify before posting",
+    amountMicro: "25.50",
+    currency: "MUR",
+    type: "expense"
+  });
+  assertReceipt(created);
+
+  assertReceipt(await jsonWrite(app, `/eof/v1/transactions/${created.id}`, "PATCH", "pending-two-step-classify", {
+    workspaceId: "workspace_1",
+    occurredOn: "2026-02-23",
+    accountId: "bank_mur",
+    categoryId: "cat_rental_expense",
+    projectId: null,
+    description: "Classify before posting",
+    amountMicro: "25.50",
+    currency: "MUR",
+    type: "expense"
+  }));
+
+  const pendingResponse = await app.request(
+    "/eof/v1/transactions?workspaceId=workspace_1&status=pending&limit=100",
+    { headers: authHeaders() }
+  );
+  assert.equal(pendingResponse.status, 200);
+  const pendingPage = (await pendingResponse.json()) as {
+    readonly items: readonly { readonly id: string; readonly status: string; readonly categoryId: string | null; readonly amountMicro: string }[];
+  };
+  const classifiedDraft = pendingPage.items.find((item) => item.id === created.id);
+  assert.ok(classifiedDraft !== undefined);
+  assert.equal(classifiedDraft.status, "draft");
+  assert.equal(classifiedDraft.categoryId, "cat_rental_expense");
+  assert.equal(classifiedDraft.amountMicro, "25.50");
+
+  assertReceipt(await jsonWrite(
+    app,
+    `/eof/v1/transactions/${created.id}/validate`,
+    "PATCH",
+    "pending-two-step-validate",
+    { workspaceId: "workspace_1" }
+  ));
+
+  const postedResponse = await app.request(
+    "/eof/v1/transactions?workspaceId=workspace_1&status=posted&limit=100",
+    { headers: authHeaders() }
+  );
+  assert.equal(postedResponse.status, 200);
+  const postedPage = (await postedResponse.json()) as { readonly items: readonly { readonly id: string }[] };
+  assert.ok(postedPage.items.some((item) => item.id === created.id));
+});
+
+test("transaction writes reject cross-workspace records and account currency mismatches", async () => {
+  const app = createWriteEnabledFixtureApiService();
+  const created = await jsonWrite(app, "/eof/v1/transactions", "POST", "transaction-scope-create", {
+    workspaceId: "workspace_1",
+    occurredOn: "2026-02-24",
+    accountId: "bank_mur",
+    categoryId: null,
+    projectId: null,
+    description: "Workspace scoped transaction",
+    amountMicro: "10.00",
+    currency: "MUR",
+    type: "expense"
+  });
+
+  const crossWorkspaceUpdate = await app.request(`/eof/v1/transactions/${created.id}`, {
+    method: "PATCH",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "transaction-scope-update" },
+    body: JSON.stringify({
+      workspaceId: "eeee-mu",
+      occurredOn: "2026-02-24",
+      accountId: "bank_mur",
+      categoryId: null,
+      projectId: null,
+      description: "Wrong workspace",
+      amountMicro: "10.00",
+      currency: "MUR",
+      type: "expense"
+    })
+  });
+  assert.equal(crossWorkspaceUpdate.status, 404);
+
+  const currencyMismatch = await app.request(`/eof/v1/transactions/${created.id}`, {
+    method: "PATCH",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "transaction-currency-update" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      occurredOn: "2026-02-24",
+      accountId: "bank_mur",
+      categoryId: null,
+      projectId: null,
+      description: "Wrong currency",
+      amountMicro: "10.00",
+      currency: "EUR",
+      type: "expense"
+    })
+  });
+  assert.equal(currencyMismatch.status, 422);
+});
+
 test("transaction create without explicit type uses fixed fallback independent of category", async () => {
   const app = createWriteEnabledFixtureApiService();
 
@@ -3566,8 +3711,32 @@ test("bank import delete is administrator-only and permanently removes the batch
   assert.equal(secondDelete.status, 404, "the batch is already gone, so a fresh delete request must 404");
 });
 
-test("reconciliation manual match, unmatch, and reject flip the bank line status", async () => {
-  const app = createWriteEnabledFixtureApiService();
+test("reconciliation requires a classified ledger entry before match, unmatch, and reject", async () => {
+  const unclassifiedApp = createWriteEnabledFixtureApiService();
+  const denied = await unclassifiedApp.request("/eof/v1/reconciliations/match", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "recon-match-unclassified-1" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      statementLineId: "bank_line_unmatched",
+      transactionId: "tx_uncategorized",
+      matchedAt: "2026-02-20T10:00:00.000Z"
+    })
+  });
+  assert.equal(denied.status, 422);
+  assert.equal((await denied.json()).error.code, "office_reconciliation_category_required");
+
+  const fixtures = createFixtureStore();
+  const app = createWriteEnabledFixtureApiServiceWithOverrides({
+    office: {
+      ...fixtures.office,
+      transactions: fixtures.office.transactions.map((transaction) =>
+        transaction.id === "tx_uncategorized"
+          ? { ...transaction, categoryId: "cat_bank_fee", status: "validated" as const }
+          : transaction
+      )
+    }
+  });
   assert.equal((await reconciliationLineStatus(app, "bank_line_unmatched"))?.status, "unmatched");
 
   assertReceipt(await jsonWrite(app, "/eof/v1/reconciliations/match", "POST", "recon-match-1", {
@@ -3622,6 +3791,26 @@ test("reconciliation ignore marks a bank line ignored and distinct from rejected
   assert.equal((await reconciliationLineStatus(app, "bank_line_unmatched"))?.status, "ignored");
 });
 
+test("matched or suggested bank lines must be resolved before ignore or account reassignment", async () => {
+  const app = createWriteEnabledFixtureApiService();
+
+  const ignoreMatched = await app.request("/eof/v1/reconciliations/ignore", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "recon-ignore-matched-1" },
+    body: JSON.stringify({ workspaceId: "workspace_1", statementLineId: "bank_line_income" })
+  });
+  assert.equal(ignoreMatched.status, 409);
+  assert.equal((await ignoreMatched.json()).error.code, "office_reconciliation_ignore_invalid_status");
+
+  const moveSuggested = await app.request("/eof/v1/bank/raw/reassign-account", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "recon-move-suggested-1" },
+    body: JSON.stringify({ workspaceId: "workspace_1", statementLineId: "bank_line_rental", accountId: "bank_eur" })
+  });
+  assert.equal(moveSuggested.status, 409);
+  assert.equal((await moveSuggested.json()).error.code, "office_bank_line_account_locked");
+});
+
 test("bank raw line reassign-account moves a line to a different bank account", async () => {
   const app = createWriteEnabledFixtureApiService();
   const before = await app.request("/eof/v1/bank/raw?workspaceId=workspace_1", { headers: authHeaders() });
@@ -3662,14 +3851,32 @@ test("reconciliation create-transaction builds a ledger line from a bank line an
   const receipt = await jsonWrite(app, "/eof/v1/reconciliations/create-transaction", "POST", "recon-create-1", {
     workspaceId: "workspace_1",
     statementLineId: "bank_line_unmatched",
-    categoryId: null,
-    projectId: null,
+    categoryId: "cat_bank_fee",
+    projectId: "project_kaya",
     matchedAt: "2026-02-20T10:00:00.000Z"
   });
   assertReceipt(receipt);
   const candidate = await reconciliationLineStatus(app, "bank_line_unmatched");
   assert.equal(candidate?.status, "matched");
   assert.equal(candidate?.transactionId, receipt.id);
+
+  const reconciliations = await app.request(
+    "/eof/v1/reconciliations?workspaceId=workspace_1&accountId=bank_mur&status=matched&limit=100",
+    { headers: authHeaders() }
+  );
+  const created = ((await reconciliations.json()) as {
+    readonly items: readonly {
+      readonly transactionId: string;
+      readonly departmentLabel: string | null;
+      readonly divisionLabel: string | null;
+      readonly categoryLabel: string | null;
+      readonly projectLabel: string | null;
+    }[];
+  }).items.find((item) => item.transactionId === receipt.id);
+  assert.equal(created?.departmentLabel, "Operations");
+  assert.equal(created?.divisionLabel, "Administration");
+  assert.equal(created?.categoryLabel, "Bank fees");
+  assert.equal(created?.projectLabel, "Kaya Estate");
 });
 
 test("reconciliation create-transaction normalizes EUR bank lines to MUR for persisted transaction currency", async () => {
@@ -3705,7 +3912,7 @@ test("reconciliation create-transaction normalizes EUR bank lines to MUR for per
   const receipt = await jsonWrite(app, "/eof/v1/reconciliations/create-transaction", "POST", "recon-create-eur-1", {
     workspaceId: "workspace_1",
     statementLineId: "bank_line_eur_unmatched",
-    categoryId: null,
+    categoryId: "cat_bank_fee",
     projectId: null,
     matchedAt: "2026-02-20T10:00:00.000Z"
   });
@@ -4255,6 +4462,45 @@ test("office reconciliation operations reports actionable reconciliation KPIs", 
   assert.equal(payload.matchedRateBp, 3333);
 });
 
+test("office reconciliation list filters reliable suggestions by account, confidence, and exposes classification", async () => {
+  const app = createFixtureApiService();
+
+  const reliable = await app.request(
+    "/eof/v1/reconciliations?workspaceId=workspace_1&accountId=bank_mur&status=suggested&minConfidenceBp=9500&classifiedOnly=true&limit=100",
+    { headers: authHeaders() }
+  );
+  assert.equal(reliable.status, 200);
+  const payload = (await reliable.json()) as {
+    readonly items: readonly {
+      readonly statementLineId: string;
+      readonly departmentLabel: string | null;
+      readonly divisionLabel: string | null;
+      readonly categoryLabel: string | null;
+      readonly projectLabel: string | null;
+    }[];
+  };
+  assert.equal(payload.items.length, 1);
+  assert.equal(payload.items[0]?.statementLineId, "bank_line_rental");
+  assert.equal(payload.items[0]?.departmentLabel, "Events");
+  assert.equal(payload.items[0]?.divisionLabel, "Live");
+  assert.equal(payload.items[0]?.categoryLabel, "Equipment rental");
+  assert.equal(payload.items[0]?.projectLabel, "Kaya Estate");
+
+  const otherAccount = await app.request(
+    "/eof/v1/reconciliations?workspaceId=workspace_1&accountId=bank_eur&status=suggested&minConfidenceBp=9500&classifiedOnly=true&limit=100",
+    { headers: authHeaders() }
+  );
+  assert.equal(otherAccount.status, 200);
+  assert.equal(((await otherAccount.json()) as { readonly items: readonly unknown[] }).items.length, 0);
+
+  const tooHigh = await app.request(
+    "/eof/v1/reconciliations?workspaceId=workspace_1&accountId=bank_mur&status=suggested&minConfidenceBp=9900&classifiedOnly=true&limit=100",
+    { headers: authHeaders() }
+  );
+  assert.equal(tooHigh.status, 200);
+  assert.equal(((await tooHigh.json()) as { readonly items: readonly unknown[] }).items.length, 0);
+});
+
 test("office reconciliation approve-suggested auto-approves high-confidence suggested candidates", async () => {
   const app = createWriteEnabledFixtureApiService();
 
@@ -4320,6 +4566,75 @@ test("office reconciliation approve-suggested auto-approves high-confidence sugg
   assert.equal(operationsPayload.suggestedCount, 0);
   assert.equal(operationsPayload.matchedCount, 2);
   assert.equal(operationsPayload.autoApprovableCount, 0);
+});
+
+test("office reconciliation approve-suggested stays inside the selected account and date range", async () => {
+  const fixtures = createFixtureStore();
+  const baseLine = fixtures.office.bankStatementLines.find((line) => line.id === "bank_line_rental");
+  const baseTransaction = fixtures.office.transactions.find((transaction) => transaction.id === "tx_bedouin_rental");
+  const baseMatch = fixtures.office.bankReconciliationMatches.find((match) => match.bankStatementLineId === "bank_line_rental");
+  assert.ok(baseLine !== undefined);
+  assert.ok(baseTransaction !== undefined);
+  assert.ok(baseMatch !== undefined);
+
+  const scopedLine = {
+    ...baseLine,
+    id: "bank_line_eur_suggested",
+    accountId: "bank_eur",
+    description: "EUR scoped suggestion",
+    reference: "EUR-SCOPE",
+    reconciliationStatus: "suggested" as const,
+    matchedTransactionId: null
+  };
+  const scopedTransaction = {
+    ...baseTransaction,
+    id: "tx_eur_scoped",
+    accountId: "bank_eur"
+  };
+  const scopedMatch = {
+    ...baseMatch,
+    id: "recon_eur_scoped",
+    bankStatementLineId: scopedLine.id,
+    transactionId: scopedTransaction.id,
+    confidenceBp: 9900,
+    status: "suggested" as const,
+    approvedByUserId: null,
+    approvedAt: null
+  };
+  const app = createWriteEnabledFixtureApiServiceWithOverrides({
+    office: {
+      ...fixtures.office,
+      transactions: [...fixtures.office.transactions, scopedTransaction],
+      bankStatementLines: [...fixtures.office.bankStatementLines, scopedLine],
+      bankReconciliationMatches: [...fixtures.office.bankReconciliationMatches, scopedMatch]
+    }
+  });
+
+  const approve = await app.request("/eof/v1/reconciliations/approve-suggested", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "reconciliation-approve-scoped-1" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      accountId: "bank_mur",
+      dateFrom: "2026-02-01",
+      dateTo: "2026-02-28",
+      approvedAt: "2026-06-21T12:00:00.000Z",
+      minConfidenceBp: 9500,
+      limit: 10
+    })
+  });
+  assert.equal(approve.status, 200);
+  const receipt = (await approve.json()) as { readonly processedCount: number; readonly candidateCount: number };
+  assert.equal(receipt.processedCount, 1);
+  assert.equal(receipt.candidateCount, 1);
+
+  const remaining = await app.request(
+    "/eof/v1/reconciliations?workspaceId=workspace_1&accountId=bank_eur&status=suggested&minConfidenceBp=9500&limit=100",
+    { headers: authHeaders() }
+  );
+  assert.equal(remaining.status, 200);
+  const remainingItems = (await remaining.json()) as { readonly items: readonly { readonly id: string }[] };
+  assert.deepEqual(remainingItems.items.map((item) => item.id), ["recon_eur_scoped"]);
 });
 
 test("office bank import confirm skips ambiguous reconciliation suggestions", async () => {

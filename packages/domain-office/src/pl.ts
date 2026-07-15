@@ -242,6 +242,62 @@ export function readProjectPnl(dataset: OfficePnlDataset, projectId: string, fil
   };
 }
 
+// Batch counterpart used by project indexes: resolve references once and scan
+// transactions/allocations once, rather than repeating the full P&L pass per project.
+export function readProjectPnls(dataset: OfficePnlDataset, filters: OfficePnlFilters): readonly OfficeProjectPnlResponse[] {
+  const resolved = resolveDataset(dataset);
+  const groups = new Map<string, MutableAccumulator>();
+  const view: OfficeProjectPnlResponse["view"] = filters.departmentId === null
+    ? "project_ledger"
+    : "project_department_allocated";
+
+  if (filters.departmentId === null) {
+    for (const transaction of filterLedgerTransactions(dataset.transactions, filters)) {
+      if (transaction.projectId === null || !resolved.projectsById.has(transaction.projectId)) {
+        continue;
+      }
+      addTransactionToGroup(groups, transaction.projectId, transaction, transaction.amountMinor);
+    }
+  } else {
+    const inputs = filterAllocationInputs(dataset, filters, {
+      departmentId: filters.departmentId,
+      projectId: null,
+      partnerId: null
+    });
+    for (const input of inputs) {
+      const projectId = input.transaction.projectId;
+      if (projectId === null || !resolved.projectsById.has(projectId)) {
+        continue;
+      }
+      addTransactionToGroup(groups, projectId, input.transaction, input.allocation.amountMinor);
+    }
+  }
+
+  const budgetsByProject = new Map<string, { incomeMinor: bigint; expenseMinor: bigint }>();
+  for (const line of dataset.projectBudgetLines) {
+    const budget = budgetsByProject.get(line.projectId) ?? { incomeMinor: 0n, expenseMinor: 0n };
+    if (line.type === "income") {
+      budget.incomeMinor += line.plannedAmountMinor;
+    } else {
+      budget.expenseMinor += line.plannedAmountMinor;
+    }
+    budgetsByProject.set(line.projectId, budget);
+  }
+
+  return dataset.projects.map((project: OfficeProjectRow): OfficeProjectPnlResponse => {
+    const accumulator = groups.get(project.id) ?? createAccumulator();
+    const totals = formatAccumulator(freezeAccumulator(accumulator), view);
+    const budget = budgetsByProject.get(project.id) ?? { incomeMinor: 0n, expenseMinor: 0n };
+    return {
+      ...totals,
+      project: toProjectResponse(project),
+      budget_income: eofMoney.format(budget.incomeMinor),
+      budget_expenses: eofMoney.format(budget.expenseMinor),
+      view
+    };
+  });
+}
+
 export function readPartnerPnl(dataset: OfficePnlDataset, partnerId: string, filters: OfficePnlFilters): OfficePartnerPnlResponse {
   const resolved = resolveDataset(dataset);
   const partner = requirePartner(resolved, partnerId);

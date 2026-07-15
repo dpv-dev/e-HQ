@@ -668,6 +668,8 @@ export interface OfficeReconciliationsQuery extends PageQuery {
   readonly period: IsoMonthString | null;
   readonly dateFrom?: IsoDateString | null;
   readonly dateTo?: IsoDateString | null;
+  readonly minConfidenceBp?: BasisPoints | null;
+  readonly classifiedOnly?: boolean;
   readonly status: "unmatched" | "suggested" | "matched" | "rejected" | "ignored" | null;
 }
 
@@ -680,6 +682,14 @@ export interface OfficeReconciliationCandidate {
   readonly ledgerDescription: string;
   readonly amountMicro: MoneyMicroString;
   readonly confidenceBp: BasisPoints;
+  readonly departmentId: EntityId | null;
+  readonly departmentLabel: string | null;
+  readonly divisionId: EntityId | null;
+  readonly divisionLabel: string | null;
+  readonly categoryId: EntityId | null;
+  readonly categoryLabel: string | null;
+  readonly projectId: EntityId | null;
+  readonly projectLabel: string | null;
   readonly status: "unmatched" | "suggested" | "matched" | "rejected" | "ignored";
 }
 
@@ -692,6 +702,9 @@ export interface OfficeReconciliationApproveRequest {
 export interface OfficeReconciliationApproveSuggestedRequest {
   readonly workspaceId: EntityId;
   readonly approvedAt: IsoDateTimeString;
+  readonly accountId?: EntityId | null;
+  readonly dateFrom?: IsoDateString | null;
+  readonly dateTo?: IsoDateString | null;
   readonly minConfidenceBp?: BasisPoints;
   readonly limit?: number;
 }
@@ -753,7 +766,7 @@ export interface OfficeBankRawLineReassignRequest {
 export interface OfficeReconciliationCreateTransactionRequest {
   readonly workspaceId: EntityId;
   readonly statementLineId: EntityId;
-  readonly categoryId: EntityId | null;
+  readonly categoryId: EntityId;
   readonly projectId: EntityId | null;
   readonly matchedAt: IsoDateTimeString;
 }
@@ -1158,12 +1171,17 @@ export interface OfficeBankAccountSummary {
   readonly currentBalanceMurMicro: MoneyMicroString | null;
   readonly isActive: boolean;
   readonly balanceAsOf: IsoDateString | null;
+  readonly importedLineCount: number;
+  readonly linkedRecordCount: number;
+  readonly canDelete: boolean;
 }
 
 export interface OfficeBankRawLinesQuery extends PageQuery {
   readonly workspaceId: EntityId;
   readonly period: IsoMonthString | null;
   readonly accountId: EntityId | null;
+  readonly dateFrom?: IsoDateString | null;
+  readonly dateTo?: IsoDateString | null;
 }
 
 export interface OfficeBankRawLine {

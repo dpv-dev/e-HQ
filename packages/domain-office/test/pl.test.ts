@@ -10,7 +10,8 @@ import {
   readPnlByCategory,
   readPnlByDepartment,
   readPnlByDivision,
-  readProjectPnl
+  readProjectPnl,
+  readProjectPnls
 } from "../src/pl.ts";
 
 const noFilter: OfficePnlFilters = {
@@ -406,6 +407,17 @@ test("project P&L fixes BUG-M1 by reading non-zero ledger totals without a depar
   });
 
   assert.notEqual(readProjectPnl(fixture, "project_alma", noFilter).income, "0.00");
+});
+
+test("batch project P&L matches individual reads with one shared scan", () => {
+  const batch = readProjectPnls(fixture, noFilter);
+  assert.equal(batch.length, fixture.projects.length);
+  for (const project of fixture.projects) {
+    assert.deepEqual(
+      batch.find((row) => row.project.id === project.id),
+      readProjectPnl(fixture, project.id, noFilter)
+    );
+  }
 });
 
 test("project P&L with a department filter reads allocations", () => {

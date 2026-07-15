@@ -78,6 +78,7 @@ import {
   readPnlByCategory,
   readPnlByDepartment,
   readProjectPnl,
+  readProjectPnls,
   type OfficeBankAccountRow,
   type OfficeBankDedupeLine,
   type OfficeBankQualityResult,
@@ -96,6 +97,7 @@ import {
   type OfficeCashflowManualEntryRow,
   type OfficePnlMonthlyRow,
   type OfficeProjectRow,
+  type OfficeProjectPnlResponse as DomainOfficeProjectPnlResponse,
   type OfficeAdvanceApplicationRow,
   type OfficeManagedAdvanceRow,
   type OfficeTransactionRow
@@ -399,6 +401,8 @@ interface OfficeBankAccountDeleteCounts {
   readonly reconciliationMatchCount: number;
   readonly importBatchCount: number;
   readonly cashflowProjectionCount: number;
+  readonly transactionCount: number;
+  readonly manualCashflowEntryCount: number;
 }
 
 interface OfficeBankImportDeleteCounts {
@@ -683,6 +687,9 @@ const officeReconciliationApproveSchema = workspaceBodySchema.extend({
 });
 const officeReconciliationApproveSuggestedSchema = workspaceBodySchema.extend({
   approvedAt: z.string().regex(isoDateTimePattern),
+  accountId: z.string().min(1).nullable().optional(),
+  dateFrom: z.string().regex(isoDatePattern).nullable().optional(),
+  dateTo: z.string().regex(isoDatePattern).nullable().optional(),
   minConfidenceBp: z.number().int().min(0).max(10_000).optional(),
   limit: z.number().int().min(1).max(1_000).optional()
 });
@@ -701,7 +708,7 @@ const officeBankRawLineReassignSchema = workspaceBodySchema.extend({
 });
 const officeReconciliationCreateTransactionSchema = workspaceBodySchema.extend({
   statementLineId: z.string().min(1),
-  categoryId: nullableStringSchema,
+  categoryId: z.string().min(1),
   projectId: nullableStringSchema,
   matchedAt: z.string().regex(isoDateTimePattern)
 });
@@ -1260,9 +1267,10 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
 
   app.get("/eof/v1/reconciliations", (context) => {
     const workspaceId = resolveWorkspaceId(context);
+    const filters = reconciliationCandidateFiltersFromQuery(context);
     return context.json(pageItems(context, toReconciliationCandidates(dependencies.fixtures.office).filter((candidate) => {
       return isReconciliationCandidateInWorkspace(dependencies.fixtures.office, candidate, workspaceId)
-        && matchesReconciliationQuery(context, candidate);
+        && matchesReconciliationFilters(dependencies.fixtures.office, candidate, filters);
     })));
   });
 
@@ -1507,11 +1515,13 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
     const derivedSnapshotByAccount = derivedBankSnapshotByAccount(dependencies.fixtures.office.bankStatementLines);
     const accounts = dependencies.fixtures.office.bankAccounts
       .filter((account) => account.workspaceId === workspaceId)
-      .map((account) =>
-        toApiBankAccountSummary(
-          resolveBankAccountSnapshot(account, latestLineByAccount.get(account.id), derivedSnapshotByAccount.get(account.id))
-        )
-      );
+      .map((account) => {
+        const dependencyCounts = countOfficeBankAccountFixtureDependencies(dependencies.fixtures, account.id);
+        return toApiBankAccountSummary(
+          resolveBankAccountSnapshot(account, latestLineByAccount.get(account.id), derivedSnapshotByAccount.get(account.id)),
+          dependencyCounts
+        );
+      });
     const page = pageItems(context, accounts);
     return context.json(page);
   });
@@ -1569,8 +1579,7 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
         ? { dateFrom: null, dateTo: null, departmentId: null }
         : rangeFiltersFromContext(context, period ?? dependencies.nowIso().slice(0, 7), null);
     const status = nullableQuery(context, "status");
-    const projects = dataset.projects
-      .map((project) => toProjectSummary(dataset, project, filters))
+    const projects = toProjectSummaries(dataset, filters)
       .filter((project) => status === null || project.status === status);
     return context.json(pageItems(context, projects));
   });
@@ -2347,6 +2356,7 @@ async function readZodBody<TBody>(context: ApiContext, schema: z.ZodType<TBody>)
 
 async function officeTransactionCreateResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
   const request = await readZodBody<OfficeTransactionWriteRequest>(context, officeTransactionWriteSchema);
+  assertOfficeTransactionWriteReferences(dependencies.fixtures.office, request);
   const amountMinor = normalizeEofAmountField(context, request.amountMicro, "amountMicro");
   const transactionId = randomUUID();
   const transactionType = request.type ?? "expense";
@@ -2396,11 +2406,20 @@ async function officeTransactionUpdateResponse(context: ApiContext, dependencies
   const transactionId = requirePathParam(context, "transactionId");
   const request = await readZodBody<OfficeTransactionWriteRequest>(context, officeTransactionWriteSchema);
   const before = requireOfficeTransaction(dependencies.fixtures.office, transactionId);
+  assertOfficeTransactionInWorkspace(before, request.workspaceId);
+  if (before.status === "cancelled") {
+    throw new ApiRouteError(409, "office_transaction_cancelled", "A cancelled transaction cannot be edited.", [
+      `transactionId=${transactionId}`
+    ]);
+  }
+  assertOfficeTransactionWriteReferences(dependencies.fixtures.office, request);
   const amountMinor = normalizeEofAmountField(context, request.amountMicro, "amountMicro");
   // Classification must never flip income/expense: keep the stored type unless
   // the caller explicitly asks to change it.
   const transactionType = request.type ?? before.type;
-  const transactionStatus: OfficeTransactionRow["status"] = request.categoryId === null ? "draft" : "validated";
+  // Classification and validation are separate audited actions. Removing a category
+  // returns the row to draft; adding one never silently posts it.
+  const transactionStatus: OfficeTransactionRow["status"] = request.categoryId === null ? "draft" : before.status;
   const idempotencyKey = requireIdempotencyKey(context);
   const actor = context.get("authUser");
   const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
@@ -2442,6 +2461,12 @@ async function officeTransactionValidateResponse(context: ApiContext, dependenci
   const transactionId = requirePathParam(context, "transactionId");
   const request = await readZodBody<WorkspaceBodyRequest>(context, workspaceBodySchema);
   const before = requireOfficeTransaction(dependencies.fixtures.office, transactionId);
+  assertOfficeTransactionInWorkspace(before, request.workspaceId);
+  if (before.status === "cancelled") {
+    throw new ApiRouteError(409, "office_transaction_cancelled", "A cancelled transaction cannot be validated.", [
+      `transactionId=${transactionId}`
+    ]);
+  }
   if (before.categoryId === null) {
     throw new ApiRouteError(422, "office_transaction_category_required", "A transaction must be classified before validation.", [
       `transactionId=${transactionId}`
@@ -2486,6 +2511,12 @@ async function officeTransactionCancelResponse(context: ApiContext, dependencies
   const transactionId = requirePathParam(context, "transactionId");
   const request = await readZodBody<WorkspaceBodyRequest>(context, workspaceBodySchema);
   const before = requireOfficeTransaction(dependencies.fixtures.office, transactionId);
+  assertOfficeTransactionInWorkspace(before, request.workspaceId);
+  if (before.status === "cancelled") {
+    throw new ApiRouteError(409, "office_transaction_already_cancelled", "The transaction is already cancelled.", [
+      `transactionId=${transactionId}`
+    ]);
+  }
   const idempotencyKey = requireIdempotencyKey(context);
   const actor = context.get("authUser");
   const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
@@ -2627,6 +2658,9 @@ async function officePlanComptableDeleteResponse(context: ApiContext, dependenci
 async function officeReconciliationApproveResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
   const request = await readZodBody<OfficeReconciliationApproveRequest>(context, officeReconciliationApproveSchema);
   const candidates = request.reconciliationIds.map((id) => requireReconciliationCandidate(dependencies.fixtures.office, id));
+  for (const candidate of candidates) {
+    assertReconciliationCandidateCanMatch(dependencies.fixtures.office, candidate, request.workspaceId);
+  }
   const primaryReconciliationId = request.reconciliationIds[0];
   if (primaryReconciliationId === undefined) {
     throw new ApiRouteError(400, "body_field_required", "At least one reconciliation id is required.", [`path=${context.req.path}`]);
@@ -2663,9 +2697,20 @@ async function officeReconciliationApproveSuggestedResponse(context: ApiContext,
   const request = await readZodBody<OfficeReconciliationApproveSuggestedRequest>(context, officeReconciliationApproveSuggestedSchema);
   const minConfidenceBp = request.minConfidenceBp ?? 9500;
   const limit = request.limit ?? 200;
-  const nowIso = dependencies.nowIso();
   const allCandidates = toReconciliationCandidates(dependencies.fixtures.office)
-    .filter((candidate) => candidate.status === "suggested" && candidate.confidenceBp >= minConfidenceBp)
+    .filter((candidate) => {
+      return isReconciliationCandidateInWorkspace(dependencies.fixtures.office, candidate, request.workspaceId)
+        && candidate.status === "suggested"
+        && candidate.categoryId !== null
+        && matchesReconciliationFilters(dependencies.fixtures.office, candidate, {
+          accountId: request.accountId ?? null,
+          period: null,
+          dateFrom: request.dateFrom ?? null,
+          dateTo: request.dateTo ?? null,
+          minConfidenceBp,
+          classifiedOnly: true
+        });
+    })
     .sort((left, right) => right.confidenceBp - left.confidenceBp || left.id.localeCompare(right.id));
   const candidates = allCandidates.slice(0, limit);
   const reconciliationIds = candidates.map((candidate) => candidate.id);
@@ -2682,6 +2727,9 @@ async function officeReconciliationApproveSuggestedResponse(context: ApiContext,
       workspaceId: request.workspaceId,
       approvedAt: request.approvedAt,
       reconciliationIds,
+      accountId: request.accountId ?? null,
+      dateFrom: request.dateFrom ?? null,
+      dateTo: request.dateTo ?? null,
       minConfidenceBp,
       limit
     },
@@ -2711,6 +2759,9 @@ async function officeReconciliationApproveSuggestedResponse(context: ApiContext,
           mode: "approve_suggested",
           status: "matched",
           processedCount: reconciliationIds.length,
+          accountId: request.accountId ?? null,
+          dateFrom: request.dateFrom ?? null,
+          dateTo: request.dateTo ?? null,
           minConfidenceBp,
           limit,
           approvedAt: request.approvedAt
@@ -2746,6 +2797,19 @@ function requireOfficeBankLine(dataset: OfficeAnalyticsDataset, statementLineId:
   }
 
   return line;
+}
+
+function assertOfficeBankLineInWorkspace(
+  dataset: OfficeAnalyticsDataset,
+  line: OfficeBankStatementLineRow,
+  workspaceId: string
+): void {
+  const account = dataset.bankAccounts.find((candidate) => candidate.id === line.accountId);
+  if (account === undefined || account.workspaceId !== workspaceId) {
+    throw new ApiRouteError(404, "office_bank_line_not_found", "Office bank statement line was not found.", [
+      `statementLineId=${line.id}`
+    ]);
+  }
 }
 
 // Ledger transactions store a POSITIVE magnitude; the `type` (income/expense) carries the sign
@@ -2844,6 +2908,17 @@ async function officeReconciliationMatchResponse(context: ApiContext, dependenci
   const request = await readZodBody<OfficeReconciliationMatchRequest>(context, officeReconciliationMatchSchema);
   const line = requireOfficeBankLine(dependencies.fixtures.office, request.statementLineId);
   const transaction = requireOfficeTransaction(dependencies.fixtures.office, request.transactionId);
+  assertOfficeBankLineInWorkspace(dependencies.fixtures.office, line, request.workspaceId);
+  if (transaction.workspaceId !== request.workspaceId) {
+    throw new ApiRouteError(404, "office_transaction_not_found", "Office transaction was not found.", [
+      `transactionId=${transaction.id}`
+    ]);
+  }
+  if (transaction.categoryId === null) {
+    throw new ApiRouteError(422, "office_reconciliation_category_required", "Classify the ledger entry before matching it to a bank line.", [
+      `transactionId=${transaction.id}`
+    ]);
+  }
   assertOfficeReconciliationKernelMatch(context, line, transaction);
   const idempotencyKey = requireIdempotencyKey(context);
   const actor = context.get("authUser");
@@ -2876,6 +2951,13 @@ async function officeReconciliationMatchResponse(context: ApiContext, dependenci
 async function officeReconciliationUnmatchResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
   const request = await readZodBody<OfficeReconciliationLineRequest>(context, officeReconciliationLineSchema);
   const line = requireOfficeBankLine(dependencies.fixtures.office, request.statementLineId);
+  assertOfficeBankLineInWorkspace(dependencies.fixtures.office, line, request.workspaceId);
+  if (line.reconciliationStatus !== "matched") {
+    throw new ApiRouteError(409, "office_reconciliation_not_matched", "Only a matched bank line can be unmatched.", [
+      `statementLineId=${line.id}`,
+      `status=${line.reconciliationStatus}`
+    ]);
+  }
   const idempotencyKey = requireIdempotencyKey(context);
   const actor = context.get("authUser");
   const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
@@ -2906,7 +2988,14 @@ async function officeReconciliationUnmatchResponse(context: ApiContext, dependen
 
 async function officeReconciliationRejectResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
   const request = await readZodBody<OfficeReconciliationLineRequest>(context, officeReconciliationLineSchema);
-  requireOfficeBankLine(dependencies.fixtures.office, request.statementLineId);
+  const line = requireOfficeBankLine(dependencies.fixtures.office, request.statementLineId);
+  assertOfficeBankLineInWorkspace(dependencies.fixtures.office, line, request.workspaceId);
+  if (line.reconciliationStatus !== "unmatched" && line.reconciliationStatus !== "suggested") {
+    throw new ApiRouteError(409, "office_reconciliation_reject_invalid_status", "Only an unmatched or suggested bank line can be rejected.", [
+      `statementLineId=${line.id}`,
+      `status=${line.reconciliationStatus}`
+    ]);
+  }
   const idempotencyKey = requireIdempotencyKey(context);
   const actor = context.get("authUser");
   const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
@@ -2937,7 +3026,14 @@ async function officeReconciliationRejectResponse(context: ApiContext, dependenc
 
 async function officeReconciliationIgnoreResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
   const request = await readZodBody<OfficeReconciliationLineRequest>(context, officeReconciliationLineSchema);
-  requireOfficeBankLine(dependencies.fixtures.office, request.statementLineId);
+  const line = requireOfficeBankLine(dependencies.fixtures.office, request.statementLineId);
+  assertOfficeBankLineInWorkspace(dependencies.fixtures.office, line, request.workspaceId);
+  if (line.reconciliationStatus === "matched" || line.reconciliationStatus === "ignored") {
+    throw new ApiRouteError(409, "office_reconciliation_ignore_invalid_status", "Only an unresolved bank line can be ignored.", [
+      `statementLineId=${line.id}`,
+      `status=${line.reconciliationStatus}`
+    ]);
+  }
   const idempotencyKey = requireIdempotencyKey(context);
   const actor = context.get("authUser");
   const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
@@ -2969,6 +3065,12 @@ async function officeReconciliationIgnoreResponse(context: ApiContext, dependenc
 async function officeBankRawLineReassignResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
   const request = await readZodBody<OfficeBankRawLineReassignRequest>(context, officeBankRawLineReassignSchema);
   const line = requireOfficeBankLine(dependencies.fixtures.office, request.statementLineId);
+  if (line.reconciliationStatus === "matched" || line.reconciliationStatus === "suggested") {
+    throw new ApiRouteError(409, "office_bank_line_account_locked", "Unmatch or reject this bank line before moving it to another account.", [
+      `statementLineId=${line.id}`,
+      `status=${line.reconciliationStatus}`
+    ]);
+  }
   // Look up target account by ID only — workspace access is already validated
   // upstream by requirePermissionForWorkspace. Filtering by workspaceId here
   // causes false 404s when the stored workspace_id differs from the request
@@ -2979,6 +3081,14 @@ async function officeBankRawLineReassignResponse(context: ApiContext, dependenci
   if (targetAccount === undefined) {
     throw new ApiRouteError(404, "office_bank_account_not_found", "Target bank account was not found.", [
       `path=${context.req.path}`,
+      `accountId=${request.accountId}`
+    ]);
+  }
+  const sourceAccount = dependencies.fixtures.office.bankAccounts.find(
+    (account: OfficeBankAccountRow): boolean => account.id === line.accountId
+  );
+  if (sourceAccount === undefined || sourceAccount.workspaceId !== targetAccount.workspaceId) {
+    throw new ApiRouteError(404, "office_bank_account_not_found", "Target bank account was not found.", [
       `accountId=${request.accountId}`
     ]);
   }
@@ -3014,6 +3124,12 @@ async function officeBankRawLineReassignResponse(context: ApiContext, dependenci
 async function officeReconciliationCreateTransactionResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
   const request = await readZodBody<OfficeReconciliationCreateTransactionRequest>(context, officeReconciliationCreateTransactionSchema);
   const line = requireOfficeBankLine(dependencies.fixtures.office, request.statementLineId);
+  assertOfficeBankLineInWorkspace(dependencies.fixtures.office, line, request.workspaceId);
+  // Category owns the division/department path; validate that path before any write.
+  resolveCategoryPath(dependencies.fixtures.office, request.categoryId);
+  if (request.projectId !== null) {
+    requireProject(dependencies.fixtures.office, request.projectId);
+  }
   const transactionId = randomUUID();
   // Reconciliation compares against MUR whenever a bank line already carries a
   // converted MUR amount; persist the created transaction in that same currency
@@ -3034,7 +3150,7 @@ async function officeReconciliationCreateTransactionResponse(context: ApiContext
   // in, debit = money out); the category only files the transaction and never
   // rewrites the type.
   const transactionType: OfficeTransactionRow["type"] = line.direction === "credit" ? "income" : "expense";
-  const transactionStatus: OfficeTransactionRow["status"] = request.categoryId === null ? "draft" : "validated";
+  const transactionStatus: OfficeTransactionRow["status"] = "validated";
   assertOfficeReconciliationKernelCreate(context, line, transactionId, amountMinor, reconciliationCurrency);
   const idempotencyKey = requireIdempotencyKey(context);
   const actor = context.get("authUser");
@@ -3427,6 +3543,14 @@ async function officeBankAccountDeleteResponse(context: ApiContext, dependencies
   }
 
   const fixtureCounts = countOfficeBankAccountFixtureDependencies(dependencies.fixtures, accountId);
+  if (hasOfficeBankAccountDependencies(fixtureCounts)) {
+    throw new ApiRouteError(409, "office_bank_account_has_dependencies", "Deactivate this bank account instead of deleting linked financial data.", [
+      `accountId=${accountId}`,
+      `statementLineCount=${String(fixtureCounts.statementLineCount)}`,
+      `transactionCount=${String(fixtureCounts.transactionCount)}`,
+      `manualCashflowEntryCount=${String(fixtureCounts.manualCashflowEntryCount)}`
+    ]);
+  }
   const idempotencyKey = requireIdempotencyKey(context);
   const actor = context.get("authUser");
   const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
@@ -3440,7 +3564,7 @@ async function officeBankAccountDeleteResponse(context: ApiContext, dependencies
       await acquireAdvisoryLock(tx, `office:bank-account:${accountId}`);
       const deletedCounts = await persistOfficeBankAccountDelete(tx, accountId, request);
       if (tx.kind !== "memory" && deletedCounts.accountCount !== 1) {
-        throw new ApiRouteError(404, "office_bank_account_not_found", "Office bank account was not found.", [
+        throw new ApiRouteError(409, "office_bank_account_delete_conflict", "The bank account changed or gained linked records before deletion.", [
           `accountId=${accountId}`,
           `workspaceId=${request.workspaceId}`
         ]);
@@ -3496,66 +3620,36 @@ async function persistOfficeBankAccountDelete(
       statementLineCount: 0,
       reconciliationMatchCount: 0,
       importBatchCount: 0,
-      cashflowProjectionCount: 0
+      cashflowProjectionCount: 0,
+      transactionCount: 0,
+      manualCashflowEntryCount: 0
     };
   }
 
   const rows = queryRowsFromResult(await tx.executor.execute(sql`
-    with scoped_account as (
-      select id
-      from office_bank_accounts
+    with deleted_account as (
+      delete from office_bank_accounts
       where id = ${accountId}
         and workspace_id = ${request.workspaceId}
-    ),
-    scoped_lines as (
-      select line.id
-      from office_bank_statement_lines line
-      join scoped_account account on account.id = line.account_id
-    ),
-    deleted_matches as (
-      delete from office_bank_reconciliation_matches match
-      using scoped_lines line
-      where match.bank_statement_line_id = line.id
-      returning match.id
-    ),
-    deleted_lines as (
-      delete from office_bank_statement_lines line
-      using scoped_account account
-      where line.account_id = account.id
-      returning line.id
-    ),
-    deleted_cashflow as (
-      delete from office_cashflow_projection_rows row
-      using scoped_account account
-      where row.account_id = account.id
-      returning row.id
-    ),
-    deleted_batches as (
-      delete from office_bank_import_batches batch
-      using scoped_account account
-      where batch.account_id = account.id
-      returning batch.id
-    ),
-    deleted_account as (
-      delete from office_bank_accounts account
-      using scoped_account scoped
-      where account.id = scoped.id
-      returning account.id
+        and not exists (select 1 from office_bank_statement_lines where account_id = ${accountId})
+        and not exists (select 1 from office_bank_import_batches where account_id = ${accountId})
+        and not exists (select 1 from office_cashflow_projection_rows where account_id = ${accountId})
+        and not exists (select 1 from transactions where account_id = ${accountId})
+        and not exists (select 1 from office_cashflow_manual_entries where account_id = ${accountId})
+      returning id
     )
     select
-      (select count(*) from deleted_account)::int as account_count,
-      (select count(*) from deleted_lines)::int as statement_line_count,
-      (select count(*) from deleted_matches)::int as reconciliation_match_count,
-      (select count(*) from deleted_batches)::int as import_batch_count,
-      (select count(*) from deleted_cashflow)::int as cashflow_projection_count
+      (select count(*) from deleted_account)::int as account_count
   `));
   const row = rows[0];
   return {
     accountCount: integerQueryField(row, "account_count"),
-    statementLineCount: integerQueryField(row, "statement_line_count"),
-    reconciliationMatchCount: integerQueryField(row, "reconciliation_match_count"),
-    importBatchCount: integerQueryField(row, "import_batch_count"),
-    cashflowProjectionCount: integerQueryField(row, "cashflow_projection_count")
+    statementLineCount: 0,
+    reconciliationMatchCount: 0,
+    importBatchCount: 0,
+    cashflowProjectionCount: 0,
+    transactionCount: 0,
+    manualCashflowEntryCount: 0
   };
 }
 
@@ -3591,28 +3685,23 @@ function countOfficeBankAccountFixtureDependencies(fixtures: ApiFixtureStore, ac
       statementLineIds.has(match.bankStatementLineId)
     ).length,
     importBatchCount: fixtures.office.bankImportBatches.filter((batch: OfficeBankImportBatchRow): boolean => batch.accountId === accountId).length,
-    cashflowProjectionCount: fixtures.office.cashflowProjectionRows.filter((row): boolean => row.accountId === accountId).length
+    cashflowProjectionCount: fixtures.office.cashflowProjectionRows.filter((row): boolean => row.accountId === accountId).length,
+    transactionCount: fixtures.office.transactions.filter((transaction: OfficeTransactionRow): boolean => transaction.accountId === accountId).length,
+    manualCashflowEntryCount: fixtures.officeCashflowManualEntries.filter((entry): boolean => entry.accountId === accountId).length
   };
+}
+
+function hasOfficeBankAccountDependencies(counts: OfficeBankAccountDeleteCounts): boolean {
+  return counts.statementLineCount > 0
+    || counts.reconciliationMatchCount > 0
+    || counts.importBatchCount > 0
+    || counts.cashflowProjectionCount > 0
+    || counts.transactionCount > 0
+    || counts.manualCashflowEntryCount > 0;
 }
 
 function deleteOfficeBankAccountFixture(fixtures: ApiFixtureStore, accountId: string): void {
   const mutableOffice = fixtures.office as Mutable<OfficeAnalyticsDataset>;
-  const statementLineIds = new Set<string>(
-    fixtures.office.bankStatementLines
-      .filter((line: OfficeBankStatementLineRow): boolean => line.accountId === accountId)
-      .map((line: OfficeBankStatementLineRow): string => line.id)
-  );
-
-  mutableOffice.bankReconciliationMatches = fixtures.office.bankReconciliationMatches.filter(
-    (match): boolean => !statementLineIds.has(match.bankStatementLineId)
-  );
-  mutableOffice.bankStatementLines = fixtures.office.bankStatementLines.filter(
-    (line: OfficeBankStatementLineRow): boolean => line.accountId !== accountId
-  );
-  mutableOffice.cashflowProjectionRows = fixtures.office.cashflowProjectionRows.filter((row): boolean => row.accountId !== accountId);
-  mutableOffice.bankImportBatches = fixtures.office.bankImportBatches.filter(
-    (batch: OfficeBankImportBatchRow): boolean => batch.accountId !== accountId
-  );
   mutableOffice.bankAccounts = fixtures.office.bankAccounts.filter((account: OfficeBankAccountRow): boolean => account.id !== accountId);
 }
 
@@ -5683,6 +5772,46 @@ function requireOfficeTransaction(dataset: OfficeAnalyticsDataset, transactionId
   }
 
   return transaction;
+}
+
+function assertOfficeTransactionInWorkspace(transaction: OfficeTransactionRow, workspaceId: string): void {
+  if (transaction.workspaceId !== workspaceId) {
+    throw new ApiRouteError(404, "office_transaction_not_found", "Office transaction was not found.", [
+      `transactionId=${transaction.id}`
+    ]);
+  }
+}
+
+function assertOfficeTransactionWriteReferences(
+  dataset: OfficeAnalyticsDataset,
+  request: OfficeTransactionWriteRequest
+): void {
+  const account = dataset.bankAccounts.find(
+    (candidate: OfficeBankAccountRow): boolean => candidate.id === request.accountId && candidate.workspaceId === request.workspaceId
+  );
+  if (account === undefined) {
+    throw new ApiRouteError(404, "office_bank_account_not_found", "Office bank account was not found in this workspace.", [
+      `accountId=${request.accountId}`
+    ]);
+  }
+  if (account.currency !== request.currency) {
+    throw new ApiRouteError(422, "office_transaction_currency_mismatch", "Transaction currency must match the selected bank account.", [
+      `accountId=${account.id}`,
+      `accountCurrency=${account.currency}`,
+      `transactionCurrency=${request.currency}`
+    ]);
+  }
+  if (request.categoryId !== null) {
+    if (!dataset.categories.some((category: OfficeCategoryRow): boolean => category.id === request.categoryId)) {
+      throw new ApiRouteError(404, "office_category_not_found", "Office category was not found.", [
+        `categoryId=${request.categoryId}`
+      ]);
+    }
+    resolveCategoryPath(dataset, request.categoryId);
+  }
+  if (request.projectId !== null) {
+    requireProject(dataset, request.projectId);
+  }
 }
 
 function transactionFromOfficeRequest(
@@ -10842,14 +10971,14 @@ function pageWindow(context: ApiContext): PageWindow {
 
 function parsePositiveInteger(value: string, label: string): number {
   if (!/^[0-9]+$/.test(value)) {
-    throw new ApiRouteError(400, "query_integer_invalid", "Pagination query parameters must be non-negative integers.", [
+    throw new ApiRouteError(400, "query_integer_invalid", "Query parameter must be a non-negative integer.", [
       `${label}=${value}`
     ]);
   }
 
   const parsed = parseInt(value, 10);
   if (!Number.isSafeInteger(parsed)) {
-    throw new ApiRouteError(400, "query_integer_invalid", "Pagination query parameter is outside the safe integer range.", [
+    throw new ApiRouteError(400, "query_integer_invalid", "Query parameter is outside the safe integer range.", [
       `${label}=${value}`
     ]);
   }
@@ -10981,7 +11110,7 @@ function readOfficeTransactionVatMeta(transaction: OfficeTransactionRow): {
   };
 }
 
-function toApiBankAccountSummary(account: OfficeBankAccountRow): {
+function toApiBankAccountSummary(account: OfficeBankAccountRow, dependencies: OfficeBankAccountDeleteCounts): {
   readonly id: string;
   readonly workspaceId: string;
   readonly bankName: string;
@@ -10991,7 +11120,16 @@ function toApiBankAccountSummary(account: OfficeBankAccountRow): {
   readonly currentBalanceMurMicro: string | null;
   readonly isActive: boolean;
   readonly balanceAsOf: string | null;
+  readonly importedLineCount: number;
+  readonly linkedRecordCount: number;
+  readonly canDelete: boolean;
 } {
+  const linkedRecordCount = dependencies.statementLineCount
+    + dependencies.reconciliationMatchCount
+    + dependencies.importBatchCount
+    + dependencies.cashflowProjectionCount
+    + dependencies.transactionCount
+    + dependencies.manualCashflowEntryCount;
   return {
     id: account.id,
     workspaceId: account.workspaceId,
@@ -11001,7 +11139,10 @@ function toApiBankAccountSummary(account: OfficeBankAccountRow): {
     currentBalanceMicro: eofMoney.format(account.currentBalanceMinor),
     currentBalanceMurMicro: account.currentBalanceMurMinor === null ? null : eofMoney.format(account.currentBalanceMurMinor),
     isActive: account.isActive,
-    balanceAsOf: account.balanceAsOf
+    balanceAsOf: account.balanceAsOf,
+    importedLineCount: dependencies.statementLineCount,
+    linkedRecordCount,
+    canDelete: linkedRecordCount === 0
   };
 }
 
@@ -11446,8 +11587,7 @@ function projectProfitabilityKpis(
   dataset: OfficeAnalyticsDataset,
   filters: OfficePnlFilters
 ): readonly OfficeDashboardProjectProfitabilityKpi[] {
-  return dataset.projects
-    .map((project) => toProjectSummary(dataset, project, filters))
+  return [...toProjectSummaries(dataset, filters)]
     .sort((left, right) => {
       const leftNet = eofMoney.parse(left.netMicro);
       const rightNet = eofMoney.parse(right.netMicro);
@@ -12025,6 +12165,10 @@ function matchesOfficeTransactionQuery(context: ApiContext, transaction: OfficeT
     return false;
   }
 
+  if (status === "pending") {
+    return transaction.status === "pending" || transaction.status === "draft";
+  }
+
   return !(status !== null && transaction.status !== status);
 }
 
@@ -12081,6 +12225,12 @@ function toReconciliationCandidates(dataset: OfficeAnalyticsDataset): readonly O
     const match = dataset.bankReconciliationMatches.find((candidate) => candidate.bankStatementLineId === line.id);
     const transactionId = line.matchedTransactionId ?? match?.transactionId ?? "tx_uncategorized";
     const transaction = dataset.transactions.find((candidate) => candidate.id === transactionId);
+    const categoryPath = transaction?.categoryId === null || transaction?.categoryId === undefined
+      ? null
+      : resolveCategoryPath(dataset, transaction.categoryId);
+    const project = transaction?.projectId === null || transaction?.projectId === undefined
+      ? null
+      : requireProject(dataset, transaction.projectId);
     return {
       id: match?.id ?? `recon_${line.id}`,
       transactionId,
@@ -12094,6 +12244,14 @@ function toReconciliationCandidates(dataset: OfficeAnalyticsDataset): readonly O
       // so clients render outflows with the right sign and tone.
       amountMicro: eofMoney.format(line.direction === "debit" ? -line.amountMurMinor : line.amountMurMinor),
       confidenceBp: match?.confidenceBp ?? (line.reconciliationStatus === "matched" ? 10000 : 0),
+      departmentId: categoryPath?.department?.id ?? null,
+      departmentLabel: categoryPath?.department?.name ?? null,
+      divisionId: categoryPath?.division?.id ?? null,
+      divisionLabel: categoryPath?.division?.name ?? null,
+      categoryId: categoryPath?.category.id ?? null,
+      categoryLabel: categoryPath?.category.name ?? null,
+      projectId: project?.id ?? null,
+      projectLabel: project?.name ?? null,
       status: toApiReconciliationStatus(line, match)
     };
   });
@@ -12142,20 +12300,74 @@ function toApiReconciliationStatus(
   return "unmatched";
 }
 
-function matchesReconciliationQuery(context: ApiContext, candidate: OfficeReconciliationCandidate): boolean {
-  const period = nullableQuery(context, "period");
-  const status = nullableQuery(context, "status");
-  const dateFrom = nullableQuery(context, "dateFrom");
-  const dateTo = nullableQuery(context, "dateTo");
-  if (isIsoDate(dateFrom) && isIsoDate(dateTo)) {
-    if (candidate.occurredOn < dateFrom || candidate.occurredOn > dateTo) {
+interface ReconciliationCandidateFilters {
+  readonly accountId: string | null;
+  readonly period: string | null;
+  readonly dateFrom: string | null;
+  readonly dateTo: string | null;
+  readonly minConfidenceBp: number | null;
+  readonly classifiedOnly: boolean;
+  readonly status?: string | null;
+}
+
+function reconciliationCandidateFiltersFromQuery(context: ApiContext): ReconciliationCandidateFilters {
+  const minConfidenceText = nullableQuery(context, "minConfidenceBp");
+  const minConfidenceBp = minConfidenceText === null
+    ? null
+    : parseBoundedIntegerQuery(minConfidenceText, "minConfidenceBp", 0, 10_000);
+
+  return {
+    accountId: nullableQuery(context, "accountId"),
+    period: nullableQuery(context, "period"),
+    dateFrom: nullableQuery(context, "dateFrom"),
+    dateTo: nullableQuery(context, "dateTo"),
+    minConfidenceBp,
+    classifiedOnly: queryBoolean(context, "classifiedOnly"),
+    status: nullableQuery(context, "status")
+  };
+}
+
+function parseBoundedIntegerQuery(value: string, label: string, min: number, max: number): number {
+  const parsed = parsePositiveInteger(value, label);
+  if (parsed < min || parsed > max) {
+    throw new ApiRouteError(400, "query_integer_out_of_range", "Query parameter is outside the allowed range.", [
+      `${label}=${value}`,
+      `range=${String(min)}..${String(max)}`
+    ]);
+  }
+
+  return parsed;
+}
+
+function matchesReconciliationFilters(
+  dataset: OfficeAnalyticsDataset,
+  candidate: OfficeReconciliationCandidate,
+  filters: ReconciliationCandidateFilters
+): boolean {
+  if (filters.accountId !== null) {
+    const line = dataset.bankStatementLines.find((item) => item.id === candidate.statementLineId);
+    if (line === undefined || line.accountId !== filters.accountId) {
       return false;
     }
-  } else if (period !== null && !candidate.occurredOn.startsWith(period)) {
+  }
+
+  if (isIsoDate(filters.dateFrom) && isIsoDate(filters.dateTo)) {
+    if (candidate.occurredOn < filters.dateFrom || candidate.occurredOn > filters.dateTo) {
+      return false;
+    }
+  } else if (filters.period !== null && !candidate.occurredOn.startsWith(filters.period)) {
     return false;
   }
 
-  return !(status !== null && candidate.status !== status);
+  if (filters.minConfidenceBp !== null && candidate.confidenceBp < filters.minConfidenceBp) {
+    return false;
+  }
+
+  if (filters.classifiedOnly && candidate.categoryId === null) {
+    return false;
+  }
+
+  return !(filters.status !== null && filters.status !== undefined && candidate.status !== filters.status);
 }
 
 function isReconciliationCandidateInWorkspace(
@@ -12176,6 +12388,25 @@ function isReconciliationCandidateInWorkspace(
   return account.workspaceId === workspaceId;
 }
 
+function assertReconciliationCandidateCanMatch(
+  dataset: OfficeAnalyticsDataset,
+  candidate: OfficeReconciliationCandidate,
+  workspaceId: string
+): void {
+  if (!isReconciliationCandidateInWorkspace(dataset, candidate, workspaceId)) {
+    throw new ApiRouteError(404, "office_reconciliation_not_found", "Office reconciliation candidate was not found.", [
+      `reconciliationId=${candidate.id}`
+    ]);
+  }
+
+  if (candidate.categoryId === null) {
+    throw new ApiRouteError(422, "office_reconciliation_category_required", "Classify the ledger entry before approving the reconciliation.", [
+      `reconciliationId=${candidate.id}`,
+      `transactionId=${candidate.transactionId}`
+    ]);
+  }
+}
+
 function readOfficeReconciliationOperations(
   dataset: OfficeAnalyticsDataset,
   workspaceId: string,
@@ -12190,22 +12421,14 @@ function readOfficeReconciliationOperations(
       return false;
     }
 
-    if (accountId !== null) {
-      const line = dataset.bankStatementLines.find((item) => item.id === candidate.statementLineId);
-      if (line === undefined || line.accountId !== accountId) {
-        return false;
-      }
-    }
-
-    if (isIsoDate(dateFrom) && isIsoDate(dateTo)) {
-      if (candidate.occurredOn < dateFrom || candidate.occurredOn > dateTo) {
-        return false;
-      }
-    } else if (period !== null && !candidate.occurredOn.startsWith(period)) {
-      return false;
-    }
-
-    return true;
+    return matchesReconciliationFilters(dataset, candidate, {
+      accountId,
+      period,
+      dateFrom,
+      dateTo,
+      minConfidenceBp: null,
+      classifiedOnly: false
+    });
   });
 
   const totalCount = candidates.length;
@@ -12214,7 +12437,9 @@ function readOfficeReconciliationOperations(
   const matchedCount = candidates.filter((candidate) => candidate.status === "matched").length;
   const rejectedCount = candidates.filter((candidate) => candidate.status === "rejected").length;
   const ignoredCount = candidates.filter((candidate) => candidate.status === "ignored").length;
-  const autoApprovableCount = candidates.filter((candidate) => candidate.status === "suggested" && candidate.confidenceBp >= 9500).length;
+  const autoApprovableCount = candidates.filter(
+    (candidate) => candidate.status === "suggested" && candidate.confidenceBp >= 9500 && candidate.categoryId !== null
+  ).length;
   const staleSuggestedCount = candidates.filter((candidate) => {
     if (candidate.status !== "suggested") {
       return false;
@@ -12406,8 +12631,26 @@ function latestDate(left: string | null, right: string): string {
   return left > right ? left : right;
 }
 
-function toProjectSummary(dataset: OfficeAnalyticsDataset, project: OfficeProjectRow, filters: OfficePnlFilters): OfficeProjectSummary {
-  const pnl = readProjectPnl(dataset, project.id, filters);
+function toProjectSummaries(
+  dataset: OfficeAnalyticsDataset,
+  filters: OfficePnlFilters
+): readonly OfficeProjectSummary[] {
+  const projectPnls = new Map<string, DomainOfficeProjectPnlResponse>(
+    readProjectPnls(dataset, filters).map((pnl): readonly [string, DomainOfficeProjectPnlResponse] => [pnl.project.id, pnl])
+  );
+  const latestActivityByProject = latestProjectActivityByProject(dataset);
+  return dataset.projects.map((project): OfficeProjectSummary => toProjectSummary(
+    project,
+    requireProjectPnl(projectPnls, project.id),
+    latestActivityByProject.get(project.id) ?? null
+  ));
+}
+
+function toProjectSummary(
+  project: OfficeProjectRow,
+  pnl: DomainOfficeProjectPnlResponse,
+  lastActivityOn: string | null
+): OfficeProjectSummary {
   return {
     id: project.id,
     code: project.id,
@@ -12421,21 +12664,31 @@ function toProjectSummary(dataset: OfficeAnalyticsDataset, project: OfficeProjec
     periodExpenseMicro: pnl.expense,
     netMicro: pnl.profit,
     openViolationCount: 0,
-    lastActivityOn: latestProjectActivityOn(dataset, project.id)
+    lastActivityOn
   };
 }
 
-function latestProjectActivityOn(dataset: OfficeAnalyticsDataset, projectId: string): string | null {
-  let latest: string | null = null;
+function requireProjectPnl(
+  rows: ReadonlyMap<string, DomainOfficeProjectPnlResponse>,
+  projectId: string
+): DomainOfficeProjectPnlResponse {
+  const pnl = rows.get(projectId);
+  if (pnl === undefined) {
+    throw new ApiRouteError(500, "project_pnl_missing", "Project P&L was not generated.", [`projectId=${projectId}`]);
+  }
+  return pnl;
+}
+
+function latestProjectActivityByProject(dataset: OfficeAnalyticsDataset): ReadonlyMap<string, string> {
+  const latestByProject = new Map<string, string>();
   for (const transaction of dataset.transactions) {
-    if (transaction.projectId !== projectId) {
+    if (transaction.projectId === null) {
       continue;
     }
-
-    latest = latestDate(latest, transaction.transactionDate.slice(0, 10));
+    const occurredOn = transaction.transactionDate.slice(0, 10);
+    latestByProject.set(transaction.projectId, latestDate(latestByProject.get(transaction.projectId) ?? null, occurredOn));
   }
-
-  return latest;
+  return latestByProject;
 }
 
 function readOfficeBankQualityForFilters(

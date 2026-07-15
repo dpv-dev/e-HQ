@@ -470,6 +470,8 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
         period: query.period,
         dateFrom: query.dateFrom ?? null,
         dateTo: query.dateTo ?? null,
+        minConfidenceBp: query.minConfidenceBp ?? null,
+        classifiedOnly: query.classifiedOnly ?? false,
         status: query.status,
         cursor: query.cursor,
         limit: query.limit
@@ -732,6 +734,8 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
         workspaceId: query.workspaceId,
         period: query.period,
         accountId: query.accountId,
+        dateFrom: query.dateFrom ?? null,
+        dateTo: query.dateTo ?? null,
         cursor: query.cursor,
         limit: query.limit
       }),

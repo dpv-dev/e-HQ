@@ -28,7 +28,6 @@
     type OfficeBankAccountWriteRequest,
     type OfficeBankQualityResponse,
     type OfficeBankRawLine,
-    type OfficeReconciliationCandidate,
     type PageResult
   } from "@ehq/api-client";
   import {
@@ -49,6 +48,7 @@
     readonly dateFrom: string;
     readonly dateTo: string;
     readonly writesEnabled: boolean;
+    readonly isAdministrator: boolean;
   }
 
   interface BankKpi {
@@ -72,18 +72,19 @@
   let qualityState = $state<ApiRequestState<OfficeBankQualityResponse>>(
     createIdleState<OfficeBankQualityResponse>()
   );
-  let reconciliationState = $state<ApiRequestState<PageResult<OfficeReconciliationCandidate>>>(
-    createIdleState<PageResult<OfficeReconciliationCandidate>>()
-  );
-
   const accountRows = $derived(readPageItems(accountsState));
   const rawRows = $derived(readPageItems(rawState));
-  const reconciliationRows = $derived(readPageItems(reconciliationState));
   const bankKpis = $derived(createBankKpis(accountRows, qualityState));
   const accountTableRows = $derived(createAccountTableRows(accountRows));
   const accountRowActions = $derived<readonly TableRowAction[]>([
     { label: "Edit", onAction: startEditAccount },
-    { label: "Delete", onAction: deleteAccountById, danger: true }
+    {
+      label: "Delete empty account",
+      onAction: deleteAccountById,
+      danger: true,
+      isEnabled: canDeleteAccount,
+      disabledReason: deleteAccountDisabledReason
+    }
   ]);
 
   let bankFormName = $state("");
@@ -93,17 +94,14 @@
   let editingAccountId = $state<string | null>(null);
   let accountSubmitStatus = $state<RequestStatus>("idle");
   let accountSubmitMessage = $state<string | null>(null);
-  let reconciliationActionStatus = $state<RequestStatus>("idle");
-  let reconciliationActionMessage = $state<string | null>(null);
+  let rawActionStatus = $state<RequestStatus>("idle");
+  let rawActionMessage = $state<string | null>(null);
   let accountsNextCursor = $state<string | null>(null);
   let accountsLoadingMore = $state(false);
   let accountsLoadMoreError = $state<string | null>(null);
   let rawNextCursor = $state<string | null>(null);
   let rawLoadingMore = $state(false);
   let rawLoadMoreError = $state<string | null>(null);
-  let reconciliationNextCursor = $state<string | null>(null);
-  let reconciliationLoadingMore = $state(false);
-  let reconciliationLoadMoreError = $state<string | null>(null);
 
   const currencyOptions: readonly SelectOption[] = [
     { label: "MUR", value: "MUR" },
@@ -149,6 +147,24 @@
     bankFormActive = account.isActive;
   }
 
+  function canDeleteAccount(accountId: string): boolean {
+    const account = accountRows.find((row: OfficeBankAccountSummary): boolean => row.id === accountId);
+    return props.isAdministrator && account?.canDelete === true;
+  }
+
+  function deleteAccountDisabledReason(accountId: string): string | null {
+    if (!props.isAdministrator) {
+      return "Administrator access is required.";
+    }
+
+    const account = accountRows.find((row: OfficeBankAccountSummary): boolean => row.id === accountId);
+    if (account === undefined) {
+      return "Bank account is not loaded.";
+    }
+
+    return account.canDelete ? null : "Deactivate this account; linked financial records cannot be deleted.";
+  }
+
   async function deleteAccountById(accountId: string): Promise<void> {
     if (!props.writesEnabled) {
       accountSubmitStatus = "error";
@@ -166,9 +182,14 @@
       accountSubmitMessage = "Bank account not found in the loaded list.";
       return;
     }
+    if (!canDeleteAccount(accountId)) {
+      accountSubmitStatus = "error";
+      accountSubmitMessage = deleteAccountDisabledReason(accountId);
+      return;
+    }
 
     const confirmed = globalThis.confirm(
-      `Delete ${account.bankName} · ${account.accountLabel} and all its imported bank lines?`
+      `Delete the empty account ${account.bankName} · ${account.accountLabel}?`
     );
     if (!confirmed) {
       return;
@@ -187,7 +208,7 @@
       }
       await loadBank();
       accountSubmitStatus = "success";
-      accountSubmitMessage = "Bank account and related lines deleted.";
+      accountSubmitMessage = "Empty bank account deleted.";
     } catch (error: unknown) {
       accountSubmitStatus = "error";
       accountSubmitMessage = getErrorMessage(error);
@@ -245,100 +266,33 @@
     return "";
   }
 
-  // Reconciliation candidate rows are keyed by candidate id, but the
-  // unmatch/reject endpoints address the bank statement line — resolve it first.
-  function reconciliationLineIdFor(candidateId: string): string | null {
-    return (
-      reconciliationRows.find((candidate: OfficeReconciliationCandidate): boolean => candidate.id === candidateId)
-        ?.statementLineId ?? null
-    );
-  }
-
-  // Shared write path for the per-row reconciliation actions: gate on the write
-  // lock, run the call, then reload the bank data so the queue reflects reality.
-  async function runReconciliationAction(action: () => Promise<unknown>, successMessage: string): Promise<void> {
+  async function runRawLineAction(action: () => Promise<unknown>, successMessage: string): Promise<void> {
     if (!props.writesEnabled) {
-      reconciliationActionStatus = "error";
-      reconciliationActionMessage = "Enable writes to act on reconciliation candidates.";
+      rawActionStatus = "error";
+      rawActionMessage = "Enable writes to update bank lines.";
       return;
     }
 
-    if (reconciliationActionStatus === "loading") {
+    if (rawActionStatus === "loading") {
       return;
     }
 
-    reconciliationActionStatus = "loading";
-    reconciliationActionMessage = null;
+    rawActionStatus = "loading";
+    rawActionMessage = null;
 
     try {
       await action();
       await loadBank();
-      reconciliationActionStatus = "success";
-      reconciliationActionMessage = successMessage;
+      rawActionStatus = "success";
+      rawActionMessage = successMessage;
     } catch (error: unknown) {
-      // Action failures stay on the status line; reconciliationState keeps the loaded list.
-      reconciliationActionStatus = "error";
-      reconciliationActionMessage = getErrorMessage(error);
+      rawActionStatus = "error";
+      rawActionMessage = getErrorMessage(error);
     }
   }
-
-  async function approveReconciliationById(candidateId: string): Promise<void> {
-    await runReconciliationAction(
-      (): Promise<unknown> =>
-        props.client.approveReconciliations(
-          {
-            workspaceId: props.workspaceId,
-            reconciliationIds: [candidateId],
-            approvedAt: new Date().toISOString()
-          },
-          { idempotencyKey: crypto.randomUUID() }
-        ),
-      "Reconciliation approved."
-    );
-  }
-
-  async function unmatchReconciliationById(candidateId: string): Promise<void> {
-    const statementLineId = reconciliationLineIdFor(candidateId);
-    if (statementLineId === null) {
-      reconciliationActionStatus = "error";
-      reconciliationActionMessage = "Bank line not found for this candidate — reload the Bank page.";
-      return;
-    }
-    await runReconciliationAction(
-      (): Promise<unknown> =>
-        props.client.unmatchReconciliation(
-          { workspaceId: props.workspaceId, statementLineId },
-          { idempotencyKey: crypto.randomUUID() }
-        ),
-      "Match cancelled."
-    );
-  }
-
-  async function rejectReconciliationById(candidateId: string): Promise<void> {
-    const statementLineId = reconciliationLineIdFor(candidateId);
-    if (statementLineId === null) {
-      reconciliationActionStatus = "error";
-      reconciliationActionMessage = "Bank line not found for this candidate — reload the Bank page.";
-      return;
-    }
-    await runReconciliationAction(
-      (): Promise<unknown> =>
-        props.client.rejectReconciliation(
-          { workspaceId: props.workspaceId, statementLineId },
-          { idempotencyKey: crypto.randomUUID() }
-        ),
-      "Candidate rejected."
-    );
-  }
-
-  const reconciliationRowActions = $derived<readonly TableRowAction[]>([
-    { label: "Approve", onAction: approveReconciliationById },
-    { label: "Cancel match", onAction: unmatchReconciliationById },
-    { label: "Reject", onAction: rejectReconciliationById, danger: true }
-  ]);
 
   async function ignoreRawLineById(lineId: string): Promise<void> {
-    await runReconciliationAction(
+    await runRawLineAction(
       (): Promise<unknown> =>
         props.client.ignoreBankRawLine(
           { workspaceId: props.workspaceId, statementLineId: lineId },
@@ -369,7 +323,7 @@
       return;
     }
 
-    await runReconciliationAction(
+    await runRawLineAction(
       (): Promise<unknown> =>
         props.client.reassignBankRawLineAccount(
           { workspaceId: props.workspaceId, statementLineId: lineId, accountId: moveTargetAccountId },
@@ -391,9 +345,19 @@
     )
   );
 
+  function canMoveRawLine(lineId: string): boolean {
+    const status = rawRows.find((line: OfficeBankRawLine): boolean => line.id === lineId)?.reconciliationStatus;
+    return status === "unmatched" || status === "rejected" || status === "ignored";
+  }
+
+  function canIgnoreRawLine(lineId: string): boolean {
+    const status = rawRows.find((line: OfficeBankRawLine): boolean => line.id === lineId)?.reconciliationStatus;
+    return status === "unmatched" || status === "suggested" || status === "rejected";
+  }
+
   const rawRowActions = $derived<readonly TableRowAction[]>([
-    { label: "Move account", onAction: startMoveRawLine },
-    { label: "Ignore", onAction: ignoreRawLineById, danger: true }
+    { label: "Move account", onAction: startMoveRawLine, isEnabled: canMoveRawLine },
+    { label: "Ignore", onAction: ignoreRawLineById, danger: true, isEnabled: canIgnoreRawLine }
   ]);
   const rawTableRows = $derived(createRawTableRows(rawRows));
   const accountsPagination = $derived<TablePagination | null>(
@@ -402,18 +366,8 @@
   const rawPagination = $derived<TablePagination | null>(
     createTablePagination(rawState, rawLoadingMore, rawLoadMoreError, loadMoreRawLines, loadAllRawLines)
   );
-  const reconciliationTableRows = $derived(createReconciliationTableRows(reconciliationRows));
   const rawDirectionPoints = $derived(createRawDirectionPoints(rawRows));
-  const reconciliationStatusPoints = $derived(createReconciliationStatusPoints(reconciliationRows));
-  const reconciliationPagination = $derived<TablePagination | null>(
-    createTablePagination(
-      reconciliationState,
-      reconciliationLoadingMore,
-      reconciliationLoadMoreError,
-      loadMoreReconciliations,
-      loadAllReconciliations
-    )
-  );
+  const reconciliationStatusPoints = $derived(createReconciliationStatusPoints(rawRows));
 
   // $effect (not onMount): re-runs on props.workspaceId/props.period change.
   $effect((): void => {
@@ -431,30 +385,21 @@
       accountsState = beginReload<PageResult<OfficeBankAccountSummary>>(accountsState);
       rawState = beginReload<PageResult<OfficeBankRawLine>>(rawState);
       qualityState = beginReload<OfficeBankQualityResponse>(qualityState);
-      reconciliationState = beginReload<PageResult<OfficeReconciliationCandidate>>(reconciliationState);
     });
 
     try {
-      const [accounts, raw, quality, reconciliations] = await Promise.all([
+      const [accounts, raw, quality] = await Promise.all([
         props.client.listBankAccounts({ workspaceId: props.workspaceId, cursor: null, limit: TABLE_PAGE_SIZE }),
         props.client.listBankRawLines({
           workspaceId: props.workspaceId,
-          period: null,
+          period: props.period,
           accountId: null,
+          dateFrom: props.dateFrom,
+          dateTo: props.dateTo,
           cursor: null,
           limit: TABLE_PAGE_SIZE
         }),
-        props.client.getBankQuality({ workspaceId: props.workspaceId, period: props.period, dateFrom: props.dateFrom, dateTo: props.dateTo }),
-        props.client.listReconciliations({
-          workspaceId: props.workspaceId,
-          accountId: null,
-          period: props.period,
-          dateFrom: props.dateFrom,
-          dateTo: props.dateTo,
-          status: null,
-          cursor: null,
-          limit: TABLE_PAGE_SIZE
-        })
+        props.client.getBankQuality({ workspaceId: props.workspaceId, period: props.period, dateFrom: props.dateFrom, dateTo: props.dateTo })
       ]);
       if (token !== loadBankToken) {
         return;
@@ -466,9 +411,6 @@
       rawNextCursor = raw.nextCursor;
       rawLoadMoreError = null;
       qualityState = createSuccessState<OfficeBankQualityResponse>(quality);
-      reconciliationState = createSuccessState<PageResult<OfficeReconciliationCandidate>>(reconciliations);
-      reconciliationNextCursor = reconciliations.nextCursor;
-      reconciliationLoadMoreError = null;
     } catch (error: unknown) {
       if (token !== loadBankToken) {
         return;
@@ -476,7 +418,6 @@
       accountsState = createErrorState<PageResult<OfficeBankAccountSummary>>(error);
       rawState = createErrorState<PageResult<OfficeBankRawLine>>(error);
       qualityState = createErrorState<OfficeBankQualityResponse>(error);
-      reconciliationState = createErrorState<PageResult<OfficeReconciliationCandidate>>(error);
     }
   }
 
@@ -545,8 +486,10 @@
       while (nextCursor !== null) {
         const nextPage = await props.client.listBankRawLines({
           workspaceId: props.workspaceId,
-          period: null,
+          period: props.period,
           accountId: null,
+          dateFrom: props.dateFrom,
+          dateTo: props.dateTo,
           cursor: nextCursor,
           limit: TABLE_PAGE_SIZE
         });
@@ -563,53 +506,6 @@
       rawLoadMoreError = getErrorMessage(error);
     } finally {
       rawLoadingMore = false;
-    }
-  }
-
-  async function loadMoreReconciliations(): Promise<void> {
-    await loadReconciliationsPage("one");
-  }
-
-  async function loadAllReconciliations(): Promise<void> {
-    await loadReconciliationsPage("all");
-  }
-
-  async function loadReconciliationsPage(mode: "one" | "all"): Promise<void> {
-    if (reconciliationState.status !== "success" || reconciliationNextCursor === null || reconciliationLoadingMore) {
-      return;
-    }
-
-    reconciliationLoadingMore = true;
-    reconciliationLoadMoreError = null;
-
-    try {
-      let nextCursor: string | null = reconciliationNextCursor;
-      let loaded: PageResult<OfficeReconciliationCandidate> = reconciliationState.data;
-
-      while (nextCursor !== null) {
-        const nextPage = await props.client.listReconciliations({
-          workspaceId: props.workspaceId,
-          accountId: null,
-          period: props.period,
-          dateFrom: props.dateFrom,
-          dateTo: props.dateTo,
-          status: null,
-          cursor: nextCursor,
-          limit: TABLE_PAGE_SIZE
-        });
-        loaded = appendPageResult(loaded, nextPage);
-        reconciliationState = createSuccessState<PageResult<OfficeReconciliationCandidate>>(loaded);
-        reconciliationNextCursor = nextPage.nextCursor;
-        nextCursor = nextPage.nextCursor;
-
-        if (mode === "one") {
-          break;
-        }
-      }
-    } catch (error: unknown) {
-      reconciliationLoadMoreError = getErrorMessage(error);
-    } finally {
-      reconciliationLoadingMore = false;
     }
   }
 
@@ -664,6 +560,11 @@
         { kind: "money", value: formatMoney(account.currentBalanceMicro, account.currency), tone: moneyTone(account.currentBalanceMicro) },
         { kind: "money", value: account.currentBalanceMurMicro === null ? "—" : formatMoney(account.currentBalanceMurMicro, "MUR"), tone: "muted" },
         { kind: "text", value: formatDateOnly(account.balanceAsOf), strong: false },
+        {
+          kind: "text",
+          value: typeof account.importedLineCount === "number" ? String(account.importedLineCount) : "—",
+          strong: false
+        },
         { kind: "badge", value: account.isActive ? "active" : "inactive", tone: account.isActive ? "success" : "muted" }
       ]
     }));
@@ -691,19 +592,6 @@
     });
   }
 
-  function createReconciliationTableRows(rows: readonly OfficeReconciliationCandidate[]): readonly TableRow[] {
-    return rows.map((candidate: OfficeReconciliationCandidate): TableRow => ({
-      id: candidate.id,
-      cells: [
-        { kind: "text", value: candidate.bankDescription, strong: true },
-        { kind: "text", value: formatDateOnly(candidate.occurredOn), strong: false },
-        { kind: "money", value: formatSignedMoney(candidate.amountMicro, "MUR"), tone: moneyTone(candidate.amountMicro) },
-        { kind: "text", value: candidate.ledgerDescription, strong: false },
-        { kind: "badge", value: candidate.status, tone: reconciliationTone(candidate.status) }
-      ]
-    }));
-  }
-
   function createRawDirectionPoints(rows: readonly OfficeBankRawLine[]): readonly ChartPoint[] {
     let creditCount = 0;
     let debitCount = 0;
@@ -725,26 +613,31 @@
     );
   }
 
-  function createReconciliationStatusPoints(rows: readonly OfficeReconciliationCandidate[]): readonly ChartPoint[] {
+  function createReconciliationStatusPoints(rows: readonly OfficeBankRawLine[]): readonly ChartPoint[] {
     let unmatchedCount = 0;
     let suggestedCount = 0;
     let matchedCount = 0;
     let rejectedCount = 0;
+    let ignoredCount = 0;
 
     for (const row of rows) {
-      if (row.status === "unmatched") {
+      if (row.reconciliationStatus === "unmatched") {
         unmatchedCount += 1;
         continue;
       }
-      if (row.status === "suggested") {
+      if (row.reconciliationStatus === "suggested") {
         suggestedCount += 1;
         continue;
       }
-      if (row.status === "matched") {
+      if (row.reconciliationStatus === "matched") {
         matchedCount += 1;
         continue;
       }
-      rejectedCount += 1;
+      if (row.reconciliationStatus === "rejected") {
+        rejectedCount += 1;
+        continue;
+      }
+      ignoredCount += 1;
     }
 
     return createNormalizedCountChartPoints(
@@ -752,7 +645,8 @@
         { label: "Unmatched", count: unmatchedCount },
         { label: "Suggested", count: suggestedCount },
         { label: "Matched", count: matchedCount },
-        { label: "Rejected", count: rejectedCount }
+        { label: "Rejected", count: rejectedCount },
+        { label: "Ignored", count: ignoredCount }
       ],
       6
     );
@@ -957,12 +851,11 @@
         <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel moving the bank line" onclick={cancelMoveRawLine} />
       </section>
     {/if}
-    <Table title="Reconciliation candidates" columns={reconciliationColumns} rows={reconciliationTableRows} state={isLoadingState(reconciliationState) ? "loading" : reconciliationState.status === "error" ? "error" : reconciliationTableRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={reconciliationRowActions} pagination={reconciliationPagination} />
-    {#if reconciliationActionMessage !== null}
+    {#if rawActionMessage !== null}
       <Alert
-        tone={reconciliationActionStatus === "error" ? "error" : "success"}
-        title={reconciliationActionStatus === "error" ? "Error" : "Operation successful"}
-        message={reconciliationActionMessage}
+        tone={rawActionStatus === "error" ? "error" : "success"}
+        title={rawActionStatus === "error" ? "Error" : "Operation successful"}
+        message={rawActionMessage}
         dismissible={false}
       />
     {/if}
@@ -979,6 +872,7 @@
     { label: "Balance", align: "right", sortable: true },
     { label: "Balance (MUR)", align: "right", sortable: true },
     { label: "As of", align: "left", sortable: true },
+    { label: "Imported lines", align: "right", sortable: true },
     { label: "Status", align: "left", sortable: true }
   ];
   const rawColumns: readonly TableColumn[] = [
@@ -990,13 +884,6 @@
     { label: "Amount (MUR)", align: "right", sortable: true },
     { label: "Duplicate", align: "left", sortable: true },
     { label: "Reconciliation", align: "left", sortable: true }
-  ];
-  const reconciliationColumns: readonly TableColumn[] = [
-    { label: "Description", align: "left", sortable: true },
-    { label: "Date", align: "left", sortable: true },
-    { label: "Amount", align: "right", sortable: true },
-    { label: "Suggested match", align: "left", sortable: true },
-    { label: "Status", align: "left", sortable: true }
   ];
 </script>
 
