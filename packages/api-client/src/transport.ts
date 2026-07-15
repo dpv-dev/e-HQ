@@ -33,8 +33,10 @@ export interface RestTransport {
 }
 
 export const standardApiRetryPolicy: RetryPolicy = {
-  maxAttempts: 5,
-  baseDelayMs: 150,
+  // Seven GET attempts cover the legacy 5-second Retry-After startup response
+  // for at least 30 seconds while keeping all mutations single-attempt.
+  maxAttempts: 7,
+  baseDelayMs: 250,
   maxRetryAfterMs: 16_000,
   retryableStatuses: [408, 429, 500, 502, 503, 504],
   retryMethods: ["GET"]
@@ -308,9 +310,9 @@ function validateConfig(config: ApiClientConfig): void {
     });
   }
 
-  if (config.retryPolicy.maxAttempts < 1 || config.retryPolicy.maxAttempts > 5) {
+  if (config.retryPolicy.maxAttempts < 1 || config.retryPolicy.maxAttempts > 10) {
     throw new ApiClientConfigurationError({
-      message: "Retry maxAttempts must be between 1 and 5.",
+      message: "Retry maxAttempts must be between 1 and 10.",
       context: [`maxAttempts=${String(config.retryPolicy.maxAttempts)}`]
     });
   }
@@ -369,19 +371,20 @@ function calculateRetryDelayMs(
   status: number | null,
   retryAfterMs: number | null
 ): number {
-  const linearBackoffMs = retryPolicy.baseDelayMs * attempt;
+  const maxBackoffMs = Math.max(retryPolicy.baseDelayMs, retryPolicy.maxRetryAfterMs);
+  const exponentialBackoffMs = Math.min(maxBackoffMs, retryPolicy.baseDelayMs * (2 ** (attempt - 1)));
 
   if (status !== 429 && status !== 503) {
-    return linearBackoffMs;
+    return exponentialBackoffMs;
   }
 
   if (retryAfterMs === null) {
-    return linearBackoffMs;
+    return exponentialBackoffMs;
   }
 
   const boundedRetryAfterMs = Math.min(retryPolicy.maxRetryAfterMs, retryAfterMs);
 
-  return Math.max(linearBackoffMs, boundedRetryAfterMs);
+  return Math.max(exponentialBackoffMs, boundedRetryAfterMs);
 }
 
 function parseRetryAfter(headerValue: string | null): number | null {

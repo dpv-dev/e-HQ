@@ -34,8 +34,9 @@ import type {
   OfficeManagedAdvanceRow,
   OfficeTransactionRow
 } from "@ehq/domain-office";
-import type { ApiDistributionRoyaltyRuleInput, ApiFixtureStore } from "./fixtures.js";
+import { createEmptyApiFixtureStore, type ApiDistributionRoyaltyRuleInput, type ApiFixtureStore } from "./fixtures.js";
 import { createPostgresPersistenceRuntime, type ApiPersistenceRuntime } from "./persistence.js";
+import { createApiStartupReadiness, type ApiStartupReadiness } from "./startup.js";
 
 type PgRow = Readonly<Record<string, unknown>>;
 type DistributionImportStatus = DistributionReadDataset["importBatches"][number]["status"];
@@ -52,11 +53,57 @@ export interface ApiPostgresRuntime {
   readonly close: () => Promise<void>;
 }
 
+export interface ApiStartingPostgresRuntime extends ApiPostgresRuntime {
+  readonly readiness: ApiStartupReadiness;
+}
+
 export interface ApiPostgresHealth {
   readonly status: "ok";
   readonly database: "postgres";
   readonly officeTransactions: number;
   readonly distributionStatements: number;
+}
+
+type OfficeFixtureSlice = Pick<
+  ApiFixtureStore,
+  | "office"
+  | "officeAuditLog"
+  | "officeClassificationSuggestions"
+  | "officePartnerPayeeLinks"
+  | "officeProjectViolations"
+  | "officeCashflowManualEntries"
+  | "officeAdvances"
+  | "officeAdvanceApplications"
+>;
+
+type DistributionFixtureSlice = Omit<ApiFixtureStore, keyof OfficeFixtureSlice>;
+
+export function startPostgresApiRuntime(
+  env: Readonly<Record<string, string | undefined>>
+): ApiStartingPostgresRuntime {
+  const pool = createPostgresPool(env);
+  const fixtures = createEmptyApiFixtureStore();
+  const office = loadFixturePhase("office", async (): Promise<OfficeFixtureSlice> => readOfficeFixtureSlice(pool), (slice) => {
+    Object.assign(fixtures, slice);
+  });
+  const distribution = loadFixturePhase(
+    "distribution",
+    async (): Promise<DistributionFixtureSlice> => readDistributionFixtureSlice(pool),
+    (slice) => {
+      Object.assign(fixtures, slice);
+    }
+  );
+  const readiness = createApiStartupReadiness({ office, distribution });
+
+  return {
+    fixtures,
+    persistence: createPostgresPersistenceRuntime(pool, env),
+    health: async (): Promise<ApiPostgresHealth> => readPostgresHealth(pool),
+    close: async (): Promise<void> => {
+      await pool.end();
+    },
+    readiness
+  };
 }
 
 export async function createPostgresApiRuntime(env: Readonly<Record<string, string | undefined>>): Promise<ApiPostgresRuntime> {
@@ -117,34 +164,22 @@ export function requireDatabaseUrl(env: Readonly<Record<string, string | undefin
 }
 
 export async function readApiFixtureStoreFromPostgres(pool: Pool): Promise<ApiFixtureStore> {
+  const [office, distribution] = await Promise.all([
+    readOfficeFixtureSlice(pool),
+    readDistributionFixtureSlice(pool)
+  ]);
+  return { ...office, ...distribution };
+}
+
+async function readOfficeFixtureSlice(pool: Pool): Promise<OfficeFixtureSlice> {
   const [
     office,
-    distribution,
-    distributionContracts,
-    distributionContractExpenses,
-    distributionMappingRows,
-    distributionRoyaltyRules,
-    distributionCostTerms,
-    distributionExpenseApplications,
-    distributionFxRates,
-    distributionPayeeBalances,
-    distributionAliases,
     officePartnerPayeeLinks,
     officeCashflowManualEntries,
     officeAdvances,
     officeAdvanceApplications
   ] = await Promise.all([
     readOfficeDataset(pool),
-    readDistributionDataset(pool),
-    readDistributionContracts(pool),
-    readDistributionContractExpenses(pool),
-    readDistributionMappingRows(pool),
-    readDistributionRoyaltyRules(pool),
-    readDistributionAllocationCostTerms(pool),
-    readDistributionExistingExpenseApplications(pool),
-    readDistributionFxRates(pool),
-    readDistributionPayeeBalances(pool),
-    readDistributionAliases(pool),
     readOfficePartnerPayeeLinks(pool),
     readOfficeCashflowManualEntries(pool),
     readOfficeAdvances(pool),
@@ -158,7 +193,12 @@ export async function readApiFixtureStoreFromPostgres(pool: Pool): Promise<ApiFi
     officeProjectViolations: emptyRecord<readonly OfficeProjectCoherenceViolation[]>(),
     officeCashflowManualEntries,
     officeAdvances,
-    officeAdvanceApplications,
+    officeAdvanceApplications
+  };
+}
+
+async function readDistributionFixtureSlice(pool: Pool): Promise<DistributionFixtureSlice> {
+  const [
     distribution,
     distributionContracts,
     distributionContractExpenses,
@@ -169,6 +209,76 @@ export async function readApiFixtureStoreFromPostgres(pool: Pool): Promise<ApiFi
     distributionFxRates,
     distributionPayeeBalances,
     distributionAliases
+  ] = await Promise.all([
+    readDistributionDataset(pool),
+    readDistributionContracts(pool),
+    readDistributionContractExpenses(pool),
+    readDistributionMappingRows(pool),
+    readDistributionRoyaltyRules(pool),
+    readDistributionAllocationCostTerms(pool),
+    readDistributionExistingExpenseApplications(pool),
+    readDistributionFxRates(pool),
+    readDistributionPayeeBalances(pool),
+    readDistributionAliases(pool)
+  ]);
+  return {
+    distribution,
+    distributionContracts,
+    distributionContractExpenses,
+    distributionMappingRows,
+    distributionRoyaltyRules,
+    distributionCostTerms,
+    distributionExpenseApplications,
+    distributionFxRates,
+    distributionPayeeBalances,
+    distributionAliases
+  };
+}
+
+async function loadFixturePhase<TSlice>(
+  phase: "office" | "distribution",
+  load: () => Promise<TSlice>,
+  apply: (slice: TSlice) => void
+): Promise<void> {
+  const startedAtMs = Date.now();
+  console.log(JSON.stringify({ level: "info", msg: "api_startup_phase", phase, status: "starting" }));
+  try {
+    const slice = await load();
+    apply(slice);
+    console.log(JSON.stringify({
+      level: "info",
+      msg: "api_startup_phase",
+      phase,
+      status: "ready",
+      durationMs: Date.now() - startedAtMs,
+      ...fixturePhaseCounts(phase, slice)
+    }));
+  } catch (error: unknown) {
+    console.error(JSON.stringify({
+      level: "error",
+      msg: "api_startup_phase",
+      phase,
+      status: "failed",
+      durationMs: Date.now() - startedAtMs,
+      errorName: error instanceof Error ? error.name : "UnknownError"
+    }));
+    throw error;
+  }
+}
+
+function fixturePhaseCounts<TSlice>(phase: "office" | "distribution", slice: TSlice): Readonly<Record<string, number>> {
+  if (phase === "office") {
+    const officeSlice = slice as OfficeFixtureSlice;
+    return {
+      transactionCount: officeSlice.office.transactions.length,
+      bankLineCount: officeSlice.office.bankStatementLines.length
+    };
+  }
+
+  const distributionSlice = slice as DistributionFixtureSlice;
+  return {
+    earningCount: distributionSlice.distribution.normalizedEarnings.length,
+    allocationCount: distributionSlice.distribution.earningAllocations.length
   };
 }
 

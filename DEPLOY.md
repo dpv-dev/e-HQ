@@ -11,6 +11,6 @@ Résumé opérationnel :
 5. Construire les artefacts : `./deploy-build.sh`.
 6. Uploader seulement `app-eeee-api-hostinger.zip` et `app-eeee-frontend.zip`.
 7. Redémarrer le slot API avec ses variables runtime.
-8. Post-gate routes critiques : `corepack pnpm smoke:critical` (inclut `/healthz` + routes console).
+8. Post-gate routes critiques : `corepack pnpm smoke:critical` (inclut `/healthz`, `/readyz` + routes console).
 
 Ne pas créer de `packages/db/.env`. Ne pas commiter de secrets.

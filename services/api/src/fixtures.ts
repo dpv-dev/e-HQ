@@ -52,6 +52,56 @@ export interface ApiFixtureStore {
   readonly distributionAliases: readonly DistributionAlias[];
 }
 
+export function createEmptyApiFixtureStore(): ApiFixtureStore {
+  return {
+    office: {
+      departments: [],
+      divisions: [],
+      categories: [],
+      partners: [],
+      projects: [],
+      projectBudgetLines: [],
+      transactions: [],
+      financialAllocations: [],
+      bankAccounts: [],
+      bankImportBatches: [],
+      bankStatementLines: [],
+      bankReconciliationMatches: [],
+      cashflowProjectionRows: [],
+      exchangeRates: []
+    },
+    officeAuditLog: [],
+    officeClassificationSuggestions: {},
+    officePartnerPayeeLinks: {},
+    officeProjectViolations: {},
+    officeCashflowManualEntries: [],
+    officeAdvances: [],
+    officeAdvanceApplications: [],
+    distribution: {
+      importBatches: [],
+      normalizedEarnings: [],
+      calculationRuns: [],
+      earningAllocations: [],
+      suspenseItems: [],
+      statements: [],
+      statementLines: [],
+      statementPaymentLinks: [],
+      payments: [],
+      payees: [],
+      tracks: []
+    },
+    distributionContracts: [],
+    distributionContractExpenses: [],
+    distributionMappingRows: [],
+    distributionRoyaltyRules: [],
+    distributionCostTerms: [],
+    distributionExpenseApplications: [],
+    distributionFxRates: [],
+    distributionPayeeBalances: [],
+    distributionAliases: []
+  };
+}
+
 export function createFixtureStore(): ApiFixtureStore {
   return {
     office: createOfficeFixture(),

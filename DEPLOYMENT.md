@@ -117,7 +117,9 @@ cd services/api/deploy
 npm install --omit=dev
 node server.bundle.js
 ```
-Health check : `curl -fsS "$API_URL/healthz"` → `200 {"status":"ok"}`
+Liveness : `curl -fsS "$API_URL/healthz"` → `200 {"status":"ok"}`, même pendant le chargement des données.
+
+Readiness : `curl -fsS "$API_URL/readyz"` → `200 {"status":"ready"}` lorsque Office et Distribution sont complètement chargés. Pendant le bootstrap, cette route renvoie `503` avec `Retry-After: 5`.
 
 ## Étape 3 — Frontend (apps/hq)
 
@@ -167,6 +169,7 @@ par défaut ; ajouter d'autres devises = `TARGET_CURRENCIES` dans le script — 
 ```bash
 corepack pnpm smoke:critical
 curl -fsS "$API_URL/healthz"
+curl -fsS "$API_URL/readyz"
 curl -fsS "$API_URL/eof/v1/pl/global?workspaceId=workspace_1&period=2026-02"   # route Office réelle
 # ouvrir https://app.eeee.mu/  puis /login puis une page /console/* (vérifier le fallback SPA)
 curl -fsS -o /dev/null -w "%{http_code}\\n" https://app.eeee.mu/console/office/bank   # doit retourner 200 (pas 404 Hostinger)
@@ -204,4 +207,4 @@ curl -fsS -o /dev/null -w "%{http_code}\\n" https://app.eeee.mu/console/office/b
 3. Vérifier les **variables d'env** du slot (Étape 2) : `DATABASE_URL` (pooler + `sslmode=no-verify`),
    `SUPABASE_*`, `WRITES_ENABLED=true`.
 4. **Étape 4** : amorcer un taux EUR→MUR (`node scripts/refresh-fx.mjs` ou le SQL) + **cron quotidien**.
-5. Vérifs finales (section ci-dessus) : `/healthz`, une route `/eof/v1/pl/global`, et l'UI.
+5. Vérifs finales (section ci-dessus) : `/healthz`, `/readyz`, une route `/eof/v1/pl/global`, et l'UI.

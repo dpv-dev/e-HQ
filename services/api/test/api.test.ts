@@ -7,6 +7,7 @@ import type { AuthenticatedApiUser, SupabaseJwtVerifier } from "../src/auth.ts";
 import { createApiService, createFixtureApiService } from "../src/index.ts";
 import { createFixtureStore } from "../src/fixtures.ts";
 import { createDrizzlePersistenceRuntime, createMemoryPersistenceRuntime } from "../src/persistence.ts";
+import { createApiStartupReadiness, requiredStartupPhases } from "../src/startup.ts";
 
 interface PaymentReceipt {
   readonly paymentId: string;
@@ -62,6 +63,76 @@ interface IdentityLinkReceipt {
     readonly confidence: string | null;
   };
 }
+
+test("startup liveness is immediate while business routes wait for complete fixture phases", async () => {
+  const office = deferred<void>();
+  const distribution = deferred<void>();
+  const readiness = createApiStartupReadiness({ office: office.promise, distribution: distribution.promise });
+  let healthCalls = 0;
+  const app = createApiService({
+    fixtures: createFixtureStore(),
+    persistence: createMemoryPersistenceRuntime({ WRITES_ENABLED: "false" }),
+    health: async () => {
+      healthCalls += 1;
+      return { status: "ok", database: "postgres" };
+    },
+    readiness,
+    nowIso: (): string => "2026-07-15T13:00:00.000Z",
+    auth: createTestAuthVerifier()
+  });
+
+  assert.deepEqual(requiredStartupPhases("/healthz"), []);
+  assert.deepEqual(requiredStartupPhases("/eof/v1/dashboard"), ["office"]);
+  assert.deepEqual(requiredStartupPhases("/eof/v1/advances/workbench"), ["office", "distribution"]);
+  assert.deepEqual(requiredStartupPhases("/erh/v1/payees"), ["office", "distribution"]);
+
+  const liveResponse = await app.request("/healthz");
+  assert.equal(liveResponse.status, 200);
+  const liveBody = await liveResponse.json() as {
+    readonly status: string;
+    readonly database: { readonly status: string };
+    readonly startup: { readonly status: string };
+  };
+  assert.equal(liveBody.status, "ok");
+  assert.equal(liveBody.database.status, "starting");
+  assert.equal(liveBody.startup.status, "starting");
+  assert.equal(healthCalls, 0, "liveness must not queue behind fixture SQL");
+
+  const notReadyResponse = await app.request("/readyz");
+  assert.equal(notReadyResponse.status, 503);
+  assert.equal(notReadyResponse.headers.get("Retry-After"), "5");
+
+  const unauthenticatedResponse = await app.request("/eof/v1/dashboard?workspaceId=workspace_1&period=2026-02");
+  assert.equal(unauthenticatedResponse.status, 401, "authentication must run before startup waits");
+
+  let officeSettled = false;
+  const officeRequest = app.request("/eof/v1/dashboard?workspaceId=workspace_1&period=2026-02", {
+    headers: authHeaders()
+  }).then((response) => {
+    officeSettled = true;
+    return response;
+  });
+  await nextTurn();
+  assert.equal(officeSettled, false);
+  office.resolve();
+  assert.equal((await officeRequest).status, 200);
+
+  let crossDomainSettled = false;
+  const crossDomainRequest = app.request("/eof/v1/advances/workbench?workspaceId=workspace_1", {
+    headers: authHeaders()
+  }).then((response) => {
+    crossDomainSettled = true;
+    return response;
+  });
+  await nextTurn();
+  assert.equal(crossDomainSettled, false, "cross-domain Office reads must wait for Distribution");
+
+  distribution.resolve();
+  assert.equal((await crossDomainRequest).status, 200);
+  const readyResponse = await app.request("/readyz");
+  assert.equal(readyResponse.status, 200);
+  assert.equal(healthCalls, 1);
+});
 
 test("Office dashboard and global P&L are served from the domain read layer", async () => {
   const app = createFixtureApiService();
@@ -5554,4 +5625,26 @@ function sourceBetween(source: string, startMarker: string, endMarker: string): 
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
   return source.slice(start, end);
+}
+
+function deferred<TValue>(): {
+  readonly promise: Promise<TValue>;
+  readonly resolve: (value?: TValue) => void;
+} {
+  let resolvePromise: (value: TValue | PromiseLike<TValue>) => void = () => undefined;
+  const promise = new Promise<TValue>((resolve) => {
+    resolvePromise = resolve;
+  });
+  return {
+    promise,
+    resolve: (value?: TValue): void => {
+      resolvePromise(value as TValue);
+    }
+  };
+}
+
+async function nextTurn(): Promise<void> {
+  await new Promise<void>((resolve) => {
+    setImmediate(resolve);
+  });
 }

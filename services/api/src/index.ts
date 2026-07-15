@@ -231,6 +231,7 @@ import { parseOfficeBankImportText } from "./office-bank-parser.js";
 import { parseDistributionImportPreview } from "./distribution-import-parser.js";
 import { createSupabaseRouter } from "./supabase-server.js";
 import { createFixtureStore, type ApiDistributionRoyaltyRuleInput, type ApiFixtureStore } from "./fixtures.js";
+import type { ApiStartupReadiness } from "./startup.js";
 import {
   appendAuditEvent,
   acquireAdvisoryLock,
@@ -312,6 +313,7 @@ export interface ApiServiceDependencies {
   readonly fixtures: ApiFixtureStore;
   readonly persistence: ApiPersistenceRuntime;
   readonly health: (() => Promise<unknown>) | null;
+  readonly readiness?: ApiStartupReadiness;
   readonly nowIso: () => string;
   readonly auth: SupabaseJwtVerifier;
 }
@@ -939,11 +941,11 @@ export const legacyAdapterMappings: readonly LegacyAdapterMapping[] = [
 ];
 
 class ApiRouteError extends Error {
-  readonly status: 400 | 403 | 404 | 409 | 422 | 500;
+  readonly status: 400 | 403 | 404 | 409 | 422 | 500 | 503;
   readonly code: string;
   readonly context: readonly string[];
 
-  constructor(status: 400 | 403 | 404 | 409 | 422 | 500, code: string, message: string, context: readonly string[]) {
+  constructor(status: 400 | 403 | 404 | 409 | 422 | 500 | 503, code: string, message: string, context: readonly string[]) {
     super(message);
     this.name = "ApiRouteError";
     this.status = status;
@@ -1055,11 +1057,49 @@ export function createApiService(dependencies: ApiServiceDependencies): Hono<Api
   );
 
   app.get("/healthz", async (context) => {
+    const startup = dependencies.readiness?.snapshot() ?? null;
+    if (startup?.status === "failed") {
+      context.header("Retry-After", "5");
+      return context.json({
+        status: "failed",
+        generatedAt: dependencies.nowIso(),
+        database: { status: "unavailable", database: "postgres" },
+        startup
+      }, 503);
+    }
+    if (startup?.status === "starting") {
+      return context.json({
+        status: "ok",
+        generatedAt: dependencies.nowIso(),
+        database: { status: "starting", database: "postgres" },
+        startup
+      });
+    }
     const database = dependencies.health === null ? { status: "ok", database: "fixture" } : await dependencies.health();
     return context.json({
       status: "ok",
       generatedAt: dependencies.nowIso(),
-      database
+      database,
+      startup
+    });
+  });
+
+  app.get("/readyz", async (context) => {
+    const startup = dependencies.readiness?.snapshot() ?? null;
+    if (startup !== null && startup.status !== "ready") {
+      context.header("Retry-After", "5");
+      return context.json({
+        status: startup.status,
+        generatedAt: dependencies.nowIso(),
+        startup
+      }, 503);
+    }
+    const database = dependencies.health === null ? { status: "ok", database: "fixture" } : await dependencies.health();
+    return context.json({
+      status: "ready",
+      generatedAt: dependencies.nowIso(),
+      database,
+      startup
     });
   });
 
@@ -1076,6 +1116,21 @@ export function createApiService(dependencies: ApiServiceDependencies): Hono<Api
   app.use("/eof/v1/*", createWorkspaceDomainGuard(authMiddleware, "office"));
   app.use("/erh/v1/*", createWorkspaceDomainGuard(authMiddleware, "distribution"));
   app.use("/cc/v1/*", createWorkspaceDomainGuard(authMiddleware, "command-center"));
+
+  // Authenticate first, then wait for the exact fixture phase consumed by the route.
+  // This prevents partial reads without delaying rejected or unauthenticated requests.
+  app.use("*", async (context, next): Promise<void> => {
+    if (context.req.method === "OPTIONS" || dependencies.readiness === undefined) {
+      await next();
+      return;
+    }
+    try {
+      await dependencies.readiness.waitForPath(context.req.path);
+    } catch {
+      throw new ApiRouteError(503, "api_startup_failed", "The API data runtime could not finish starting.", []);
+    }
+    await next();
+  });
 
   registerOfficeRoutes(app, dependencies);
   registerDistributionRoutes(app, dependencies);

@@ -35867,6 +35867,57 @@ function createSupabaseRouter() {
   return router;
 }
 
+// src/fixtures.ts
+function createEmptyApiFixtureStore() {
+  return {
+    office: {
+      departments: [],
+      divisions: [],
+      categories: [],
+      partners: [],
+      projects: [],
+      projectBudgetLines: [],
+      transactions: [],
+      financialAllocations: [],
+      bankAccounts: [],
+      bankImportBatches: [],
+      bankStatementLines: [],
+      bankReconciliationMatches: [],
+      cashflowProjectionRows: [],
+      exchangeRates: []
+    },
+    officeAuditLog: [],
+    officeClassificationSuggestions: {},
+    officePartnerPayeeLinks: {},
+    officeProjectViolations: {},
+    officeCashflowManualEntries: [],
+    officeAdvances: [],
+    officeAdvanceApplications: [],
+    distribution: {
+      importBatches: [],
+      normalizedEarnings: [],
+      calculationRuns: [],
+      earningAllocations: [],
+      suspenseItems: [],
+      statements: [],
+      statementLines: [],
+      statementPaymentLinks: [],
+      payments: [],
+      payees: [],
+      tracks: []
+    },
+    distributionContracts: [],
+    distributionContractExpenses: [],
+    distributionMappingRows: [],
+    distributionRoyaltyRules: [],
+    distributionCostTerms: [],
+    distributionExpenseApplications: [],
+    distributionFxRates: [],
+    distributionPayeeBalances: [],
+    distributionAliases: []
+  };
+}
+
 // src/persistence.ts
 import { createHash, randomUUID } from "crypto";
 
@@ -41234,11 +41285,48 @@ function createApiService(dependencies) {
     )
   );
   app.get("/healthz", async (context) => {
+    const startup = dependencies.readiness?.snapshot() ?? null;
+    if (startup?.status === "failed") {
+      context.header("Retry-After", "5");
+      return context.json({
+        status: "failed",
+        generatedAt: dependencies.nowIso(),
+        database: { status: "unavailable", database: "postgres" },
+        startup
+      }, 503);
+    }
+    if (startup?.status === "starting") {
+      return context.json({
+        status: "ok",
+        generatedAt: dependencies.nowIso(),
+        database: { status: "starting", database: "postgres" },
+        startup
+      });
+    }
     const database = dependencies.health === null ? { status: "ok", database: "fixture" } : await dependencies.health();
     return context.json({
       status: "ok",
       generatedAt: dependencies.nowIso(),
-      database
+      database,
+      startup
+    });
+  });
+  app.get("/readyz", async (context) => {
+    const startup = dependencies.readiness?.snapshot() ?? null;
+    if (startup !== null && startup.status !== "ready") {
+      context.header("Retry-After", "5");
+      return context.json({
+        status: startup.status,
+        generatedAt: dependencies.nowIso(),
+        startup
+      }, 503);
+    }
+    const database = dependencies.health === null ? { status: "ok", database: "fixture" } : await dependencies.health();
+    return context.json({
+      status: "ready",
+      generatedAt: dependencies.nowIso(),
+      database,
+      startup
     });
   });
   const authMiddleware = createSupabaseAuthMiddleware(dependencies.auth);
@@ -41254,6 +41342,18 @@ function createApiService(dependencies) {
   app.use("/eof/v1/*", createWorkspaceDomainGuard(authMiddleware, "office"));
   app.use("/erh/v1/*", createWorkspaceDomainGuard(authMiddleware, "distribution"));
   app.use("/cc/v1/*", createWorkspaceDomainGuard(authMiddleware, "command-center"));
+  app.use("*", async (context, next) => {
+    if (context.req.method === "OPTIONS" || dependencies.readiness === void 0) {
+      await next();
+      return;
+    }
+    try {
+      await dependencies.readiness.waitForPath(context.req.path);
+    } catch {
+      throw new ApiRouteError(503, "api_startup_failed", "The API data runtime could not finish starting.", []);
+    }
+    await next();
+  });
   registerOfficeRoutes(app, dependencies);
   registerDistributionRoutes(app, dependencies);
   registerCommandCenterRoutes(app, dependencies);
@@ -52064,22 +52164,108 @@ function formatPeriodLabel(start, end) {
 
 // src/postgres.ts
 import { Pool as Pool2 } from "pg";
-async function createPostgresApiRuntime(env) {
-  const pool = createPostgresPool(env);
-  try {
-    const fixtures = await readApiFixtureStoreFromPostgres(pool);
-    return {
-      fixtures,
-      persistence: createPostgresPersistenceRuntime(pool, env),
-      health: async () => readPostgresHealth(pool),
-      close: async () => {
-        await pool.end();
-      }
-    };
-  } catch (error) {
-    await pool.end();
-    throw error;
+
+// src/startup.ts
+function createApiStartupReadiness(input) {
+  const nowMs = input.nowMs ?? Date.now;
+  const startedAtMs = nowMs();
+  const phaseState = {
+    office: createStartingPhase(startedAtMs),
+    distribution: createStartingPhase(startedAtMs)
+  };
+  const phasePromises = {
+    office: trackPhase("office", input.office, phaseState, nowMs),
+    distribution: trackPhase("distribution", input.distribution, phaseState, nowMs)
+  };
+  const allReady = Promise.all([phasePromises.office, phasePromises.distribution]).then(() => void 0);
+  return {
+    waitForPath: async (path) => {
+      const requiredPhases = requiredStartupPhases(path);
+      await Promise.all(requiredPhases.map((phase) => phasePromises[phase]));
+    },
+    waitUntilReady: async () => allReady,
+    snapshot: () => startupSnapshot(startedAtMs, phaseState, nowMs())
+  };
+}
+function requiredStartupPhases(path) {
+  if (path.startsWith("/erh/v1/") || path.startsWith("/cc/v1/")) {
+    return ["office", "distribution"];
   }
+  if (!path.startsWith("/eof/v1/")) {
+    return [];
+  }
+  if (path.startsWith("/eof/v1/advances") || /^\/eof\/v1\/partners\/[^/]+\/payee-link(?:\/|$)/u.test(path)) {
+    return ["office", "distribution"];
+  }
+  return ["office"];
+}
+function createStartingPhase(startedAtMs) {
+  return {
+    status: "starting",
+    startedAtMs,
+    readyAtMs: null
+  };
+}
+function trackPhase(phase, promise, state, nowMs) {
+  return promise.then(
+    () => {
+      state[phase].status = "ready";
+      state[phase].readyAtMs = nowMs();
+    },
+    (error) => {
+      state[phase].status = "failed";
+      state[phase].readyAtMs = nowMs();
+      throw error;
+    }
+  );
+}
+function startupSnapshot(startedAtMs, state, observedAtMs) {
+  const office = phaseSnapshot(state.office);
+  const distribution = phaseSnapshot(state.distribution);
+  const status = office.status === "failed" || distribution.status === "failed" ? "failed" : office.status === "ready" && distribution.status === "ready" ? "ready" : "starting";
+  const readyAtMs = status === "starting" ? null : Math.max(state.office.readyAtMs ?? observedAtMs, state.distribution.readyAtMs ?? observedAtMs);
+  return {
+    status,
+    startedAt: new Date(startedAtMs).toISOString(),
+    readyAt: readyAtMs === null ? null : new Date(readyAtMs).toISOString(),
+    durationMs: readyAtMs === null ? null : readyAtMs - startedAtMs,
+    phases: { office, distribution }
+  };
+}
+function phaseSnapshot(state) {
+  const completedAtMs = state.readyAtMs;
+  return {
+    status: state.status,
+    startedAt: new Date(state.startedAtMs).toISOString(),
+    readyAt: completedAtMs === null ? null : new Date(completedAtMs).toISOString(),
+    durationMs: completedAtMs === null ? null : completedAtMs - state.startedAtMs
+  };
+}
+
+// src/postgres.ts
+function startPostgresApiRuntime(env) {
+  const pool = createPostgresPool(env);
+  const fixtures = createEmptyApiFixtureStore();
+  const office = loadFixturePhase("office", async () => readOfficeFixtureSlice(pool), (slice) => {
+    Object.assign(fixtures, slice);
+  });
+  const distribution = loadFixturePhase(
+    "distribution",
+    async () => readDistributionFixtureSlice(pool),
+    (slice) => {
+      Object.assign(fixtures, slice);
+    }
+  );
+  const readiness = createApiStartupReadiness({ office, distribution });
+  return {
+    fixtures,
+    persistence: createPostgresPersistenceRuntime(pool, env),
+    health: async () => readPostgresHealth(pool),
+    close: async () => {
+      await pool.end();
+    },
+    readiness
+  };
 }
 function createPostgresPool(env) {
   const databaseUrl = requireDatabaseUrl(env);
@@ -52116,35 +52302,15 @@ function requireDatabaseUrl(env) {
   }
   return value;
 }
-async function readApiFixtureStoreFromPostgres(pool) {
+async function readOfficeFixtureSlice(pool) {
   const [
     office,
-    distribution,
-    distributionContracts,
-    distributionContractExpenses,
-    distributionMappingRows,
-    distributionRoyaltyRules,
-    distributionCostTerms,
-    distributionExpenseApplications,
-    distributionFxRates,
-    distributionPayeeBalances,
-    distributionAliases,
     officePartnerPayeeLinks,
     officeCashflowManualEntries,
     officeAdvances,
     officeAdvanceApplications
   ] = await Promise.all([
     readOfficeDataset(pool),
-    readDistributionDataset(pool),
-    readDistributionContracts(pool),
-    readDistributionContractExpenses(pool),
-    readDistributionMappingRows(pool),
-    readDistributionRoyaltyRules(pool),
-    readDistributionAllocationCostTerms(pool),
-    readDistributionExistingExpenseApplications(pool),
-    readDistributionFxRates(pool),
-    readDistributionPayeeBalances(pool),
-    readDistributionAliases(pool),
     readOfficePartnerPayeeLinks(pool),
     readOfficeCashflowManualEntries(pool),
     readOfficeAdvances(pool),
@@ -52158,7 +52324,11 @@ async function readApiFixtureStoreFromPostgres(pool) {
     officeProjectViolations: emptyRecord(),
     officeCashflowManualEntries,
     officeAdvances,
-    officeAdvanceApplications,
+    officeAdvanceApplications
+  };
+}
+async function readDistributionFixtureSlice(pool) {
+  const [
     distribution,
     distributionContracts,
     distributionContractExpenses,
@@ -52169,6 +52339,69 @@ async function readApiFixtureStoreFromPostgres(pool) {
     distributionFxRates,
     distributionPayeeBalances,
     distributionAliases
+  ] = await Promise.all([
+    readDistributionDataset(pool),
+    readDistributionContracts(pool),
+    readDistributionContractExpenses(pool),
+    readDistributionMappingRows(pool),
+    readDistributionRoyaltyRules(pool),
+    readDistributionAllocationCostTerms(pool),
+    readDistributionExistingExpenseApplications(pool),
+    readDistributionFxRates(pool),
+    readDistributionPayeeBalances(pool),
+    readDistributionAliases(pool)
+  ]);
+  return {
+    distribution,
+    distributionContracts,
+    distributionContractExpenses,
+    distributionMappingRows,
+    distributionRoyaltyRules,
+    distributionCostTerms,
+    distributionExpenseApplications,
+    distributionFxRates,
+    distributionPayeeBalances,
+    distributionAliases
+  };
+}
+async function loadFixturePhase(phase, load, apply) {
+  const startedAtMs = Date.now();
+  console.log(JSON.stringify({ level: "info", msg: "api_startup_phase", phase, status: "starting" }));
+  try {
+    const slice = await load();
+    apply(slice);
+    console.log(JSON.stringify({
+      level: "info",
+      msg: "api_startup_phase",
+      phase,
+      status: "ready",
+      durationMs: Date.now() - startedAtMs,
+      ...fixturePhaseCounts(phase, slice)
+    }));
+  } catch (error) {
+    console.error(JSON.stringify({
+      level: "error",
+      msg: "api_startup_phase",
+      phase,
+      status: "failed",
+      durationMs: Date.now() - startedAtMs,
+      errorName: error instanceof Error ? error.name : "UnknownError"
+    }));
+    throw error;
+  }
+}
+function fixturePhaseCounts(phase, slice) {
+  if (phase === "office") {
+    const officeSlice = slice;
+    return {
+      transactionCount: officeSlice.office.transactions.length,
+      bankLineCount: officeSlice.office.bankStatementLines.length
+    };
+  }
+  const distributionSlice = slice;
+  return {
+    earningCount: distributionSlice.distribution.normalizedEarnings.length,
+    allocationCount: distributionSlice.distribution.earningAllocations.length
   };
 }
 async function readOfficeCashflowManualEntries(pool) {
@@ -53169,60 +53402,61 @@ async function bootServer() {
   const port = parsePort(process.env.PORT ?? 8787);
   process.stdout.write(`eHQ Hono API booting on http://${host}:${String(port)}
 `);
-  let readyApp = null;
-  let runtime = null;
-  const server = createServer((request, response) => {
-    if (readyApp === null) {
-      const rawOrigin = request.headers["origin"];
-      const origin = Array.isArray(rawOrigin) ? rawOrigin[0] ?? "" : rawOrigin ?? "";
-      const allowedOrigins = ["https://app.eeee.mu", "http://localhost:5173", "http://127.0.0.1:5173"];
-      const corsOrigin = allowedOrigins.includes(origin) ? origin : "";
-      const headers = { "Content-Type": "application/json" };
-      if (corsOrigin.length > 0) {
-        headers["Access-Control-Allow-Origin"] = corsOrigin;
-        headers["Access-Control-Allow-Methods"] = "GET,POST,PATCH,DELETE,OPTIONS";
-        headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization,Idempotency-Key,Cache-Control,Pragma";
-      }
-      if (request.method === "OPTIONS") {
-        response.writeHead(204, headers);
-        response.end();
-        return;
-      }
-      headers["Retry-After"] = "5";
-      response.writeHead(503, headers);
-      response.end(JSON.stringify({ status: "starting" }));
-      return;
-    }
-    void handleRequestWithApp(readyApp, host, port, request, response);
-  });
-  server.listen(port, host, () => {
-    const serverWithAddress = server;
-    const boundAddress = serverWithAddress.address();
-    const resolvedPort = typeof boundAddress === "object" && boundAddress !== null ? boundAddress.port : port;
-    process.stdout.write(`eHQ Hono API listening on http://${host}:${String(resolvedPort)} (DB loading...)
-`);
-  });
   process.stdout.write("eHQ Hono API connecting to Postgres...\n");
+  let runtime;
   try {
-    runtime = await createPostgresApiRuntime(process.env);
+    runtime = startPostgresApiRuntime(process.env);
   } catch (error) {
     writeBootError(error);
     process.exit(1);
     return;
   }
-  readyApp = createApiService({
+  const app = createApiService({
     fixtures: runtime.fixtures,
     persistence: runtime.persistence,
     health: runtime.health,
+    readiness: runtime.readiness,
     nowIso: () => (/* @__PURE__ */ new Date()).toISOString(),
     auth: createSupabaseJwtVerifier(createSupabaseJwtAuthConfig(process.env))
   });
-  process.stdout.write("eHQ Hono API ready\n");
+  const server = createServer((request, response) => {
+    void handleRequestWithApp(app, host, port, request, response).catch((error) => {
+      writeRequestError(error, response);
+    });
+  });
+  server.listen(port, host, () => {
+    const serverWithAddress = server;
+    const boundAddress = serverWithAddress.address();
+    const resolvedPort = typeof boundAddress === "object" && boundAddress !== null ? boundAddress.port : port;
+    process.stdout.write(`eHQ Hono API listening on http://${host}:${String(resolvedPort)} (data phases loading...)
+`);
+  });
+  let shuttingDown = false;
+  const stop = (code, error) => {
+    if (shuttingDown) {
+      return;
+    }
+    shuttingDown = true;
+    if (error !== null) {
+      writeBootError(error);
+    }
+    void shutdown(server, runtime, code).catch((shutdownError) => {
+      writeBootError(shutdownError);
+      process.exit(code);
+    });
+  };
+  void runtime.readiness.waitUntilReady().then(() => {
+    const startup = runtime.readiness.snapshot();
+    process.stdout.write(`eHQ Hono API ready in ${String(startup.durationMs ?? 0)}ms
+`);
+  }).catch((error) => {
+    stop(1, error);
+  });
   process.on("SIGINT", () => {
-    void shutdown(server, runtime, 0);
+    stop(0, null);
   });
   process.on("SIGTERM", () => {
-    void shutdown(server, runtime, 0);
+    stop(0, null);
   });
 }
 async function handleRequestWithApp(app, host, port, request, response) {
@@ -53305,6 +53539,21 @@ function writeBootError(error) {
     return;
   }
   console.error(`eHQ Hono API shadow boot failed: ${String(error)}`);
+}
+function writeRequestError(error, response) {
+  console.error(`eHQ Hono API request bridge failed: ${error instanceof Error ? error.message : String(error)}`);
+  if (response.headersSent) {
+    response.destroy(error instanceof Error ? error : void 0);
+    return;
+  }
+  response.writeHead(500, { "Content-Type": "application/json" });
+  response.end(JSON.stringify({
+    error: {
+      code: "api_request_bridge_failed",
+      message: "The API request could not be completed.",
+      context: []
+    }
+  }));
 }
 function resolveRootEnvPath(startPath) {
   let currentDirectory = startPath;

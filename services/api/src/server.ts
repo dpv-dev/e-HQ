@@ -5,7 +5,7 @@ import { Readable } from "node:stream";
 import { dirname, resolve } from "node:path";
 import { createSupabaseJwtAuthConfig, createSupabaseJwtVerifier } from "./auth.js";
 import { createApiService } from "./index.js";
-import { createPostgresApiRuntime } from "./postgres.js";
+import { startPostgresApiRuntime } from "./postgres.js";
 
 const envFilePath = resolveRootEnvPath(process.cwd());
 if (existsSync(envFilePath)) {
@@ -49,70 +49,68 @@ async function bootServer(): Promise<void> {
   const port = parsePort(process.env.PORT ?? 8787);
   process.stdout.write(`eHQ Hono API booting on http://${host}:${String(port)}\n`);
 
-  // Hostinger requires listen() within 3 seconds of process start. The Postgres
-  // fixture load can exceed that, so we bind the port immediately and serve 503
-  // while the DB initialises in the background. Once ready, the real Hono app
-  // replaces the stub handler atomically.
-  let readyApp: ReturnType<typeof createApiService> | null = null;
-  let runtime: Awaited<ReturnType<typeof createPostgresApiRuntime>> | null = null;
-
-  const server = createServer((request, response) => {
-    if (readyApp === null) {
-      const rawOrigin = request.headers["origin"];
-      const origin = Array.isArray(rawOrigin) ? (rawOrigin[0] ?? "") : (rawOrigin ?? "");
-      const allowedOrigins = ["https://app.eeee.mu", "http://localhost:5173", "http://127.0.0.1:5173"];
-      const corsOrigin = allowedOrigins.includes(origin) ? origin : "";
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (corsOrigin.length > 0) {
-        headers["Access-Control-Allow-Origin"] = corsOrigin;
-        headers["Access-Control-Allow-Methods"] = "GET,POST,PATCH,DELETE,OPTIONS";
-        headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization,Idempotency-Key,Cache-Control,Pragma";
-      }
-      if (request.method === "OPTIONS") {
-        response.writeHead(204, headers);
-        response.end();
-        return;
-      }
-      // Retry-After: 5 tells the API client (standardApiRetryPolicy reads this header)
-      // to wait 5 seconds before retrying — giving DB fixtures time to finish loading.
-      headers["Retry-After"] = "5";
-      response.writeHead(503, headers);
-      response.end(JSON.stringify({ status: "starting" }));
-      return;
-    }
-    void handleRequestWithApp(readyApp, host, port, request, response);
-  });
-
-  server.listen(port, host, () => {
-    const serverWithAddress = server as unknown as { address: () => { port: number } | string | null };
-    const boundAddress = serverWithAddress.address();
-    const resolvedPort = typeof boundAddress === "object" && boundAddress !== null ? boundAddress.port : port;
-    process.stdout.write(`eHQ Hono API listening on http://${host}:${String(resolvedPort)} (DB loading...)\n`);
-  });
-
+  // Hostinger requires listen() within 3 seconds. Start both data phases without
+  // awaiting them, then bind immediately. Hono gates each business route on the
+  // phase it consumes; /healthz remains an immediate liveness endpoint.
   process.stdout.write("eHQ Hono API connecting to Postgres...\n");
+  let runtime: ReturnType<typeof startPostgresApiRuntime>;
   try {
-    runtime = await createPostgresApiRuntime(process.env);
+    runtime = startPostgresApiRuntime(process.env);
   } catch (error: unknown) {
     writeBootError(error);
     process.exit(1);
     return;
   }
 
-  readyApp = createApiService({
+  const app = createApiService({
     fixtures: runtime.fixtures,
     persistence: runtime.persistence,
     health: runtime.health,
+    readiness: runtime.readiness,
     nowIso: (): string => new Date().toISOString(),
     auth: createSupabaseJwtVerifier(createSupabaseJwtAuthConfig(process.env))
   });
-  process.stdout.write("eHQ Hono API ready\n");
+
+  const server = createServer((request, response) => {
+    void handleRequestWithApp(app, host, port, request, response).catch((error: unknown) => {
+      writeRequestError(error, response);
+    });
+  });
+
+  server.listen(port, host, () => {
+    const serverWithAddress = server as unknown as { address: () => { port: number } | string | null };
+    const boundAddress = serverWithAddress.address();
+    const resolvedPort = typeof boundAddress === "object" && boundAddress !== null ? boundAddress.port : port;
+    process.stdout.write(`eHQ Hono API listening on http://${host}:${String(resolvedPort)} (data phases loading...)\n`);
+  });
+
+  let shuttingDown = false;
+  const stop = (code: number, error: unknown | null): void => {
+    if (shuttingDown) {
+      return;
+    }
+    shuttingDown = true;
+    if (error !== null) {
+      writeBootError(error);
+    }
+    void shutdown(server, runtime, code).catch((shutdownError: unknown) => {
+      writeBootError(shutdownError);
+      process.exit(code);
+    });
+  };
+
+  void runtime.readiness.waitUntilReady().then(() => {
+    const startup = runtime.readiness.snapshot();
+    process.stdout.write(`eHQ Hono API ready in ${String(startup.durationMs ?? 0)}ms\n`);
+  }).catch((error: unknown) => {
+    stop(1, error);
+  });
 
   process.on("SIGINT", () => {
-    void shutdown(server, runtime!, 0);
+    stop(0, null);
   });
   process.on("SIGTERM", () => {
-    void shutdown(server, runtime!, 0);
+    stop(0, null);
   });
 }
 
@@ -218,6 +216,22 @@ function writeBootError(error: unknown): void {
   }
 
   console.error(`eHQ Hono API shadow boot failed: ${String(error)}`);
+}
+
+function writeRequestError(error: unknown, response: ServerResponse): void {
+  console.error(`eHQ Hono API request bridge failed: ${error instanceof Error ? error.message : String(error)}`);
+  if (response.headersSent) {
+    response.destroy(error instanceof Error ? error : undefined);
+    return;
+  }
+  response.writeHead(500, { "Content-Type": "application/json" });
+  response.end(JSON.stringify({
+    error: {
+      code: "api_request_bridge_failed",
+      message: "The API request could not be completed.",
+      context: []
+    }
+  }));
 }
 
 function resolveRootEnvPath(startPath: string): string {
