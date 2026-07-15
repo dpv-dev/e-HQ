@@ -197,7 +197,7 @@
   const selectedProject = $derived(readSelectedProject(projects, selectedProjectId));
   const projectPnl = $derived(readProjectPnl(projectPnlState));
   const violations = $derived(readPageItems(violationsState));
-  const projectKpis = $derived(createProjectKpis(projectPnlState));
+  const projectKpis = $derived(createProjectKpis(projectPnlState, selectedProjectId !== null));
   const projectRows = $derived(createProjectRows(projects, selectedProjectId));
   const pnlRows = $derived(createPnlRows(projectPnl));
   const projectLineImpactPoints = $derived(createProjectLineImpactPoints(projectPnl));
@@ -245,12 +245,18 @@
       projectsState = createSuccessState<PageResult<OfficeProjectSummary>>(page);
       projectsLoadMoreError = null;
       const firstProject = page.items[0] ?? null;
+      const selectedProjectIsAvailable =
+        selectedProjectId !== null && page.items.some((project: OfficeProjectSummary): boolean => project.id === selectedProjectId);
 
-      // Write-only: the selectProject effect above owns fetching. Only
-      // auto-select when nothing is selected yet, so this does not override
-      // an in-progress user selection if the project list ever reloads.
-      if (firstProject !== null && selectedProjectId === null) {
-        selectedProjectId = firstProject.id;
+      if (!selectedProjectIsAvailable) {
+        selectedProjectId = firstProject?.id ?? null;
+      }
+
+      // No project means there is no dependent request to keep loading.
+      if (firstProject === null) {
+        selectProjectToken += 1;
+        projectPnlState = createIdleState<OfficeProjectPnl>();
+        violationsState = createIdleState<PageResult<OfficeProjectCoherenceViolation>>();
       }
     } catch (error: unknown) {
       projectsState = createErrorState<PageResult<OfficeProjectSummary>>(error);
@@ -386,7 +392,19 @@
     return rows.find((project: OfficeProjectSummary): boolean => project.id === projectId) ?? null;
   }
 
-  function createProjectKpis(state: ApiRequestState<OfficeProjectPnl>): readonly ProjectKpi[] {
+  function createProjectKpis(
+    state: ApiRequestState<OfficeProjectPnl>,
+    hasSelectedProject: boolean
+  ): readonly ProjectKpi[] {
+    if (!hasSelectedProject) {
+      return [
+        { label: "Income", value: "—", detail: "Select an active project.", tone: "muted", accent: true },
+        { label: "Expense", value: "—", detail: "Select an active project.", tone: "muted", accent: false },
+        { label: "Net", value: "—", detail: "Select an active project.", tone: "muted", accent: false },
+        { label: "Receivable", value: "—", detail: "Select an active project.", tone: "muted", accent: false }
+      ];
+    }
+
     if (state.status !== "success") {
       const detail = stateLabel(state);
       return [
@@ -573,7 +591,7 @@
 <section class="projects-view">
   <section class="kpi-grid" aria-label="Selected project indicators">
     {#each projectKpis as kpi (kpi.label)}
-      <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state={isLoadingState(projectPnlState) ? "loading" : "default"} accent={kpi.accent} />
+      <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state={selectedProjectId !== null && isLoadingState(projectPnlState) ? "loading" : "default"} accent={kpi.accent} />
     {/each}
   </section>
 
@@ -725,7 +743,12 @@
         {/if}
       </header>
 
-      {#if isLoadingState(projectPnlState)}
+      {#if selectedProjectId === null}
+        <div class="state-copy">
+          <strong>No active project selected</strong>
+          <span>Create or select an active project to load its validated projection.</span>
+        </div>
+      {:else if isLoadingState(projectPnlState)}
         <Loader label="Loading project P&L" detail="Reading validated project projection." size="medium" />
       {:else if projectPnlState.status === "error"}
         <div class="state-copy error">
@@ -743,7 +766,7 @@
   </section>
 
   <Table title="Active projects" columns={projectColumns} rows={projectRows} state={isLoadingState(projectsState) ? "loading" : projectsState.status === "error" ? "error" : projectRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={projectsPagination} />
-  <Table title="Coherence violations" columns={violationColumns} rows={violationRows} state={isLoadingState(violationsState) ? "loading" : violationsState.status === "error" ? "error" : violationRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={violationsPagination} />
+  <Table title="Coherence violations" columns={violationColumns} rows={violationRows} state={selectedProjectId === null ? "empty" : isLoadingState(violationsState) ? "loading" : violationsState.status === "error" ? "error" : violationRows.length === 0 ? "empty" : "default"} actionLabel="" pagination={violationsPagination} />
 </section>
 
 <script module lang="ts">
