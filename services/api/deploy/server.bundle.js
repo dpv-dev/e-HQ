@@ -25115,6 +25115,8 @@ function readOfficeBankQuality(dataset, period) {
   const periodImports = dataset.bankImportBatches.filter((batch) => batch.status === "confirmed" && batchIntersectsPeriod(batch, period));
   return {
     period,
+    totalLineCount: totalCount,
+    matchedLineCount: matchedCount,
     matchedRateBp,
     unmatchedLineCount: lines.filter((line) => line.reconciliationStatus === "unmatched" && !matchedLineIds.has(line.id)).length,
     duplicateCandidateCount: lines.filter((line) => line.isDuplicateCandidate).length,
@@ -25436,705 +25438,6 @@ function absoluteMinor(value) {
 function isDateInRange(value, dateFrom, dateTo) {
   const date = value.slice(0, 10);
   return (dateFrom === null || date >= dateFrom.slice(0, 10)) && (dateTo === null || date <= dateTo.slice(0, 10));
-}
-
-// src/office-bank-parser.ts
-var MONTHS = {
-  jan: 1,
-  feb: 2,
-  mar: 3,
-  apr: 4,
-  may: 5,
-  jun: 6,
-  jul: 7,
-  aug: 8,
-  sep: 9,
-  oct: 10,
-  nov: 11,
-  dec: 12
-};
-var SBI_DATE_LINE = /^\s*(\d{1,2},[A-Za-z]{3,9},\d{4})\s+(.+?)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s*$/u;
-var SBI_FIXED_DATE_LINE = /^\s*(\d{1,2}-\d{1,2}-\d{4})\b/u;
-var MONEY_TOKEN = /[0-9][0-9,]*\.[0-9]{2}/gu;
-var TOTAL_MONEY_TOKEN = /(?:^|\s)([0-9][0-9,]*\.[0-9]{2}|0)(?=\s|$)/gu;
-var MCB_LINE = /^\s*(\d{2}\/\d{2}\/\d{4})\s+\d{2}\/\d{2}\/\d{4}\s+(.+?)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s*$/u;
-function parseOfficeBankImportText(input) {
-  const parseAsCsv = input.sourceHint === "csv" || input.fileName.trim().toLowerCase().endsWith(".csv");
-  if (parseAsCsv) {
-    const rows2 = parseBankCsv(input.text);
-    const currency2 = detectCsvCurrency(input.text) ?? "MUR";
-    return {
-      source: "csv",
-      currency: currency2,
-      parsedRowCount: rows2.length,
-      rows: rows2.map(
-        (row) => bankRowToRecord(row, currency2)
-      ),
-      parsingNotes: [
-        "Parsed on API from CSV content and normalized before import preview."
-      ],
-      validationIssues: []
-    };
-  }
-  const source = input.sourceHint === "mcb" || input.sourceHint === "sbi" ? input.sourceHint : detectBankFormat(input.text) === "mcb" ? "mcb" : "sbi";
-  const fixedSbi = source === "sbi" ? parseFixedSbiStatementText(input.text) : null;
-  const rows = source === "mcb" ? parseMcbStatementText(input.text) : fixedSbi !== null && fixedSbi.rows.length > 0 ? fixedSbi.rows : parseSbiStatementText(input.text);
-  const currency = detectStatementCurrency(input.text);
-  const fixedSbiDetected = fixedSbi !== null && fixedSbi.rows.length > 0;
-  return {
-    source,
-    currency,
-    parsedRowCount: rows.length,
-    rows: rows.map(
-      (row) => bankRowToRecord(row, currency)
-    ),
-    parsingNotes: fixedSbiDetected ? [
-      "Fixed-column SBI statement detected and normalized by the API.",
-      ...fixedSbi?.totalsVerified === true ? ["Printed totals and running balances were verified exactly."] : ["Running balances were verified exactly; no printed grand total was available."]
-    ] : ["Parsed on API from extracted statement text and normalized before import preview."],
-    validationIssues: fixedSbi?.validationIssues ?? []
-  };
-}
-function bankRowToRecord(row, currency) {
-  const record = {
-    transactionDate: row.date,
-    description: row.description,
-    currency
-  };
-  record[row.direction] = eofMoney.format(absBigInt2(row.amountMinor));
-  if (row.balanceMinor !== null) {
-    record.balance = eofMoney.format(row.balanceMinor);
-  }
-  if (row.reference !== null) {
-    record.reference = row.reference;
-  }
-  return record;
-}
-function parseAmountUnits(input) {
-  const cleaned = cleanMoneyText(input);
-  if (cleaned.length === 0 || cleaned === "-" || cleaned === "+") {
-    return null;
-  }
-  try {
-    return eofMoney.parse(cleaned);
-  } catch {
-    return null;
-  }
-}
-function parseDate(input) {
-  const value = input.trim();
-  if (value.length === 0) {
-    return null;
-  }
-  const sbi = value.match(/^([0-9]{1,2})\s*,\s*([A-Za-z]{3,})\s*,\s*([0-9]{4})$/u);
-  if (sbi !== null && sbi[1] !== void 0 && sbi[2] !== void 0 && sbi[3] !== void 0) {
-    const month = MONTHS[sbi[2].slice(0, 3).toLowerCase()];
-    if (month === void 0) {
-      return null;
-    }
-    return `${sbi[3]}-${pad2(month)}-${pad2(Number.parseInt(sbi[1], 10))}`;
-  }
-  if (/^\d{4}-\d{2}-\d{2}/u.test(value)) {
-    return value.slice(0, 10);
-  }
-  const dmy = value.match(/^(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})$/u);
-  if (dmy !== null && dmy[1] !== void 0 && dmy[2] !== void 0 && dmy[3] !== void 0) {
-    return `${dmy[3]}-${pad2(Number.parseInt(dmy[2], 10))}-${pad2(Number.parseInt(dmy[1], 10))}`;
-  }
-  const dmyShort = value.match(/^(\d{1,2})[/\-](\d{1,2})[/\-](\d{2})$/u);
-  if (dmyShort !== null && dmyShort[1] !== void 0 && dmyShort[2] !== void 0 && dmyShort[3] !== void 0) {
-    const year2 = 2e3 + Number.parseInt(dmyShort[3], 10);
-    return `${year2}-${pad2(Number.parseInt(dmyShort[2], 10))}-${pad2(Number.parseInt(dmyShort[1], 10))}`;
-  }
-  return null;
-}
-function parseFixedSbiStatementText(text) {
-  const rows = [];
-  const validationIssues = /* @__PURE__ */ new Set();
-  let chequeColumn = null;
-  let withdrawalsColumn = null;
-  let depositsColumn = null;
-  let fixedHeaderDetected = false;
-  let openingBalanceMinor = null;
-  let previousBalanceMinor = null;
-  let debitTotalMinor = 0n;
-  let creditTotalMinor = 0n;
-  let printedDebitTotalMinor = null;
-  let printedCreditTotalMinor = null;
-  let printedClosingBalanceMinor = null;
-  for (const rawLine of text.split(/\r\n|\r|\n/u)) {
-    const upper = rawLine.toUpperCase();
-    if (upper.includes("PARTICULARS") && upper.includes("WITHDRAWALS") && upper.includes("DEPOSITS") && upper.includes("BALANCE")) {
-      fixedHeaderDetected = true;
-      chequeColumn = positiveColumn(upper.indexOf("CHQ.NO."));
-      withdrawalsColumn = positiveColumn(upper.indexOf("WITHDRAWALS"));
-      depositsColumn = positiveColumn(upper.indexOf("DEPOSITS"));
-      continue;
-    }
-    if (!fixedHeaderDetected || depositsColumn === null) {
-      continue;
-    }
-    if (/\bGrand\s+Total\s*:/iu.test(rawLine)) {
-      const totals = totalMoneyTokens(rawLine);
-      if (totals.length >= 3) {
-        const debitToken = totals[totals.length - 3];
-        const creditToken = totals[totals.length - 2];
-        const balanceToken2 = totals[totals.length - 1];
-        printedDebitTotalMinor = debitToken === void 0 ? null : parseAmountUnits(debitToken.text);
-        printedCreditTotalMinor = creditToken === void 0 ? null : parseAmountUnits(creditToken.text);
-        printedClosingBalanceMinor = balanceToken2 === void 0 ? null : signedBalanceMinor(rawLine, balanceToken2);
-      }
-      continue;
-    }
-    const dateMatch = rawLine.match(SBI_FIXED_DATE_LINE);
-    if (dateMatch === null || dateMatch[1] === void 0) {
-      continue;
-    }
-    const tokens = moneyTokens(rawLine);
-    if (tokens.length === 1 && /\bB\s*\/\s*F\b/iu.test(rawLine)) {
-      const balanceToken2 = tokens[0];
-      openingBalanceMinor = balanceToken2 === void 0 ? null : signedBalanceMinor(rawLine, balanceToken2);
-      previousBalanceMinor = openingBalanceMinor;
-      continue;
-    }
-    if (tokens.length < 2) {
-      validationIssues.add("sbi_dated_row_unreadable");
-      continue;
-    }
-    const amountToken = tokens[tokens.length - 2];
-    const balanceToken = tokens[tokens.length - 1];
-    const date = parseDate(dateMatch[1]);
-    const amountMinor = amountToken === void 0 ? null : parseAmountUnits(amountToken.text);
-    const balanceMinor = balanceToken === void 0 ? null : signedBalanceMinor(rawLine, balanceToken);
-    if (date === null || amountMinor === null || balanceMinor === null || amountToken === void 0) {
-      validationIssues.add("sbi_dated_row_unreadable");
-      continue;
-    }
-    const direction = amountToken.end >= depositsColumn ? "credit" : "debit";
-    const absoluteAmountMinor = absBigInt2(amountMinor);
-    const signedMovementMinor = direction === "credit" ? absoluteAmountMinor : -absoluteAmountMinor;
-    if (previousBalanceMinor !== null && balanceMinor - previousBalanceMinor !== signedMovementMinor) {
-      validationIssues.add("sbi_running_balance_mismatch");
-    }
-    previousBalanceMinor = balanceMinor;
-    if (direction === "credit") {
-      creditTotalMinor += absoluteAmountMinor;
-    } else {
-      debitTotalMinor += absoluteAmountMinor;
-    }
-    const details = fixedSbiDetails(
-      rawLine,
-      dateMatch[0].length,
-      amountToken.start,
-      chequeColumn,
-      withdrawalsColumn
-    );
-    if (details.description.length === 0) {
-      validationIssues.add("sbi_description_missing");
-    }
-    rows.push({
-      date,
-      description: details.description,
-      amountMinor: absoluteAmountMinor,
-      direction,
-      balanceMinor,
-      reference: details.reference
-    });
-  }
-  const hasPrintedTotals = printedDebitTotalMinor !== null && printedCreditTotalMinor !== null && printedClosingBalanceMinor !== null;
-  if (fixedHeaderDetected && rows.length > 0 && !hasPrintedTotals) {
-    validationIssues.add("sbi_grand_total_missing");
-  }
-  if (hasPrintedTotals) {
-    if (printedDebitTotalMinor !== debitTotalMinor || printedCreditTotalMinor !== creditTotalMinor || printedClosingBalanceMinor !== previousBalanceMinor) {
-      validationIssues.add("sbi_grand_total_mismatch");
-    }
-    if (openingBalanceMinor !== null && openingBalanceMinor + creditTotalMinor - debitTotalMinor !== printedClosingBalanceMinor) {
-      validationIssues.add("sbi_opening_closing_mismatch");
-    }
-  }
-  return {
-    rows,
-    validationIssues: [...validationIssues],
-    totalsVerified: hasPrintedTotals && validationIssues.size === 0
-  };
-}
-function positiveColumn(index) {
-  return index >= 0 ? index : null;
-}
-function moneyTokens(line) {
-  return [...line.matchAll(MONEY_TOKEN)].flatMap((match2) => {
-    const text = match2[0];
-    const start = match2.index;
-    return text === void 0 || start === void 0 ? [] : [{ text, start, end: start + text.length }];
-  });
-}
-function totalMoneyTokens(line) {
-  return [...line.matchAll(TOTAL_MONEY_TOKEN)].flatMap((match2) => {
-    const text = match2[1];
-    const matchStart = match2.index;
-    if (text === void 0 || matchStart === void 0) {
-      return [];
-    }
-    const start = matchStart + match2[0].indexOf(text);
-    return [{ text, start, end: start + text.length }];
-  });
-}
-function signedBalanceMinor(line, token) {
-  const amountMinor = parseAmountUnits(token.text);
-  if (amountMinor === null) {
-    return null;
-  }
-  const marker = line.slice(token.end).match(/^\s*(Dr|Cr)\b/iu)?.[1]?.toLowerCase();
-  return marker === "dr" ? -absBigInt2(amountMinor) : absBigInt2(amountMinor);
-}
-function fixedSbiDetails(line, dateEnd, amountStart, chequeColumn, withdrawalsColumn) {
-  const detailsEnd = Math.min(amountStart, withdrawalsColumn ?? amountStart);
-  const safeChequeColumn = chequeColumn !== null && chequeColumn > dateEnd && chequeColumn < detailsEnd ? chequeColumn : null;
-  const descriptionSlice = line.slice(dateEnd, safeChequeColumn ?? detailsEnd).trim();
-  const referenceSlice = safeChequeColumn === null ? "" : line.slice(safeChequeColumn, detailsEnd).trim();
-  const reference = /^[A-Z0-9][A-Z0-9./-]{3,}$/iu.test(referenceSlice) ? referenceSlice : null;
-  const description = [descriptionSlice, reference === null ? referenceSlice : ""].filter((part) => part.length > 0).join(" ").replace(/\s+/gu, " ").trim();
-  return { description, reference };
-}
-function parseSbiStatementText(text) {
-  const drafts = [];
-  for (const block of splitIntoBlocks(text)) {
-    const draft = sbiDraftFromBlock(block);
-    if (draft !== null) {
-      drafts.push(draft);
-    }
-  }
-  return assignDirectionsByNeighbors(drafts);
-}
-function splitIntoBlocks(text) {
-  const blocks = [];
-  let current = [];
-  for (const rawLine of text.split(/\r\n|\r|\n/u)) {
-    if (rawLine.trim().length === 0) {
-      if (current.length > 0) {
-        blocks.push(current);
-        current = [];
-      }
-      continue;
-    }
-    current.push(rawLine);
-  }
-  if (current.length > 0) {
-    blocks.push(current);
-  }
-  return blocks;
-}
-function sbiDraftFromBlock(block) {
-  let dateLineIndex = -1;
-  let match2 = null;
-  for (let index = 0; index < block.length; index += 1) {
-    const candidate = (block[index] ?? "").match(SBI_DATE_LINE);
-    if (candidate !== null) {
-      match2 = candidate;
-      dateLineIndex = index;
-      break;
-    }
-  }
-  if (match2 === null) {
-    return null;
-  }
-  const dateStr = match2[1];
-  const middleText = match2[2];
-  const amountStr = match2[3];
-  const balanceStr = match2[4];
-  if (dateStr === void 0 || amountStr === void 0) {
-    return null;
-  }
-  const date = parseDate(dateStr);
-  const amountMinor = parseAmountUnits(amountStr);
-  if (date === null || amountMinor === null) {
-    return null;
-  }
-  const parts = [];
-  let reference = null;
-  for (let index = 0; index < block.length; index += 1) {
-    const lineText = index === dateLineIndex ? (middleText ?? "").trim() : (block[index] ?? "").trim();
-    if (lineText.length === 0) {
-      continue;
-    }
-    const idMatch = lineText.match(/^ID:\s*(\S+)/iu);
-    if (idMatch !== null && idMatch[1] !== void 0) {
-      if (reference === null) {
-        reference = idMatch[1];
-      }
-      continue;
-    }
-    parts.push(lineText);
-  }
-  return {
-    date,
-    amountMinor: absBigInt2(amountMinor),
-    balanceMinor: balanceStr !== void 0 ? parseAmountUnits(balanceStr) : null,
-    description: parts.join(" ").replace(/\s+/gu, " ").trim(),
-    reference
-  };
-}
-function assignDirectionsByNeighbors(drafts) {
-  return drafts.map((row, index) => {
-    if (row.balanceMinor === null) {
-      return toRow(row, "debit");
-    }
-    const candidates = [];
-    const prev = drafts[index - 1];
-    const next = drafts[index + 1];
-    if (prev !== void 0 && prev.balanceMinor !== null) {
-      candidates.push(row.balanceMinor - prev.balanceMinor);
-    }
-    if (next !== void 0 && next.balanceMinor !== null) {
-      candidates.push(row.balanceMinor - next.balanceMinor);
-    }
-    const matched = candidates.find(
-      (delta) => absBigInt2(absBigInt2(delta) - row.amountMinor) <= 1n
-    );
-    if (matched !== void 0) {
-      return toRow(row, matched < 0n ? "debit" : "credit");
-    }
-    const firstDelta = candidates[0];
-    if (firstDelta !== void 0) {
-      return toRow(row, firstDelta > 0n ? "credit" : "debit");
-    }
-    return toRow(row, "debit");
-  });
-}
-function parseMcbStatementText(text) {
-  const lines = text.split(/\r\n|\r|\n/u);
-  const drafts = [];
-  let current = null;
-  let openingBalanceMinor = null;
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    if (line.length === 0) {
-      continue;
-    }
-    const opening = line.match(/^Opening Balance\s+([\d,]+\.\d{2})$/iu);
-    if (opening !== null && opening[1] !== void 0) {
-      openingBalanceMinor = parseAmountUnits(opening[1]);
-      continue;
-    }
-    if (/^Closing Balance/iu.test(line)) {
-      if (current !== null) {
-        drafts.push(current);
-        current = null;
-      }
-      continue;
-    }
-    const match2 = line.match(MCB_LINE);
-    if (match2 !== null && match2[1] !== void 0 && match2[3] !== void 0 && match2[4] !== void 0) {
-      if (current !== null) {
-        drafts.push(current);
-      }
-      const date = parseDate(match2[1]);
-      const amountMinor = parseAmountUnits(match2[3]);
-      if (date === null || amountMinor === null) {
-        current = null;
-        continue;
-      }
-      current = {
-        date,
-        amountMinor: absBigInt2(amountMinor),
-        balanceMinor: parseAmountUnits(match2[4]),
-        description: (match2[2] ?? "").trim(),
-        reference: null
-      };
-      continue;
-    }
-    if (current !== null) {
-      current = {
-        ...current,
-        description: `${current.description} ${line}`.replace(/\s+/gu, " ").trim()
-      };
-    }
-  }
-  if (current !== null) {
-    drafts.push(current);
-  }
-  return assignDirectionsSequential(drafts, openingBalanceMinor);
-}
-function assignDirectionsSequential(drafts, openingBalanceMinor) {
-  let previousBalanceMinor = openingBalanceMinor;
-  return drafts.map((row) => {
-    const balanceMinor = row.balanceMinor;
-    if (balanceMinor === null || previousBalanceMinor === null) {
-      previousBalanceMinor = balanceMinor ?? previousBalanceMinor;
-      return toRow(row, "debit");
-    }
-    const delta = balanceMinor - previousBalanceMinor;
-    previousBalanceMinor = balanceMinor;
-    return toRow(row, delta < 0n ? "debit" : "credit");
-  });
-}
-function toRow(row, direction) {
-  return {
-    date: row.date,
-    description: row.description,
-    amountMinor: row.amountMinor,
-    direction,
-    balanceMinor: row.balanceMinor,
-    reference: row.reference
-  };
-}
-function detectBankFormat(text) {
-  const lower = text.toLowerCase();
-  if (lower.includes("transactions list") || lower.includes("particulars") || lower.includes("instrument id") || lower.includes("txn date") || lower.includes("narration") || lower.includes("sbi (mauritius)") || lower.includes("sbi mauritius") || lower.includes("state bank") || lower.includes("sbm")) {
-    return "sbi";
-  }
-  if (lower.includes("current account statement") || /mcbl09\d/u.test(lower)) {
-    return "mcb";
-  }
-  return "unknown";
-}
-function detectStatementCurrency(text) {
-  const labelled = text.match(/Currency\s*:?\s*([A-Za-z]{3})/u);
-  if (labelled !== null && labelled[1] !== void 0) {
-    return labelled[1].toUpperCase();
-  }
-  if (/\bEUR\b/u.test(text)) {
-    return "EUR";
-  }
-  return "MUR";
-}
-function splitCsvLine(line) {
-  const cells = [];
-  let cell = "";
-  let inQuotes = false;
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index];
-    if (inQuotes) {
-      if (char === '"') {
-        if (line[index + 1] === '"') {
-          cell += '"';
-          index += 1;
-        } else {
-          inQuotes = false;
-        }
-      } else {
-        cell += char ?? "";
-      }
-    } else if (char === '"') {
-      inQuotes = true;
-    } else if (char === ",") {
-      cells.push(cell);
-      cell = "";
-    } else {
-      cell += char ?? "";
-    }
-  }
-  cells.push(cell);
-  return cells.map((value) => value.trim());
-}
-function headerIndex(header, names) {
-  for (const name of names) {
-    const index = header.indexOf(name);
-    if (index >= 0) {
-      return index;
-    }
-  }
-  return -1;
-}
-function cellAt(cells, index) {
-  if (index < 0) {
-    return "";
-  }
-  const value = cells[index];
-  return value !== void 0 ? value : "";
-}
-function parseCsvDate(input, dayFirst) {
-  const value = input.trim();
-  if (value.length === 0) {
-    return null;
-  }
-  if (/^\d{4}-\d{2}-\d{2}/u.test(value)) {
-    return value.slice(0, 10);
-  }
-  const match2 = value.match(/^(\d{1,2})[/\-](\d{1,2})[/\-](\d{2}|\d{4})$/u);
-  if (match2 === null || match2[1] === void 0 || match2[2] === void 0 || match2[3] === void 0) {
-    return null;
-  }
-  const first = Number.parseInt(match2[1], 10);
-  const second = Number.parseInt(match2[2], 10);
-  const day2 = dayFirst ? first : second;
-  const month = dayFirst ? second : first;
-  const yearRaw = Number.parseInt(match2[3], 10);
-  const year2 = match2[3].length === 2 ? 2e3 + yearRaw : yearRaw;
-  if (month < 1 || month > 12 || day2 < 1 || day2 > 31) {
-    return null;
-  }
-  return `${year2}-${pad2(month)}-${pad2(day2)}`;
-}
-function detectDayFirstDates(rows, dateIndex) {
-  for (const cells of rows) {
-    const match2 = cellAt(cells, dateIndex).match(/^([0-9]{1,2})[/\-]([0-9]{1,2})[/\-][0-9]{2,4}$/u);
-    if (match2 !== null && match2[1] !== void 0 && match2[2] !== void 0) {
-      if (Number.parseInt(match2[1], 10) > 12) {
-        return true;
-      }
-      if (Number.parseInt(match2[2], 10) > 12) {
-        return false;
-      }
-    }
-  }
-  return false;
-}
-function parseBankCsv(text) {
-  const lines = text.split(/\r\n|\r|\n/u).filter((line) => line.trim().length > 0);
-  const firstLine = lines[0];
-  if (lines.length < 2 || firstLine === void 0) {
-    return [];
-  }
-  const header = splitCsvLine(firstLine).map(
-    (value) => value.toLowerCase()
-  );
-  const dateIndex = headerIndex(header, [
-    "date",
-    "transaction date",
-    "trans date",
-    "value date",
-    "posting date"
-  ]);
-  const descriptionIndex = headerIndex(header, [
-    "description",
-    "details",
-    "narration",
-    "particulars",
-    "memo",
-    "transaction details"
-  ]);
-  const debitIndex = headerIndex(header, ["debit", "withdrawal", "dr", "debit amount"]);
-  const creditIndex = headerIndex(header, [
-    "credit",
-    "deposit",
-    "cr",
-    "credit amount"
-  ]);
-  const amountIndex = headerIndex(header, ["amount"]);
-  const balanceIndex = headerIndex(header, ["balance", "running balance", "closing balance"]);
-  const referenceIndex = headerIndex(header, [
-    "reference",
-    "ref",
-    "transaction id",
-    "cheque",
-    "cheque no"
-  ]);
-  if (dateIndex < 0 || debitIndex < 0 && creditIndex < 0 && amountIndex < 0) {
-    return [];
-  }
-  const dataRows = lines.slice(1).map(splitCsvLine);
-  const dayFirst = detectDayFirstDates(dataRows, dateIndex);
-  const rows = [];
-  for (const cells of dataRows) {
-    const date = parseCsvDate(cellAt(cells, dateIndex), dayFirst);
-    if (date === null) {
-      continue;
-    }
-    const debit = debitIndex >= 0 ? parseAmountUnits(cellAt(cells, debitIndex)) : null;
-    const credit = creditIndex >= 0 ? parseAmountUnits(cellAt(cells, creditIndex)) : null;
-    let amountMinor = null;
-    let direction = "debit";
-    if (credit !== null && credit !== 0n && (debit === null || debit === 0n)) {
-      amountMinor = absBigInt2(credit);
-      direction = "credit";
-    } else if (debit !== null && debit !== 0n) {
-      amountMinor = absBigInt2(debit);
-      direction = "debit";
-    } else if (amountIndex >= 0) {
-      const signed = parseAmountUnits(cellAt(cells, amountIndex));
-      if (signed !== null && signed !== 0n) {
-        amountMinor = absBigInt2(signed);
-        direction = signed < 0n ? "debit" : "credit";
-      }
-    }
-    if (amountMinor === null || amountMinor === 0n) {
-      continue;
-    }
-    const reference = referenceIndex >= 0 ? cellAt(cells, referenceIndex) : "";
-    rows.push({
-      date,
-      description: cellAt(cells, descriptionIndex),
-      amountMinor,
-      direction,
-      balanceMinor: balanceIndex >= 0 ? parseAmountUnits(cellAt(cells, balanceIndex)) : null,
-      reference: reference.length > 0 ? reference : null
-    });
-  }
-  return rows;
-}
-function detectCsvCurrency(text) {
-  const lines = text.split(/\r\n|\r|\n/u).filter((line) => line.trim().length > 0);
-  const firstLine = lines[0];
-  if (lines.length < 2 || firstLine === void 0) {
-    return null;
-  }
-  const header = splitCsvLine(firstLine).map(
-    (value) => value.toLowerCase()
-  );
-  const currencyIndex = headerIndex(header, ["currency", "ccy", "currency code"]);
-  if (currencyIndex < 0) {
-    return null;
-  }
-  for (const line of lines.slice(1)) {
-    const value = cellAt(splitCsvLine(line), currencyIndex).toUpperCase();
-    if (/^[A-Z]{3}$/u.test(value)) {
-      return value;
-    }
-  }
-  return null;
-}
-function cleanMoneyText(value) {
-  const original = value.trim();
-  if (original.length === 0) {
-    return "";
-  }
-  let sign = "";
-  let trimmed = original;
-  if (trimmed.startsWith("(") && trimmed.endsWith(")")) {
-    sign = "-";
-    trimmed = trimmed.slice(1, -1).trim();
-  }
-  if (trimmed.startsWith("+")) {
-    trimmed = trimmed.slice(1).trim();
-  } else if (trimmed.startsWith("-")) {
-    sign = "-";
-    trimmed = trimmed.slice(1).trim();
-  }
-  const compacted = trimmed.replaceAll(/\u00a0/g, "").replaceAll(" ", "").replace(/[^0-9.,]/gu, "");
-  if (compacted.length === 0) {
-    return "";
-  }
-  const lastComma = compacted.lastIndexOf(",");
-  const lastDot = compacted.lastIndexOf(".");
-  if (lastComma === -1 && lastDot === -1) {
-    return `${sign}${compacted}`;
-  }
-  if (lastComma === -1) {
-    return `${sign}${compacted.replace(/,/gu, "")}`;
-  }
-  if (lastDot === -1) {
-    const decimalPart = compacted.slice(lastComma + 1);
-    const integerWithGroup = compacted.slice(0, lastComma);
-    const integerGroups = integerWithGroup.split(",");
-    if (decimalPart.length > 0 && decimalPart.length <= 2 && integerGroups.every(
-      (group, groupIndex) => groupIndex === 0 ? group.length >= 1 && group.length <= 3 : group.length === 3
-    )) {
-      return `${sign}${integerWithGroup.replace(/,/gu, "")}.${decimalPart}`;
-    }
-    return `${sign}${compacted.replace(/,/gu, "")}`;
-  }
-  if (lastComma > lastDot) {
-    return `${sign}${compacted.slice(0, lastComma).replace(/,/gu, "")}.${compacted.slice(lastComma + 1)}`;
-  }
-  return `${sign}${compacted.replace(/,/gu, "")}`;
-}
-function absBigInt2(value) {
-  return value < 0n ? -value : value;
-}
-function pad2(value) {
-  return String(value).padStart(2, "0");
 }
 
 // src/distribution-import-parser.ts
@@ -39589,6 +38892,7 @@ function drizzle(...params) {
 var SENSITIVE_ACTIONS = /* @__PURE__ */ new Set([
   "command_center_integration_toggle",
   "command_center_settings_update",
+  "office_settings_update",
   "command_center_user_permission_update",
   "distribution_alias_upsert",
   "distribution_allocations_preview",
@@ -39617,6 +38921,7 @@ var SENSITIVE_ACTIONS = /* @__PURE__ */ new Set([
   "distribution_suspense_resolve",
   "distribution_track_upsert",
   "office_bank_import_reverse",
+  "office_cashflow_import_reverse",
   "office_bank_import_delete",
   "office_financial_reset",
   "office_bank_account_delete",
@@ -39638,7 +38943,9 @@ var ALLOWED_MUTATING_ACTIONS = /* @__PURE__ */ new Set([
   "office_bank_account_update",
   "office_project_create",
   "office_project_update",
+  "office_settings_update",
   "office_cashflow_import_confirm",
+  "office_cashflow_import_reverse",
   "office_cashflow_manual_entry_create",
   "office_cashflow_manual_entry_cancel",
   "office_advance_create",
@@ -39666,7 +38973,9 @@ var OFFICE_BOT_ACTIONS = /* @__PURE__ */ new Set([
   "office_bank_account_update",
   "office_project_create",
   "office_project_update",
+  "office_settings_update",
   "office_cashflow_import_confirm",
+  "office_cashflow_import_reverse",
   "office_cashflow_manual_entry_create",
   "office_cashflow_manual_entry_cancel",
   "office_advance_create",
@@ -40973,6 +40282,9 @@ var optionalNullableStringSchema = external_exports.preprocess(
   external_exports.string().min(1).nullable()
 );
 var workspaceBodySchema = external_exports.object({ workspaceId: external_exports.string().min(1) });
+var officeSettingsUpdateSchema = workspaceBodySchema.extend({
+  defaultImportAccountId: nullableStringSchema
+});
 var OFFICE_FINANCIAL_RESET_PHRASE = "DELETE ALL OFFICE DATA";
 var officeFinancialResetSchema = workspaceBodySchema.extend({
   confirmationPhrase: external_exports.literal(OFFICE_FINANCIAL_RESET_PHRASE)
@@ -41068,6 +40380,8 @@ var officeProjectWriteSchema = workspaceBodySchema.extend({
   active: external_exports.boolean()
 });
 var officeCashflowImportSchema = workspaceBodySchema.extend({
+  fileName: external_exports.string().min(1).optional(),
+  checksum: external_exports.string().min(1).optional(),
   rows: external_exports.array(external_exports.record(external_exports.string()))
 });
 var officeLedgerBulkRowSchema = external_exports.object({
@@ -41470,9 +40784,6 @@ function registerOfficeRoutes(app, dependencies) {
   app.post("/eof/v1/bank-import/preview", async (context) => {
     return officeBankImportPreviewResponse(context, dependencies);
   });
-  app.post("/eof/v1/bank-import/parse-preview", async (context) => {
-    return officeBankImportParsePreviewResponse(context, dependencies);
-  });
   app.post("/eof/v1/bank-import/confirm", async (context) => {
     return officeBankImportConfirmResponse(context, dependencies);
   });
@@ -41540,6 +40851,12 @@ function registerOfficeRoutes(app, dependencies) {
     const buckets = readOfficeCashflowProjection(dataset, from, to, accountId);
     return context.json(toCashflowBuckets(buckets));
   });
+  app.get("/eof/v1/settings", async (context) => {
+    return context.json(await officeSettingsReadResponse(context, dependencies));
+  });
+  app.patch("/eof/v1/settings", async (context) => {
+    return officeSettingsUpdateResponse(context, dependencies);
+  });
   app.get("/eof/v1/cashflow/workbench", (context) => {
     return context.json(officeCashflowWorkbenchResponse(context, dependencies));
   });
@@ -41554,6 +40871,9 @@ function registerOfficeRoutes(app, dependencies) {
   });
   app.post("/eof/v1/cashflow/confirm", async (context) => {
     return officeCashflowConfirmResponse(context, dependencies);
+  });
+  app.post("/eof/v1/cashflow/imports/:batchId/reverse", async (context) => {
+    return officeCashflowImportReverseResponse(context, dependencies);
   });
   app.get("/eof/v1/advances/workbench", (context) => {
     return context.json(officeAdvancesWorkbenchResponse(context, dependencies));
@@ -41766,6 +41086,8 @@ function registerOfficeRoutes(app, dependencies) {
     const result = readOfficeBankQualityForFilters(dataset, period, filters);
     const response = {
       period: result.period,
+      totalLineCount: result.totalLineCount,
+      matchedLineCount: result.matchedLineCount,
       matchedRateBp: result.matchedRateBp,
       unmatchedLineCount: result.unmatchedLineCount,
       duplicateCandidateCount: result.duplicateCandidateCount,
@@ -42856,16 +42178,16 @@ function assertOfficeReconciliationKernelCreate(context, line, transactionId, am
 function officeReconciliationLineMoney(line) {
   const currency = line.amountMurMinor === null ? line.currency : "MUR";
   const amountMinor = line.amountMurMinor ?? line.amountMinor;
-  return createMoneyAmount(createMoneyMicroUnits(absBigInt3(amountMinor)), createCurrencyCode(currency));
+  return createMoneyAmount(createMoneyMicroUnits(absBigInt2(amountMinor)), createCurrencyCode(currency));
 }
 function officeReconciliationTransactionMoney(transaction) {
   const originalCurrency = transaction.originalCurrency?.trim().toUpperCase() ?? null;
   const currency = originalCurrency === null || originalCurrency.length === 0 || originalCurrency === "MUR" || transaction.exchangeRateE10 !== null ? "MUR" : originalCurrency;
-  return createMoneyAmount(createMoneyMicroUnits(absBigInt3(transaction.amountMinor)), createCurrencyCode(currency));
+  return createMoneyAmount(createMoneyMicroUnits(absBigInt2(transaction.amountMinor)), createCurrencyCode(currency));
 }
 function createFinanceMoneyAmount(context, amountMinor, currency) {
   try {
-    return createMoneyAmount(createMoneyMicroUnits(absBigInt3(amountMinor)), createCurrencyCode(currency));
+    return createMoneyAmount(createMoneyMicroUnits(absBigInt2(amountMinor)), createCurrencyCode(currency));
   } catch (error) {
     throw new ApiRouteError(400, "currency_invalid", "Currency must be a valid ISO-4217 code.", [
       `path=${context.req.path}`,
@@ -43793,6 +43115,96 @@ function parseCashflowImportRow(record) {
     issues: []
   };
 }
+var OFFICE_DEFAULT_IMPORT_ACCOUNT_SETTING_KEY = "office_default_import_account_id";
+async function officeSettingsReadResponse(context, dependencies) {
+  const workspaceId = resolveWorkspaceId(context);
+  const persisted = await dependencies.persistence.withTx(
+    async (tx) => {
+      if (tx.kind === "memory") {
+        return { accountId: null, updatedAt: null };
+      }
+      const row = queryRowsFromResult(await tx.executor.execute(sql`
+        select value_json, updated_at::text
+        from command_center_settings
+        where workspace_id = ${workspaceId} and key = ${OFFICE_DEFAULT_IMPORT_ACCOUNT_SETTING_KEY}
+        limit 1
+      `))[0];
+      const value = jsonRecordQueryField(row, "value_json");
+      return {
+        accountId: typeof value.accountId === "string" ? value.accountId : null,
+        updatedAt: row === void 0 ? null : stringQueryField(row, "updated_at") || null
+      };
+    }
+  );
+  const accountExists = persisted.accountId === null || dependencies.fixtures.office.bankAccounts.some(
+    (account) => account.id === persisted.accountId && account.workspaceId === workspaceId
+  );
+  return {
+    workspaceId,
+    referenceCurrency: "MUR",
+    defaultImportAccountId: accountExists ? persisted.accountId : null,
+    updatedAt: persisted.updatedAt
+  };
+}
+async function officeSettingsUpdateResponse(context, dependencies) {
+  const request = await readZodBody(context, officeSettingsUpdateSchema);
+  const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, request.workspaceId);
+  if (request.defaultImportAccountId !== null) {
+    const account = dataset.bankAccounts.find((candidate) => candidate.id === request.defaultImportAccountId);
+    if (account === void 0 || !account.isActive) {
+      throw new ApiRouteError(
+        422,
+        "office_settings_account_invalid",
+        "The default import account must be an active account in this workspace.",
+        [`accountId=${request.defaultImportAccountId}`]
+      );
+    }
+  }
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const targetId = `${request.workspaceId}:setting:${OFFICE_DEFAULT_IMPORT_ACCOUNT_SETTING_KEY}`;
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_settings_update",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `office:settings:${request.workspaceId}`);
+      if (tx.kind !== "memory") {
+        await tx.executor.execute(sql`
+          insert into command_center_settings (
+            workspace_id, key, value_json, status, updated_by_user_id, updated_at
+          ) values (
+            ${request.workspaceId},
+            ${OFFICE_DEFAULT_IMPORT_ACCOUNT_SETTING_KEY},
+            ${JSON.stringify({ accountId: request.defaultImportAccountId })}::jsonb,
+            'Configured',
+            ${actor.userId},
+            now()
+          )
+          on conflict (workspace_id, key) do update set
+            value_json = excluded.value_json,
+            status = excluded.status,
+            updated_by_user_id = excluded.updated_by_user_id,
+            updated_at = now()
+        `);
+      }
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_settings_update",
+        targetType: "office_setting",
+        targetId,
+        before: {},
+        after: { defaultImportAccountId: request.defaultImportAccountId },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      return mutationReceipt(targetId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
 async function officeCashflowPreviewResponse(context) {
   const request = await readZodBody(context, officeCashflowImportSchema);
   resolveWorkspaceId(context);
@@ -43817,11 +43229,22 @@ async function officeCashflowPreviewResponse(context) {
 }
 async function officeCashflowConfirmResponse(context, dependencies) {
   const request = await readZodBody(context, officeCashflowImportSchema);
-  const workspaceId = resolveWorkspaceId(context);
+  const workspaceId = request.workspaceId;
   const parsed = request.rows.map((record) => parseCashflowImportRow(record).parsed).filter((row) => row !== null);
+  if (parsed.length !== request.rows.length || parsed.length === 0) {
+    throw new ApiRouteError(
+      422,
+      "cashflow_import_rows_invalid",
+      "Every cash-flow import row must pass preview validation before confirmation.",
+      [`accepted=${parsed.length}`, `received=${request.rows.length}`]
+    );
+  }
   const idempotencyKey = requireIdempotencyKey(context);
   const actor = context.get("authUser");
   const batchId = randomUUID2();
+  const importedAt = dependencies.nowIso();
+  const fileName = request.fileName ?? `cashflow-${batchId}.csv`;
+  const checksum = request.checksum ?? batchId;
   const result = await runIdempotentMutation({
     runtime: dependencies.persistence,
     actor,
@@ -43830,17 +43253,89 @@ async function officeCashflowConfirmResponse(context, dependencies) {
     idempotencyKey,
     requestBody: request,
     write: async (tx, resolvedIdempotencyKey) => {
-      await persistOfficeCashflowRows(tx, workspaceId, parsed);
+      await persistOfficeCashflowRows(tx, {
+        batchId,
+        workspaceId,
+        fileName,
+        checksum,
+        idempotencyFingerprint: `cashflow:${resolvedIdempotencyKey}`,
+        importedAt,
+        rows: parsed
+      });
       const auditEventId = await appendAuditEvent(tx, {
         actor,
         action: "office_cashflow_import_confirm",
         targetType: "office_cashflow_import",
         targetId: batchId,
         before: {},
-        after: { workspaceId, rowCount: parsed.length },
+        after: { workspaceId, fileName, checksum, rowCount: parsed.length, reversible: true },
         idempotencyKey: resolvedIdempotencyKey
       });
-      upsertOfficeCashflowFixture(dependencies.fixtures, workspaceId, parsed, dependencies.nowIso());
+      appendOfficeBankImportFixture(dependencies.fixtures, {
+        batchId,
+        workspaceId,
+        source: "cashflow",
+        fileName,
+        checksum,
+        accountId: null,
+        periodStart: null,
+        periodEnd: null,
+        currency: "MUR",
+        acceptedRowCount: parsed.length,
+        rejectedRowCount: 0,
+        duplicateRowCount: 0,
+        idempotencyFingerprint: `cashflow:${resolvedIdempotencyKey}`,
+        status: "confirmed",
+        importedAt,
+        metadata: { kind: "cashflow_baseline", periods: parsed.map((row) => row.periodMonth) },
+        lines: []
+      });
+      appendOfficeCashflowFixture(dependencies.fixtures, batchId, workspaceId, parsed, importedAt);
+      return mutationReceipt(batchId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+async function officeCashflowImportReverseResponse(context, dependencies) {
+  const request = await readZodBody(context, workspaceBodySchema);
+  const batchId = requirePathParam(context, "batchId");
+  const batch = dependencies.fixtures.office.bankImportBatches.find(
+    (candidate) => candidate.id === batchId && candidate.workspaceId === request.workspaceId && candidate.source === "cashflow"
+  );
+  if (batch === void 0) {
+    throw new ApiRouteError(404, "cashflow_import_not_found", "Cash-flow import batch was not found.", [`batchId=${batchId}`]);
+  }
+  if (batch.status === "void") {
+    throw new ApiRouteError(409, "cashflow_import_already_reversed", "Cash-flow import batch is already reversed.", [`batchId=${batchId}`]);
+  }
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_cashflow_import_reverse",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `office:cashflow-import:${batchId}`);
+      if (tx.kind !== "memory") {
+        await tx.executor.execute(sql`
+          update office_bank_import_batches
+          set status = 'void', updated_at = now()
+          where id = ${batchId} and workspace_id = ${request.workspaceId} and source = 'cashflow' and status = 'confirmed'
+        `);
+      }
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_cashflow_import_reverse",
+        targetType: "office_cashflow_import",
+        targetId: batchId,
+        before: { status: batch.status },
+        after: { status: "void" },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      markOfficeCashflowImportFixtureVoid(dependencies.fixtures, batchId);
       return mutationReceipt(batchId, auditEventId);
     }
   });
@@ -43884,7 +43379,15 @@ function officeCashflowWorkbenchResponse(context, dependencies) {
     forecastOutflowLevel: toBarLevel(row.forecastOutflowMinor, maxUnits)
   }));
   const manualEntries = dependencies.fixtures.officeCashflowManualEntries.filter((entry) => entry.workspaceId === workspaceId && entry.entryDate >= from && entry.entryDate <= to).filter((entry) => accountId === null || entry.accountId === accountId).sort((left, right) => right.entryDate.localeCompare(left.entryDate) || right.createdAt.localeCompare(left.createdAt)).slice(0, 200).map(toApiCashflowManualEntry);
-  return { buckets, manualEntries };
+  const importBatches = dependencies.fixtures.office.bankImportBatches.filter((batch) => batch.workspaceId === workspaceId && batch.source === "cashflow").sort((left, right) => (right.importedAt ?? "").localeCompare(left.importedAt ?? "")).slice(0, 50).map((batch) => ({
+    id: batch.id,
+    fileName: batch.fileName,
+    rowCount: batch.acceptedRowCount,
+    status: batch.status === "void" ? "void" : "confirmed",
+    importedAt: batch.importedAt,
+    reversible: batch.status === "confirmed"
+  }));
+  return { buckets, manualEntries, importBatches };
 }
 async function officeCashflowManualEntryCreateResponse(context, dependencies) {
   const request = await readZodBody(context, officeCashflowManualEntryWriteSchema);
@@ -44332,29 +43835,33 @@ function assertOfficeOptionalReferences(dataset, workspaceId, accountId, partner
 function distributionMoneyToEofMinor(value) {
   return roundRatioHalfUp(erhMoney.parse(value), 100000000n);
 }
-async function persistOfficeCashflowRows(tx, workspaceId, rows) {
-  if (tx.kind === "memory" || rows.length === 0) {
+async function persistOfficeCashflowRows(tx, input) {
+  if (tx.kind === "memory" || input.rows.length === 0) {
     return;
   }
-  const periods = [...new Set(rows.map((row) => row.periodMonth))];
-  for (const period of periods) {
-    await tx.executor.execute(sql`delete from office_cashflow_projection_rows where workspace_id = ${workspaceId} and period_month = ${period}`);
-  }
-  for (const row of rows) {
+  await tx.executor.execute(sql`
+    insert into office_bank_import_batches (
+      id, workspace_id, source, file_name, checksum, account_id, currency,
+      accepted_row_count, rejected_row_count, duplicate_row_count,
+      idempotency_fingerprint, status, imported_at, metadata
+    ) values (
+      ${input.batchId}, ${input.workspaceId}, 'cashflow', ${input.fileName}, ${input.checksum}, null, 'MUR',
+      ${input.rows.length}, 0, 0, ${input.idempotencyFingerprint}, 'confirmed', ${input.importedAt},
+      ${JSON.stringify({ kind: "cashflow_baseline", periods: input.rows.map((row) => row.periodMonth) })}::jsonb
+    )
+  `);
+  for (const row of input.rows) {
     await tx.executor.execute(sql`
-      insert into office_cashflow_projection_rows (id, workspace_id, period_month, expected_inflow_minor, expected_outflow_minor, expected_closing_balance_minor, currency)
-      values (${randomUUID2()}, ${workspaceId}, ${row.periodMonth}, ${row.inflowMinor.toString()}, ${row.outflowMinor.toString()}, ${row.closingBalanceMinor.toString()}, ${row.currency})
+      insert into office_cashflow_projection_rows (id, import_batch_id, workspace_id, period_month, expected_inflow_minor, expected_outflow_minor, expected_closing_balance_minor, currency)
+      values (${randomUUID2()}, ${input.batchId}, ${input.workspaceId}, ${row.periodMonth}, ${row.inflowMinor.toString()}, ${row.outflowMinor.toString()}, ${row.closingBalanceMinor.toString()}, ${row.currency})
     `);
   }
 }
-function upsertOfficeCashflowFixture(fixtures, workspaceId, rows, nowIso) {
+function appendOfficeCashflowFixture(fixtures, batchId, workspaceId, rows, nowIso) {
   const mutableOffice = fixtures.office;
-  const periods = new Set(rows.map((row) => row.periodMonth));
-  const kept = fixtures.office.cashflowProjectionRows.filter(
-    (row) => !(row.workspaceId === workspaceId && periods.has(row.periodMonth))
-  );
   const added = rows.map((row) => ({
     id: randomUUID2(),
+    importBatchId: batchId,
     workspaceId,
     accountId: null,
     periodMonth: row.periodMonth,
@@ -44364,7 +43871,16 @@ function upsertOfficeCashflowFixture(fixtures, workspaceId, rows, nowIso) {
     currency: row.currency,
     createdAt: nowIso
   }));
-  mutableOffice.cashflowProjectionRows = [...kept, ...added];
+  mutableOffice.cashflowProjectionRows = [...fixtures.office.cashflowProjectionRows, ...added];
+}
+function markOfficeCashflowImportFixtureVoid(fixtures, batchId) {
+  const mutableOffice = fixtures.office;
+  mutableOffice.bankImportBatches = fixtures.office.bankImportBatches.map(
+    (batch) => batch.id === batchId ? { ...batch, status: "void" } : batch
+  );
+  mutableOffice.cashflowProjectionRows = fixtures.office.cashflowProjectionRows.filter(
+    (row) => row.importBatchId !== batchId
+  );
 }
 function safeEofParse(value) {
   try {
@@ -47237,44 +46753,6 @@ async function distributionImportReverseResponse(context, dependencies) {
   });
   return context.json(result.body, result.status);
 }
-async function officeBankImportParsePreviewResponse(context, dependencies) {
-  const request = await readJsonBody(context);
-  assertOfficeBankImportParsePreviewRequest(context, request);
-  requirePermissionForWorkspace(context.get("authUser"), "office_bank_import_preview", request.workspaceId);
-  const parsed = parseOfficeBankImportText({
-    text: request.contentText,
-    fileName: request.fileName,
-    sourceHint: request.sourceHint
-  });
-  if (parsed.validationIssues.length > 0) {
-    throw new ApiRouteError(
-      422,
-      "bank_import_statement_validation_failed",
-      "The statement does not reconcile with its printed balances and totals.",
-      [
-        `path=${context.req.path}`,
-        `fileName=${request.fileName}`,
-        `issues=${parsed.validationIssues.join(",")}`
-      ]
-    );
-  }
-  if (parsed.rows.length === 0) {
-    throw new ApiRouteError(
-      422,
-      "bank_import_parse_empty",
-      "No readable transaction row was detected in this file.",
-      [`path=${context.req.path}`, `fileName=${request.fileName}`]
-    );
-  }
-  const response = {
-    source: parsed.source,
-    currency: parsed.currency,
-    parsedRowCount: parsed.parsedRowCount,
-    rows: parsed.rows,
-    parsingNotes: parsed.parsingNotes
-  };
-  return context.json(response);
-}
 async function officeBankImportPreviewResponse(context, dependencies) {
   const request = await readJsonBody(context);
   assertOfficeBankImportPreviewRequest(context, request);
@@ -48078,19 +47556,6 @@ function assertNullableStringField(context, value, field) {
   }
   assertStringField(context, value, field);
 }
-function assertOfficeBankImportParsePreviewRequest(context, request) {
-  assertStringField(context, request.workspaceId, "workspaceId");
-  assertStringField(context, request.fileName, "fileName");
-  assertStringField(context, request.contentText, "contentText");
-  if (request.sourceHint !== null && request.sourceHint !== "sbi" && request.sourceHint !== "mcb" && request.sourceHint !== "csv" && request.sourceHint !== "pdf") {
-    throw new ApiRouteError(
-      400,
-      "body_value_invalid",
-      "Office bank parse-preview source hint is invalid.",
-      [`path=${context.req.path}`, `sourceHint=${String(request.sourceHint)}`]
-    );
-  }
-}
 function assertOfficeBankImportPreviewRequest(context, request) {
   assertStringField(context, request.workspaceId, "workspaceId");
   if (request.accountId !== void 0) {
@@ -48567,7 +48032,7 @@ function buildOfficeReconciliationSuggestions(dataset, workspaceId, lines) {
     }
     const expectedType = line.direction === "debit" ? "expense" : "income";
     const rankedCandidates = transactionPool.filter(
-      (transaction) => transaction.type === expectedType && absBigInt3(transaction.amountMinor) === line.amountMurMinor && !alreadyMatchedTransactionIds.has(transaction.id) && !usedTransactionIds.has(transaction.id)
+      (transaction) => transaction.type === expectedType && absBigInt2(transaction.amountMinor) === line.amountMurMinor && !alreadyMatchedTransactionIds.has(transaction.id) && !usedTransactionIds.has(transaction.id)
     ).map((transaction) => {
       const score = reconciliationSuggestionScore(line, transaction);
       return {
@@ -48757,16 +48222,16 @@ function amountForBankRow(row) {
   }
   if (credit !== null) {
     return {
-      amountMinor: absBigInt3(credit),
-      amountMurMinor: currency === "MUR" ? absBigInt3(credit) : moneyValue(row, ["amountMur", "amount_mur", "amountMurMinor", "amount_mur_minor"]),
+      amountMinor: absBigInt2(credit),
+      amountMurMinor: currency === "MUR" ? absBigInt2(credit) : moneyValue(row, ["amountMur", "amount_mur", "amountMurMinor", "amount_mur_minor"]),
       currency,
       direction: "credit"
     };
   }
   if (debit !== null) {
     return {
-      amountMinor: absBigInt3(debit),
-      amountMurMinor: currency === "MUR" ? absBigInt3(debit) : moneyValue(row, ["amountMur", "amount_mur", "amountMurMinor", "amount_mur_minor"]),
+      amountMinor: absBigInt2(debit),
+      amountMurMinor: currency === "MUR" ? absBigInt2(debit) : moneyValue(row, ["amountMur", "amount_mur", "amountMurMinor", "amount_mur_minor"]),
       currency,
       direction: "debit"
     };
@@ -48783,7 +48248,7 @@ function convertMinorToMurViaFinanceKernel(amountMinor, fromCurrency, occurredOn
   }
   try {
     const converted = convertMoney(
-      createMoneyAmount(createMoneyMicroUnits(absBigInt3(amountMinor)), createCurrencyCode(fromCurrency)),
+      createMoneyAmount(createMoneyMicroUnits(absBigInt2(amountMinor)), createCurrencyCode(fromCurrency)),
       createCurrencyCode("MUR"),
       {
         fromCurrency: createCurrencyCode(rate.fromCurrency),
@@ -48814,7 +48279,7 @@ function pickMurExchangeRateForPreview(fromCurrency, occurredOn, exchangeRates) 
 }
 function decimalFromE10(rateE10) {
   const sign = rateE10 < 0n ? "-" : "";
-  const digits = absBigInt3(rateE10).toString().padStart(11, "0");
+  const digits = absBigInt2(rateE10).toString().padStart(11, "0");
   const integer = digits.slice(0, -10);
   const fraction = digits.slice(-10);
   return `${sign}${integer}.${fraction}`;
@@ -48825,12 +48290,12 @@ function moneyValue(row, aliases) {
     return null;
   }
   try {
-    return eofMoney.parse(cleanMoneyText2(value));
+    return eofMoney.parse(cleanMoneyText(value));
   } catch (_error) {
     return null;
   }
 }
-function cleanMoneyText2(value) {
+function cleanMoneyText(value) {
   const original = value.trim();
   if (original.length === 0) {
     return "";
@@ -48911,7 +48376,7 @@ function normalizeColumnKey2(key) {
 function uniqueStrings(values) {
   return [...new Set(values)];
 }
-function absBigInt3(value) {
+function absBigInt2(value) {
   return value < 0n ? -value : value;
 }
 function officeDateRange(dates) {
@@ -49703,7 +49168,7 @@ function toOfficeVatReport(dataset, period) {
     if (!vatMeta.isApplicable) {
       continue;
     }
-    const grossMinor = absBigInt3(transaction.amountMinor);
+    const grossMinor = absBigInt2(transaction.amountMinor);
     const rateBp = vatMeta.rateBp;
     const breakdown = rateBp > 0 ? calculateVat(
       createMoneyAmount(createMoneyMicroUnits(grossMinor), createCurrencyCode("MUR")),
@@ -49740,8 +49205,8 @@ function readOfficeTransactionVatMeta(transaction) {
   const hasVatAmount = typeof value.vatAmountMinor === "bigint" || value.vatAmountMinor === null;
   const hasSource = hasVatApplicable || hasVatRate || hasVatAmount;
   const normalizedRate = typeof value.vatRateBp === "number" && Number.isInteger(value.vatRateBp) && value.vatRateBp >= 0 && value.vatRateBp <= 1e4 ? value.vatRateBp : 0;
-  const normalizedVatAmount = typeof value.vatAmountMinor === "bigint" ? absBigInt3(value.vatAmountMinor) : null;
-  const isApplicable = value.vatApplicable === true || typeof value.vatAmountMinor === "bigint" && absBigInt3(value.vatAmountMinor) > 0n || normalizedRate > 0;
+  const normalizedVatAmount = typeof value.vatAmountMinor === "bigint" ? absBigInt2(value.vatAmountMinor) : null;
+  const isApplicable = value.vatApplicable === true || typeof value.vatAmountMinor === "bigint" && absBigInt2(value.vatAmountMinor) > 0n || normalizedRate > 0;
   return {
     hasSource,
     isApplicable,
@@ -50170,7 +49635,7 @@ function departmentExpenseTrendKpis(dataset, filters, months) {
     }
     const existing = trends.get(path.department.id);
     const series = existing?.series ?? months.map(() => 0n);
-    series[monthIndex] = eofMoney.add(series[monthIndex] ?? 0n, absBigInt3(transaction.amountMinor));
+    series[monthIndex] = eofMoney.add(series[monthIndex] ?? 0n, absBigInt2(transaction.amountMinor));
     trends.set(path.department.id, {
       departmentLabel: path.department.name,
       series
@@ -50217,8 +49682,8 @@ function roundSignedRatioBp(numerator, denominator) {
     return 0;
   }
   const negative = numerator < 0n !== denominator < 0n;
-  const absoluteNumerator = absBigInt3(numerator);
-  const absoluteDenominator = absBigInt3(denominator);
+  const absoluteNumerator = absBigInt2(numerator);
+  const absoluteDenominator = absBigInt2(denominator);
   const magnitude = Number((absoluteNumerator * 10000n + absoluteDenominator / 2n) / absoluteDenominator);
   return negative ? -magnitude : magnitude;
 }
@@ -50312,7 +49777,7 @@ function toOfficeLedgerTransactions(dataset, filters) {
       id: transaction.id,
       transactionDate: transaction.transactionDate.slice(0, 10),
       direction: transaction.type,
-      amount: createMoneyAmount(createMoneyMicroUnits(absBigInt3(transaction.amountMinor)), createCurrencyCode("MUR")),
+      amount: createMoneyAmount(createMoneyMicroUnits(absBigInt2(transaction.amountMinor)), createCurrencyCode("MUR")),
       categoryId: transaction.categoryId,
       departmentId,
       divisionId,
@@ -50956,6 +50421,8 @@ function readOfficeBankQualityForFilters(dataset, period, filters) {
   );
   return {
     period,
+    totalLineCount: totalCount,
+    matchedLineCount: matchedCount,
     matchedRateBp,
     unmatchedLineCount: lines.filter((line) => line.reconciliationStatus === "unmatched" && !matchedLineIds.has(line.id)).length,
     duplicateCandidateCount: lines.filter((line) => line.isDuplicateCandidate).length,
@@ -52165,6 +51632,13 @@ function formatPeriodLabel(start, end) {
 // src/postgres.ts
 import { Pool as Pool2 } from "pg";
 
+// src/office-bank-description.ts
+var MCB_PAGE_CHROME_MARKER = /\s+(?:The Mauritius Commercial Bank Ltd\.?|Republic of Mauritius|SWIFT Code\b|Internet Banking Pro\b|Current Account IBAN\s*:|\bBBAN\s*:|Date Range\s*:)/iu;
+function sanitizeOfficeBankDescription(description) {
+  const marker = MCB_PAGE_CHROME_MARKER.exec(description);
+  return (marker === null ? description : description.slice(0, marker.index)).replace(/\s+/gu, " ").trim();
+}
+
 // src/startup.ts
 function createApiStartupReadiness(input) {
   const nowMs = input.nowMs ?? Date.now;
@@ -52496,7 +51970,13 @@ async function readOfficeDataset(pool) {
     ),
     queryRows(
       pool,
-      "select id::text, workspace_id, account_id::text, period_month, expected_inflow_minor::text, expected_outflow_minor::text, expected_closing_balance_minor::text, currency, created_at from office_cashflow_projection_rows order by period_month, id",
+      `select rows.id::text, rows.import_batch_id::text, rows.workspace_id, rows.account_id::text, rows.period_month,
+        rows.expected_inflow_minor::text, rows.expected_outflow_minor::text,
+        rows.expected_closing_balance_minor::text, rows.currency, rows.created_at
+       from office_cashflow_projection_rows rows
+       left join office_bank_import_batches batches on batches.id = rows.import_batch_id
+       where rows.import_batch_id is null or batches.id is null or batches.status <> 'void'
+       order by rows.period_month, rows.id`,
       []
     ),
     queryRows(
@@ -52936,7 +52416,7 @@ function toOfficeBankStatementLine(row) {
     accountId: stringCell(row, "account_id"),
     occurredOn: dateCell(row, "occurred_on"),
     valueOn: nullableDateCell(row, "value_on"),
-    description: stringCell(row, "description"),
+    description: sanitizeOfficeBankDescription(stringCell(row, "description")),
     reference: nullableStringCell(row, "reference"),
     direction: enumCell(row, "direction", ["credit", "debit"]),
     amountMinor: bigintCell(row, "amount_minor"),
@@ -52964,6 +52444,7 @@ function toOfficeBankReconciliationMatch(row) {
 function toOfficeCashflowProjectionRow(row) {
   return {
     id: stringCell(row, "id"),
+    importBatchId: nullableStringCell(row, "import_batch_id"),
     workspaceId: stringCell(row, "workspace_id"),
     accountId: nullableStringCell(row, "account_id"),
     periodMonth: stringCell(row, "period_month"),

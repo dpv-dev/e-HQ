@@ -215,6 +215,7 @@ const fixture: OfficeAnalyticsDataset = {
   cashflowProjectionRows: [
     {
       id: "cash_jan",
+      importBatchId: null,
       workspaceId: "workspace_1",
       accountId: "bank_mur",
       periodMonth: "2026-01",
@@ -226,6 +227,7 @@ const fixture: OfficeAnalyticsDataset = {
     },
     {
       id: "cash_feb",
+      importBatchId: null,
       workspaceId: "workspace_1",
       accountId: "bank_mur",
       periodMonth: "2026-02",
@@ -241,6 +243,8 @@ const fixture: OfficeAnalyticsDataset = {
 test("bank quality derives matched rate and exception counts from bank tables", () => {
   assert.deepEqual(readOfficeBankQuality(fixture, "2026-01"), {
     period: "2026-01",
+    totalLineCount: 3,
+    matchedLineCount: 2,
     matchedRateBp: 6667,
     unmatchedLineCount: 1,
     duplicateCandidateCount: 1,
@@ -275,6 +279,7 @@ test("cashflow projection keeps only the most recent row per account+month inste
       ...fixture.cashflowProjectionRows,
       {
         id: "cash_jan_reimport",
+        importBatchId: null,
         workspaceId: "workspace_1",
         accountId: "bank_mur",
         periodMonth: "2026-01",

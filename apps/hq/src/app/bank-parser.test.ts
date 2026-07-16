@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseAmount, parseSbiStatementText } from "./bank-parser.js";
+import { parseAmount, parseBankImportContent, parseMcbStatementText, parseSbiStatementText } from "./bank-parser.js";
 
 const header = " DATE          PARTICULARS              CHQ.NO.     WITHDRAWALS        DEPOSITS          BALANCE";
 
@@ -66,5 +66,37 @@ describe("SBI fixed-column parser", () => {
     ].join("\n"));
 
     expect(rows[0]).toMatchObject({ direction: "debit", balance: -50 });
+  });
+});
+
+describe("MCB PDF parser", () => {
+  it("does not append repeated page headers to transaction descriptions", () => {
+    const rows = parseMcbStatementText([
+      "Opening Balance 10,000.00",
+      "07/07/2026 07/07/2026 FT26182R7CY0 JUICE Account Transfer|refund|MR KHILESH EMRITH 100.00 9,900.00",
+      "The Mauritius Commercial Bank Ltd. 9-15 Sir William Newton Street, Port-Louis,",
+      "Republic of Mauritius T: +230 202 6060 F: +230 208 7054 E: contact@mcb.mu",
+      "SWIFT Code MCBLMUMU BRN: C07000934 www.mcb.mu Page 9 of 20",
+      "Internet Banking Pro Account Name: Current Account IBAN:",
+      "MU57MCBL0901000455164517000MUR BBAN: 000455164517 Currency: MUR",
+      "Date Range: 12 Jun 2026 - Transaction Value Date Debit Credit Transaction reference & Description Balance date",
+      "08/07/2026 08/07/2026 FT26183S4TQB IB Account Transfer|Internet online 50.00 9,850.00"
+    ].join("\n"));
+
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.description).toBe("FT26182R7CY0 JUICE Account Transfer|refund|MR KHILESH EMRITH");
+    expect(rows[1]?.description).toBe("FT26183S4TQB IB Account Transfer|Internet online");
+  });
+
+  it("normalizes a PDF into structured API rows locally", () => {
+    const parsed = parseBankImportContent([
+      "Current Account Statement",
+      "Currency: MUR",
+      "Opening Balance 1,000.00",
+      "07/07/2026 07/07/2026 REF-1 PAYMENT 100.00 900.00"
+    ].join("\n"), "statement.pdf");
+
+    expect(parsed.source).toBe("mcb");
+    expect(parsed.rows[0]).toMatchObject({ transactionDate: "2026-07-07", debit: "100.00", currency: "MUR" });
   });
 });

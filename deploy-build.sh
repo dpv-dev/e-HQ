@@ -34,6 +34,9 @@ bash scripts/check-regressions.sh
 echo "==> SQL column completeness check"
 node scripts/check-sql-columns.mjs
 
+echo "==> Write-path audit coverage check"
+node scripts/check-write-audit-coverage.mjs
+
 echo "==> Package upload zips (deterministic, secret-guarded)"
 bash deploy-zip.sh
 

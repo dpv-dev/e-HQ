@@ -529,21 +529,25 @@
       {
         label: "Matched rate",
         value: matchedValue,
-        detail: quality.status === "success" ? quality.data.period : stateLabel(quality),
+        detail: quality.status === "success"
+          ? `${String(quality.data.matchedLineCount)} / ${String(quality.data.totalLineCount)} lines in active range`
+          : stateLabel(quality),
         tone: "success",
         accent: false
       },
       {
         label: "Unmatched lines",
         value: unmatchedValue,
-        detail: "bank quality",
+        detail: quality.status === "success"
+          ? `of ${String(quality.data.totalLineCount)} lines · active range`
+          : stateLabel(quality),
         tone: "warning",
         accent: false
       },
       {
         label: "Duplicate candidates",
         value: duplicateValue,
-        detail: "bank quality",
+        detail: quality.status === "success" ? "active range" : stateLabel(quality),
         tone: "muted",
         accent: false
       }

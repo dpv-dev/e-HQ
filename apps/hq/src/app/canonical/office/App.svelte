@@ -41,7 +41,6 @@
     type CashflowBucket,
     type OfficeDashboardResponse,
     type OfficeDashboardAnalyticsResponse,
-    type OfficeDashboardReconciliationAccountKpi,
     type OfficeDepartmentPnl,
     type OfficeDivisionPnl,
     type OfficeGlobalPnl,
@@ -56,7 +55,6 @@
     type OfficeBankPreviewRowResult,
     type OfficeTransaction,
     type BankImportConfirmResponse,
-    type BankImportParsePreviewResponse,
     type BankImportPreviewRequest,
     type OfficeTransactionWriteRequest,
     type PageResult,
@@ -72,7 +70,8 @@
   } from "./recent-import-actions.js";
   import { suggestedImportAccountId } from "../../bank-import-account.js";
   import { extractPdfText } from "../../pdf-extract.js";
-  import { parseCsvRecords } from "../../bank-parser.js";
+  import { parseCsvRecords } from "../../csv-records.js";
+  import type { ParsedBankImportContent } from "../../bank-parser.js";
   import { formatDateOnly } from "../../date-format.js";
   import { apiMoneyToMicroUnits, formatMoneyValue, formatSignedMoneyValue, moneyToneForValue } from "../../money-format.js";
   import { createPeriodOptions, getLatestDataPeriod, periodLabel, rangeForScope, rangeLabel, todayIso, type DateRange, type PeriodScope } from "../../period-controls.js";
@@ -221,7 +220,7 @@
         { id: "reconciliation", label: "Reconciliation", title: "Bank reconciliation", subtitle: "Match bank lines to the general ledger and approve suggestions." },
         { id: "monitoring", label: "Monitoring", title: "Monitoring", subtitle: "Integrity checks, bank quality, pending items, imports, and audit." },
         { id: "audit", label: "Audit Log", title: "Audit Log", subtitle: "Read-only history of Office audit events." },
-        { id: "settings", label: "Settings", title: "Settings", subtitle: "Read-only Office configuration: reference currency and maintenance." }
+        { id: "settings", label: "Settings", title: "Settings", subtitle: "Operational Office configuration with audited, persisted changes." }
       ]
     },
     {
@@ -418,6 +417,7 @@
     message: "Choose a bank statement (PDF or CSV)."
   });
   let importAccounts = $state<readonly OfficeBankAccountSummary[]>([]);
+  let configuredDefaultImportAccountId = $state<string>("");
   let selectedImportAccountId = $state<string>("");
   let importAccountWasUserSelected = $state(false);
   let importRowSelection = $state<Record<string, boolean>>({});
@@ -666,15 +666,12 @@
   const canConfirmImport = $derived(selectedImportRowIds.length > 0 && importState.status !== "loading");
   const recentImportRows = $derived(createRecentImportRows(dashboardState));
   const dashboardImportPoints = $derived(createDashboardImportPoints(dashboardState));
-  const dashboardImportRows = $derived(recentImportRows.slice(0, 6));
   const dashboardAnalyticsKpis = $derived(createDashboardAnalyticsKpis(dashboardAnalyticsState));
   const dashboardRunwayPanel = $derived(createDashboardRunwayPanel(dashboardAnalyticsState));
   const dashboardProjectProfitabilityPoints = $derived(createDashboardProjectProfitabilityPoints(dashboardAnalyticsState));
   const dashboardProjectProfitabilityRows = $derived(createDashboardProjectProfitabilityRows(dashboardAnalyticsState));
   const dashboardExpenseTrendPoints = $derived(createDashboardExpenseTrendPoints(dashboardAnalyticsState));
   const dashboardExpenseTrendRows = $derived(createDashboardExpenseTrendRows(dashboardAnalyticsState));
-  const dashboardRecentTransactionRows = $derived(createDashboardRecentTransactionRows(transactionRows));
-  const dashboardBankQualityRows = $derived(createDashboardBankQualityRows(dashboardAnalyticsState));
   const coaStructurePoints = $derived(createCoaStructurePoints(planTableNodes));
   const transactionTypePoints = $derived(createTransactionTypePoints(transactionRows));
   const transactionStatusPoints = $derived(createTransactionStatusPoints(transactionRows));
@@ -968,10 +965,14 @@
   // with "account_not_found" when no target account is resolved.
   async function loadImportAccounts(): Promise<void> {
     try {
-      const accounts = await client.office.listBankAccounts({ workspaceId: officeWorkspaceId, cursor: null, limit: TABLE_PAGE_SIZE });
+      const [accounts, settings] = await Promise.all([
+        client.office.listBankAccounts({ workspaceId: officeWorkspaceId, cursor: null, limit: TABLE_PAGE_SIZE }),
+        client.office.getSettings(officeWorkspaceId)
+      ]);
       importAccounts = accounts.items;
-      if (selectedImportAccountId.length === 0) {
-        selectedImportAccountId = defaultImportAccountId(importAccounts, null);
+      configuredDefaultImportAccountId = settings.defaultImportAccountId ?? "";
+      if (!importAccountWasUserSelected) {
+        selectedImportAccountId = defaultImportAccountId(importAccounts, null, null, selectedImportAccountId);
       }
     } catch {
       importAccounts = [];
@@ -1011,6 +1012,17 @@
     source: ImportSource | null = null,
     currentAccountId = ""
   ): string {
+    const configured = accounts.find((account): boolean => account.id === configuredDefaultImportAccountId && account.isActive);
+    const sourceMatches = configured !== undefined && (
+      source === null || source === "csv" || configured.bankName.toLowerCase().includes(source)
+    );
+    if (
+      configured !== undefined &&
+      (currency === null || configured.currency === currency) &&
+      sourceMatches
+    ) {
+      return configured.id;
+    }
     return suggestedImportAccountId(accounts, currency, source, currentAccountId);
   }
 
@@ -2500,25 +2512,21 @@
               message: `Reading PDF: page ${pageNumber} of ${pageCount}.`
             };
           });
-      const parsed = await client.office.parseBankImportPreview({
-        workspaceId: officeWorkspaceId,
-        fileName: file.name,
-        sourceHint: isCsv ? "csv" : null,
-        contentText: text
-      }, {
-        idempotencyKey: createIdempotencyKey("import-parse-preview")
-      });
+      // The full statement parser is only needed when a user chooses a file.
+      // Keep it out of the initial Office workspace bundle.
+      const { parseBankImportContent } = await import("../../bank-parser.js");
+      const parsed = parseBankImportContent(text, file.name);
 
-      await applyBackendParsedImportRows(file.name, checksum, parsed);
+      await applyParsedImportRows(file.name, checksum, parsed);
     } catch (error: unknown) {
       importState = { ...importState, status: "error", rows: [], message: getErrorMessage(error) };
     }
   }
 
-  async function applyBackendParsedImportRows(
+  async function applyParsedImportRows(
     fileName: string,
     checksum: string,
-    parsed: BankImportParsePreviewResponse
+    parsed: ParsedBankImportContent
   ): Promise<void> {
     const source = parsed.source;
     const currency = parsed.currency;
@@ -3773,39 +3781,6 @@
     });
   }
 
-  function createDashboardRecentTransactionRows(rows: readonly OfficeTransaction[]): readonly TableRow[] {
-    return rows
-      .filter((transaction: OfficeTransaction): boolean => transaction.status === "posted" || transaction.status === "reconciled")
-      .slice(0, 10)
-      .map((transaction: OfficeTransaction): TableRow => ({
-        id: transaction.id,
-        cells: [
-          { kind: "text", value: formatDateOnly(transaction.occurredOn), strong: false },
-          { kind: "text", value: transaction.description, strong: true },
-          { kind: "badge", value: transaction.type ?? "unvalidated", tone: transaction.type === "income" ? "success" : "warning" },
-          { kind: "money", value: formatSignedMicro(typedSignedAmountMicro(transaction), transaction.currency), tone: moneyTone(typedSignedAmountMicro(transaction)) },
-          { kind: "badge", value: transaction.status, tone: transactionStatusTone(transaction.status) }
-        ]
-      }));
-  }
-
-  function createDashboardBankQualityRows(state: ApiRequestState<OfficeDashboardAnalyticsResponse>): readonly TableRow[] {
-    if (state.status !== "success") {
-      return [];
-    }
-
-    return state.data.reconciliationByAccount.map((account: OfficeDashboardReconciliationAccountKpi): TableRow => ({
-      id: account.accountId,
-      cells: [
-        { kind: "text", value: `${account.bankName} · ${account.accountLabel}`, strong: true },
-        { kind: "text", value: String(account.lineCount), strong: false },
-        { kind: "text", value: String(account.unmatchedLineCount), strong: false },
-        { kind: "text", value: formatBasisPoints(account.matchedRateBp), strong: false },
-        { kind: "text", value: account.oldestUnmatchedDays === null ? "—" : `${String(account.oldestUnmatchedDays)} day(s)`, strong: false }
-      ]
-    }));
-  }
-
   function createPendingTableRows(rows: readonly OfficeTransaction[], selectedIds: readonly string[]): readonly TableRow[] {
     return rows.map((transaction: OfficeTransaction): TableRow => ({
       id: transaction.id,
@@ -4324,12 +4299,6 @@
           <BarsChart title="Monthly cashflow expense" points={cashflowOutflowPoints} tone="error" />
         </section>
 
-        <section class="dashboard-grid">
-          <Table title="Recent validated transactions" columns={dashboardRecentTransactionColumns} rows={dashboardRecentTransactionRows} state={isLoadingState(transactionsState) ? "loading" : dashboardRecentTransactionRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={ledgerRowActions} />
-          <Table title="Recent imports" columns={importColumns} rows={dashboardImportRows} state={isLoadingState(dashboardState) ? "loading" : dashboardImportRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={importRowActions} />
-        </section>
-
-        <Table title="Bank data quality" columns={dashboardBankQualityColumns} rows={dashboardBankQualityRows} state={isLoadingState(dashboardAnalyticsState) ? "loading" : dashboardBankQualityRows.length === 0 ? "empty" : "default"} actionLabel="" />
       {:else if activePageId === "pnl"}
         <section class="kpi-grid" aria-label="P&L indicators">
           {#each pnlKpis as kpi (kpi.label)}
@@ -4677,7 +4646,7 @@
           <SectionTemplate
             eyebrow="RELIABLE SUGGESTIONS · 95%+ CONFIDENCE"
             title="Reliable suggestions"
-            detail="High-confidence bank ↔ ledger matches with a complete category path. Category determines division and department; project remains optional."
+            detail="Suggestions compare imported bank lines with existing ledger transactions. Create and classify a transaction first when no ledger entry exists. Only 95%+ matches with a complete category path appear here; project remains optional."
             state={isLoadingState(reliableSuggestionsState) ? "loading" : reliableSuggestionsState.status === "error" ? "error" : reliableSuggestionRows.length === 0 ? "empty" : "ready"}
           >
             {#snippet action()}
@@ -4811,7 +4780,7 @@
       {:else if activePageId === "vat"}
         <VatView client={client.office} workspaceId={officeWorkspaceId} {period} dateFrom={activeRange.from} dateTo={activeRange.to} />
       {:else if activePageId === "settings"}
-        <SettingsView client={client.office} workspaceId={officeWorkspaceId} {period} />
+        <SettingsView client={client.office} workspaceId={officeWorkspaceId} {period} {writesEnabled} />
       {/if}
     </div>
 </WorkspaceShell>
@@ -4858,20 +4827,6 @@
     { label: "Partner", align: "left", sortable: true },
     { label: "Project", align: "left", sortable: true },
     { label: "Status", align: "left", sortable: true }
-  ];
-  const dashboardRecentTransactionColumns: readonly TableColumn[] = [
-    { label: "Date", align: "left", sortable: true },
-    { label: "Description", align: "left", sortable: true },
-    { label: "Type", align: "left", sortable: true },
-    { label: "Amount", align: "right", sortable: true },
-    { label: "Status", align: "left", sortable: true }
-  ];
-  const dashboardBankQualityColumns: readonly TableColumn[] = [
-    { label: "Account", align: "left", sortable: true },
-    { label: "Total lines", align: "right", sortable: true },
-    { label: "Unmatched", align: "right", sortable: true },
-    { label: "Match rate", align: "right", sortable: true },
-    { label: "Oldest unmatched", align: "right", sortable: true }
   ];
   const importColumns: readonly TableColumn[] = [
     { label: "File", align: "left", sortable: true },

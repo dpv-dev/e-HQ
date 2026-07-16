@@ -202,6 +202,35 @@
   color: var(--ehq-text-muted);
 }
 
+/* Office data surfaces share one left/right content rail. */
+.ehq-workspace-office .period-control {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  margin-left: 0;
+  flex-wrap: wrap;
+}
+
+.ehq-workspace-office .period-control .period-presets {
+  flex: 1 1 auto;
+}
+
+.ehq-workspace-office .period-control .period-presets .ehq-button {
+  font-size: calc(var(--ehq-type-action-size) - 1px);
+}
+
+.ehq-workspace-office .period-control .ehq-select-field select {
+  font-size: calc(1.08rem - 1px);
+}
+
+.ehq-workspace-office .ehq-table-shell {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  grid-column: 1 / -1;
+  justify-self: stretch;
+}
+
 :is(.ehq-workspace-office, .ehq-workspace-distribution, .ehq-workspace-command-center) .nav-item.active {
   background: linear-gradient(90deg, var(--ehq-yellow-muted), transparent 78%);
 }

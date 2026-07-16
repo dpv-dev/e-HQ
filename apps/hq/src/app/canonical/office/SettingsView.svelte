@@ -1,11 +1,15 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import {
+    Alert,
     BarsChart,
+    Button,
     Card,
     Loader,
+    Select,
     Table,
     type ChartPoint,
+    type SelectOption,
     type TablePagination,
     type TableRow
   } from "@ehq/ui";
@@ -17,6 +21,7 @@
     type ApiRequestState,
     type OfficeApiClient,
     type OfficeBankAccountSummary,
+    type OfficeSettingsResponse,
     type PageResult
   } from "@ehq/api-client";
   import { isApiRequestLoading as isLoadingState } from "../request-state.js";
@@ -28,6 +33,7 @@
     readonly client: OfficeApiClient;
     readonly workspaceId: string;
     readonly period: string;
+    readonly writesEnabled: boolean;
   }
 
   const props: Props = $props();
@@ -37,6 +43,11 @@
   );
   let accountsLoadingMore = $state(false);
   let accountsLoadMoreError = $state<string | null>(null);
+  let settings = $state<OfficeSettingsResponse | null>(null);
+  let selectedDefaultAccountId = $state("");
+  let settingsSaving = $state(false);
+  let settingsMessage = $state("");
+  let settingsError = $state("");
 
   const accountRows = $derived(readPageItems(accountsState));
   const currencyTableRows = $derived(createCurrencyTableRows(accountRows));
@@ -44,6 +55,15 @@
   const accountPagination = $derived<TablePagination | null>(
     createTablePagination(accountsState, accountsLoadingMore, accountsLoadMoreError, loadMoreAccounts, loadAllAccounts)
   );
+  const defaultAccountOptions = $derived<readonly SelectOption[]>([
+    { value: "", label: "Automatic by bank and currency" },
+    ...accountRows
+      .filter((account): boolean => account.isActive)
+      .map((account): SelectOption => ({
+        value: account.id,
+        label: `${account.bankName} · ${account.accountLabel} · ${account.currency}`
+      }))
+  ]);
 
   onMount((): void => {
     void loadSettings();
@@ -53,11 +73,37 @@
     accountsState = beginReload<PageResult<OfficeBankAccountSummary>>(accountsState);
 
     try {
-      const accounts = await props.client.listBankAccounts({ workspaceId: props.workspaceId, cursor: null, limit: TABLE_PAGE_SIZE });
+      const [accounts, officeSettings] = await Promise.all([
+        props.client.listBankAccounts({ workspaceId: props.workspaceId, cursor: null, limit: TABLE_PAGE_SIZE }),
+        props.client.getSettings(props.workspaceId)
+      ]);
       accountsState = createSuccessState<PageResult<OfficeBankAccountSummary>>(accounts);
+      settings = officeSettings;
+      selectedDefaultAccountId = officeSettings.defaultImportAccountId ?? "";
       accountsLoadMoreError = null;
     } catch (error: unknown) {
       accountsState = createErrorState<PageResult<OfficeBankAccountSummary>>(error);
+    }
+  }
+
+  async function saveSettings(): Promise<void> {
+    settingsSaving = true;
+    settingsError = "";
+    settingsMessage = "";
+    try {
+      await props.client.updateSettings(
+        {
+          workspaceId: props.workspaceId,
+          defaultImportAccountId: selectedDefaultAccountId.length === 0 ? null : selectedDefaultAccountId
+        },
+        { idempotencyKey: `office-settings-${crypto.randomUUID()}` }
+      );
+      settings = settings === null ? null : { ...settings, defaultImportAccountId: selectedDefaultAccountId || null };
+      settingsMessage = "Default import account saved and audited.";
+    } catch (error: unknown) {
+      settingsError = getErrorMessage(error);
+    } finally {
+      settingsSaving = false;
     }
   }
 
@@ -222,14 +268,30 @@
     />
     <Card
       eyebrow="Maintenance"
-      title="Read-only"
-      subtitle="This console exposes Office in read-only mode. Maintenance and configuration changes are made in the eof admin backend; no editable settings are surfaced here."
+      title="Operational"
+      subtitle="Office settings persist through the API to Postgres and every change emits an audit event."
       state="default"
       accent={false}
       badgeLabel=""
       badgeTone="muted"
       actionLabel=""
     />
+  </section>
+
+  {#if settingsError.length > 0}
+    <Alert tone="error" title="Settings not saved" message={settingsError} dismissible={false} />
+  {:else if settingsMessage.length > 0}
+    <Alert tone="success" title="Settings saved" message={settingsMessage} dismissible={false} />
+  {/if}
+
+  <section class="settings-editor ehq-edge-surface" aria-label="Editable Office settings">
+    <div>
+      <p class="eyebrow">Bank imports</p>
+      <h2>Default import account</h2>
+      <p>Used as the first destination choice. Bank and currency detection still prevents an incompatible account.</p>
+    </div>
+    <Select id="office-default-import-account" label="Account" value={selectedDefaultAccountId} options={defaultAccountOptions} state="default" message={settings?.updatedAt === null ? "Not configured yet." : "Persisted in Office settings."} onchange={(value) => { selectedDefaultAccountId = value; }} />
+    <Button label="Save setting" variant="primary" size="medium" type="button" disabled={!props.writesEnabled || settings === null} loading={settingsSaving} locked={false} focus={false} ariaLabel="Save default bank import account" title={props.writesEnabled ? "" : "Enable writes to edit Office settings."} onclick={saveSettings} />
   </section>
 
   <section class="dashboard-grid">
@@ -282,6 +344,21 @@
     gap: var(--ehq-space-3);
   }
 
+  .settings-editor {
+    padding: var(--ehq-space-4);
+    border-radius: var(--ehq-radius-sm);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(260px, 420px) auto;
+    align-items: end;
+    gap: var(--ehq-space-4);
+  }
+
+  .settings-editor h2,
+  .settings-editor p { margin: 0; }
+  .settings-editor > div { display: grid; gap: var(--ehq-space-1); }
+  .settings-editor > div > p:last-child { color: var(--ehq-text-soft); }
+  .eyebrow { color: var(--ehq-text-muted); font-family: var(--ehq-mono); font-size: var(--ehq-type-label-size); letter-spacing: .1em; text-transform: uppercase; }
+
   .state-copy {
     min-height: 180px;
     padding: var(--ehq-space-5);
@@ -305,5 +382,6 @@
     .config-grid {
       grid-template-columns: 1fr;
     }
+    .settings-editor { grid-template-columns: 1fr; align-items: stretch; }
   }
 </style>

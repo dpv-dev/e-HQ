@@ -16,6 +16,13 @@ export interface ParsedBankRow {
   readonly reference: string | null;
 }
 
+export interface ParsedBankImportContent {
+  readonly source: "sbi" | "mcb" | "csv";
+  readonly currency: string;
+  readonly rows: readonly Readonly<Record<string, string>>[];
+  readonly parsingNotes: readonly string[];
+}
+
 const MONTHS: Readonly<Record<string, number>> = {
   jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
   jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12
@@ -455,6 +462,12 @@ function toRow(row: StatementDraftRow, direction: BankDirection, confidence: "hi
 
 const MCB_LINE = /^\s*(\d{2}\/\d{2}\/\d{4})\s+\d{2}\/\d{2}\/\d{4}\s+(.+?)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s*$/u;
 
+// PDF extraction repeats these statement headers between transaction rows.
+// They are page chrome, never a continuation of the transaction description.
+function isMcbStatementNoiseLine(line: string): boolean {
+  return /(?:The Mauritius Commercial Bank Ltd|Sir William Newton Street|Republic of Mauritius|contact@mcb\.mu|SWIFT Code|\bBRN\s*:|www\.mcb\.mu|\bPage\s+\d+\s+of\s+\d+|Internet Banking Pro|Account Name\s*:|Current Account IBAN\s*:|\bBBAN\s*:|\bCurrency\s*:|\bDate Range\s*:|Transaction reference\s*&\s*Description|Value Date\s+Debit\s+Credit|\(DD\/MM\/YYYY\)|Balance date)/iu.test(line);
+}
+
 // Parse an MCB (Mauritius) Euro current-account statement (pdftotext -layout output).
 // Each transaction line carries a single amount (debit or credit) + running balance;
 // the direction is recovered from the sequential balance movement.
@@ -505,7 +518,7 @@ export function parseMcbStatementText(text: string): readonly ParsedBankRow[] {
       continue;
     }
 
-    if (current !== null) {
+    if (current !== null && !isMcbStatementNoiseLine(line)) {
       current.description = `${current.description} ${line}`.replace(/\s+/gu, " ").trim();
     }
   }
@@ -750,28 +763,6 @@ export function parseBankCsv(text: string): readonly ParsedBankRow[] {
   return rows;
 }
 
-// Parse a CSV into header-keyed records (generic — for imports like cashflow that send
-// raw records to the API for server-side parsing).
-export function parseCsvRecords(text: string): readonly Readonly<Record<string, string>>[] {
-  const lines = text.split(/\r\n|\r|\n/u).filter((line: string): boolean => line.trim().length > 0);
-  const firstLine = lines[0];
-  if (lines.length < 2 || firstLine === undefined) {
-    return [];
-  }
-  const header = splitCsvLine(firstLine);
-  return lines.slice(1).map((line: string): Readonly<Record<string, string>> => {
-    const cells = splitCsvLine(line);
-    const record: Record<string, string> = {};
-    for (let index = 0; index < header.length; index += 1) {
-      const key = header[index];
-      if (key !== undefined && key.length > 0) {
-        record[key] = cells[index] ?? "";
-      }
-    }
-    return record;
-  });
-}
-
 // Read the statement currency from a CSV "Currency" column (first valid 3-letter code).
 export function detectCsvCurrency(text: string): string | null {
   const lines = text.split(/\r\n|\r|\n/u).filter((line: string): boolean => line.trim().length > 0);
@@ -791,4 +782,40 @@ export function detectCsvCurrency(text: string): string | null {
     }
   }
   return null;
+}
+
+// PDF text is parsed locally so the API only receives validated structured rows.
+export function parseBankImportContent(text: string, fileName: string): ParsedBankImportContent {
+  const csv = fileName.trim().toLowerCase().endsWith(".csv");
+  const source = csv ? "csv" : detectBankFormat(text) === "mcb" ? "mcb" : "sbi";
+  const rows = csv
+    ? parseBankCsv(text)
+    : source === "mcb"
+      ? parseMcbStatementText(text)
+      : parseSbiStatementText(text);
+  const currency = csv ? detectCsvCurrency(text) ?? "MUR" : detectStatementCurrency(text);
+
+  return {
+    source,
+    currency,
+    rows: rows.map((row: ParsedBankRow): Readonly<Record<string, string>> => {
+      const record: Record<string, string> = {
+        transactionDate: row.date,
+        description: row.description,
+        currency,
+        [row.direction]: row.amount.toFixed(2)
+      };
+      if (row.balance !== null) {
+        record.balance = row.balance.toFixed(2);
+      }
+      if (row.reference !== null) {
+        record.reference = row.reference;
+      }
+      return record;
+    }),
+    parsingNotes: [
+      `${source.toUpperCase()} content parsed locally in the browser.`,
+      "Only structured rows are sent to the API preview endpoint."
+    ]
+  };
 }

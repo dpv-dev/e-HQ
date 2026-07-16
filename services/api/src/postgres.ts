@@ -35,6 +35,7 @@ import type {
   OfficeTransactionRow
 } from "@ehq/domain-office";
 import { createEmptyApiFixtureStore, type ApiDistributionRoyaltyRuleInput, type ApiFixtureStore } from "./fixtures.js";
+import { sanitizeOfficeBankDescription } from "./office-bank-description.js";
 import { createPostgresPersistenceRuntime, type ApiPersistenceRuntime } from "./persistence.js";
 import { createApiStartupReadiness, type ApiStartupReadiness } from "./startup.js";
 
@@ -378,7 +379,13 @@ async function readOfficeDataset(pool: Pool): Promise<OfficeAnalyticsDataset> {
     ),
     queryRows(
       pool,
-      "select id::text, workspace_id, account_id::text, period_month, expected_inflow_minor::text, expected_outflow_minor::text, expected_closing_balance_minor::text, currency, created_at from office_cashflow_projection_rows order by period_month, id",
+      `select rows.id::text, rows.import_batch_id::text, rows.workspace_id, rows.account_id::text, rows.period_month,
+        rows.expected_inflow_minor::text, rows.expected_outflow_minor::text,
+        rows.expected_closing_balance_minor::text, rows.currency, rows.created_at
+       from office_cashflow_projection_rows rows
+       left join office_bank_import_batches batches on batches.id = rows.import_batch_id
+       where rows.import_batch_id is null or batches.id is null or batches.status <> 'void'
+       order by rows.period_month, rows.id`,
       []
     ),
     queryRows(
@@ -845,7 +852,7 @@ function toOfficeBankStatementLine(row: PgRow): OfficeBankStatementLineRow {
     accountId: stringCell(row, "account_id"),
     occurredOn: dateCell(row, "occurred_on"),
     valueOn: nullableDateCell(row, "value_on"),
-    description: stringCell(row, "description"),
+    description: sanitizeOfficeBankDescription(stringCell(row, "description")),
     reference: nullableStringCell(row, "reference"),
     direction: enumCell(row, "direction", ["credit", "debit"]),
     amountMinor: bigintCell(row, "amount_minor"),
@@ -875,6 +882,7 @@ function toOfficeBankReconciliationMatch(row: PgRow): OfficeBankReconciliationMa
 function toOfficeCashflowProjectionRow(row: PgRow): OfficeCashflowProjectionRowInput {
   return {
     id: stringCell(row, "id"),
+    importBatchId: nullableStringCell(row, "import_batch_id"),
     workspaceId: stringCell(row, "workspace_id"),
     accountId: nullableStringCell(row, "account_id"),
     periodMonth: stringCell(row, "period_month"),

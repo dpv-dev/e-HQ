@@ -44,7 +44,7 @@
   import { Alert, BarsChart, Button, Input, KPI, Loader, PageHeader, SectionTemplate, Select, Table, Toolbar, WorkspaceShell } from "@ehq/ui";
   import type { ChartPoint, IconName, SelectOption, TableColumn, TablePagination, TableRow, TableRowAction, Tone, ToolbarFilter, WorkspaceNavGroup, WorkspaceNavItem } from "@ehq/ui";
   import { createShellApiClient } from "../../app-shell-data.js";
-  import { parseCsvRecords } from "../../bank-parser.js";
+  import { parseCsvRecords } from "../../csv-records.js";
   import { formatDateOnly, formatDateRange } from "../../date-format.js";
   import { formatMoneyValue, moneyToneForValue } from "../../money-format.js";
   import "./distribution-command.css";

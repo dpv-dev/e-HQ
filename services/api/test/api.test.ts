@@ -314,11 +314,15 @@ test("Bank quality analytics follow explicit date range filters", async () => {
   });
   assert.equal(fullMonthResponse.status, 200);
   const fullMonth = await fullMonthResponse.json() as {
+    readonly totalLineCount: number;
+    readonly matchedLineCount: number;
     readonly matchedRateBp: number;
     readonly unmatchedLineCount: number;
     readonly duplicateCandidateCount: number;
     readonly missingReferenceCount: number;
   };
+  assert.equal(fullMonth.totalLineCount, 3);
+  assert.equal(fullMonth.matchedLineCount, 2);
   assert.equal(fullMonth.matchedRateBp, 6667);
   assert.equal(fullMonth.unmatchedLineCount, 1);
   assert.equal(fullMonth.duplicateCandidateCount, 1);
@@ -330,11 +334,15 @@ test("Bank quality analytics follow explicit date range filters", async () => {
   );
   assert.equal(narrowRangeResponse.status, 200);
   const narrowRange = await narrowRangeResponse.json() as {
+    readonly totalLineCount: number;
+    readonly matchedLineCount: number;
     readonly matchedRateBp: number;
     readonly unmatchedLineCount: number;
     readonly duplicateCandidateCount: number;
     readonly missingReferenceCount: number;
   };
+  assert.equal(narrowRange.totalLineCount, 1);
+  assert.equal(narrowRange.matchedLineCount, 1);
   assert.equal(narrowRange.matchedRateBp, 10000);
   assert.equal(narrowRange.unmatchedLineCount, 0);
   assert.equal(narrowRange.duplicateCandidateCount, 0);
@@ -1131,6 +1139,34 @@ test("Office cash-flow and beneficiary advance writes persist atomically in PGli
   });
 
   try {
+    assertReceipt(await jsonWrite(app, "/eof/v1/settings", "PATCH", "pglite-office-settings-1", {
+      workspaceId: "workspace_1",
+      defaultImportAccountId: "bank_mur"
+    }));
+    const persistedSetting = await pglite.query(
+      "select value_json from command_center_settings where workspace_id = $1 and key = $2",
+      ["workspace_1", "office_default_import_account_id"]
+    );
+    assert.deepEqual((persistedSetting.rows[0] as { readonly value_json: unknown }).value_json, { accountId: "bank_mur" });
+
+    const cashflowImport = await jsonWrite(app, "/eof/v1/cashflow/confirm", "POST", "pglite-cashflow-import-1", {
+      workspaceId: "workspace_1",
+      fileName: "baseline.csv",
+      checksum: "baseline-checksum",
+      rows: [{ periodMonth: "2026-07", inflow: "100.00", outflow: "30.00", closingBalance: "70.00", currency: "MUR" }]
+    });
+    assertReceipt(cashflowImport);
+    assert.equal(await pgliteCount(pglite, "office_cashflow_projection_rows"), 1);
+    assertReceipt(await jsonWrite(
+      app,
+      `/eof/v1/cashflow/imports/${cashflowImport.id}/reverse`,
+      "POST",
+      "pglite-cashflow-reverse-1",
+      { workspaceId: "workspace_1" }
+    ));
+    const reversedBatch = await pglite.query("select status from office_bank_import_batches where id = $1", [cashflowImport.id]);
+    assert.equal((reversedBatch.rows[0] as { readonly status: string }).status, "void");
+
     assertReceipt(await jsonWrite(app, "/eof/v1/cashflow/manual-entries", "POST", "pglite-cashflow-manual-1", {
       workspaceId: "workspace_1",
       accountId: null,
@@ -1178,8 +1214,8 @@ test("Office cash-flow and beneficiary advance writes persist atomically in PGli
     assert.equal(await pgliteCount(pglite, "office_cashflow_manual_entries"), 1);
     assert.equal(await pgliteCount(pglite, "office_advances"), 1);
     assert.equal(await pgliteCount(pglite, "office_advance_applications"), 1);
-    assert.equal(await pgliteCount(pglite, "api_idempotency_keys"), 3);
-    assert.equal(await pgliteCount(pglite, "audit_logs"), 3);
+    assert.equal(await pgliteCount(pglite, "api_idempotency_keys"), 6);
+    assert.equal(await pgliteCount(pglite, "audit_logs"), 6);
     const status = await pglite.query("select status from office_advances where id = $1", [advance.id]);
     assert.equal((status.rows[0] as { readonly status: string }).status, "partially_applied");
     const beneficiary = await pglite.query(
@@ -3264,78 +3300,6 @@ test("import previews are permission-checked but not gated by WRITES_ENABLED", a
   assert.equal(disabled.action, "office_bank_import_confirm");
 });
 
-test("bank import parse-preview parses CSV rows server-side and enforces preview permissions", async () => {
-  const app = createDisabledFixtureApiService();
-  const csv = [
-    "Date,Description,Debit,Credit,Currency,Reference",
-    "05/27/2026,CHARGES FOR BILL I,40.00,,MUR,REF-1",
-    "05/28/2026,PAYMENT RECEIVED,,125.00,MUR,REF-2"
-  ].join("\n");
-
-  const viewerParse = await app.request("/eof/v1/bank-import/parse-preview", {
-    method: "POST",
-    headers: { ...authHeadersForToken("fixture-viewer-token"), "Content-Type": "application/json" },
-    body: JSON.stringify({
-      workspaceId: "workspace_1",
-      fileName: "bank.csv",
-      sourceHint: "csv",
-      contentText: csv
-    })
-  });
-  assert.equal(viewerParse.status, 403);
-
-  const officeParse = await app.request("/eof/v1/bank-import/parse-preview", {
-    method: "POST",
-    headers: { ...authHeadersForToken("fixture-office-token"), "Content-Type": "application/json" },
-    body: JSON.stringify({
-      workspaceId: "workspace_1",
-      fileName: "bank.csv",
-      sourceHint: "csv",
-      contentText: csv
-    })
-  });
-  assert.equal(officeParse.status, 200);
-  const json = (await officeParse.json()) as {
-    readonly source: string;
-    readonly currency: string;
-    readonly parsedRowCount: number;
-    readonly rows: readonly Readonly<Record<string, string>>[];
-  };
-  assert.equal(json.source, "csv");
-  assert.equal(json.currency, "MUR");
-  assert.equal(json.parsedRowCount, 2);
-  assert.equal(json.rows.length, 2);
-  assert.equal(json.rows[0]?.transactionDate, "2026-05-27");
-  assert.equal(json.rows[0]?.debit, "40.00");
-  assert.equal(json.rows[1]?.credit, "125.00");
-});
-
-test("bank import parse-preview rejects an SBI statement whose printed totals do not reconcile", async () => {
-  const app = createWriteEnabledFixtureApiService();
-  const statementText = [
-    "SBI (Mauritius) Ltd",
-    " DATE          PARTICULARS              CHQ.NO.     WITHDRAWALS        DEPOSITS          BALANCE",
-    " 01-01-2026 B/F                                                               1,000.00 Cr",
-    " 02-01-2026 BANK SERVICE FEE                     100.00                 900.00 Cr",
-    " Grand Total:                                   101.00            0.00         900.00 Cr"
-  ].join("\n");
-
-  const response = await app.request("/eof/v1/bank-import/parse-preview", {
-    method: "POST",
-    headers: { ...authHeaders(), "Content-Type": "application/json" },
-    body: JSON.stringify({
-      workspaceId: "workspace_1",
-      fileName: "sbi-invalid.pdf",
-      sourceHint: "sbi",
-      contentText: statementText
-    })
-  });
-
-  assert.equal(response.status, 422);
-  const json = (await response.json()) as { readonly error: { readonly code: string } };
-  assert.equal(json.error.code, "bank_import_statement_validation_failed");
-});
-
 test("bank import preview excludes an existing line by balance even when the wording changed", async () => {
   const app = createWriteEnabledFixtureApiService();
   const response = await app.request("/eof/v1/bank-import/preview", {
@@ -3663,6 +3627,40 @@ test("transaction writes reject cross-workspace records and account currency mis
     })
   });
   assert.equal(currencyMismatch.status, 422);
+
+  const missingCategory = await app.request(`/eof/v1/transactions/${created.id}`, {
+    method: "PATCH",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "transaction-category-update" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      occurredOn: "2026-02-24",
+      accountId: "bank_mur",
+      categoryId: "category_missing",
+      projectId: null,
+      description: "Missing category",
+      amountMicro: "10.00",
+      currency: "MUR",
+      type: "expense"
+    })
+  });
+  assert.equal(missingCategory.status, 404);
+
+  const missingProject = await app.request(`/eof/v1/transactions/${created.id}`, {
+    method: "PATCH",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "transaction-project-update" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      occurredOn: "2026-02-24",
+      accountId: "bank_mur",
+      categoryId: "cat_bank_fee",
+      projectId: "project_missing",
+      description: "Missing project",
+      amountMicro: "10.00",
+      currency: "MUR",
+      type: "expense"
+    })
+  });
+  assert.equal(missingProject.status, 404);
 });
 
 test("transaction create without explicit type uses fixed fallback independent of category", async () => {
@@ -5359,6 +5357,19 @@ async function createPgliteWriteTables(pglite: PGlite): Promise<void> {
 
 async function createPgliteCashflowAdvanceTables(pglite: PGlite): Promise<void> {
   await pglite.exec(`
+    create table office_cashflow_projection_rows (
+      id uuid primary key,
+      import_batch_id uuid references office_bank_import_batches(id),
+      account_id uuid,
+      workspace_id text not null,
+      period_month char(7) not null,
+      expected_inflow_minor bigint not null default 0,
+      expected_outflow_minor bigint not null default 0,
+      expected_closing_balance_minor bigint not null default 0,
+      currency char(3) not null default 'MUR',
+      created_at timestamp with time zone default now() not null
+    );
+
     create table office_cashflow_manual_entries (
       id uuid primary key,
       workspace_id text not null,

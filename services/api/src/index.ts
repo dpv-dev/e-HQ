@@ -110,8 +110,6 @@ import type {
   ApiMutationReceipt,
   ApiRunReceipt,
   AuditLogEntry,
-  BankImportParsePreviewRequest,
-  BankImportParsePreviewResponse,
   BankImportConfirmRequest,
   BankImportConfirmResponse,
   BankImportPreviewRequest,
@@ -126,6 +124,7 @@ import type {
   OfficeCashflowManualEntryWriteRequest,
   OfficeCashflowWorkbenchBucket,
   OfficeCashflowWorkbenchResponse,
+  OfficeSettingsResponse,
   CommandCenterOverviewIntegration,
   CommandCenterOverviewResponse,
   CommandCenterOverviewSetting,
@@ -227,7 +226,6 @@ import {
   type AuthenticatedApiUser,
   type SupabaseJwtVerifier
 } from "./auth.js";
-import { parseOfficeBankImportText } from "./office-bank-parser.js";
 import { parseDistributionImportPreview } from "./distribution-import-parser.js";
 import { createSupabaseRouter } from "./supabase-server.js";
 import { createFixtureStore, type ApiDistributionRoyaltyRuleInput, type ApiFixtureStore } from "./fixtures.js";
@@ -637,6 +635,10 @@ const optionalNullableStringSchema = z.preprocess(
   z.string().min(1).nullable()
 );
 const workspaceBodySchema = z.object({ workspaceId: z.string().min(1) });
+const officeSettingsUpdateSchema = workspaceBodySchema.extend({
+  defaultImportAccountId: nullableStringSchema
+});
+type OfficeSettingsUpdateRequest = z.infer<typeof officeSettingsUpdateSchema>;
 // Defense in depth beyond the administrator-role gate: the literal phrase must be typed
 // by a human, so this can't be triggered by a script that merely holds an admin token.
 const OFFICE_FINANCIAL_RESET_PHRASE = "DELETE ALL OFFICE DATA";
@@ -740,6 +742,8 @@ const officeProjectWriteSchema = workspaceBodySchema.extend({
 });
 type OfficeProjectWriteRequest = z.infer<typeof officeProjectWriteSchema>;
 const officeCashflowImportSchema = workspaceBodySchema.extend({
+  fileName: z.string().min(1).optional(),
+  checksum: z.string().min(1).optional(),
   rows: z.array(z.record(z.string()))
 });
 type OfficeCashflowImportRequest = z.infer<typeof officeCashflowImportSchema>;
@@ -1300,10 +1304,6 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
     return officeBankImportPreviewResponse(context, dependencies);
   });
 
-  app.post("/eof/v1/bank-import/parse-preview", async (context) => {
-    return officeBankImportParsePreviewResponse(context, dependencies);
-  });
-
   app.post("/eof/v1/bank-import/confirm", async (context) => {
     return officeBankImportConfirmResponse(context, dependencies);
   });
@@ -1386,6 +1386,14 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
     return context.json(toCashflowBuckets(buckets));
   });
 
+  app.get("/eof/v1/settings", async (context) => {
+    return context.json(await officeSettingsReadResponse(context, dependencies));
+  });
+
+  app.patch("/eof/v1/settings", async (context) => {
+    return officeSettingsUpdateResponse(context, dependencies);
+  });
+
   app.get("/eof/v1/cashflow/workbench", (context) => {
     return context.json(officeCashflowWorkbenchResponse(context, dependencies));
   });
@@ -1404,6 +1412,10 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
 
   app.post("/eof/v1/cashflow/confirm", async (context) => {
     return officeCashflowConfirmResponse(context, dependencies);
+  });
+
+  app.post("/eof/v1/cashflow/imports/:batchId/reverse", async (context) => {
+    return officeCashflowImportReverseResponse(context, dependencies);
   });
 
   app.get("/eof/v1/advances/workbench", (context) => {
@@ -1674,6 +1686,8 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
     const result = readOfficeBankQualityForFilters(dataset, period, filters);
     const response: OfficeBankQualityResponse = {
       period: result.period,
+      totalLineCount: result.totalLineCount,
+      matchedLineCount: result.matchedLineCount,
       matchedRateBp: result.matchedRateBp,
       unmatchedLineCount: result.unmatchedLineCount,
       duplicateCandidateCount: result.duplicateCandidateCount,
@@ -3989,6 +4003,107 @@ function parseCashflowImportRow(record: Readonly<Record<string, string>>): { rea
   };
 }
 
+const OFFICE_DEFAULT_IMPORT_ACCOUNT_SETTING_KEY = "office_default_import_account_id";
+
+async function officeSettingsReadResponse(
+  context: ApiContext,
+  dependencies: ApiServiceDependencies
+): Promise<OfficeSettingsResponse> {
+  const workspaceId = resolveWorkspaceId(context);
+  const persisted = await dependencies.persistence.withTx(
+    async (tx: ApiWriteTransaction): Promise<{ readonly accountId: string | null; readonly updatedAt: string | null }> => {
+      if (tx.kind === "memory") {
+        return { accountId: null, updatedAt: null };
+      }
+      const row = queryRowsFromResult(await tx.executor.execute(sql`
+        select value_json, updated_at::text
+        from command_center_settings
+        where workspace_id = ${workspaceId} and key = ${OFFICE_DEFAULT_IMPORT_ACCOUNT_SETTING_KEY}
+        limit 1
+      `))[0];
+      const value = jsonRecordQueryField(row, "value_json");
+      return {
+        accountId: typeof value.accountId === "string" ? value.accountId : null,
+        updatedAt: row === undefined ? null : stringQueryField(row, "updated_at") || null
+      };
+    }
+  );
+
+  const accountExists = persisted.accountId === null || dependencies.fixtures.office.bankAccounts.some(
+    (account): boolean => account.id === persisted.accountId && account.workspaceId === workspaceId
+  );
+  return {
+    workspaceId,
+    referenceCurrency: "MUR",
+    defaultImportAccountId: accountExists ? persisted.accountId : null,
+    updatedAt: persisted.updatedAt
+  };
+}
+
+async function officeSettingsUpdateResponse(
+  context: ApiContext,
+  dependencies: ApiServiceDependencies
+): Promise<Response> {
+  const request = await readZodBody<OfficeSettingsUpdateRequest>(context, officeSettingsUpdateSchema);
+  const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, request.workspaceId);
+  if (request.defaultImportAccountId !== null) {
+    const account = dataset.bankAccounts.find((candidate): boolean => candidate.id === request.defaultImportAccountId);
+    if (account === undefined || !account.isActive) {
+      throw new ApiRouteError(
+        422,
+        "office_settings_account_invalid",
+        "The default import account must be an active account in this workspace.",
+        [`accountId=${request.defaultImportAccountId}`]
+      );
+    }
+  }
+
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const targetId = `${request.workspaceId}:setting:${OFFICE_DEFAULT_IMPORT_ACCOUNT_SETTING_KEY}`;
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_settings_update",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `office:settings:${request.workspaceId}`);
+      if (tx.kind !== "memory") {
+        await tx.executor.execute(sql`
+          insert into command_center_settings (
+            workspace_id, key, value_json, status, updated_by_user_id, updated_at
+          ) values (
+            ${request.workspaceId},
+            ${OFFICE_DEFAULT_IMPORT_ACCOUNT_SETTING_KEY},
+            ${JSON.stringify({ accountId: request.defaultImportAccountId })}::jsonb,
+            'Configured',
+            ${actor.userId},
+            now()
+          )
+          on conflict (workspace_id, key) do update set
+            value_json = excluded.value_json,
+            status = excluded.status,
+            updated_by_user_id = excluded.updated_by_user_id,
+            updated_at = now()
+        `);
+      }
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_settings_update",
+        targetType: "office_setting",
+        targetId,
+        before: {},
+        after: { defaultImportAccountId: request.defaultImportAccountId },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      return mutationReceipt(targetId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
 async function officeCashflowPreviewResponse(context: ApiContext): Promise<Response> {
   const request = await readZodBody<OfficeCashflowImportRequest>(context, officeCashflowImportSchema);
   resolveWorkspaceId(context);
@@ -4014,13 +4129,24 @@ async function officeCashflowPreviewResponse(context: ApiContext): Promise<Respo
 
 async function officeCashflowConfirmResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
   const request = await readZodBody<OfficeCashflowImportRequest>(context, officeCashflowImportSchema);
-  const workspaceId = resolveWorkspaceId(context);
+  const workspaceId = request.workspaceId;
   const parsed = request.rows
     .map((record: Readonly<Record<string, string>>): ParsedCashflowRow | null => parseCashflowImportRow(record).parsed)
     .filter((row: ParsedCashflowRow | null): row is ParsedCashflowRow => row !== null);
+  if (parsed.length !== request.rows.length || parsed.length === 0) {
+    throw new ApiRouteError(
+      422,
+      "cashflow_import_rows_invalid",
+      "Every cash-flow import row must pass preview validation before confirmation.",
+      [`accepted=${parsed.length}`, `received=${request.rows.length}`]
+    );
+  }
   const idempotencyKey = requireIdempotencyKey(context);
   const actor = context.get("authUser");
   const batchId = randomUUID();
+  const importedAt = dependencies.nowIso();
+  const fileName = request.fileName ?? `cashflow-${batchId}.csv`;
+  const checksum = request.checksum ?? batchId;
   const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
     runtime: dependencies.persistence,
     actor,
@@ -4029,17 +4155,91 @@ async function officeCashflowConfirmResponse(context: ApiContext, dependencies: 
     idempotencyKey,
     requestBody: request,
     write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
-      await persistOfficeCashflowRows(tx, workspaceId, parsed);
+      await persistOfficeCashflowRows(tx, {
+        batchId,
+        workspaceId,
+        fileName,
+        checksum,
+        idempotencyFingerprint: `cashflow:${resolvedIdempotencyKey}`,
+        importedAt,
+        rows: parsed
+      });
       const auditEventId = await appendAuditEvent(tx, {
         actor,
         action: "office_cashflow_import_confirm",
         targetType: "office_cashflow_import",
         targetId: batchId,
         before: {},
-        after: { workspaceId, rowCount: parsed.length },
+        after: { workspaceId, fileName, checksum, rowCount: parsed.length, reversible: true },
         idempotencyKey: resolvedIdempotencyKey
       });
-      upsertOfficeCashflowFixture(dependencies.fixtures, workspaceId, parsed, dependencies.nowIso());
+      appendOfficeBankImportFixture(dependencies.fixtures, {
+        batchId,
+        workspaceId,
+        source: "cashflow",
+        fileName,
+        checksum,
+        accountId: null,
+        periodStart: null,
+        periodEnd: null,
+        currency: "MUR",
+        acceptedRowCount: parsed.length,
+        rejectedRowCount: 0,
+        duplicateRowCount: 0,
+        idempotencyFingerprint: `cashflow:${resolvedIdempotencyKey}`,
+        status: "confirmed",
+        importedAt,
+        metadata: { kind: "cashflow_baseline", periods: parsed.map((row) => row.periodMonth) },
+        lines: []
+      });
+      appendOfficeCashflowFixture(dependencies.fixtures, batchId, workspaceId, parsed, importedAt);
+      return mutationReceipt(batchId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function officeCashflowImportReverseResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const request = await readZodBody<WorkspaceBodyRequest>(context, workspaceBodySchema);
+  const batchId = requirePathParam(context, "batchId");
+  const batch = dependencies.fixtures.office.bankImportBatches.find(
+    (candidate): boolean => candidate.id === batchId && candidate.workspaceId === request.workspaceId && candidate.source === "cashflow"
+  );
+  if (batch === undefined) {
+    throw new ApiRouteError(404, "cashflow_import_not_found", "Cash-flow import batch was not found.", [`batchId=${batchId}`]);
+  }
+  if (batch.status === "void") {
+    throw new ApiRouteError(409, "cashflow_import_already_reversed", "Cash-flow import batch is already reversed.", [`batchId=${batchId}`]);
+  }
+
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "office_cashflow_import_reverse",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `office:cashflow-import:${batchId}`);
+      if (tx.kind !== "memory") {
+        await tx.executor.execute(sql`
+          update office_bank_import_batches
+          set status = 'void', updated_at = now()
+          where id = ${batchId} and workspace_id = ${request.workspaceId} and source = 'cashflow' and status = 'confirmed'
+        `);
+      }
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "office_cashflow_import_reverse",
+        targetType: "office_cashflow_import",
+        targetId: batchId,
+        before: { status: batch.status },
+        after: { status: "void" },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      markOfficeCashflowImportFixtureVoid(dependencies.fixtures, batchId);
       return mutationReceipt(batchId, auditEventId);
     }
   });
@@ -4091,7 +4291,19 @@ function officeCashflowWorkbenchResponse(context: ApiContext, dependencies: ApiS
     .sort((left, right) => right.entryDate.localeCompare(left.entryDate) || right.createdAt.localeCompare(left.createdAt))
     .slice(0, 200)
     .map(toApiCashflowManualEntry);
-  return { buckets, manualEntries };
+  const importBatches = dependencies.fixtures.office.bankImportBatches
+    .filter((batch): boolean => batch.workspaceId === workspaceId && batch.source === "cashflow")
+    .sort((left, right) => (right.importedAt ?? "").localeCompare(left.importedAt ?? ""))
+    .slice(0, 50)
+    .map((batch) => ({
+      id: batch.id,
+      fileName: batch.fileName,
+      rowCount: batch.acceptedRowCount,
+      status: batch.status === "void" ? "void" as const : "confirmed" as const,
+      importedAt: batch.importedAt,
+      reversible: batch.status === "confirmed"
+    }));
+  return { buckets, manualEntries, importBatches };
 }
 
 async function officeCashflowManualEntryCreateResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
@@ -4569,30 +4781,44 @@ function distributionMoneyToEofMinor(value: string): bigint {
   return roundRatioHalfUp(erhMoney.parse(value), 100_000_000n);
 }
 
-async function persistOfficeCashflowRows(tx: ApiWriteTransaction, workspaceId: string, rows: readonly ParsedCashflowRow[]): Promise<void> {
-  if (tx.kind === "memory" || rows.length === 0) {
+interface PersistOfficeCashflowImportInput {
+  readonly batchId: string;
+  readonly workspaceId: string;
+  readonly fileName: string;
+  readonly checksum: string;
+  readonly idempotencyFingerprint: string;
+  readonly importedAt: string;
+  readonly rows: readonly ParsedCashflowRow[];
+}
+
+async function persistOfficeCashflowRows(tx: ApiWriteTransaction, input: PersistOfficeCashflowImportInput): Promise<void> {
+  if (tx.kind === "memory" || input.rows.length === 0) {
     return;
   }
-  const periods = [...new Set(rows.map((row: ParsedCashflowRow): string => row.periodMonth))];
-  for (const period of periods) {
-    await tx.executor.execute(sql`delete from office_cashflow_projection_rows where workspace_id = ${workspaceId} and period_month = ${period}`);
-  }
-  for (const row of rows) {
+  await tx.executor.execute(sql`
+    insert into office_bank_import_batches (
+      id, workspace_id, source, file_name, checksum, account_id, currency,
+      accepted_row_count, rejected_row_count, duplicate_row_count,
+      idempotency_fingerprint, status, imported_at, metadata
+    ) values (
+      ${input.batchId}, ${input.workspaceId}, 'cashflow', ${input.fileName}, ${input.checksum}, null, 'MUR',
+      ${input.rows.length}, 0, 0, ${input.idempotencyFingerprint}, 'confirmed', ${input.importedAt},
+      ${JSON.stringify({ kind: "cashflow_baseline", periods: input.rows.map((row) => row.periodMonth) })}::jsonb
+    )
+  `);
+  for (const row of input.rows) {
     await tx.executor.execute(sql`
-      insert into office_cashflow_projection_rows (id, workspace_id, period_month, expected_inflow_minor, expected_outflow_minor, expected_closing_balance_minor, currency)
-      values (${randomUUID()}, ${workspaceId}, ${row.periodMonth}, ${row.inflowMinor.toString()}, ${row.outflowMinor.toString()}, ${row.closingBalanceMinor.toString()}, ${row.currency})
+      insert into office_cashflow_projection_rows (id, import_batch_id, workspace_id, period_month, expected_inflow_minor, expected_outflow_minor, expected_closing_balance_minor, currency)
+      values (${randomUUID()}, ${input.batchId}, ${input.workspaceId}, ${row.periodMonth}, ${row.inflowMinor.toString()}, ${row.outflowMinor.toString()}, ${row.closingBalanceMinor.toString()}, ${row.currency})
     `);
   }
 }
 
-function upsertOfficeCashflowFixture(fixtures: ApiFixtureStore, workspaceId: string, rows: readonly ParsedCashflowRow[], nowIso: string): void {
+function appendOfficeCashflowFixture(fixtures: ApiFixtureStore, batchId: string, workspaceId: string, rows: readonly ParsedCashflowRow[], nowIso: string): void {
   const mutableOffice = fixtures.office as Mutable<OfficeAnalyticsDataset>;
-  const periods = new Set(rows.map((row: ParsedCashflowRow): string => row.periodMonth));
-  const kept = fixtures.office.cashflowProjectionRows.filter(
-    (row): boolean => !(row.workspaceId === workspaceId && periods.has(row.periodMonth))
-  );
   const added: OfficeAnalyticsDataset["cashflowProjectionRows"][number][] = rows.map((row: ParsedCashflowRow) => ({
     id: randomUUID(),
+    importBatchId: batchId,
     workspaceId,
     accountId: null,
     periodMonth: row.periodMonth,
@@ -4602,7 +4828,17 @@ function upsertOfficeCashflowFixture(fixtures: ApiFixtureStore, workspaceId: str
     currency: row.currency as CurrencyCode,
     createdAt: nowIso
   }));
-  mutableOffice.cashflowProjectionRows = [...kept, ...added];
+  mutableOffice.cashflowProjectionRows = [...fixtures.office.cashflowProjectionRows, ...added];
+}
+
+function markOfficeCashflowImportFixtureVoid(fixtures: ApiFixtureStore, batchId: string): void {
+  const mutableOffice = fixtures.office as Mutable<OfficeAnalyticsDataset>;
+  mutableOffice.bankImportBatches = fixtures.office.bankImportBatches.map(
+    (batch) => batch.id === batchId ? { ...batch, status: "void" } : batch
+  );
+  mutableOffice.cashflowProjectionRows = fixtures.office.cashflowProjectionRows.filter(
+    (row): boolean => row.importBatchId !== batchId
+  );
 }
 
 function safeEofParse(value: string): bigint | null {
@@ -7903,49 +8139,6 @@ async function distributionImportReverseResponse(context: ApiContext, dependenci
   return context.json(result.body, result.status);
 }
 
-async function officeBankImportParsePreviewResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
-  const request = await readJsonBody<BankImportParsePreviewRequest>(context);
-  assertOfficeBankImportParsePreviewRequest(context, request);
-  requirePermissionForWorkspace(context.get("authUser"), "office_bank_import_preview", request.workspaceId);
-
-  const parsed = parseOfficeBankImportText({
-    text: request.contentText,
-    fileName: request.fileName,
-    sourceHint: request.sourceHint
-  });
-
-  if (parsed.validationIssues.length > 0) {
-    throw new ApiRouteError(
-      422,
-      "bank_import_statement_validation_failed",
-      "The statement does not reconcile with its printed balances and totals.",
-      [
-        `path=${context.req.path}`,
-        `fileName=${request.fileName}`,
-        `issues=${parsed.validationIssues.join(",")}`
-      ]
-    );
-  }
-
-  if (parsed.rows.length === 0) {
-    throw new ApiRouteError(
-      422,
-      "bank_import_parse_empty",
-      "No readable transaction row was detected in this file.",
-      [`path=${context.req.path}`, `fileName=${request.fileName}`]
-    );
-  }
-
-  const response: BankImportParsePreviewResponse = {
-    source: parsed.source,
-    currency: parsed.currency,
-    parsedRowCount: parsed.parsedRowCount,
-    rows: parsed.rows,
-    parsingNotes: parsed.parsingNotes
-  };
-  return context.json(response);
-}
-
 async function officeBankImportPreviewResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
   const request = await readJsonBody<BankImportPreviewRequest>(context);
   assertOfficeBankImportPreviewRequest(context, request);
@@ -8867,26 +9060,6 @@ function assertNullableStringField(context: ApiContext, value: unknown, field: s
   }
 
   assertStringField(context, value, field);
-}
-
-function assertOfficeBankImportParsePreviewRequest(context: ApiContext, request: BankImportParsePreviewRequest): void {
-  assertStringField(context, request.workspaceId, "workspaceId");
-  assertStringField(context, request.fileName, "fileName");
-  assertStringField(context, request.contentText, "contentText");
-  if (
-    request.sourceHint !== null &&
-    request.sourceHint !== "sbi" &&
-    request.sourceHint !== "mcb" &&
-    request.sourceHint !== "csv" &&
-    request.sourceHint !== "pdf"
-  ) {
-    throw new ApiRouteError(
-      400,
-      "body_value_invalid",
-      "Office bank parse-preview source hint is invalid.",
-      [`path=${context.req.path}`, `sourceHint=${String(request.sourceHint)}`]
-    );
-  }
 }
 
 function assertOfficeBankImportPreviewRequest(context: ApiContext, request: BankImportPreviewRequest): void {
@@ -12764,6 +12937,8 @@ function readOfficeBankQualityForFilters(
 
   return {
     period,
+    totalLineCount: totalCount,
+    matchedLineCount: matchedCount,
     matchedRateBp,
     unmatchedLineCount: lines.filter((line) => line.reconciliationStatus === "unmatched" && !matchedLineIds.has(line.id)).length,
     duplicateCandidateCount: lines.filter((line) => line.isDuplicateCandidate).length,

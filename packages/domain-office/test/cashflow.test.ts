@@ -73,6 +73,7 @@ test("cash-flow workbench combines validated actuals, latest forecast, manual ad
     projectionRows: [
       {
         id: "old",
+        importBatchId: null,
         workspaceId: "eeee-mu",
         accountId: null,
         periodMonth: "2026-07",
@@ -84,6 +85,7 @@ test("cash-flow workbench combines validated actuals, latest forecast, manual ad
       },
       {
         id: "latest",
+        importBatchId: null,
         workspaceId: "eeee-mu",
         accountId: null,
         periodMonth: "2026-07",

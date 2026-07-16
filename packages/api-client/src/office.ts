@@ -4,8 +4,6 @@ import type {
   ApiMutationReceipt,
   AuditLogEntry,
   AuditLogQuery,
-  BankImportParsePreviewRequest,
-  BankImportParsePreviewResponse,
   BankImportConfirmRequest,
   BankImportConfirmResponse,
   BankImportPreviewRequest,
@@ -28,6 +26,8 @@ import type {
   OfficeBankAccountDeleteRequest,
   OfficeBankAccountSummary,
   OfficeBankAccountWriteRequest,
+  OfficeSettingsResponse,
+  OfficeSettingsUpdateRequest,
   OfficeBankQualityQuery,
   OfficeBankQualityResponse,
   OfficeBankRawLine,
@@ -139,10 +139,6 @@ export interface OfficeApiClient {
     request: BankImportPreviewRequest,
     options: WriteRequestOptions
   ) => Promise<BankImportPreviewResponse>;
-  readonly parseBankImportPreview: (
-    request: BankImportParsePreviewRequest,
-    options: WriteRequestOptions
-  ) => Promise<BankImportParsePreviewResponse>;
   readonly confirmBankImport: (
     request: BankImportConfirmRequest,
     options: WriteRequestOptions
@@ -200,6 +196,8 @@ export interface OfficeApiClient {
     options: WriteRequestOptions
   ) => Promise<ApiMutationReceipt>;
   readonly getCashflow: (query: CashflowQuery) => Promise<readonly CashflowBucket[]>;
+  readonly getSettings: (workspaceId: EntityId) => Promise<OfficeSettingsResponse>;
+  readonly updateSettings: (request: OfficeSettingsUpdateRequest, options: WriteRequestOptions) => Promise<ApiMutationReceipt>;
   readonly getCashflowWorkbench: (query: OfficeCashflowWorkbenchQuery) => Promise<OfficeCashflowWorkbenchResponse>;
   readonly createCashflowManualEntry: (
     request: OfficeCashflowManualEntryWriteRequest,
@@ -212,6 +210,7 @@ export interface OfficeApiClient {
   ) => Promise<ApiMutationReceipt>;
   readonly previewCashflowImport: (request: OfficeCashflowImportRequest, options: WriteRequestOptions) => Promise<OfficeCashflowPreviewResponse>;
   readonly confirmCashflowImport: (request: OfficeCashflowImportRequest, options: WriteRequestOptions) => Promise<ApiMutationReceipt>;
+  readonly reverseCashflowImport: (batchId: EntityId, workspaceId: EntityId, options: WriteRequestOptions) => Promise<ApiMutationReceipt>;
   readonly getAdvancesWorkbench: (query: OfficeAdvancesWorkbenchQuery) => Promise<OfficeAdvancesWorkbenchResponse>;
   readonly createAdvance: (
     request: OfficeAdvanceWriteRequest,
@@ -426,11 +425,6 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
       options: WriteRequestOptions
     ): Promise<BankImportPreviewResponse> =>
       transport.post<BankImportPreviewResponse>("bank-import/preview", request, options.idempotencyKey),
-    parseBankImportPreview: (
-      request: BankImportParsePreviewRequest,
-      options: WriteRequestOptions
-    ): Promise<BankImportParsePreviewResponse> =>
-      transport.post<BankImportParsePreviewResponse>("bank-import/parse-preview", request, options.idempotencyKey),
     confirmBankImport: (
       request: BankImportConfirmRequest,
       options: WriteRequestOptions
@@ -537,6 +531,10 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
         to: query.to,
         accountId: query.accountId
       }),
+    getSettings: (workspaceId: EntityId): Promise<OfficeSettingsResponse> =>
+      transport.get<OfficeSettingsResponse>("settings", { workspaceId }),
+    updateSettings: (request: OfficeSettingsUpdateRequest, options: WriteRequestOptions): Promise<ApiMutationReceipt> =>
+      transport.patch<ApiMutationReceipt>("settings", request, options.idempotencyKey),
     getCashflowWorkbench: (query: OfficeCashflowWorkbenchQuery): Promise<OfficeCashflowWorkbenchResponse> =>
       transport.get<OfficeCashflowWorkbenchResponse>("cashflow/workbench", {
         workspaceId: query.workspaceId,
@@ -563,6 +561,12 @@ export function createOfficeApiClient(config: ApiClientConfig): OfficeApiClient 
       transport.post<OfficeCashflowPreviewResponse>("cashflow/preview", request, options.idempotencyKey),
     confirmCashflowImport: (request: OfficeCashflowImportRequest, options: WriteRequestOptions): Promise<ApiMutationReceipt> =>
       transport.post<ApiMutationReceipt>("cashflow/confirm", request, options.idempotencyKey),
+    reverseCashflowImport: (batchId: EntityId, workspaceId: EntityId, options: WriteRequestOptions): Promise<ApiMutationReceipt> =>
+      transport.post<ApiMutationReceipt>(
+        `cashflow/imports/${encodePathSegment(batchId)}/reverse`,
+        { workspaceId },
+        options.idempotencyKey
+      ),
     getAdvancesWorkbench: (query: OfficeAdvancesWorkbenchQuery): Promise<OfficeAdvancesWorkbenchResponse> =>
       transport.get<OfficeAdvancesWorkbenchResponse>("advances/workbench", {
         workspaceId: query.workspaceId,

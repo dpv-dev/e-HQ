@@ -81,11 +81,13 @@ export type OfficeBankReconciliationMatchRow = Pick<
 >;
 export type OfficeCashflowProjectionRowInput = Pick<
   OfficeCashflowProjectionRow,
-  "id" | "workspaceId" | "accountId" | "periodMonth" | "expectedInflowMinor" | "expectedOutflowMinor" | "expectedClosingBalanceMinor" | "currency" | "createdAt"
+  "id" | "importBatchId" | "workspaceId" | "accountId" | "periodMonth" | "expectedInflowMinor" | "expectedOutflowMinor" | "expectedClosingBalanceMinor" | "currency" | "createdAt"
 >;
 
 export interface OfficeBankQualityResult {
   readonly period: string;
+  readonly totalLineCount: number;
+  readonly matchedLineCount: number;
   readonly matchedRateBp: number;
   readonly unmatchedLineCount: number;
   readonly duplicateCandidateCount: number;
@@ -155,6 +157,8 @@ export function readOfficeBankQuality(dataset: OfficeAnalyticsDataset, period: s
 
   return {
     period,
+    totalLineCount: totalCount,
+    matchedLineCount: matchedCount,
     matchedRateBp,
     unmatchedLineCount: lines.filter((line) => line.reconciliationStatus === "unmatched" && !matchedLineIds.has(line.id)).length,
     duplicateCandidateCount: lines.filter((line) => line.isDuplicateCandidate).length,

@@ -16,11 +16,12 @@
   import type {
     OfficeApiClient,
     OfficeBankAccountSummary,
+    OfficeCashflowImportBatch,
     OfficeCashflowManualEntry,
     OfficeCashflowWorkbenchBucket,
     OfficeCashflowWorkbenchResponse
   } from "@ehq/api-client";
-  import { parseCsvRecords } from "../../bank-parser.js";
+  import { parseCsvRecords } from "../../csv-records.js";
   import { apiMoneyToMicroUnits, formatMoneyValue, moneyToneForValue } from "../../money-format.js";
   import { periodLabel } from "../../period-controls.js";
 
@@ -46,6 +47,8 @@
   let label = $state("");
   let notes = $state("");
   let importRecords = $state<readonly Readonly<Record<string, string>>[]>([]);
+  let importFileName = $state("");
+  let importChecksum = $state("");
   let importMessage = $state("Import a baseline CSV when you already have a monthly forecast.");
 
   const directionOptions: readonly SelectOption[] = [
@@ -61,12 +64,14 @@
   ]);
   const buckets = $derived(data?.buckets ?? []);
   const manualEntries = $derived(data?.manualEntries ?? []);
+  const importBatches = $derived(data?.importBatches ?? []);
   const actualInflowPoints = $derived(chartPoints(buckets, "actualInflowLevel"));
   const actualOutflowPoints = $derived(chartPoints(buckets, "actualOutflowLevel"));
   const forecastInflowPoints = $derived(chartPoints(buckets, "forecastInflowLevel"));
   const forecastOutflowPoints = $derived(chartPoints(buckets, "forecastOutflowLevel"));
   const cashflowRows = $derived(toCashflowRows(buckets));
   const manualRows = $derived(toManualRows(manualEntries));
+  const importBatchRows = $derived(toImportBatchRows(importBatches));
   const actualNet = $derived(sumMoney(buckets, "actualInflowMicro") - sumMoney(buckets, "actualOutflowMicro"));
   const forecastNet = $derived(sumMoney(buckets, "forecastInflowMicro") - sumMoney(buckets, "forecastOutflowMicro"));
   const variance = $derived(sumMoney(buckets, "varianceMicro"));
@@ -78,6 +83,15 @@
       onAction: cancelManualEntry,
       isEnabled: (rowId: string): boolean => manualEntries.some((entry) => entry.id === rowId && entry.status !== "cancelled"),
       disabledReason: (): string => "This entry is already cancelled."
+    }
+  ];
+  const importBatchActions: readonly TableRowAction[] = [
+    {
+      label: "Reverse",
+      danger: true,
+      onAction: reverseImport,
+      isEnabled: (rowId: string): boolean => importBatches.some((batch) => batch.id === rowId && batch.reversible),
+      disabledReason: (): string => "This import is already reversed."
     }
   ];
 
@@ -179,11 +193,14 @@
     if (file === null) return;
     try {
       const records = parseCsvRecords(await file.text());
+      const checksum = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
       const preview = await props.client.previewCashflowImport(
-        { workspaceId: props.workspaceId, rows: records },
+        { workspaceId: props.workspaceId, fileName: file.name, checksum: hexDigest(checksum), rows: records },
         { idempotencyKey: createIdempotencyKey("cashflow-preview") }
       );
       importRecords = records;
+      importFileName = file.name;
+      importChecksum = hexDigest(checksum);
       importMessage = `${String(preview.acceptedRowCount)} rows ready · ${String(preview.rejectedRowCount)} rejected.`;
     } catch (error: unknown) {
       importRecords = [];
@@ -196,10 +213,12 @@
     saving = true;
     try {
       await props.client.confirmCashflowImport(
-        { workspaceId: props.workspaceId, rows: importRecords },
+        { workspaceId: props.workspaceId, fileName: importFileName, checksum: importChecksum, rows: importRecords },
         { idempotencyKey: createIdempotencyKey("cashflow-confirm") }
       );
       importRecords = [];
+      importFileName = "";
+      importChecksum = "";
       importMessage = "Baseline forecast imported and audited.";
       await loadWorkbench();
     } catch (error: unknown) {
@@ -207,6 +226,28 @@
     } finally {
       saving = false;
     }
+  }
+
+  async function reverseImport(batchId: string): Promise<void> {
+    saving = true;
+    importMessage = "";
+    try {
+      await props.client.reverseCashflowImport(
+        batchId,
+        props.workspaceId,
+        { idempotencyKey: createIdempotencyKey(`cashflow-reverse-${batchId}`) }
+      );
+      importMessage = "Baseline import reversed. The preceding baseline is active again.";
+      await loadWorkbench();
+    } catch (error: unknown) {
+      importMessage = messageFor(error);
+    } finally {
+      saving = false;
+    }
+  }
+
+  function hexDigest(buffer: ArrayBuffer): string {
+    return [...new Uint8Array(buffer)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
   }
 
   function chartPoints(rows: readonly OfficeCashflowWorkbenchBucket[], key: "actualInflowLevel" | "actualOutflowLevel" | "forecastInflowLevel" | "forecastOutflowLevel"): readonly ChartPoint[] {
@@ -245,6 +286,18 @@
     }));
   }
 
+  function toImportBatchRows(rows: readonly OfficeCashflowImportBatch[]): readonly TableRow[] {
+    return rows.map((batch) => ({
+      id: batch.id,
+      cells: [
+        { kind: "text", value: batch.fileName, strong: true },
+        { kind: "text", value: String(batch.rowCount), strong: false },
+        { kind: "badge", value: batch.status, tone: batch.status === "confirmed" ? "success" : "muted" },
+        { kind: "text", value: batch.importedAt?.slice(0, 10) ?? "—", strong: false }
+      ]
+    }));
+  }
+
   function createIdempotencyKey(prefix: string): string {
     return `${prefix}-${crypto.randomUUID()}`;
   }
@@ -268,6 +321,12 @@
     { label: "Direction", align: "left", sortable: true },
     { label: "Amount", align: "right", sortable: true },
     { label: "Status", align: "left", sortable: true }
+  ];
+  const importBatchColumns: readonly TableColumn[] = [
+    { label: "File", align: "left", sortable: true },
+    { label: "Rows", align: "right", sortable: true },
+    { label: "Status", align: "left", sortable: true },
+    { label: "Imported", align: "left", sortable: true }
   ];
 </script>
 
@@ -318,6 +377,8 @@
   <p>{importMessage}</p>
   <Button label="Import baseline" variant="secondary" size="medium" type="button" disabled={!props.writesEnabled || importRecords.length === 0} loading={saving} locked={false} focus={false} ariaLabel="Import baseline cash-flow forecast" onclick={confirmImport} />
 </section>
+
+<Table title="Baseline import history" columns={importBatchColumns} rows={importBatchRows} state={loading ? "loading" : importBatchRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={importBatchActions} />
 
 <style>
   .kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--ehq-space-3); }

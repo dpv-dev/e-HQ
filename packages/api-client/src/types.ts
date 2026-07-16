@@ -545,21 +545,6 @@ export interface BankImportPreviewRequest {
   readonly rows: readonly Readonly<Record<string, string>>[];
 }
 
-export interface BankImportParsePreviewRequest {
-  readonly workspaceId: EntityId;
-  readonly fileName: string;
-  readonly sourceHint: "sbi" | "mcb" | "csv" | "pdf" | null;
-  readonly contentText: string;
-}
-
-export interface BankImportParsePreviewResponse {
-  readonly source: "sbi" | "mcb" | "csv";
-  readonly currency: CurrencyCode;
-  readonly parsedRowCount: number;
-  readonly rows: readonly Readonly<Record<string, string>>[];
-  readonly parsingNotes: readonly string[];
-}
-
 export interface BankImportPreviewResponse {
   readonly previewId: EntityId;
   readonly accountId: EntityId | null;
@@ -820,6 +805,16 @@ export interface OfficeCashflowManualEntry {
 export interface OfficeCashflowWorkbenchResponse {
   readonly buckets: readonly OfficeCashflowWorkbenchBucket[];
   readonly manualEntries: readonly OfficeCashflowManualEntry[];
+  readonly importBatches: readonly OfficeCashflowImportBatch[];
+}
+
+export interface OfficeCashflowImportBatch {
+  readonly id: EntityId;
+  readonly fileName: string;
+  readonly rowCount: number;
+  readonly status: "confirmed" | "void";
+  readonly importedAt: IsoDateTimeString | null;
+  readonly reversible: boolean;
 }
 
 export interface OfficeCashflowManualEntryWriteRequest {
@@ -1116,6 +1111,8 @@ export interface OfficeBankQualityQuery extends PeriodQuery {}
 
 export interface OfficeBankQualityResponse {
   readonly period: IsoMonthString;
+  readonly totalLineCount: number;
+  readonly matchedLineCount: number;
   readonly matchedRateBp: BasisPoints;
   readonly unmatchedLineCount: number;
   readonly duplicateCandidateCount: number;
@@ -1130,6 +1127,8 @@ export interface OfficeBankAccountsQuery extends PageQuery {
 
 export interface OfficeCashflowImportRequest {
   readonly workspaceId: EntityId;
+  readonly fileName?: string;
+  readonly checksum?: string;
   readonly rows: readonly Readonly<Record<string, string>>[];
 }
 
@@ -1174,6 +1173,18 @@ export interface OfficeBankAccountSummary {
   readonly importedLineCount: number;
   readonly linkedRecordCount: number;
   readonly canDelete: boolean;
+}
+
+export interface OfficeSettingsResponse {
+  readonly workspaceId: EntityId;
+  readonly referenceCurrency: CurrencyCode;
+  readonly defaultImportAccountId: EntityId | null;
+  readonly updatedAt: IsoDateTimeString | null;
+}
+
+export interface OfficeSettingsUpdateRequest {
+  readonly workspaceId: EntityId;
+  readonly defaultImportAccountId: EntityId | null;
 }
 
 export interface OfficeBankRawLinesQuery extends PageQuery {

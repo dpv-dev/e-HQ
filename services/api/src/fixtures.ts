@@ -364,6 +364,7 @@ function createOfficeFixture(): OfficeAnalyticsDataset {
     cashflowProjectionRows: [
       {
         id: "cash_feb",
+        importBatchId: null,
         workspaceId: "workspace_1",
         accountId: "bank_mur",
         periodMonth: "2026-02",
@@ -375,6 +376,7 @@ function createOfficeFixture(): OfficeAnalyticsDataset {
       },
       {
         id: "cash_mar",
+        importBatchId: null,
         workspaceId: "workspace_1",
         accountId: "bank_mur",
         periodMonth: "2026-03",
