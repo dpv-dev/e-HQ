@@ -40705,6 +40705,14 @@ function createApiService(dependencies) {
     if (isApiPersistenceHttpError(error)) {
       return context.json(createErrorPayload(error.code, error.message, error.context), error.status);
     }
+    if (error instanceof HTTPException) {
+      const code = error.status === 401 ? "unauthorized" : error.status === 403 ? "forbidden" : `http_error_${error.status}`;
+      const message2 = error.status === 401 ? "A valid bearer token is required." : error.status === 403 ? "Access to this resource is forbidden." : error.status >= 500 ? "The API route failed while handling the request." : error.message;
+      return context.json(createErrorPayload(code, message2, [
+        `method=${context.req.method}`,
+        `path=${context.req.path}`
+      ]), error.status);
+    }
     return context.json(
       createErrorPayload("api_internal_error", "The API route failed while handling the request.", [
         `errorName=${error.name}`,

@@ -446,6 +446,44 @@ test("Business routes require Supabase bearer auth and auth/me returns the verif
   });
 });
 
+test("Supabase adapter auth failures preserve their HTTP status", async () => {
+  const keys = [
+    "SUPABASE_URL",
+    "SUPABASE_PUBLISHABLE_KEY",
+    "SUPABASE_SECRET_KEY",
+    "SUPABASE_JWKS_URL"
+  ] as const;
+  const previous = new Map(keys.map((key) => [key, process.env[key]]));
+
+  process.env.SUPABASE_URL = "https://example.supabase.co";
+  process.env.SUPABASE_PUBLISHABLE_KEY = "sb_publishable_test";
+  process.env.SUPABASE_SECRET_KEY = "sb_secret_test";
+  process.env.SUPABASE_JWKS_URL = "https://example.supabase.co/auth/v1/.well-known/jwks.json";
+
+  try {
+    const app = createFixtureApiService();
+    const response = await app.request("/supabase/me");
+
+    assert.equal(response.status, 401);
+    assert.deepEqual(await response.json(), {
+      error: {
+        code: "unauthorized",
+        message: "A valid bearer token is required.",
+        context: ["method=GET", "path=/supabase/me"]
+      }
+    });
+  } finally {
+    for (const key of keys) {
+      const value = previous.get(key);
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+});
+
 test("Command Center notifications expose guarded live readiness items", async () => {
   const app = createDisabledFixtureApiService();
 

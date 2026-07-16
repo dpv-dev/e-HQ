@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { Hono } from "hono";
 import type { Context, MiddlewareHandler } from "hono";
 import { cors } from "hono/cors";
+import { HTTPException } from "hono/http-exception";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { getAuthRoleProfile, type WorkspaceAppId } from "@ehq/auth";
@@ -1044,6 +1045,26 @@ export function createApiService(dependencies: ApiServiceDependencies): Hono<Api
 
     if (isApiPersistenceHttpError(error)) {
       return context.json(createErrorPayload(error.code, error.message, error.context), error.status);
+    }
+
+    if (error instanceof HTTPException) {
+      const code = error.status === 401
+        ? "unauthorized"
+        : error.status === 403
+          ? "forbidden"
+          : `http_error_${error.status}`;
+      const message = error.status === 401
+        ? "A valid bearer token is required."
+        : error.status === 403
+          ? "Access to this resource is forbidden."
+          : error.status >= 500
+            ? "The API route failed while handling the request."
+            : error.message;
+
+      return context.json(createErrorPayload(code, message, [
+        `method=${context.req.method}`,
+        `path=${context.req.path}`
+      ]), error.status);
     }
 
     return context.json(
