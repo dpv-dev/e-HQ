@@ -51,8 +51,8 @@ flowchart TD
 | Suppliers | `PartnersView.svelte` | `/eof/v1/partners`, `/pl/partner/:id`, partner payee link | Office partners + Distribution payee link | OK | Verified by facet tests: supplier means expense-side activity; a dual-activity partner can appear in both lenses. |
 | Projects | `ProjectsView.svelte` | `/eof/v1/projects`, `/pl/project/:id`, coherence violations | Office projects/P&L | OK | Verified in production 2026-07-16 after API deployment: the list endpoint returns promptly and the Projects page renders without the previous stall. |
 | Monitoring | `MonitoringView.svelte` | `/integrity/check-all`, `/analytics/bank-quality`, audit/dashboard | Office integrity analytics | OK | Verified: pass → success, warning → warning, and fail → error badges are rendered in the live component. |
-| Audit | `App.svelte` | `GET /eof/v1/audit-log` | Office audit events | OK | Build gate verifies all 63 idempotent write paths append an audit event. |
-| VAT | `VatView.svelte` | `GET /eof/v1/vat` | Office VAT report + `domain-finance/src/vat.ts` | Partial | API report uses the finance VAT primitive; next check is rate/source configuration and live report parity. |
+| Audit | `App.svelte` | `GET /eof/v1/audit-log` | Postgres `audit_logs` | OK | Audit reads now come from persisted events, not a startup fixture; action, actor, entity, idempotency key, and context are exposed. |
+| VAT | `VatView.svelte` | `GET /eof/v1/vat`, transaction create/update | Office VAT report + `domain-finance/src/vat.ts` | OK | Transaction create/edit exposes VAT applicability and rate; the API calculates gross-inclusive VAT with integer finance primitives, persists it, audits the write, and rejects mixed-currency reporting. |
 | Settings | `SettingsView.svelte` | `GET/PATCH /eof/v1/settings` | `command_center_settings` + Office audit | OK | Operational default-import-account setting persists to Postgres, is audited, and is consumed by the importer. |
 | Wave invoices | Removed from visible menu | none | none | Hidden | Add only when API, data model, and UI workflow exist. |
 
@@ -63,33 +63,34 @@ flowchart TD
 | Dashboard | `apps/hq/src/app/canonical/distribution/App.svelte` | `GET /erh/v1/dashboard` | `domain-distribution` reads | OK | Verify live KPIs against statements/allocation data. |
 | Imports | `App.svelte` | `/erh/v1/imports/batches`, preview/confirm/reverse | Distribution imports | OK | Confirm RouteNote/Kontor formats in live browser flow. |
 | Mapping | `App.svelte` | `/erh/v1/mapping/rows`, `/mapping/apply-rules` | Distribution import mapping | OK | Verify reusable rules persist and audit. |
-| Aliases | `App.svelte` | `GET /erh/v1/aliases` | Distribution aliases | Partial | Add create/update alias actions if aliases are meant to be managed here. |
-| Duplicates | `App.svelte` | `GET /erh/v1/duplicates` | Distribution diagnostics | Partial | Merge/resolve is still a maintenance action, not product workflow. |
+| Aliases | `App.svelte` | `GET/POST /erh/v1/aliases`, `PATCH /aliases/:id` | Distribution aliases | OK | Create/edit controls persist canonical targets and append scoped audit events. |
+| Duplicates | `App.svelte` | `GET /erh/v1/duplicates`, `POST /duplicates/:id/resolve` | Distribution diagnostics | OK | Explicit keep/merge resolution is idempotent, persisted, audited, and immediately removed from the open duplicate queue. |
 | Catalog | `App.svelte` | `/erh/v1/releases`, `/tracks`, create release/track | Distribution catalog | OK | Add edit/override workflow if source records are immutable. |
 | Contracts | `App.svelte` | `/contracts`, expenses, rules | Distribution contracts + recoupments | OK | Verify rule totals and recoupable expense audit. |
-| Financial reconciliation | `App.svelte` | `GET /erh/v1/financial-reconciliation` | Distribution reconciliation diagnostics | Partial | Guarded actions need concrete write handlers or explicit maintenance-only labels. |
+| Financial reconciliation | `App.svelte` | `GET /erh/v1/financial-reconciliation`, `POST /financial-reconciliation/actions` | Distribution reconciliation diagnostics | OK | The UI labels maintenance mode explicitly; recompute balance, repair identity link, and refresh derived summary have concrete guarded, locked, idempotent, audited handlers. |
 | Allocations | `App.svelte` | `/allocations/runs`, preview/post/unpost | `domain-distribution/src/allocation.ts` + finance allocation | OK | Confirm workflow lock behavior in production. |
 | Suspense | `App.svelte` | `/suspense`, resolve | Distribution suspense | OK | Confirm resolve writes target canonical catalog records. |
 | Statements | `App.svelte` | `/statements`, generate/print/void | Distribution statements | OK | Verify A4 print route and balance ledger. |
 | Payments | `App.svelte` | `/payments`, record/update/reconcile/void | Distribution payments | OK | Verify payment reconciliation touches Office bank/ledger where expected. |
 | Revenue | `App.svelte` | `GET /erh/v1/revenue` | Distribution revenue reads | OK | Verify group-by totals match allocation/statement totals. |
-| Audit log | `App.svelte` | `GET /erh/v1/audit-log` | Shared/distribution audit events | Partial | Code notes Distribution has no dedicated audit fixture; verify production source. |
+| Audit log | `App.svelte` | `GET /erh/v1/audit-log` | Postgres `audit_logs` filtered to Distribution actions | OK | Persisted `distribution_*` and compatibility `distribution.*` events are loaded live; the fixture-only read defect is covered by memory and PGlite tests. |
 | Settings | `App.svelte` | `GET /erh/v1/settings` | Distribution workspace config | OK | Confirm settings are sufficient for operations. |
 
-## Engine Integration Debt
+## Engine Integration Status
 
-These files/functions still need integration or removal before claiming the
-visible product is fully backed by the shared engine:
+The integration-debt pass is closed for the active runtime paths:
 
-| File | Current issue | Product impact |
+| File | Status | Runtime evidence |
 | --- | --- | --- |
-| `packages/domain-finance/src/ledger.ts` | Implemented and now used by Office global P&L/domain paths | Remaining risk is duplicated local summaries outside P&L. |
-| `packages/domain-finance/src/reconciliation.ts` | Implemented and used by Office reconciliation write paths | Remaining risk is production-level transaction/audit atomicity. |
-| `packages/domain-finance/src/vat.ts` | Implemented and used by the Office VAT API report | Remaining risk is live rate/source configuration parity. |
-| `packages/domain-finance/src/fx.ts` | Implemented primitive, adoption incomplete across all FX paths | FX conversion can still be duplicated outside the kernel. |
-| `packages/domain-finance/src/schemas.ts` | Implemented schemas, adoption incomplete | API validation still needs to consume shared finance schemas. |
-| `packages/domain-office/src/index.ts` | Stable snapshot primitive exists, broader API adoption incomplete | Office still needs a real workbench snapshot wired to live data. |
-| `packages/domain-distribution/src/index.ts` | Stable statement draft primitive exists, broader API adoption incomplete | Distribution statement drafting should be wired into statement generation paths where useful. |
+| `packages/domain-finance/src/ledger.ts` | CLOSED | Office global P&L is computed once by `domain-office/readGlobalPnl`; the duplicate API `summarizeLedger` pass was removed. Dimension-specific project/category/month summaries remain intentional domain projections. |
+| `packages/domain-finance/src/fx.ts` | CLOSED | Effective-date selection and E10 conversion now live in the finance kernel. Office analytics and bank-import preview both consume the shared Office path; Distribution's foreign recoupment path only gates on rate availability and does not perform a duplicate conversion. |
+| `packages/domain-finance/src/schemas.ts` | CLOSED | API write schemas import the shared ISO date, ISO timestamp, currency, decimal-money, and basis-point validators. |
+| `packages/domain-office/src/index.ts` | CLOSED | `GET /eof/v1/workbench/snapshot` builds the domain snapshot from live workspace/date-scoped ledger and reconciliation rows, and the Office screen bundle includes it. |
+| `packages/domain-distribution/src/statements.ts` | CLOSED | `buildStatementPlan` now creates and consumes the normalized statement draft, so API statement generation uses the primitive on every path. |
+
+Distribution cross-currency recoupment remains an explicit product capability gap:
+the current engine requires a dated FX rate but deliberately does not convert or
+recover a foreign-currency cost term. It is not a duplicate-calculation path.
 
 ## Implementation Order
 
@@ -97,6 +98,6 @@ visible product is fully backed by the shared engine:
 2. Make every visible Office page pass: UI loads, API route responds, write path
    persists, audit event exists, and live route is verified.
 3. Make every visible Distribution page pass the same gate.
-4. Continue adopting the finance kernel in remaining local calculation paths,
-   starting with FX and shared validation schemas.
+4. Continue auditing new calculation paths against the finance kernel before
+   they are exposed through an API or UI.
 5. Add tests at the domain layer first, then API tests, then browser smoke.

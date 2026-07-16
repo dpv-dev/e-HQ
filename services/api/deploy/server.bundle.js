@@ -23904,7 +23904,18 @@ function reconcileTransaction(request) {
 }
 
 // ../../packages/domain-finance/src/fx.ts
-function convertMoney(amount, targetCurrency, rate) {
+var FX_RATE_E10_SCALE = 10000000000n;
+function pickEffectiveFxRate(rates, fromCurrency, toCurrency, effectiveDate) {
+  const candidates = rates.filter(
+    (rate) => rate.fromCurrency === fromCurrency && rate.toCurrency === toCurrency
+  );
+  if (candidates.length === 0) {
+    return null;
+  }
+  const onOrBefore = candidates.filter((rate) => rate.effectiveDate <= effectiveDate);
+  return latestEffectiveRate(onOrBefore.length > 0 ? onOrBefore : candidates);
+}
+function convertMoneyWithE10(amount, targetCurrency, rate) {
   if (rate.fromCurrency !== amount.currency) {
     raiseFinanceDomainError("currency_mismatch", "FX rate source currency must match the amount currency.", {
       amountCurrency: amount.currency,
@@ -23917,9 +23928,20 @@ function convertMoney(amount, targetCurrency, rate) {
       rateToCurrency: rate.toCurrency
     });
   }
+  if (rate.rateE10 <= 0n) {
+    raiseFinanceDomainError("conversion_invalid", "FX rate must be greater than zero.", {
+      rateE10: rate.rateE10.toString()
+    });
+  }
   return createMoneyAmount(
-    createMoneyMicroUnits(applyDecimalFactor(amount.amountMicro, rate.rateDecimal, "HALF_UP")),
+    createMoneyMicroUnits(roundRatioHalfUp(amount.amountMicro * rate.rateE10, FX_RATE_E10_SCALE)),
     targetCurrency
+  );
+}
+function latestEffectiveRate(rates) {
+  return rates.reduce(
+    (latest, rate) => latest === null || rate.effectiveDate > latest.effectiveDate ? rate : latest,
+    null
   );
 }
 
@@ -23939,7 +23961,12 @@ function calculateVat(grossAmount, vatRateBasisPoints) {
 }
 
 // ../../packages/domain-finance/src/schemas.ts
-var currencyCodeSchema = external_exports.string().regex(/^[A-Z]{3}$/u).transform(createCurrencyCode);
+var isoDateSchema = external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/u);
+var isoDateTimeSchema = external_exports.string().regex(/^\d{4}-\d{2}-\d{2}T/u);
+var currencyCodeInputSchema = external_exports.string().regex(/^[A-Z]{3}$/u);
+var decimalMoneyStringSchema = external_exports.string().regex(/^-?\d+(?:\.\d+)?$/u);
+var basisPointsInputSchema = external_exports.number().int().min(0).max(1e4);
+var currencyCodeSchema = currencyCodeInputSchema.transform(createCurrencyCode);
 var moneyMicroUnitsSchema = external_exports.bigint().transform(createMoneyMicroUnits);
 var moneyAmountSchema = external_exports.object({
   amountMicro: moneyMicroUnitsSchema,
@@ -23947,11 +23974,11 @@ var moneyAmountSchema = external_exports.object({
 }).transform((value) => createMoneyAmount(value.amountMicro, value.currency));
 var basisPointShareSchema = external_exports.object({
   participantId: external_exports.string().min(1),
-  shareBasisPoints: external_exports.number().int().min(0).max(1e4).transform(createBasisPoints)
+  shareBasisPoints: basisPointsInputSchema.transform(createBasisPoints)
 });
 var ledgerTransactionSchema = external_exports.object({
   id: external_exports.string().min(1),
-  transactionDate: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
+  transactionDate: isoDateSchema,
   direction: external_exports.enum(["income", "expense"]),
   amount: moneyAmountSchema,
   categoryId: external_exports.string().min(1).nullable(),
@@ -24259,36 +24286,49 @@ function computeCarry(opening, periodNet) {
     closing: formatErhAmount2(closingUnits)
   };
 }
+function createDistributionStatementDraft(input) {
+  return {
+    payeeId: input.payee.id,
+    periodStart: input.period.start,
+    periodEnd: input.period.end,
+    currency: input.currency,
+    allocations: input.allocations.filter(
+      (allocation) => allocation.payeeId === input.payee.id && allocation.currency === input.currency
+    ),
+    lastClosing: formatErhAmount2(parseErhAmount2(input.lastClosing)),
+    version: input.version
+  };
+}
 function buildStatementPlan(payee, period, currency, allocations, lastClosing, version4) {
-  const periodAllocations = allocations.filter((allocation) => allocation.payeeId === payee.id && allocation.currency === currency);
-  const totals = sumAllocations(currency, periodAllocations);
-  const carry = computeCarry(lastClosing, formatErhAmount2(totals.netPayableUnits));
+  const draft = createDistributionStatementDraft({ payee, period, currency, allocations, lastClosing, version: version4 });
+  const totals = sumAllocations(draft.currency, draft.allocations);
+  const carry = computeCarry(draft.lastClosing, formatErhAmount2(totals.netPayableUnits));
   return {
     statement: {
-      payeeId: payee.id,
-      periodStart: period.start,
-      periodEnd: period.end,
-      currency,
+      payeeId: draft.payeeId,
+      periodStart: draft.periodStart,
+      periodEnd: draft.periodEnd,
+      currency: draft.currency,
       grossTotal: formatErhAmount2(totals.grossTotalUnits),
       recoupmentTotal: formatErhAmount2(totals.recoupmentTotalUnits),
       netPayable: formatErhAmount2(totals.netPayableUnits),
       amountDue: carry.amountDue,
-      version: version4,
+      version: draft.version,
       status: "generated"
     },
-    lines: periodAllocations.map((allocation) => ({
+    lines: draft.allocations.map((allocation) => ({
       earningAllocationId: allocation.id,
       trackId: allocation.trackId,
       grossShare: formatErhAmount2(parseErhAmount2(allocation.grossShare)),
       recoupmentApplied: formatErhAmount2(parseErhAmount2(allocation.recoupmentApplied)),
       netPayable: formatErhAmount2(parseErhAmount2(allocation.netPayable)),
       quantity: allocation.quantity,
-      currency
+      currency: draft.currency
     })),
     balanceLedgerRow: {
-      payeeId: payee.id,
+      payeeId: draft.payeeId,
       statementId: null,
-      currency,
+      currency: draft.currency,
       openingBalance: carry.opening,
       periodNet: carry.periodNet,
       closingBalance: carry.closing,
@@ -25236,6 +25276,23 @@ function toBasisPointValue(value) {
   }
   return parseInt(value.toString(), 10);
 }
+function pickMurExchangeRate(fromCurrency, occurredOn, exchangeRates) {
+  return pickEffectiveFxRate(exchangeRates, fromCurrency, "MUR", occurredOn);
+}
+function convertMinorToMur(amountMinor, fromCurrency, occurredOn, exchangeRates) {
+  if (fromCurrency === "MUR") {
+    return amountMinor;
+  }
+  const rate = pickMurExchangeRate(fromCurrency, occurredOn, exchangeRates);
+  if (rate === null) {
+    return null;
+  }
+  return convertMoneyWithE10(
+    createMoneyAmount(createMoneyMicroUnits(amountMinor), createCurrencyCode(fromCurrency)),
+    createCurrencyCode("MUR"),
+    rate
+  ).amountMicro;
+}
 
 // ../../packages/domain-office/src/bank-import-dedupe.ts
 function detectOfficeBankImportDuplicates(candidates, existingLines) {
@@ -25438,6 +25495,14 @@ function absoluteMinor(value) {
 function isDateInRange(value, dateFrom, dateTo) {
   const date = value.slice(0, 10);
   return (dateFrom === null || date >= dateFrom.slice(0, 10)) && (dateTo === null || date <= dateTo.slice(0, 10));
+}
+
+// ../../packages/domain-office/src/index.ts
+function createOfficeWorkbenchSnapshot(input = {}) {
+  return {
+    transactions: [...input.transactions ?? []],
+    reconciliations: [...input.reconciliations ?? []]
+  };
 }
 
 // src/distribution-import-parser.ts
@@ -39014,6 +39079,7 @@ function createDrizzlePersistenceRuntime(database, env) {
   return {
     writesEnabled: isWritesEnabled(env),
     withTx: async (callback) => database.transaction(async (executor) => callback({ kind: "postgres", executor })),
+    readAuditEvents: async (scope) => database.transaction(async (executor) => readPersistedAuditEvents(executor, scope)),
     storeDistributionImportPreview: async (preview) => {
       state.distributionPreviews.set(preview.previewId, preview);
       await database.transaction(async (executor) => {
@@ -39166,13 +39232,16 @@ async function appendAuditEvent(tx, input) {
     const auditEventId2 = `audit_${randomUUID()}`;
     tx.state.auditEvents.push({
       id: auditEventId2,
-      actorUserId: input.actor.userId,
+      occurredAt: (/* @__PURE__ */ new Date()).toISOString(),
+      actorId: input.actor.userId,
       action: input.action,
-      targetType: input.targetType,
-      targetId: input.targetId,
-      before: input.before,
-      after: input.after,
-      idempotencyKey: input.idempotencyKey
+      entityType: input.targetType,
+      entityId: input.targetId,
+      idempotencyKey: input.idempotencyKey,
+      context: {
+        actorEmail: input.actor.email ?? "unknown",
+        actorRole: input.actor.role
+      }
     });
     return auditEventId2;
   }
@@ -40194,6 +40263,63 @@ function rowsFromQueryResult(result) {
   }
   return [];
 }
+async function readPersistedAuditEvents(executor, scope) {
+  const actionPattern = `^${scope}[._]`;
+  const rows = rowsFromQueryResult(await executor.execute(sql`
+    select
+      id::text,
+      created_at,
+      coalesce(actor_user_id::text, 'system') as actor_id,
+      action,
+      entity_type,
+      entity_id::text,
+      metadata->>'idempotencyKey' as idempotency_key,
+      metadata
+    from audit_logs
+    where action ~ ${actionPattern}
+    order by created_at desc, id desc
+    limit 1000
+  `));
+  return rows.map((row) => ({
+    id: stringField(row, "id"),
+    occurredAt: timestampField(row, "created_at"),
+    actorId: stringField(row, "actor_id"),
+    action: stringField(row, "action"),
+    entityType: stringField(row, "entity_type"),
+    entityId: stringField(row, "entity_id"),
+    idempotencyKey: nullableStringField(row, "idempotency_key"),
+    context: stringContext(row.metadata)
+  }));
+}
+function timestampField(row, key) {
+  const value = row[key];
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString();
+  }
+  if (typeof value === "string") {
+    const timestamp = Date.parse(value);
+    if (!Number.isNaN(timestamp)) {
+      return new Date(timestamp).toISOString();
+    }
+  }
+  throwPersistenceHttpError(500, "timestamp_field_invalid", "Database row field is not a timestamp.", [`field=${key}`]);
+}
+function stringContext(value) {
+  if (!isJsonRecord(value)) {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(value).flatMap(([key, item]) => {
+      if (typeof item === "string") {
+        return [[key, item]];
+      }
+      if (typeof item === "number" || typeof item === "boolean") {
+        return [[key, String(item)]];
+      }
+      return [];
+    })
+  );
+}
 function stringField(row, key) {
   if (row === void 0) {
     return "unknown";
@@ -40272,10 +40398,6 @@ function canonicalJson(value) {
 
 // src/index.ts
 var DEFAULT_WORKSPACE_ID = "eeee-mu";
-var isoDatePattern2 = /^\d{4}-\d{2}-\d{2}$/u;
-var isoDateTimePattern = /^\d{4}-\d{2}-\d{2}T/u;
-var currencyCodePattern2 = /^[A-Z]{3}$/u;
-var moneyStringPattern2 = /^-?\d+(?:\.\d+)?$/u;
 var nullableStringSchema = external_exports.string().min(1).nullable();
 var optionalNullableStringSchema = external_exports.preprocess(
   (value) => value === void 0 || value === "" ? null : value,
@@ -40307,13 +40429,15 @@ var commandCenterUserPermissionUpdateSchema = workspaceBodySchema.extend({
   permissions: jsonRecordSchema
 });
 var officeTransactionWriteSchema = workspaceBodySchema.extend({
-  occurredOn: external_exports.string().regex(isoDatePattern2),
+  occurredOn: isoDateSchema,
   accountId: external_exports.string().min(1),
   categoryId: nullableStringSchema,
   projectId: nullableStringSchema,
   description: external_exports.string().min(1),
-  amountMicro: external_exports.string().regex(moneyStringPattern2),
-  currency: external_exports.string().regex(currencyCodePattern2),
+  amountMicro: decimalMoneyStringSchema,
+  currency: currencyCodeInputSchema,
+  vatApplicable: external_exports.boolean().optional(),
+  vatRateBp: basisPointsInputSchema.nullable().optional(),
   // Income/expense is the transaction's own attribute; the category only files it
   // under division/department. Optional for backward compatibility: absent on
   // create defaults to "expense" (never category-derived), absent on update
@@ -40330,20 +40454,20 @@ var officePlanComptableWriteSchema = workspaceBodySchema.extend({
 });
 var officeReconciliationApproveSchema = workspaceBodySchema.extend({
   reconciliationIds: external_exports.array(external_exports.string().min(1)).min(1),
-  approvedAt: external_exports.string().regex(isoDateTimePattern)
+  approvedAt: isoDateTimeSchema
 });
 var officeReconciliationApproveSuggestedSchema = workspaceBodySchema.extend({
-  approvedAt: external_exports.string().regex(isoDateTimePattern),
+  approvedAt: isoDateTimeSchema,
   accountId: external_exports.string().min(1).nullable().optional(),
-  dateFrom: external_exports.string().regex(isoDatePattern2).nullable().optional(),
-  dateTo: external_exports.string().regex(isoDatePattern2).nullable().optional(),
-  minConfidenceBp: external_exports.number().int().min(0).max(1e4).optional(),
+  dateFrom: isoDateSchema.nullable().optional(),
+  dateTo: isoDateSchema.nullable().optional(),
+  minConfidenceBp: basisPointsInputSchema.optional(),
   limit: external_exports.number().int().min(1).max(1e3).optional()
 });
 var officeReconciliationMatchSchema = workspaceBodySchema.extend({
   statementLineId: external_exports.string().min(1),
   transactionId: external_exports.string().min(1),
-  matchedAt: external_exports.string().regex(isoDateTimePattern)
+  matchedAt: isoDateTimeSchema
 });
 var officeReconciliationLineSchema = workspaceBodySchema.extend({
   statementLineId: external_exports.string().min(1)
@@ -40356,7 +40480,7 @@ var officeReconciliationCreateTransactionSchema = workspaceBodySchema.extend({
   statementLineId: external_exports.string().min(1),
   categoryId: external_exports.string().min(1),
   projectId: nullableStringSchema,
-  matchedAt: external_exports.string().regex(isoDateTimePattern)
+  matchedAt: isoDateTimeSchema
 });
 var officePartnerWriteSchema = workspaceBodySchema.extend({
   name: external_exports.string().min(1),
@@ -40370,7 +40494,7 @@ var officePartnerWriteSchema = workspaceBodySchema.extend({
 var officeBankAccountWriteSchema = workspaceBodySchema.extend({
   bankName: external_exports.string().min(1),
   accountLabel: external_exports.string().min(1),
-  currency: external_exports.string().regex(currencyCodePattern2),
+  currency: currencyCodeInputSchema,
   active: external_exports.boolean()
 });
 var officeProjectWriteSchema = workspaceBodySchema.extend({
@@ -40387,10 +40511,10 @@ var officeCashflowImportSchema = workspaceBodySchema.extend({
 var officeLedgerBulkRowSchema = external_exports.object({
   legacyId: external_exports.coerce.number().int().optional(),
   externalId: external_exports.coerce.number().int().optional(),
-  occurredOn: external_exports.string().regex(isoDatePattern2),
+  occurredOn: isoDateSchema,
   type: external_exports.enum(["income", "expense"]),
-  amount: external_exports.string().regex(moneyStringPattern2),
-  currency: external_exports.string().regex(currencyCodePattern2),
+  amount: decimalMoneyStringSchema,
+  currency: currencyCodeInputSchema,
   description: external_exports.string().min(1),
   departmentId: optionalNullableStringSchema,
   divisionId: optionalNullableStringSchema,
@@ -40426,20 +40550,20 @@ var distributionMappingApplyRulesSchema = workspaceBodySchema.extend({
 var distributionContractExpenseRecordSchema = workspaceBodySchema.extend({
   contractId: external_exports.string().min(1),
   payeeId: external_exports.string().min(1),
-  incurredOn: external_exports.string().regex(isoDatePattern2),
+  incurredOn: isoDateSchema,
   label: external_exports.string().min(1),
-  amountMicro: external_exports.string().regex(moneyStringPattern2),
-  currency: external_exports.string().regex(currencyCodePattern2)
+  amountMicro: decimalMoneyStringSchema,
+  currency: currencyCodeInputSchema
 });
 var distributionContractUpsertSchema = workspaceBodySchema.extend({
   id: nullableStringSchema,
   payeeId: nullableStringSchema,
   title: external_exports.string().min(1),
   status: external_exports.enum(["draft", "active", "paused", "ended"]),
-  effectiveFrom: external_exports.string().regex(isoDatePattern2),
-  effectiveTo: external_exports.string().regex(isoDatePattern2).nullable(),
-  splitBp: external_exports.number().int().min(0).max(1e4),
-  currency: external_exports.string().regex(currencyCodePattern2)
+  effectiveFrom: isoDateSchema,
+  effectiveTo: isoDateSchema.nullable(),
+  splitBp: basisPointsInputSchema,
+  currency: currencyCodeInputSchema
 });
 var distributionContractExpenseUpdateSchema = distributionContractExpenseRecordSchema.extend({
   status: external_exports.enum(["open", "recouped", "waived"])
@@ -40449,7 +40573,7 @@ var distributionPayeeUpsertSchema = workspaceBodySchema.extend({
   displayName: external_exports.string().min(1),
   email: nullableStringSchema,
   status: external_exports.enum(["active", "inactive"]),
-  defaultCurrency: external_exports.string().regex(currencyCodePattern2)
+  defaultCurrency: currencyCodeInputSchema
 });
 var distributionReleaseUpsertSchema = workspaceBodySchema.extend({
   id: nullableStringSchema,
@@ -40457,7 +40581,7 @@ var distributionReleaseUpsertSchema = workspaceBodySchema.extend({
   artistName: external_exports.string().min(1),
   upc: nullableStringSchema,
   status: external_exports.enum(["draft", "released", "archived"]),
-  releaseDate: external_exports.string().regex(isoDatePattern2).nullable()
+  releaseDate: isoDateSchema.nullable()
 });
 var distributionTrackUpsertSchema = workspaceBodySchema.extend({
   id: nullableStringSchema,
@@ -40903,6 +41027,13 @@ function registerOfficeRoutes(app, dependencies) {
     resolveWorkspaceId(context);
     return context.json({ writesEnabled: dependencies.persistence.writesEnabled });
   });
+  app.get("/eof/v1/workbench/snapshot", (context) => {
+    const workspaceId = resolveWorkspaceId(context);
+    const period = requireCompatQuery(context, ["period", "month"], "period");
+    const filters = rangeFiltersFromContext(context, period, null);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
+    return context.json(toOfficeWorkbenchSnapshotResponse(dataset, filters));
+  });
   app.get("/eof/v1/screen/office", async (context) => {
     const workspaceId = resolveWorkspaceId(context);
     const period = requireCompatQuery(context, ["period", "month"], "period");
@@ -40922,7 +41053,8 @@ function registerOfficeRoutes(app, dependencies) {
       reconciliations: `/eof/v1/reconciliations?${scoped}&status=unmatched&limit=100`,
       cashflow: `/eof/v1/cashflow?${base}&from=${encodeURIComponent(dateFrom)}&to=${encodeURIComponent(dateTo)}`,
       auditLog: `/eof/v1/audit-log?${base}&from=${encodeURIComponent(dateFrom)}&to=${encodeURIComponent(dateTo)}&limit=100`,
-      bankAccounts: `/eof/v1/bank/accounts?${base}&limit=100`
+      bankAccounts: `/eof/v1/bank/accounts?${base}&limit=100`,
+      workbenchSnapshot: `/eof/v1/workbench/snapshot?${scoped}`
     };
     const headers = {
       Authorization: context.req.header("Authorization") ?? ""
@@ -40942,9 +41074,10 @@ function registerOfficeRoutes(app, dependencies) {
     );
     return context.json(Object.fromEntries(entries));
   });
-  app.get("/eof/v1/audit-log", (context) => {
+  app.get("/eof/v1/audit-log", async (context) => {
     resolveWorkspaceId(context);
-    return context.json(pageItems(context, dependencies.fixtures.officeAuditLog.filter((entry) => matchesAuditQuery(context, entry))));
+    const auditLog = await readScopedAuditLog(dependencies, "office");
+    return context.json(pageItems(context, auditLog.filter((entry) => matchesAuditQuery(context, entry))));
   });
   app.get("/eof/v1/partners", (context) => {
     const period = requireCompatQuery(context, ["period", "month"], "period");
@@ -41108,7 +41241,7 @@ function filterRunwayWindowMonths(monthlyRows, runwayWindowMonths) {
   return runwayWindowMonths.filter((month) => availableMonths.has(month));
 }
 function registerDistributionRoutes(app, dependencies) {
-  app.get("/erh/v1/screen", (context) => {
+  app.get("/erh/v1/screen", async (context) => {
     const period = requireQuery(context, "period");
     requireQuery(context, "workspaceId");
     const source = nullableQuery(context, "importSource");
@@ -41186,7 +41319,7 @@ function registerDistributionRoutes(app, dependencies) {
       reconciliation: toDistributionReconciliation(dependencies.fixtures),
       aliases: pageItems(context, toDistributionAliases(dependencies.fixtures)),
       duplicates: pageItems(context, toDistributionDuplicates(dependencies.fixtures)),
-      auditLog: pageItems(context, toDistributionAuditLog(dependencies.fixtures)),
+      auditLog: pageItems(context, await readScopedAuditLog(dependencies, "distribution")),
       settings: toDistributionSettings(context, dependencies.fixtures, dependencies.persistence.writesEnabled)
     };
     return context.json(response);
@@ -41506,9 +41639,10 @@ function registerDistributionRoutes(app, dependencies) {
   app.post("/erh/v1/duplicates/:duplicateId/resolve", async (context) => {
     return distributionDuplicateResolveResponse(context, dependencies);
   });
-  app.get("/erh/v1/audit-log", (context) => {
+  app.get("/erh/v1/audit-log", async (context) => {
     requireQuery(context, "workspaceId");
-    return context.json(pageItems(context, toDistributionAuditLog(dependencies.fixtures)));
+    const auditLog = await readScopedAuditLog(dependencies, "distribution");
+    return context.json(pageItems(context, auditLog.filter((entry) => matchesAuditQuery(context, entry))));
   });
   app.get("/erh/v1/status", (context) => {
     requireQuery(context, "workspaceId");
@@ -41705,6 +41839,7 @@ async function officeTransactionCreateResponse(context, dependencies) {
   const request = await readZodBody(context, officeTransactionWriteSchema);
   assertOfficeTransactionWriteReferences(dependencies.fixtures.office, request);
   const amountMinor = normalizeEofAmountField(context, request.amountMicro, "amountMicro");
+  const vat = resolveOfficeTransactionVat(request, amountMinor, null);
   const transactionId = randomUUID2();
   const transactionType = request.type ?? "expense";
   const transactionStatus = request.categoryId === null ? "draft" : "validated";
@@ -41722,6 +41857,7 @@ async function officeTransactionCreateResponse(context, dependencies) {
         id: transactionId,
         request,
         amountMinor,
+        vat,
         transactionType,
         transactionStatus,
         actorUserId: actor.userId,
@@ -41742,7 +41878,7 @@ async function officeTransactionCreateResponse(context, dependencies) {
         },
         idempotencyKey: resolvedIdempotencyKey
       });
-      upsertOfficeTransactionFixture(dependencies.fixtures, transactionFromOfficeRequest(transactionId, request, amountMinor, transactionType, transactionStatus));
+      upsertOfficeTransactionFixture(dependencies.fixtures, transactionFromOfficeRequest(transactionId, request, amountMinor, transactionType, transactionStatus, vat));
       return mutationReceipt(transactionId, auditEventId);
     }
   });
@@ -41760,6 +41896,7 @@ async function officeTransactionUpdateResponse(context, dependencies) {
   }
   assertOfficeTransactionWriteReferences(dependencies.fixtures.office, request);
   const amountMinor = normalizeEofAmountField(context, request.amountMicro, "amountMicro");
+  const vat = resolveOfficeTransactionVat(request, amountMinor, before);
   const transactionType = request.type ?? before.type;
   const transactionStatus = request.categoryId === null ? "draft" : before.status;
   const idempotencyKey = requireIdempotencyKey(context);
@@ -41777,12 +41914,13 @@ async function officeTransactionUpdateResponse(context, dependencies) {
         id: transactionId,
         request,
         amountMinor,
+        vat,
         transactionType,
         transactionStatus,
         actorUserId: actor.userId,
         isUpdate: true
       });
-      const after = transactionFromOfficeRequest(transactionId, request, amountMinor, transactionType, transactionStatus);
+      const after = transactionFromOfficeRequest(transactionId, request, amountMinor, transactionType, transactionStatus, vat);
       const auditEventId = await appendAuditEvent(tx, {
         actor,
         action: "office_transaction_update",
@@ -42424,6 +42562,7 @@ async function officeReconciliationCreateTransactionResponse(context, dependenci
     currency: reconciliationCurrency
   };
   const amountMinor = normalizeEofAmountField(context, writeRequest.amountMicro, "amountMicro");
+  const vat = resolveOfficeTransactionVat(writeRequest, amountMinor, null);
   const transactionType = line.direction === "credit" ? "income" : "expense";
   const transactionStatus = "validated";
   assertOfficeReconciliationKernelCreate(context, line, transactionId, amountMinor, reconciliationCurrency);
@@ -42442,6 +42581,7 @@ async function officeReconciliationCreateTransactionResponse(context, dependenci
         id: transactionId,
         request: writeRequest,
         amountMinor,
+        vat,
         transactionType,
         transactionStatus,
         actorUserId: actor.userId,
@@ -42457,7 +42597,7 @@ async function officeReconciliationCreateTransactionResponse(context, dependenci
         after: { transactionId, statementLineId: request.statementLineId, request: writeRequest, amountMinor: amountMinor.toString() },
         idempotencyKey: resolvedIdempotencyKey
       });
-      upsertOfficeTransactionFixture(dependencies.fixtures, transactionFromOfficeRequest(transactionId, writeRequest, amountMinor, transactionType, transactionStatus));
+      upsertOfficeTransactionFixture(dependencies.fixtures, transactionFromOfficeRequest(transactionId, writeRequest, amountMinor, transactionType, transactionStatus, vat));
       matchReconciliationFixture(dependencies.fixtures, request.statementLineId, transactionId, request.matchedAt, actor.userId);
       return mutationReceipt(transactionId, auditEventId);
     }
@@ -45003,7 +45143,41 @@ function assertOfficeTransactionWriteReferences(dataset, request) {
     requireProject2(dataset, request.projectId);
   }
 }
-function transactionFromOfficeRequest(id, request, amountMinor, transactionType, transactionStatus) {
+function resolveOfficeTransactionVat(request, amountMinor, before) {
+  const hasExplicitVat = request.vatApplicable !== void 0 || request.vatRateBp !== void 0;
+  if (!hasExplicitVat && before !== null) {
+    return {
+      applicable: before.vatApplicable === true,
+      rateBp: before.vatRateBp ?? null,
+      amountMinor: before.vatAmountMinor ?? 0n
+    };
+  }
+  const applicable = request.vatApplicable ?? (request.vatRateBp !== null && request.vatRateBp !== void 0);
+  const rateBp = request.vatRateBp ?? null;
+  if (applicable && rateBp === null) {
+    throw new ApiRouteError(422, "office_transaction_vat_rate_required", "A VAT-applicable transaction requires an explicit VAT rate.", []);
+  }
+  if (!applicable && rateBp !== null && rateBp !== 0) {
+    throw new ApiRouteError(422, "office_transaction_vat_state_invalid", "A non-VAT transaction cannot carry a positive VAT rate.", [
+      `vatRateBp=${String(rateBp)}`
+    ]);
+  }
+  if (applicable && request.currency !== "MUR") {
+    throw new ApiRouteError(422, "office_transaction_vat_currency_unsupported", "VAT entry currently requires a MUR transaction so report totals cannot mix currencies.", [
+      `currency=${request.currency}`
+    ]);
+  }
+  const vatAmountMinor = applicable && rateBp !== null && rateBp > 0 ? calculateVat(
+    createMoneyAmount(createMoneyMicroUnits(absBigInt2(amountMinor)), createCurrencyCode("MUR")),
+    createBasisPoints(rateBp)
+  ).vatAmount.amountMicro : 0n;
+  return {
+    applicable,
+    rateBp: applicable ? rateBp : null,
+    amountMinor: vatAmountMinor
+  };
+}
+function transactionFromOfficeRequest(id, request, amountMinor, transactionType, transactionStatus, vat) {
   return {
     id,
     workspaceId: request.workspaceId,
@@ -45018,7 +45192,10 @@ function transactionFromOfficeRequest(id, request, amountMinor, transactionType,
     accountId: request.accountId,
     amountMinor,
     originalCurrency: request.currency === "MUR" ? null : request.currency,
-    exchangeRateE10: null
+    exchangeRateE10: null,
+    vatApplicable: vat.applicable,
+    vatRateBp: vat.rateBp,
+    vatAmountMinor: vat.amountMinor
   };
 }
 function officeTransactionAuditSnapshot(transaction) {
@@ -45035,7 +45212,10 @@ function officeTransactionAuditSnapshot(transaction) {
     accountId: transaction.accountId,
     amountMinor: transaction.amountMinor.toString(),
     originalCurrency: transaction.originalCurrency,
-    exchangeRateE10: transaction.exchangeRateE10 === null ? null : transaction.exchangeRateE10.toString()
+    exchangeRateE10: transaction.exchangeRateE10 === null ? null : transaction.exchangeRateE10.toString(),
+    vatApplicable: transaction.vatApplicable === true,
+    vatRateBp: transaction.vatRateBp ?? null,
+    vatAmountMinor: (transaction.vatAmountMinor ?? 0n).toString()
   };
 }
 function officeBankAccountAuditSnapshot(account) {
@@ -45076,6 +45256,9 @@ async function persistOfficeTransactionUpsert(tx, input) {
         amount_minor = ${input.amountMinor.toString()},
         original_amount_minor = ${input.amountMinor.toString()},
         original_currency = ${input.request.currency === "MUR" ? null : input.request.currency},
+        vat_applicable = ${input.vat.applicable},
+        vat_rate_bp = ${input.vat.rateBp},
+        vat_amount_minor = ${input.vat.amountMinor.toString()},
         approved_by_user_id = ${input.transactionStatus === "validated" ? input.actorUserId : null},
         approved_at = ${input.transactionStatus === "validated" ? (/* @__PURE__ */ new Date()).toISOString() : null},
         updated_at = now()
@@ -45098,6 +45281,9 @@ async function persistOfficeTransactionUpsert(tx, input) {
       amount_minor,
       original_amount_minor,
       original_currency,
+      vat_applicable,
+      vat_rate_bp,
+      vat_amount_minor,
       source,
       created_by_user_id,
       approved_by_user_id,
@@ -45117,6 +45303,9 @@ async function persistOfficeTransactionUpsert(tx, input) {
       ${input.amountMinor.toString()},
       ${input.amountMinor.toString()},
       ${input.request.currency === "MUR" ? null : input.request.currency},
+      ${input.vat.applicable},
+      ${input.vat.rateBp},
+      ${input.vat.amountMinor.toString()},
       'manual',
       ${input.actorUserId},
       ${input.transactionStatus === "validated" ? input.actorUserId : null},
@@ -47977,7 +48166,7 @@ function parseOfficeBankPreviewRow(row, workspaceId, accounts, exchangeRates, ac
   const occurredOn = isoDateValue(row.rawData, ["occurredOn", "occurred_on", "transactionDate", "transaction_date", "date", "DATE", "Date", "paid_on", "paidOn"]);
   const description = rowValue2(row.rawData, ["description", "label", "particulars", "details", "narrative", "memo"]);
   const amount = amountForBankRow(row.rawData);
-  const amountMurMinor = amount === null ? null : amount.amountMurMinor !== null ? amount.amountMurMinor : occurredOn !== null ? convertMinorToMurViaFinanceKernel(amount.amountMinor, amount.currency, occurredOn, exchangeRates) : null;
+  const amountMurMinor = amount === null ? null : amount.amountMurMinor !== null ? amount.amountMurMinor : occurredOn !== null ? convertMinorToMur(amount.amountMinor, amount.currency, occurredOn, exchangeRates) : null;
   const issues = [
     ...account === null ? ["account_not_found"] : [],
     ...occurredOn === null ? ["occurred_on_missing"] : [],
@@ -48237,52 +48426,6 @@ function amountForBankRow(row) {
     };
   }
   return null;
-}
-function convertMinorToMurViaFinanceKernel(amountMinor, fromCurrency, occurredOn, exchangeRates) {
-  if (fromCurrency === "MUR") {
-    return amountMinor;
-  }
-  const rate = pickMurExchangeRateForPreview(fromCurrency, occurredOn, exchangeRates);
-  if (rate === null) {
-    return null;
-  }
-  try {
-    const converted = convertMoney(
-      createMoneyAmount(createMoneyMicroUnits(absBigInt2(amountMinor)), createCurrencyCode(fromCurrency)),
-      createCurrencyCode("MUR"),
-      {
-        fromCurrency: createCurrencyCode(rate.fromCurrency),
-        toCurrency: createCurrencyCode(rate.toCurrency),
-        rateDecimal: decimalFromE10(rate.rateE10),
-        effectiveDate: rate.effectiveDate,
-        source: "office.exchange_rates"
-      }
-    );
-    return converted.amountMicro;
-  } catch (_error) {
-    return null;
-  }
-}
-function pickMurExchangeRateForPreview(fromCurrency, occurredOn, exchangeRates) {
-  const candidates = exchangeRates.filter(
-    (rate) => rate.fromCurrency === fromCurrency && rate.toCurrency === "MUR"
-  );
-  if (candidates.length === 0) {
-    return null;
-  }
-  const onOrBefore = candidates.filter((rate) => rate.effectiveDate <= occurredOn);
-  const pool = onOrBefore.length > 0 ? onOrBefore : candidates;
-  return pool.reduce(
-    (best, rate) => best === null || rate.effectiveDate > best.effectiveDate ? rate : best,
-    null
-  );
-}
-function decimalFromE10(rateE10) {
-  const sign = rateE10 < 0n ? "-" : "";
-  const digits = absBigInt2(rateE10).toString().padStart(11, "0");
-  const integer = digits.slice(0, -10);
-  const fraction = digits.slice(-10);
-  return `${sign}${integer}.${fraction}`;
 }
 function moneyValue(row, aliases) {
   const value = rowValue2(row, aliases);
@@ -49704,23 +49847,15 @@ function isoDayFromMs(epochMs) {
   return new Date(epochMs).toISOString().slice(0, 10);
 }
 function toOfficeGlobalPnl(dataset, period, filters) {
-  const fallbackPnl = readGlobalPnl(dataset, filters);
-  const ledgerTransactions = toOfficeLedgerTransactions(dataset, filters);
-  const ledgerSummary = ledgerTransactions.length === 0 ? null : summarizeLedger(ledgerTransactions, {
-    startsOn: filters.dateFrom ?? `${period}-01`,
-    endsOn: filters.dateTo ?? lastDayOfMonth(period)
-  });
-  const incomeMicro = ledgerSummary === null ? fallbackPnl.income : eofMoney.format(ledgerSummary.income.amountMicro);
-  const expenseMicro = ledgerSummary === null ? fallbackPnl.expense : eofMoney.format(ledgerSummary.expense.amountMicro);
-  const netMicro = ledgerSummary === null ? fallbackPnl.profit : eofMoney.format(ledgerSummary.profit.amountMicro);
+  const pnl = readGlobalPnl(dataset, filters);
   const projectionRows = readProjectionRowsForGlobalPnl(dataset, filters);
   return {
     scope: "global",
     completeness: "complete",
     period,
-    incomeMicro,
-    expenseMicro,
-    netMicro,
+    incomeMicro: pnl.income,
+    expenseMicro: pnl.expense,
+    netMicro: pnl.profit,
     validatedProjectionId: `projection_global_${period}`,
     projectionRows: toProjectionRows(projectionRows, period),
     lines: toOfficeCategoryPnlLines(dataset, filters)
@@ -49784,6 +49919,54 @@ function toOfficeLedgerTransactions(dataset, filters) {
       sourceSystem: "office"
     };
   });
+}
+function toOfficeWorkbenchSnapshotResponse(dataset, filters) {
+  const transactions = toOfficeLedgerTransactions(dataset, filters);
+  const transactionIds = new Set(transactions.map((transaction) => transaction.id));
+  const matchesByLineId = new Map(
+    dataset.bankReconciliationMatches.filter((match2) => match2.status === "matched").map((match2) => [match2.bankStatementLineId, match2])
+  );
+  const reconciliations = [];
+  for (const line of dataset.bankStatementLines) {
+    if (!isOfficeBankLineInRange(line, filters)) {
+      continue;
+    }
+    const persistedMatch = matchesByLineId.get(line.id);
+    const transactionId = line.matchedTransactionId ?? persistedMatch?.transactionId ?? null;
+    const isMatched = line.reconciliationStatus === "matched" || persistedMatch !== void 0;
+    if (!isMatched || transactionId === null || !transactionIds.has(transactionId)) {
+      continue;
+    }
+    reconciliations.push({
+      transactionId,
+      linkedBankTransactionIds: [line.id],
+      reconciledAmount: createMoneyAmount(
+        createMoneyMicroUnits(absBigInt2(line.amountMurMinor ?? line.amountMinor)),
+        createCurrencyCode(line.amountMurMinor === null ? line.currency : "MUR")
+      )
+    });
+  }
+  const snapshot = createOfficeWorkbenchSnapshot({ transactions, reconciliations });
+  const reconciledTransactionIds = new Set(snapshot.reconciliations.map((reconciliation) => reconciliation.transactionId));
+  const totalsByCurrency2 = /* @__PURE__ */ new Map();
+  for (const reconciliation of snapshot.reconciliations) {
+    totalsByCurrency2.set(
+      reconciliation.reconciledAmount.currency,
+      (totalsByCurrency2.get(reconciliation.reconciledAmount.currency) ?? 0n) + reconciliation.reconciledAmount.amountMicro
+    );
+  }
+  return {
+    transactionCount: snapshot.transactions.length,
+    reconciliationCount: snapshot.reconciliations.length,
+    reconciledTransactionCount: reconciledTransactionIds.size,
+    unreconciledTransactionCount: snapshot.transactions.filter(
+      (transaction) => !reconciledTransactionIds.has(transaction.id)
+    ).length,
+    reconciledByCurrency: [...totalsByCurrency2.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([currency, amount]) => ({ currency, amountMicro: eofMoney.format(amount) }))
+  };
+}
+function isOfficeBankLineInRange(line, filters) {
+  return !(filters.dateFrom !== null && line.occurredOn < filters.dateFrom) && !(filters.dateTo !== null && line.occurredOn > filters.dateTo);
 }
 function isOfficeFxValidForLedger(transaction) {
   if (transaction.originalCurrency === null || transaction.originalCurrency === "" || transaction.originalCurrency === "MUR") {
@@ -51231,8 +51414,37 @@ function findIdentityRepairCandidate(fixtures) {
 function normalizeIdentityName(value) {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/gu, " ").replace(/\s+/gu, " ");
 }
-function toDistributionAuditLog(store) {
-  return store.officeAuditLog.filter((entry) => entry.action.startsWith("distribution."));
+async function readScopedAuditLog(dependencies, scope) {
+  const persisted = await dependencies.persistence.readAuditEvents(scope);
+  const merged = /* @__PURE__ */ new Map();
+  for (const event of persisted) {
+    const entry = auditEntryFromPersistedEvent(dependencies.fixtures, event);
+    if (isAuditActionInScope(entry.action, scope)) {
+      merged.set(entry.id, entry);
+    }
+  }
+  for (const entry of dependencies.fixtures.officeAuditLog) {
+    if (isAuditActionInScope(entry.action, scope) && !merged.has(entry.id)) {
+      merged.set(entry.id, entry);
+    }
+  }
+  return [...merged.values()].sort((left, right) => right.occurredAt.localeCompare(left.occurredAt));
+}
+function auditEntryFromPersistedEvent(fixtures, event) {
+  return {
+    id: event.id,
+    occurredAt: event.occurredAt,
+    actorId: event.actorId,
+    action: event.action,
+    entityType: event.entityType,
+    entityId: event.entityId,
+    entityReference: auditEntityReference(fixtures, event.entityType, event.entityId),
+    idempotencyKey: event.idempotencyKey,
+    context: event.context
+  };
+}
+function isAuditActionInScope(action, scope) {
+  return action.startsWith(`${scope}.`) || action.startsWith(`${scope}_`);
 }
 function toDistributionSettings(context, store, writesEnabled) {
   const workspaceId = requireQuery(context, "workspaceId");

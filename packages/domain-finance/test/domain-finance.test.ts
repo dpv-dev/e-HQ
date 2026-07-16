@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { allocateLargestRemainder } from "../src/allocations.ts";
-import { convertMoney } from "../src/fx.ts";
+import { convertMoney, convertMoneyWithE10, pickEffectiveFxRate } from "../src/fx.ts";
 import { summarizeLedger } from "../src/ledger.ts";
 import {
   convertDistributionDecimal24_10ToMoney,
@@ -21,7 +21,15 @@ import {
   splitRemainderLast
 } from "../src/money.ts";
 import { reconcileTransaction } from "../src/reconciliation.ts";
-import { ledgerTransactionSchema, moneyAmountSchema } from "../src/schemas.ts";
+import {
+  basisPointsInputSchema,
+  currencyCodeInputSchema,
+  decimalMoneyStringSchema,
+  isoDateSchema,
+  isoDateTimeSchema,
+  ledgerTransactionSchema,
+  moneyAmountSchema
+} from "../src/schemas.ts";
 import type { BasisPointShare, CurrencyCode, LedgerTransaction, MoneyAmount } from "../src/types.ts";
 import { calculateVat } from "../src/vat.ts";
 
@@ -346,6 +354,22 @@ test("FX conversion applies decimal factors without floating point arithmetic", 
   assert.equal(formatMoneyAmount(converted), "125.000000");
 });
 
+test("scaled FX conversion and effective-date selection are owned by the finance kernel", () => {
+  const rates = [
+    { fromCurrency: "EUR", toCurrency: "USD", rateE10: 12_000_000_000n, effectiveDate: "2026-01-01" },
+    { fromCurrency: "EUR", toCurrency: "USD", rateE10: 12_500_000_000n, effectiveDate: "2026-02-01" }
+  ] as const;
+  const selected = pickEffectiveFxRate(rates, "EUR", "USD", "2026-01-15");
+  assert.equal(selected?.effectiveDate, "2026-01-01");
+
+  const converted = convertMoneyWithE10(parseDecimalToMicroUnits("100.000000", eur), usd, rates[1]);
+  assert.equal(formatMoneyAmount(converted), "125.000000");
+  assert.throws(
+    () => convertMoneyWithE10(parseDecimalToMicroUnits("100.000000", eur), usd, { ...rates[1], rateE10: 0n }),
+    /greater than zero/
+  );
+});
+
 test("finance schemas validate branded domain values", () => {
   const amount = moneyAmountSchema.parse({ amountMicro: 123_456_000n, currency: "EUR" });
   assert.equal(formatMoneyAmount(amount), "123.456000");
@@ -362,6 +386,15 @@ test("finance schemas validate branded domain values", () => {
   });
   assert.equal(transaction.id, "tx-schema");
   assert.throws(() => moneyAmountSchema.parse({ amountMicro: 1n, currency: "EURO" }), /Invalid/);
+});
+
+test("finance boundary schemas are reusable by API write validation", () => {
+  assert.equal(isoDateSchema.parse("2026-07-16"), "2026-07-16");
+  assert.equal(isoDateTimeSchema.parse("2026-07-16T10:00:00.000Z"), "2026-07-16T10:00:00.000Z");
+  assert.equal(currencyCodeInputSchema.parse("MUR"), "MUR");
+  assert.equal(decimalMoneyStringSchema.parse("-125.50"), "-125.50");
+  assert.equal(basisPointsInputSchema.parse(10_000), 10_000);
+  assert.throws(() => decimalMoneyStringSchema.parse("125,50"), /Invalid/);
 });
 
 test("legacy Office DECIMAL(15,2) conversion is lossless and string-only", () => {

@@ -8,13 +8,9 @@ import {
   buildVoidPlan,
   computeCarry,
   computeStatementBalance,
-  computeStatementGroupTotals
+  computeStatementGroupTotals,
+  createDistributionStatementDraft
 } from "../src/statements.ts";
-import { createDistributionStatementDraft } from "../src/index.ts";
-import {
-  createCurrencyCode,
-  parseDecimalToMicroUnits
-} from "@ehq/domain-finance";
 
 const period = {
   start: "2026-01-01",
@@ -27,17 +23,39 @@ const payee = {
 
 test("distribution statement draft is a stable domain value", () => {
   const draft = createDistributionStatementDraft({
-    payeeId: "payee_a",
-    periodStart: period.start,
-    periodEnd: period.end,
-    currencyTotal: parseDecimalToMicroUnits("125.000000", createCurrencyCode("USD")),
-    allocationLines: [],
-    openExpenses: []
+    payee,
+    period,
+    currency: "USD",
+    allocations: [
+      {
+        id: "allocation_draft",
+        payeeId: "payee_a",
+        trackId: null,
+        currency: "USD",
+        grossShare: "125.0000000000",
+        recoupmentApplied: "0.0000000000",
+        netPayable: "125.0000000000",
+        quantity: "1.000000"
+      },
+      {
+        id: "allocation_other_payee",
+        payeeId: "payee_b",
+        trackId: null,
+        currency: "USD",
+        grossShare: "50.0000000000",
+        recoupmentApplied: "0.0000000000",
+        netPayable: "50.0000000000",
+        quantity: "1.000000"
+      }
+    ],
+    lastClosing: "0",
+    version: 2
   });
 
   assert.equal(draft.payeeId, "payee_a");
-  assert.equal(draft.allocationLines.length, 0);
-  assert.equal(draft.openExpenses.length, 0);
+  assert.equal(draft.allocations.length, 1);
+  assert.equal(draft.lastClosing, "0.0000000000");
+  assert.equal(draft.version, 2);
 });
 
 const allocations: readonly StatementAllocationInput[] = [

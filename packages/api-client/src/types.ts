@@ -324,6 +324,19 @@ export interface OfficeScreenQuery {
   readonly dateTo: IsoDateString;
 }
 
+export interface OfficeWorkbenchSnapshotCurrencyTotal {
+  readonly currency: CurrencyCode;
+  readonly amountMicro: MoneyMicroString;
+}
+
+export interface OfficeWorkbenchSnapshotResponse {
+  readonly transactionCount: number;
+  readonly reconciliationCount: number;
+  readonly reconciledTransactionCount: number;
+  readonly unreconciledTransactionCount: number;
+  readonly reconciledByCurrency: readonly OfficeWorkbenchSnapshotCurrencyTotal[];
+}
+
 export interface OfficeScreenResponse {
   readonly status: OfficeWriteStatusResponse;
   readonly dashboard: OfficeDashboardResponse;
@@ -336,6 +349,7 @@ export interface OfficeScreenResponse {
   readonly cashflow: readonly CashflowBucket[];
   readonly auditLog: PageResult<AuditLogEntry>;
   readonly bankAccounts: PageResult<OfficeBankAccountSummary>;
+  readonly workbenchSnapshot: OfficeWorkbenchSnapshotResponse;
 }
 
 export interface OfficePnlProjectionQuery extends PeriodQuery {
@@ -475,6 +489,10 @@ export interface OfficeTransactionWriteRequest {
   readonly description: string;
   readonly amountMicro: MoneyMicroString;
   readonly currency: CurrencyCode;
+  // VAT is configured on the source transaction. The API calculates and stores
+  // the gross-inclusive VAT amount with the shared integer finance primitive.
+  readonly vatApplicable?: boolean | undefined;
+  readonly vatRateBp?: BasisPoints | null | undefined;
   // Income/expense is the transaction's own attribute; the category only files it
   // under division/department and never rewrites the type. Omitted on update the
   // stored type is preserved.

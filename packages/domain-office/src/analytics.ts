@@ -1,5 +1,14 @@
 import type { OfficeBankAccount, OfficeBankImportBatch, OfficeBankReconciliationMatch, OfficeBankStatementLine, OfficeCashflowProjectionRow } from "@ehq/db";
-import { eofMoney, format as formatScaledUnits, roundRatioHalfUp } from "@ehq/domain-finance";
+import {
+  convertMoneyWithE10,
+  createCurrencyCode,
+  createMoneyAmount,
+  createMoneyMicroUnits,
+  eofMoney,
+  format as formatScaledUnits,
+  pickEffectiveFxRate,
+  roundRatioHalfUp
+} from "@ehq/domain-finance";
 import type { OfficeWriteExchangeRateRow } from "./allocations.js";
 import {
   type OfficePnlDataset,
@@ -323,8 +332,6 @@ function toBasisPointValue(value: bigint): number {
   return parseInt(value.toString(), 10);
 }
 
-const EXCHANGE_RATE_SCALE = 10_000_000_000n; // rateE10 stores rate × 10^10
-
 // Pick the exchange rate for a foreign currency into MUR effective on (or, failing that,
 // closest to) the given ISO date. Returns null when no MUR rate exists for the currency.
 export function pickMurExchangeRate(
@@ -332,20 +339,7 @@ export function pickMurExchangeRate(
   occurredOn: string,
   exchangeRates: readonly OfficeWriteExchangeRateRow[]
 ): OfficeWriteExchangeRateRow | null {
-  const candidates = exchangeRates.filter(
-    (rate: OfficeWriteExchangeRateRow): boolean => rate.fromCurrency === fromCurrency && rate.toCurrency === "MUR"
-  );
-  if (candidates.length === 0) {
-    return null;
-  }
-
-  const onOrBefore = candidates.filter((rate: OfficeWriteExchangeRateRow): boolean => rate.effectiveDate <= occurredOn);
-  const pool = onOrBefore.length > 0 ? onOrBefore : candidates;
-  return pool.reduce(
-    (best: OfficeWriteExchangeRateRow | null, rate: OfficeWriteExchangeRateRow): OfficeWriteExchangeRateRow =>
-      best === null || rate.effectiveDate > best.effectiveDate ? rate : best,
-    null as OfficeWriteExchangeRateRow | null
-  );
+  return pickEffectiveFxRate(exchangeRates, fromCurrency, "MUR", occurredOn);
 }
 
 // Convert a foreign-currency minor amount into MUR minor units using the office FX table.
@@ -366,6 +360,9 @@ export function convertMinorToMur(
     return null;
   }
 
-  const product = amountMinor * rate.rateE10;
-  return (product + EXCHANGE_RATE_SCALE / 2n) / EXCHANGE_RATE_SCALE; // round half-up
+  return convertMoneyWithE10(
+    createMoneyAmount(createMoneyMicroUnits(amountMinor), createCurrencyCode(fromCurrency)),
+    createCurrencyCode("MUR"),
+    rate
+  ).amountMicro;
 }

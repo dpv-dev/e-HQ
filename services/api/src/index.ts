@@ -13,20 +13,24 @@ import {
   officeAdvanceWriteSchema
 } from "@ehq/api-contracts";
 import {
+  basisPointsInputSchema,
   calculateVat,
-  convertMoney,
   createBasisPoints,
   createCurrencyCode,
   createMoneyAmount,
   createMoneyMicroUnits,
+  currencyCodeInputSchema,
+  decimalMoneyStringSchema,
   eofMoney,
   erhMoney,
   format as formatScaledUnits,
+  isoDateSchema,
+  isoDateTimeSchema,
   parse as parseScaledUnits,
   roundRatioHalfUp,
   reconcileTransaction,
-  summarizeLedger,
-  type LedgerTransaction
+  type LedgerTransaction,
+  type ReconciliationResult
 } from "@ehq/domain-finance";
 import {
   buildAllocationPlan,
@@ -66,6 +70,8 @@ import {
 import {
   buildOfficeCashflowWorkbench,
   calculateAdvanceBalance,
+  convertMinorToMur,
+  createOfficeWorkbenchSnapshot,
   detectOfficeBankImportDuplicates,
   readDepartmentPnl,
   readGlobalPnl,
@@ -201,6 +207,7 @@ import type {
   OfficeTransaction,
   OfficeTransactionStatus,
   OfficeTransactionWriteRequest,
+  OfficeWorkbenchSnapshotResponse,
   OfficeAdvanceKind,
   OfficeAdvanceApplicationRequest,
   OfficeAdvanceMarkPaidRequest,
@@ -278,6 +285,7 @@ import {
   type PersistDistributionPaymentRecordInput,
   type PersistDistributionPaymentUpdateInput,
   type PersistDistributionPaymentVoidInput,
+  type PersistedAuditEvent,
   type PersistDistributionRoyaltyRulesInput,
   type PersistDistributionStatementVoidInput,
   type PersistIdentityLinkInput,
@@ -624,11 +632,6 @@ type ApiContext = Context<ApiAuthBindings>;
 
 const DEFAULT_WORKSPACE_ID = "eeee-mu";
 
-const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/u;
-const isoDateTimePattern = /^\d{4}-\d{2}-\d{2}T/u;
-const currencyCodePattern = /^[A-Z]{3}$/u;
-const moneyStringPattern = /^-?\d+(?:\.\d+)?$/u;
-
 const nullableStringSchema = z.string().min(1).nullable();
 const optionalNullableStringSchema = z.preprocess(
   (value: unknown): unknown => value === undefined || value === "" ? null : value,
@@ -664,13 +667,15 @@ const commandCenterUserPermissionUpdateSchema = workspaceBodySchema.extend({
   permissions: jsonRecordSchema
 });
 const officeTransactionWriteSchema = workspaceBodySchema.extend({
-  occurredOn: z.string().regex(isoDatePattern),
+  occurredOn: isoDateSchema,
   accountId: z.string().min(1),
   categoryId: nullableStringSchema,
   projectId: nullableStringSchema,
   description: z.string().min(1),
-  amountMicro: z.string().regex(moneyStringPattern),
-  currency: z.string().regex(currencyCodePattern),
+  amountMicro: decimalMoneyStringSchema,
+  currency: currencyCodeInputSchema,
+  vatApplicable: z.boolean().optional(),
+  vatRateBp: basisPointsInputSchema.nullable().optional(),
   // Income/expense is the transaction's own attribute; the category only files it
   // under division/department. Optional for backward compatibility: absent on
   // create defaults to "expense" (never category-derived), absent on update
@@ -687,21 +692,21 @@ const officePlanComptableWriteSchema = workspaceBodySchema.extend({
 });
 const officeReconciliationApproveSchema = workspaceBodySchema.extend({
   reconciliationIds: z.array(z.string().min(1)).min(1),
-  approvedAt: z.string().regex(isoDateTimePattern)
+  approvedAt: isoDateTimeSchema
 });
 const officeReconciliationApproveSuggestedSchema = workspaceBodySchema.extend({
-  approvedAt: z.string().regex(isoDateTimePattern),
+  approvedAt: isoDateTimeSchema,
   accountId: z.string().min(1).nullable().optional(),
-  dateFrom: z.string().regex(isoDatePattern).nullable().optional(),
-  dateTo: z.string().regex(isoDatePattern).nullable().optional(),
-  minConfidenceBp: z.number().int().min(0).max(10_000).optional(),
+  dateFrom: isoDateSchema.nullable().optional(),
+  dateTo: isoDateSchema.nullable().optional(),
+  minConfidenceBp: basisPointsInputSchema.optional(),
   limit: z.number().int().min(1).max(1_000).optional()
 });
 type OfficeReconciliationApproveSuggestedRequest = z.infer<typeof officeReconciliationApproveSuggestedSchema>;
 const officeReconciliationMatchSchema = workspaceBodySchema.extend({
   statementLineId: z.string().min(1),
   transactionId: z.string().min(1),
-  matchedAt: z.string().regex(isoDateTimePattern)
+  matchedAt: isoDateTimeSchema
 });
 const officeReconciliationLineSchema = workspaceBodySchema.extend({
   statementLineId: z.string().min(1)
@@ -714,7 +719,7 @@ const officeReconciliationCreateTransactionSchema = workspaceBodySchema.extend({
   statementLineId: z.string().min(1),
   categoryId: z.string().min(1),
   projectId: nullableStringSchema,
-  matchedAt: z.string().regex(isoDateTimePattern)
+  matchedAt: isoDateTimeSchema
 });
 const officePartnerWriteSchema = workspaceBodySchema.extend({
   name: z.string().min(1),
@@ -728,7 +733,7 @@ const officePartnerWriteSchema = workspaceBodySchema.extend({
 const officeBankAccountWriteSchema = workspaceBodySchema.extend({
   bankName: z.string().min(1),
   accountLabel: z.string().min(1),
-  currency: z.string().regex(currencyCodePattern),
+  currency: currencyCodeInputSchema,
   active: z.boolean()
 });
 type OfficeBankAccountWriteRequest = z.infer<typeof officeBankAccountWriteSchema>;
@@ -760,10 +765,10 @@ interface ParsedCashflowRow {
 const officeLedgerBulkRowSchema = z.object({
   legacyId: z.coerce.number().int().optional(),
   externalId: z.coerce.number().int().optional(),
-  occurredOn: z.string().regex(isoDatePattern),
+  occurredOn: isoDateSchema,
   type: z.enum(["income", "expense"]),
-  amount: z.string().regex(moneyStringPattern),
-  currency: z.string().regex(currencyCodePattern),
+  amount: decimalMoneyStringSchema,
+  currency: currencyCodeInputSchema,
   description: z.string().min(1),
   departmentId: optionalNullableStringSchema,
   divisionId: optionalNullableStringSchema,
@@ -818,20 +823,20 @@ const distributionMappingApplyRulesSchema = workspaceBodySchema.extend({
 const distributionContractExpenseRecordSchema = workspaceBodySchema.extend({
   contractId: z.string().min(1),
   payeeId: z.string().min(1),
-  incurredOn: z.string().regex(isoDatePattern),
+  incurredOn: isoDateSchema,
   label: z.string().min(1),
-  amountMicro: z.string().regex(moneyStringPattern),
-  currency: z.string().regex(currencyCodePattern)
+  amountMicro: decimalMoneyStringSchema,
+  currency: currencyCodeInputSchema
 });
 const distributionContractUpsertSchema = workspaceBodySchema.extend({
   id: nullableStringSchema,
   payeeId: nullableStringSchema,
   title: z.string().min(1),
   status: z.enum(["draft", "active", "paused", "ended"]),
-  effectiveFrom: z.string().regex(isoDatePattern),
-  effectiveTo: z.string().regex(isoDatePattern).nullable(),
-  splitBp: z.number().int().min(0).max(10_000),
-  currency: z.string().regex(currencyCodePattern)
+  effectiveFrom: isoDateSchema,
+  effectiveTo: isoDateSchema.nullable(),
+  splitBp: basisPointsInputSchema,
+  currency: currencyCodeInputSchema
 });
 const distributionContractExpenseUpdateSchema = distributionContractExpenseRecordSchema.extend({
   status: z.enum(["open", "recouped", "waived"])
@@ -841,7 +846,7 @@ const distributionPayeeUpsertSchema = workspaceBodySchema.extend({
   displayName: z.string().min(1),
   email: nullableStringSchema,
   status: z.enum(["active", "inactive"]),
-  defaultCurrency: z.string().regex(currencyCodePattern)
+  defaultCurrency: currencyCodeInputSchema
 });
 const distributionReleaseUpsertSchema = workspaceBodySchema.extend({
   id: nullableStringSchema,
@@ -849,7 +854,7 @@ const distributionReleaseUpsertSchema = workspaceBodySchema.extend({
   artistName: z.string().min(1),
   upc: nullableStringSchema,
   status: z.enum(["draft", "released", "archived"]),
-  releaseDate: z.string().regex(isoDatePattern).nullable()
+  releaseDate: isoDateSchema.nullable()
 });
 const distributionTrackUpsertSchema = workspaceBodySchema.extend({
   id: nullableStringSchema,
@@ -1459,6 +1464,14 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
     return context.json({ writesEnabled: dependencies.persistence.writesEnabled });
   });
 
+  app.get("/eof/v1/workbench/snapshot", (context) => {
+    const workspaceId = resolveWorkspaceId(context);
+    const period = requireCompatQuery(context, ["period", "month"], "period");
+    const filters = rangeFiltersFromContext(context, period, null);
+    const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
+    return context.json(toOfficeWorkbenchSnapshotResponse(dataset, filters));
+  });
+
   // Screen bundle: one round trip for the Office console's initial/period-scoped load.
   // The browser previously fired ~11 parallel requests, each paying the client→server
   // network RTT; this endpoint fans out INTERNALLY to the existing routes (full reuse of
@@ -1483,7 +1496,8 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
       reconciliations: `/eof/v1/reconciliations?${scoped}&status=unmatched&limit=100`,
       cashflow: `/eof/v1/cashflow?${base}&from=${encodeURIComponent(dateFrom)}&to=${encodeURIComponent(dateTo)}`,
       auditLog: `/eof/v1/audit-log?${base}&from=${encodeURIComponent(dateFrom)}&to=${encodeURIComponent(dateTo)}&limit=100`,
-      bankAccounts: `/eof/v1/bank/accounts?${base}&limit=100`
+      bankAccounts: `/eof/v1/bank/accounts?${base}&limit=100`,
+      workbenchSnapshot: `/eof/v1/workbench/snapshot?${scoped}`
     };
     const headers: Readonly<Record<string, string>> = {
       Authorization: context.req.header("Authorization") ?? ""
@@ -1504,9 +1518,10 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
     return context.json(Object.fromEntries(entries));
   });
 
-  app.get("/eof/v1/audit-log", (context) => {
+  app.get("/eof/v1/audit-log", async (context) => {
     resolveWorkspaceId(context);
-    return context.json(pageItems(context, dependencies.fixtures.officeAuditLog.filter((entry) => matchesAuditQuery(context, entry))));
+    const auditLog = await readScopedAuditLog(dependencies, "office");
+    return context.json(pageItems(context, auditLog.filter((entry) => matchesAuditQuery(context, entry))));
   });
 
   app.get("/eof/v1/partners", (context) => {
@@ -1714,7 +1729,7 @@ function filterRunwayWindowMonths(
 }
 
 function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServiceDependencies): void {
-  app.get("/erh/v1/screen", (context) => {
+  app.get("/erh/v1/screen", async (context) => {
     const period = requireQuery(context, "period");
     requireQuery(context, "workspaceId");
     const source = nullableQuery(context, "importSource");
@@ -1796,7 +1811,7 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
       reconciliation: toDistributionReconciliation(dependencies.fixtures),
       aliases: pageItems(context, toDistributionAliases(dependencies.fixtures)),
       duplicates: pageItems(context, toDistributionDuplicates(dependencies.fixtures)),
-      auditLog: pageItems(context, toDistributionAuditLog(dependencies.fixtures)),
+      auditLog: pageItems(context, await readScopedAuditLog(dependencies, "distribution")),
       settings: toDistributionSettings(context, dependencies.fixtures, dependencies.persistence.writesEnabled)
     };
     return context.json(response);
@@ -2191,9 +2206,10 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
     return distributionDuplicateResolveResponse(context, dependencies);
   });
 
-  app.get("/erh/v1/audit-log", (context) => {
+  app.get("/erh/v1/audit-log", async (context) => {
     requireQuery(context, "workspaceId");
-    return context.json(pageItems(context, toDistributionAuditLog(dependencies.fixtures)));
+    const auditLog = await readScopedAuditLog(dependencies, "distribution");
+    return context.json(pageItems(context, auditLog.filter((entry) => matchesAuditQuery(context, entry))));
   });
 
   // Distribution-scoped write-gate read (same reason as eof/v1/status: the distribution role is
@@ -2427,6 +2443,7 @@ async function officeTransactionCreateResponse(context: ApiContext, dependencies
   const request = await readZodBody<OfficeTransactionWriteRequest>(context, officeTransactionWriteSchema);
   assertOfficeTransactionWriteReferences(dependencies.fixtures.office, request);
   const amountMinor = normalizeEofAmountField(context, request.amountMicro, "amountMicro");
+  const vat = resolveOfficeTransactionVat(request, amountMinor, null);
   const transactionId = randomUUID();
   const transactionType = request.type ?? "expense";
   const transactionStatus: OfficeTransactionRow["status"] = request.categoryId === null ? "draft" : "validated";
@@ -2444,6 +2461,7 @@ async function officeTransactionCreateResponse(context: ApiContext, dependencies
         id: transactionId,
         request,
         amountMinor,
+        vat,
         transactionType,
         transactionStatus,
         actorUserId: actor.userId,
@@ -2464,7 +2482,7 @@ async function officeTransactionCreateResponse(context: ApiContext, dependencies
         },
         idempotencyKey: resolvedIdempotencyKey
       });
-      upsertOfficeTransactionFixture(dependencies.fixtures, transactionFromOfficeRequest(transactionId, request, amountMinor, transactionType, transactionStatus));
+      upsertOfficeTransactionFixture(dependencies.fixtures, transactionFromOfficeRequest(transactionId, request, amountMinor, transactionType, transactionStatus, vat));
       return mutationReceipt(transactionId, auditEventId);
     }
   });
@@ -2483,6 +2501,7 @@ async function officeTransactionUpdateResponse(context: ApiContext, dependencies
   }
   assertOfficeTransactionWriteReferences(dependencies.fixtures.office, request);
   const amountMinor = normalizeEofAmountField(context, request.amountMicro, "amountMicro");
+  const vat = resolveOfficeTransactionVat(request, amountMinor, before);
   // Classification must never flip income/expense: keep the stored type unless
   // the caller explicitly asks to change it.
   const transactionType = request.type ?? before.type;
@@ -2504,12 +2523,13 @@ async function officeTransactionUpdateResponse(context: ApiContext, dependencies
         id: transactionId,
         request,
         amountMinor,
+        vat,
         transactionType,
         transactionStatus,
         actorUserId: actor.userId,
         isUpdate: true
       });
-      const after = transactionFromOfficeRequest(transactionId, request, amountMinor, transactionType, transactionStatus);
+      const after = transactionFromOfficeRequest(transactionId, request, amountMinor, transactionType, transactionStatus, vat);
       const auditEventId = await appendAuditEvent(tx, {
         actor,
         action: "office_transaction_update",
@@ -3215,6 +3235,7 @@ async function officeReconciliationCreateTransactionResponse(context: ApiContext
     currency: reconciliationCurrency
   };
   const amountMinor = normalizeEofAmountField(context, writeRequest.amountMicro, "amountMicro");
+  const vat = resolveOfficeTransactionVat(writeRequest, amountMinor, null);
   // The bank direction is the source of truth for income/expense (credit = money
   // in, debit = money out); the category only files the transaction and never
   // rewrites the type.
@@ -3236,6 +3257,7 @@ async function officeReconciliationCreateTransactionResponse(context: ApiContext
         id: transactionId,
         request: writeRequest,
         amountMinor,
+        vat,
         transactionType,
         transactionStatus,
         actorUserId: actor.userId,
@@ -3251,7 +3273,7 @@ async function officeReconciliationCreateTransactionResponse(context: ApiContext
         after: { transactionId, statementLineId: request.statementLineId, request: writeRequest, amountMinor: amountMinor.toString() },
         idempotencyKey: resolvedIdempotencyKey
       });
-      upsertOfficeTransactionFixture(dependencies.fixtures, transactionFromOfficeRequest(transactionId, writeRequest, amountMinor, transactionType, transactionStatus));
+      upsertOfficeTransactionFixture(dependencies.fixtures, transactionFromOfficeRequest(transactionId, writeRequest, amountMinor, transactionType, transactionStatus, vat));
       matchReconciliationFixture(dependencies.fixtures, request.statementLineId, transactionId, request.matchedAt, actor.userId);
       return mutationReceipt(transactionId, auditEventId);
     }
@@ -6105,12 +6127,63 @@ function assertOfficeTransactionWriteReferences(
   }
 }
 
+interface OfficeTransactionVatValues {
+  readonly applicable: boolean;
+  readonly rateBp: number | null;
+  readonly amountMinor: bigint;
+}
+
+function resolveOfficeTransactionVat(
+  request: OfficeTransactionWriteRequest,
+  amountMinor: bigint,
+  before: OfficeTransactionRow | null
+): OfficeTransactionVatValues {
+  const hasExplicitVat = request.vatApplicable !== undefined || request.vatRateBp !== undefined;
+  if (!hasExplicitVat && before !== null) {
+    return {
+      applicable: before.vatApplicable === true,
+      rateBp: before.vatRateBp ?? null,
+      amountMinor: before.vatAmountMinor ?? 0n
+    };
+  }
+
+  const applicable = request.vatApplicable ?? (request.vatRateBp !== null && request.vatRateBp !== undefined);
+  const rateBp = request.vatRateBp ?? null;
+  if (applicable && rateBp === null) {
+    throw new ApiRouteError(422, "office_transaction_vat_rate_required", "A VAT-applicable transaction requires an explicit VAT rate.", []);
+  }
+  if (!applicable && rateBp !== null && rateBp !== 0) {
+    throw new ApiRouteError(422, "office_transaction_vat_state_invalid", "A non-VAT transaction cannot carry a positive VAT rate.", [
+      `vatRateBp=${String(rateBp)}`
+    ]);
+  }
+  if (applicable && request.currency !== "MUR") {
+    throw new ApiRouteError(422, "office_transaction_vat_currency_unsupported", "VAT entry currently requires a MUR transaction so report totals cannot mix currencies.", [
+      `currency=${request.currency}`
+    ]);
+  }
+
+  const vatAmountMinor = applicable && rateBp !== null && rateBp > 0
+    ? calculateVat(
+        createMoneyAmount(createMoneyMicroUnits(absBigInt(amountMinor)), createCurrencyCode("MUR")),
+        createBasisPoints(rateBp)
+      ).vatAmount.amountMicro
+    : 0n;
+
+  return {
+    applicable,
+    rateBp: applicable ? rateBp : null,
+    amountMinor: vatAmountMinor
+  };
+}
+
 function transactionFromOfficeRequest(
   id: string,
   request: OfficeTransactionWriteRequest,
   amountMinor: bigint,
   transactionType: OfficeTransactionRow["type"],
-  transactionStatus: OfficeTransactionRow["status"]
+  transactionStatus: OfficeTransactionRow["status"],
+  vat: OfficeTransactionVatValues
 ): OfficeTransactionRow {
   return {
     id,
@@ -6126,7 +6199,10 @@ function transactionFromOfficeRequest(
     accountId: request.accountId,
     amountMinor,
     originalCurrency: request.currency === "MUR" ? null : request.currency,
-    exchangeRateE10: null
+    exchangeRateE10: null,
+    vatApplicable: vat.applicable,
+    vatRateBp: vat.rateBp,
+    vatAmountMinor: vat.amountMinor
   };
 }
 
@@ -6144,7 +6220,10 @@ function officeTransactionAuditSnapshot(transaction: OfficeTransactionRow): Read
     accountId: transaction.accountId,
     amountMinor: transaction.amountMinor.toString(),
     originalCurrency: transaction.originalCurrency,
-    exchangeRateE10: transaction.exchangeRateE10 === null ? null : transaction.exchangeRateE10.toString()
+    exchangeRateE10: transaction.exchangeRateE10 === null ? null : transaction.exchangeRateE10.toString(),
+    vatApplicable: transaction.vatApplicable === true,
+    vatRateBp: transaction.vatRateBp ?? null,
+    vatAmountMinor: (transaction.vatAmountMinor ?? 0n).toString()
   };
 }
 
@@ -6177,6 +6256,7 @@ async function persistOfficeTransactionUpsert(
     readonly id: string;
     readonly request: OfficeTransactionWriteRequest;
     readonly amountMinor: bigint;
+    readonly vat: OfficeTransactionVatValues;
     readonly transactionType: OfficeTransactionRow["type"];
     readonly transactionStatus: OfficeTransactionRow["status"];
     readonly actorUserId: string;
@@ -6202,6 +6282,9 @@ async function persistOfficeTransactionUpsert(
         amount_minor = ${input.amountMinor.toString()},
         original_amount_minor = ${input.amountMinor.toString()},
         original_currency = ${input.request.currency === "MUR" ? null : input.request.currency},
+        vat_applicable = ${input.vat.applicable},
+        vat_rate_bp = ${input.vat.rateBp},
+        vat_amount_minor = ${input.vat.amountMinor.toString()},
         approved_by_user_id = ${input.transactionStatus === "validated" ? input.actorUserId : null},
         approved_at = ${input.transactionStatus === "validated" ? new Date().toISOString() : null},
         updated_at = now()
@@ -6225,6 +6308,9 @@ async function persistOfficeTransactionUpsert(
       amount_minor,
       original_amount_minor,
       original_currency,
+      vat_applicable,
+      vat_rate_bp,
+      vat_amount_minor,
       source,
       created_by_user_id,
       approved_by_user_id,
@@ -6244,6 +6330,9 @@ async function persistOfficeTransactionUpsert(
       ${input.amountMinor.toString()},
       ${input.amountMinor.toString()},
       ${input.request.currency === "MUR" ? null : input.request.currency},
+      ${input.vat.applicable},
+      ${input.vat.rateBp},
+      ${input.vat.amountMinor.toString()},
       'manual',
       ${input.actorUserId},
       ${input.transactionStatus === "validated" ? input.actorUserId : null},
@@ -9653,7 +9742,7 @@ function parseOfficeBankPreviewRow(
       : amount.amountMurMinor !== null
         ? amount.amountMurMinor
         : occurredOn !== null
-          ? convertMinorToMurViaFinanceKernel(amount.amountMinor, amount.currency, occurredOn, exchangeRates)
+          ? convertMinorToMur(amount.amountMinor, amount.currency, occurredOn, exchangeRates)
           : null;
   const issues = [
     ...(account === null ? ["account_not_found"] : []),
@@ -10023,69 +10112,6 @@ function amountForBankRow(row: Readonly<Record<string, string>>): {
   }
 
   return null;
-}
-
-function convertMinorToMurViaFinanceKernel(
-  amountMinor: bigint,
-  fromCurrency: string,
-  occurredOn: string,
-  exchangeRates: readonly OfficeWriteExchangeRateRow[]
-): bigint | null {
-  if (fromCurrency === "MUR") {
-    return amountMinor;
-  }
-
-  const rate = pickMurExchangeRateForPreview(fromCurrency, occurredOn, exchangeRates);
-  if (rate === null) {
-    return null;
-  }
-
-  try {
-    const converted = convertMoney(
-      createMoneyAmount(createMoneyMicroUnits(absBigInt(amountMinor)), createCurrencyCode(fromCurrency)),
-      createCurrencyCode("MUR"),
-      {
-        fromCurrency: createCurrencyCode(rate.fromCurrency),
-        toCurrency: createCurrencyCode(rate.toCurrency),
-        rateDecimal: decimalFromE10(rate.rateE10),
-        effectiveDate: rate.effectiveDate,
-        source: "office.exchange_rates"
-      }
-    );
-
-    return converted.amountMicro;
-  } catch (_error: unknown) {
-    return null;
-  }
-}
-
-function pickMurExchangeRateForPreview(
-  fromCurrency: string,
-  occurredOn: string,
-  exchangeRates: readonly OfficeWriteExchangeRateRow[]
-): OfficeWriteExchangeRateRow | null {
-  const candidates = exchangeRates.filter(
-    (rate: OfficeWriteExchangeRateRow): boolean => rate.fromCurrency === fromCurrency && rate.toCurrency === "MUR"
-  );
-  if (candidates.length === 0) {
-    return null;
-  }
-
-  const onOrBefore = candidates.filter((rate: OfficeWriteExchangeRateRow): boolean => rate.effectiveDate <= occurredOn);
-  const pool = onOrBefore.length > 0 ? onOrBefore : candidates;
-  return pool.reduce(
-    (best: OfficeWriteExchangeRateRow | null, rate: OfficeWriteExchangeRateRow): OfficeWriteExchangeRateRow =>
-      best === null || rate.effectiveDate > best.effectiveDate ? rate : best,
-    null as OfficeWriteExchangeRateRow | null
-  );
-}
-
-function decimalFromE10(rateE10: bigint): string {
-  const sign = rateE10 < 0n ? "-" : "";
-  const digits = absBigInt(rateE10).toString().padStart(11, "0");
-  const integer = digits.slice(0, -10);
-  const fraction = digits.slice(-10);
-  return `${sign}${integer}.${fraction}`;
 }
 
 function directionValue(row: Readonly<Record<string, string>>): "credit" | "debit" | null {
@@ -12027,19 +12053,9 @@ function isoDayFromMs(epochMs: number): string {
 }
 
 function toOfficeGlobalPnl(dataset: OfficeAnalyticsDataset, period: string, filters: OfficePnlFilters): OfficeGlobalPnl {
-  const fallbackPnl = readGlobalPnl(dataset, filters);
-  const ledgerTransactions = toOfficeLedgerTransactions(dataset, filters);
-  const ledgerSummary =
-    ledgerTransactions.length === 0
-      ? null
-      : summarizeLedger(ledgerTransactions, {
-          startsOn: filters.dateFrom ?? `${period}-01`,
-          endsOn: filters.dateTo ?? lastDayOfMonth(period)
-        });
-
-  const incomeMicro = ledgerSummary === null ? fallbackPnl.income : eofMoney.format(ledgerSummary.income.amountMicro);
-  const expenseMicro = ledgerSummary === null ? fallbackPnl.expense : eofMoney.format(ledgerSummary.expense.amountMicro);
-  const netMicro = ledgerSummary === null ? fallbackPnl.profit : eofMoney.format(ledgerSummary.profit.amountMicro);
+  // readGlobalPnl is the single owner of the ledger summary; the API only
+  // projects the domain result into the public response shape.
+  const pnl = readGlobalPnl(dataset, filters);
 
   const projectionRows = readProjectionRowsForGlobalPnl(dataset, filters);
 
@@ -12047,9 +12063,9 @@ function toOfficeGlobalPnl(dataset: OfficeAnalyticsDataset, period: string, filt
     scope: "global",
     completeness: "complete",
     period,
-    incomeMicro,
-    expenseMicro,
-    netMicro,
+    incomeMicro: pnl.income,
+    expenseMicro: pnl.expense,
+    netMicro: pnl.profit,
     validatedProjectionId: `projection_global_${period}`,
     projectionRows: toProjectionRows(projectionRows, period),
     lines: toOfficeCategoryPnlLines(dataset, filters)
@@ -12128,6 +12144,69 @@ function toOfficeLedgerTransactions(dataset: OfficeAnalyticsDataset, filters: Of
         sourceSystem: "office"
       };
     });
+}
+
+function toOfficeWorkbenchSnapshotResponse(
+  dataset: OfficeAnalyticsDataset,
+  filters: OfficePnlFilters
+): OfficeWorkbenchSnapshotResponse {
+  const transactions = toOfficeLedgerTransactions(dataset, filters);
+  const transactionIds = new Set(transactions.map((transaction) => transaction.id));
+  const matchesByLineId = new Map(
+    dataset.bankReconciliationMatches
+      .filter((match) => match.status === "matched")
+      .map((match) => [match.bankStatementLineId, match] as const)
+  );
+  const reconciliations: ReconciliationResult[] = [];
+
+  for (const line of dataset.bankStatementLines) {
+    if (!isOfficeBankLineInRange(line, filters)) {
+      continue;
+    }
+
+    const persistedMatch = matchesByLineId.get(line.id);
+    const transactionId = line.matchedTransactionId ?? persistedMatch?.transactionId ?? null;
+    const isMatched = line.reconciliationStatus === "matched" || persistedMatch !== undefined;
+    if (!isMatched || transactionId === null || !transactionIds.has(transactionId)) {
+      continue;
+    }
+
+    reconciliations.push({
+      transactionId,
+      linkedBankTransactionIds: [line.id],
+      reconciledAmount: createMoneyAmount(
+        createMoneyMicroUnits(absBigInt(line.amountMurMinor ?? line.amountMinor)),
+        createCurrencyCode(line.amountMurMinor === null ? line.currency : "MUR")
+      )
+    });
+  }
+
+  const snapshot = createOfficeWorkbenchSnapshot({ transactions, reconciliations });
+  const reconciledTransactionIds = new Set(snapshot.reconciliations.map((reconciliation) => reconciliation.transactionId));
+  const totalsByCurrency = new Map<string, bigint>();
+  for (const reconciliation of snapshot.reconciliations) {
+    totalsByCurrency.set(
+      reconciliation.reconciledAmount.currency,
+      (totalsByCurrency.get(reconciliation.reconciledAmount.currency) ?? 0n) + reconciliation.reconciledAmount.amountMicro
+    );
+  }
+
+  return {
+    transactionCount: snapshot.transactions.length,
+    reconciliationCount: snapshot.reconciliations.length,
+    reconciledTransactionCount: reconciledTransactionIds.size,
+    unreconciledTransactionCount: snapshot.transactions.filter(
+      (transaction) => !reconciledTransactionIds.has(transaction.id)
+    ).length,
+    reconciledByCurrency: [...totalsByCurrency.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([currency, amount]) => ({ currency, amountMicro: eofMoney.format(amount) }))
+  };
+}
+
+function isOfficeBankLineInRange(line: OfficeBankStatementLineRow, filters: OfficePnlFilters): boolean {
+  return !(filters.dateFrom !== null && line.occurredOn < filters.dateFrom)
+    && !(filters.dateTo !== null && line.occurredOn > filters.dateTo);
 }
 
 function isOfficeFxValidForLedger(transaction: OfficeTransactionRow): boolean {
@@ -13934,10 +14013,45 @@ function normalizeIdentityName(value: string): string {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/gu, " ").replace(/\s+/gu, " ");
 }
 
-function toDistributionAuditLog(store: ApiFixtureStore): readonly AuditLogEntry[] {
-  // Distribution has no dedicated audit-log fixture; reuse the shared audit data when present
-  // and filter to distribution-scoped entries, otherwise return a typed empty list.
-  return store.officeAuditLog.filter((entry) => entry.action.startsWith("distribution."));
+async function readScopedAuditLog(
+  dependencies: ApiServiceDependencies,
+  scope: "office" | "distribution"
+): Promise<readonly AuditLogEntry[]> {
+  const persisted = await dependencies.persistence.readAuditEvents(scope);
+  const merged = new Map<string, AuditLogEntry>();
+
+  for (const event of persisted) {
+    const entry = auditEntryFromPersistedEvent(dependencies.fixtures, event);
+    if (isAuditActionInScope(entry.action, scope)) {
+      merged.set(entry.id, entry);
+    }
+  }
+
+  for (const entry of dependencies.fixtures.officeAuditLog) {
+    if (isAuditActionInScope(entry.action, scope) && !merged.has(entry.id)) {
+      merged.set(entry.id, entry);
+    }
+  }
+
+  return [...merged.values()].sort((left, right): number => right.occurredAt.localeCompare(left.occurredAt));
+}
+
+function auditEntryFromPersistedEvent(fixtures: ApiFixtureStore, event: PersistedAuditEvent): AuditLogEntry {
+  return {
+    id: event.id,
+    occurredAt: event.occurredAt,
+    actorId: event.actorId,
+    action: event.action,
+    entityType: event.entityType,
+    entityId: event.entityId,
+    entityReference: auditEntityReference(fixtures, event.entityType, event.entityId),
+    idempotencyKey: event.idempotencyKey,
+    context: event.context
+  };
+}
+
+function isAuditActionInScope(action: string, scope: "office" | "distribution"): boolean {
+  return action.startsWith(`${scope}.`) || action.startsWith(`${scope}_`);
 }
 
 function toDistributionSettings(context: ApiContext, store: ApiFixtureStore, writesEnabled: boolean): DistributionSettingsResponse {

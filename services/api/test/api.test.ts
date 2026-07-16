@@ -948,6 +948,13 @@ test("Office screen bundle returns every section in one response matching the st
     readonly cashflow: readonly unknown[];
     readonly auditLog: { readonly items: readonly unknown[] };
     readonly bankAccounts: { readonly items: readonly { readonly id: string }[] };
+    readonly workbenchSnapshot: {
+      readonly transactionCount: number;
+      readonly reconciliationCount: number;
+      readonly reconciledTransactionCount: number;
+      readonly unreconciledTransactionCount: number;
+      readonly reconciledByCurrency: readonly { readonly currency: string; readonly amountMicro: string }[];
+    };
   };
   assert.equal(typeof screen.status.writesEnabled, "boolean");
   assert.equal(screen.dashboard.period, "2026-02");
@@ -956,6 +963,11 @@ test("Office screen bundle returns every section in one response matching the st
   assert.ok(screen.transactions.items.some((item) => item.id === "tx_mcb_fee"));
   assert.ok(screen.pendingTransactions.items.some((item) => item.id === "tx_uncategorized"));
   assert.ok(screen.bankAccounts.items.some((item) => item.id === "bank_mur"));
+  assert.ok(screen.workbenchSnapshot.transactionCount > 0);
+  assert.equal(
+    screen.workbenchSnapshot.reconciledTransactionCount + screen.workbenchSnapshot.unreconciledTransactionCount,
+    screen.workbenchSnapshot.transactionCount
+  );
 
   const direct = await app.request(
     "/eof/v1/transactions?workspaceId=workspace_1&period=2026-02&dateFrom=2026-02-01&dateTo=2026-02-28&limit=100",
@@ -966,6 +978,13 @@ test("Office screen bundle returns every section in one response matching the st
     screen.transactions.items.map((item) => item.id),
     directPage.items.map((item) => item.id)
   );
+
+  const directSnapshotResponse = await app.request(
+    "/eof/v1/workbench/snapshot?workspaceId=workspace_1&period=2026-02&dateFrom=2026-02-01&dateTo=2026-02-28",
+    { headers: authHeaders() }
+  );
+  assert.equal(directSnapshotResponse.status, 200);
+  assert.deepEqual(await directSnapshotResponse.json(), screen.workbenchSnapshot);
 });
 
 test("Office screen bundle rejects unauthenticated calls", async () => {
@@ -1312,6 +1331,22 @@ test("distribution aliases create persists a new alias and exposes it in the rea
   assert.equal(createdAlias?.aliasText, "Alma Legacy");
   assert.equal(createdAlias?.targetType, "payee");
   assert.equal(createdAlias?.targetId, "payee_alma");
+
+  const auditResponse = await app.request("/erh/v1/audit-log?workspaceId=workspace_1&limit=100", {
+    headers: authHeaders()
+  });
+  assert.equal(auditResponse.status, 200);
+  const auditPage = (await auditResponse.json()) as {
+    readonly items: readonly { readonly id: string; readonly action: string; readonly idempotencyKey: string | null }[];
+  };
+  assert.ok(
+    auditPage.items.some(
+      (entry) =>
+        entry.id === receipt.auditEventId &&
+        entry.action === "distribution_alias_upsert" &&
+        entry.idempotencyKey === "distribution-alias-create-1"
+    )
+  );
 });
 
 test("distribution aliases patch updates an existing alias target", async () => {
@@ -4097,6 +4132,152 @@ test("VAT report computes totals from transaction VAT metadata", async () => {
   assert.ok(vat.rows.some((row) => row.id === "tx_vat_expense" && row.vatMicro === "30.00"));
 });
 
+test("transaction VAT configuration calculates, persists in the read model, and feeds the VAT report", async () => {
+  const app = createWriteEnabledFixtureApiService();
+  const create = await app.request("/eof/v1/transactions", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "transaction-vat-create-1" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      occurredOn: "2026-02-20",
+      accountId: "bank_mur",
+      categoryId: "cat_live_income",
+      projectId: null,
+      description: "VAT inclusive live income",
+      amountMicro: "115.00",
+      currency: "MUR",
+      type: "income",
+      vatApplicable: true,
+      vatRateBp: 1500
+    })
+  });
+  assert.equal(create.status, 200);
+  const receipt = (await create.json()) as { readonly id: string; readonly auditEventId: string | null };
+  assert.ok(receipt.auditEventId !== null);
+
+  const transactions = await app.request("/eof/v1/transactions?workspaceId=workspace_1&period=2026-02&limit=100", {
+    headers: authHeaders()
+  });
+  assert.equal(transactions.status, 200);
+  const transactionPage = (await transactions.json()) as {
+    readonly items: readonly {
+      readonly id: string;
+      readonly vatApplicable: boolean;
+      readonly vatRateBp: number | null;
+      readonly vatAmountMicro: string | null;
+    }[];
+  };
+  const transaction = transactionPage.items.find((item) => item.id === receipt.id);
+  assert.equal(transaction?.vatApplicable, true);
+  assert.equal(transaction?.vatRateBp, 1500);
+  assert.equal(transaction?.vatAmountMicro, "15.00");
+
+  const report = await app.request("/eof/v1/vat?workspaceId=workspace_1&period=2026-02", {
+    headers: authHeaders()
+  });
+  assert.equal(report.status, 200);
+  const vat = (await report.json()) as {
+    readonly hasVatSource: boolean;
+    readonly outputVatMicro: string;
+    readonly rows: readonly { readonly id: string; readonly vatMicro: string }[];
+  };
+  assert.equal(vat.hasVatSource, true);
+  assert.equal(vat.outputVatMicro, "15.00");
+  assert.ok(vat.rows.some((row) => row.id === receipt.id && row.vatMicro === "15.00"));
+
+  const missingRate = await app.request("/eof/v1/transactions", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "transaction-vat-missing-rate-1" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      occurredOn: "2026-02-21",
+      accountId: "bank_mur",
+      categoryId: "cat_live_income",
+      projectId: null,
+      description: "Invalid VAT source",
+      amountMicro: "100.00",
+      currency: "MUR",
+      type: "income",
+      vatApplicable: true,
+      vatRateBp: null
+    })
+  });
+  assert.equal(missingRate.status, 422);
+  assert.equal(
+    ((await missingRate.json()) as { readonly error: { readonly code: string } }).error.code,
+    "office_transaction_vat_rate_required"
+  );
+});
+
+test("transaction VAT columns persist and update atomically in PGlite", async () => {
+  const pglite = new PGlite();
+  await createPgliteWriteTables(pglite);
+  await createPgliteTransactionTable(pglite);
+  const app = createApiService({
+    fixtures: createFixtureStore(),
+    persistence: createDrizzlePersistenceRuntime(
+      drizzle(pglite) as Parameters<typeof createDrizzlePersistenceRuntime>[0],
+      { WRITES_ENABLED: "true" }
+    ),
+    health: null,
+    nowIso: (): string => "2026-07-16T05:00:00.000Z",
+    auth: createTestAuthVerifier()
+  });
+
+  try {
+    const request = {
+      workspaceId: "workspace_1",
+      occurredOn: "2026-02-20",
+      accountId: "bank_mur",
+      categoryId: "cat_live_income",
+      projectId: null,
+      description: "Persisted VAT income",
+      amountMicro: "115.00",
+      currency: "MUR",
+      type: "income",
+      vatApplicable: true,
+      vatRateBp: 1500
+    } as const;
+    const create = await app.request("/eof/v1/transactions", {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "transaction-vat-pglite-create-1" },
+      body: JSON.stringify(request)
+    });
+    assert.equal(create.status, 200);
+    const receipt = (await create.json()) as { readonly id: string };
+
+    const inserted = await pglite.query(
+      "select vat_applicable, vat_rate_bp, vat_amount_minor::text from transactions where id = $1",
+      [receipt.id]
+    );
+    assert.deepEqual(inserted.rows[0], {
+      vat_applicable: true,
+      vat_rate_bp: 1500,
+      vat_amount_minor: "1500"
+    });
+
+    const update = await app.request(`/eof/v1/transactions/${receipt.id}`, {
+      method: "PATCH",
+      headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "transaction-vat-pglite-update-1" },
+      body: JSON.stringify({ ...request, amountMicro: "110.00", vatRateBp: 1000 })
+    });
+    assert.equal(update.status, 200);
+
+    const updated = await pglite.query(
+      "select vat_applicable, vat_rate_bp, vat_amount_minor::text from transactions where id = $1",
+      [receipt.id]
+    );
+    assert.deepEqual(updated.rows[0], {
+      vat_applicable: true,
+      vat_rate_bp: 1000,
+      vat_amount_minor: "1000"
+    });
+    assert.equal(await pgliteCount(pglite, "audit_logs"), 2);
+  } finally {
+    await pglite.close();
+  }
+});
+
 test("ledger bulk preview resolves classified rows by name and reports unresolved ones", async () => {
   const app = createWriteEnabledFixtureApiService();
   const preview = await app.request("/eof/v1/transactions/bulk-preview", {
@@ -4985,6 +5166,22 @@ test("office bank import confirm writes idempotency, audit, batch, and lines in 
     assert.equal(await pgliteCount(pglite, "office_bank_import_batches"), 1);
     assert.equal(await pgliteCount(pglite, "office_bank_statement_lines"), 1);
 
+    const auditResponse = await app.request("/eof/v1/audit-log?workspaceId=workspace_1&limit=100", {
+      headers: authHeaders()
+    });
+    assert.equal(auditResponse.status, 200);
+    const auditPage = (await auditResponse.json()) as {
+      readonly items: readonly { readonly action: string; readonly entityId: string; readonly idempotencyKey: string | null }[];
+    };
+    assert.ok(
+      auditPage.items.some(
+        (entry) =>
+          entry.action === "office_bank_import_confirm" &&
+          entry.entityId === originalReceipt.id &&
+          entry.idempotencyKey === "bank-confirm-pglite-1"
+      )
+    );
+
     const staleConfirm = await app.request("/eof/v1/bank-import/confirm", {
       method: "POST",
       headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "bank-confirm-pglite-stale" },
@@ -5351,6 +5548,35 @@ async function createPgliteWriteTables(pglite: PGlite): Promise<void> {
       created_at timestamp with time zone default now() not null,
       updated_at timestamp with time zone default now() not null,
       primary key (workspace_id, user_id)
+    );
+  `);
+}
+
+async function createPgliteTransactionTable(pglite: PGlite): Promise<void> {
+  await pglite.exec(`
+    create table transactions (
+      id uuid primary key,
+      workspace_id text not null,
+      transaction_date timestamp with time zone not null,
+      type text not null,
+      status text not null,
+      is_active boolean not null default true,
+      description text,
+      category_id text,
+      project_id text,
+      account_id text,
+      amount_minor bigint not null,
+      original_amount_minor bigint not null,
+      original_currency char(3),
+      vat_applicable boolean not null default false,
+      vat_rate_bp integer,
+      vat_amount_minor bigint not null default 0,
+      source text not null,
+      created_by_user_id text,
+      approved_by_user_id text,
+      approved_at timestamp with time zone,
+      created_at timestamp with time zone default now() not null,
+      updated_at timestamp with time zone default now() not null
     );
   `);
 }

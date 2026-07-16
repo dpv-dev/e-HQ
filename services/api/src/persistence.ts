@@ -76,9 +76,23 @@ export interface OfficeBankImportPreviewDecision {
   readonly issues: readonly string[];
 }
 
+export interface PersistedAuditEvent {
+  readonly id: string;
+  readonly occurredAt: string;
+  readonly actorId: string;
+  readonly action: string;
+  readonly entityType: string;
+  readonly entityId: string;
+  readonly idempotencyKey: string | null;
+  readonly context: Readonly<Record<string, string>>;
+}
+
+export type AuditEventScope = "office" | "distribution";
+
 export interface ApiPersistenceRuntime {
   readonly writesEnabled: boolean;
   readonly withTx: <TResult>(callback: (tx: ApiWriteTransaction) => Promise<TResult>) => Promise<TResult>;
+  readonly readAuditEvents: (scope: AuditEventScope) => Promise<readonly PersistedAuditEvent[]>;
   readonly storeDistributionImportPreview: (preview: DistributionImportPreviewRecord) => Promise<void>;
   readonly getDistributionImportPreview: (previewId: string) => Promise<DistributionImportPreviewRecord | null>;
   readonly storeOfficeBankImportPreview: (preview: OfficeBankImportPreviewRecord) => Promise<void>;
@@ -335,7 +349,7 @@ type BeginIdempotentResult =
 
 interface MemoryPersistenceState {
   readonly idempotency: Map<string, StoredIdempotencyResult>;
-  readonly auditEvents: JsonRecord[];
+  readonly auditEvents: PersistedAuditEvent[];
 }
 
 interface PersistenceState {
@@ -477,6 +491,8 @@ export function createDrizzlePersistenceRuntime(database: TransactionalDrizzleDa
     writesEnabled: isWritesEnabled(env),
     withTx: async <TResult>(callback: (tx: ApiWriteTransaction) => Promise<TResult>): Promise<TResult> =>
       database.transaction(async (executor: SqlExecutor): Promise<TResult> => callback({ kind: "postgres", executor })),
+    readAuditEvents: async (scope: AuditEventScope): Promise<readonly PersistedAuditEvent[]> =>
+      database.transaction(async (executor: SqlExecutor): Promise<readonly PersistedAuditEvent[]> => readPersistedAuditEvents(executor, scope)),
     storeDistributionImportPreview: async (preview: DistributionImportPreviewRecord): Promise<void> => {
       state.distributionPreviews.set(preview.previewId, preview);
       await database.transaction(async (executor: SqlExecutor): Promise<void> => {
@@ -534,6 +550,8 @@ export function createMemoryPersistenceRuntime(env: Readonly<Record<string, stri
       };
       return result;
     },
+    readAuditEvents: async (scope: AuditEventScope): Promise<readonly PersistedAuditEvent[]> =>
+      state.memory.auditEvents.filter((event) => isAuditActionInScope(event.action, scope)).reverse(),
     storeDistributionImportPreview: async (preview: DistributionImportPreviewRecord): Promise<void> => {
       state.distributionPreviews.set(preview.previewId, preview);
     },
@@ -705,13 +723,16 @@ export async function appendAuditEvent(tx: ApiWriteTransaction, input: AppendAud
     const auditEventId = `audit_${randomUUID()}`;
     tx.state.auditEvents.push({
       id: auditEventId,
-      actorUserId: input.actor.userId,
+      occurredAt: new Date().toISOString(),
+      actorId: input.actor.userId,
       action: input.action,
-      targetType: input.targetType,
-      targetId: input.targetId,
-      before: input.before,
-      after: input.after,
-      idempotencyKey: input.idempotencyKey
+      entityType: input.targetType,
+      entityId: input.targetId,
+      idempotencyKey: input.idempotencyKey,
+      context: {
+        actorEmail: input.actor.email ?? "unknown",
+        actorRole: input.actor.role
+      }
     });
     return auditEventId;
   }
@@ -1869,6 +1890,72 @@ function rowsFromQueryResult(result: unknown): readonly JsonRecord[] {
   }
 
   return [];
+}
+
+async function readPersistedAuditEvents(executor: SqlExecutor, scope: AuditEventScope): Promise<readonly PersistedAuditEvent[]> {
+  const actionPattern = `^${scope}[._]`;
+  const rows = rowsFromQueryResult(await executor.execute(sql`
+    select
+      id::text,
+      created_at,
+      coalesce(actor_user_id::text, 'system') as actor_id,
+      action,
+      entity_type,
+      entity_id::text,
+      metadata->>'idempotencyKey' as idempotency_key,
+      metadata
+    from audit_logs
+    where action ~ ${actionPattern}
+    order by created_at desc, id desc
+    limit 1000
+  `));
+
+  return rows.map((row): PersistedAuditEvent => ({
+    id: stringField(row, "id"),
+    occurredAt: timestampField(row, "created_at"),
+    actorId: stringField(row, "actor_id"),
+    action: stringField(row, "action"),
+    entityType: stringField(row, "entity_type"),
+    entityId: stringField(row, "entity_id"),
+    idempotencyKey: nullableStringField(row, "idempotency_key"),
+    context: stringContext(row.metadata)
+  }));
+}
+
+function isAuditActionInScope(action: string, scope: AuditEventScope): boolean {
+  return action.startsWith(`${scope}.`) || action.startsWith(`${scope}_`);
+}
+
+function timestampField(row: JsonRecord, key: string): string {
+  const value = row[key];
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString();
+  }
+  if (typeof value === "string") {
+    const timestamp = Date.parse(value);
+    if (!Number.isNaN(timestamp)) {
+      return new Date(timestamp).toISOString();
+    }
+  }
+  throwPersistenceHttpError(500, "timestamp_field_invalid", "Database row field is not a timestamp.", [`field=${key}`]);
+}
+
+function stringContext(value: unknown): Readonly<Record<string, string>> {
+  if (!isJsonRecord(value)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).flatMap(([key, item]): readonly (readonly [string, string])[] => {
+      if (typeof item === "string") {
+        return [[key, item]];
+      }
+      if (typeof item === "number" || typeof item === "boolean") {
+        return [[key, String(item)]];
+      }
+      return [];
+    })
+  );
 }
 
 function stringField(row: JsonRecord | undefined, key: string): string {

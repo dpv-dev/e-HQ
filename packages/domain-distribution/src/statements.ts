@@ -20,6 +20,25 @@ export interface StatementAllocationInput {
   readonly quantity: string;
 }
 
+export interface DistributionStatementDraftInput {
+  readonly payee: DistributionPayeeInput;
+  readonly period: DistributionStatementPeriod;
+  readonly currency: string;
+  readonly allocations: readonly StatementAllocationInput[];
+  readonly lastClosing: string;
+  readonly version: number;
+}
+
+export interface DistributionStatementDraft {
+  readonly payeeId: string;
+  readonly periodStart: string;
+  readonly periodEnd: string;
+  readonly currency: string;
+  readonly allocations: readonly StatementAllocationInput[];
+  readonly lastClosing: string;
+  readonly version: number;
+}
+
 export interface PayeeBalanceLedgerInput {
   readonly id: string;
   readonly payeeId: string;
@@ -142,6 +161,22 @@ export function computeCarry(opening: string, periodNet: string): DistributionCa
   };
 }
 
+export function createDistributionStatementDraft(
+  input: DistributionStatementDraftInput
+): DistributionStatementDraft {
+  return {
+    payeeId: input.payee.id,
+    periodStart: input.period.start,
+    periodEnd: input.period.end,
+    currency: input.currency,
+    allocations: input.allocations.filter(
+      (allocation) => allocation.payeeId === input.payee.id && allocation.currency === input.currency
+    ),
+    lastClosing: formatErhAmount(parseErhAmount(input.lastClosing)),
+    version: input.version
+  };
+}
+
 export function buildStatementPlan(
   payee: DistributionPayeeInput,
   period: DistributionStatementPeriod,
@@ -150,36 +185,36 @@ export function buildStatementPlan(
   lastClosing: string,
   version: number
 ): DistributionStatementPlan {
-  const periodAllocations = allocations.filter((allocation) => allocation.payeeId === payee.id && allocation.currency === currency);
-  const totals = sumAllocations(currency, periodAllocations);
-  const carry = computeCarry(lastClosing, formatErhAmount(totals.netPayableUnits));
+  const draft = createDistributionStatementDraft({ payee, period, currency, allocations, lastClosing, version });
+  const totals = sumAllocations(draft.currency, draft.allocations);
+  const carry = computeCarry(draft.lastClosing, formatErhAmount(totals.netPayableUnits));
 
   return {
     statement: {
-      payeeId: payee.id,
-      periodStart: period.start,
-      periodEnd: period.end,
-      currency,
+      payeeId: draft.payeeId,
+      periodStart: draft.periodStart,
+      periodEnd: draft.periodEnd,
+      currency: draft.currency,
       grossTotal: formatErhAmount(totals.grossTotalUnits),
       recoupmentTotal: formatErhAmount(totals.recoupmentTotalUnits),
       netPayable: formatErhAmount(totals.netPayableUnits),
       amountDue: carry.amountDue,
-      version,
+      version: draft.version,
       status: "generated"
     },
-    lines: periodAllocations.map((allocation) => ({
+    lines: draft.allocations.map((allocation) => ({
       earningAllocationId: allocation.id,
       trackId: allocation.trackId,
       grossShare: formatErhAmount(parseErhAmount(allocation.grossShare)),
       recoupmentApplied: formatErhAmount(parseErhAmount(allocation.recoupmentApplied)),
       netPayable: formatErhAmount(parseErhAmount(allocation.netPayable)),
       quantity: allocation.quantity,
-      currency
+      currency: draft.currency
     })),
     balanceLedgerRow: {
-      payeeId: payee.id,
+      payeeId: draft.payeeId,
       statementId: null,
-      currency,
+      currency: draft.currency,
       openingBalance: carry.opening,
       periodNet: carry.periodNet,
       closingBalance: carry.closing,

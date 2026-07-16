@@ -14,7 +14,7 @@ export interface OfficeWorkbenchSnapshot {
 
 export function createOfficeWorkbenchSnapshot(input: Partial<OfficeWorkbenchSnapshot> = {}): OfficeWorkbenchSnapshot {
   return {
-    transactions: input.transactions ?? [],
-    reconciliations: input.reconciliations ?? []
+    transactions: [...(input.transactions ?? [])],
+    reconciliations: [...(input.reconciliations ?? [])]
   };
 }

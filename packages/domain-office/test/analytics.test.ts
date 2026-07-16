@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   type OfficeAnalyticsDataset,
+  convertMinorToMur,
+  pickMurExchangeRate,
   readOfficeBankQuality,
   readOfficeCashRunway,
   readOfficeCashflowProjection,
@@ -270,6 +272,17 @@ test("cashflow projection buckets stay exact MUR kernel strings", () => {
     { period: "2026-01", inflowMur: "1000.00", outflowMur: "2000.00", closingMur: "3000.00" },
     { period: "2026-02", inflowMur: "0.00", outflowMur: "1000.00", closingMur: "2500.00" }
   ]);
+});
+
+test("Office FX paths delegate dated E10 conversion to the finance kernel", () => {
+  const rates = [
+    { fromCurrency: "EUR", toCurrency: "MUR", rateE10: 500_000_000_000n, effectiveDate: "2026-01-01" },
+    { fromCurrency: "EUR", toCurrency: "MUR", rateE10: 505_000_000_000n, effectiveDate: "2026-02-01" }
+  ] as const;
+
+  assert.equal(pickMurExchangeRate("EUR", "2026-01-31", rates)?.effectiveDate, "2026-01-01");
+  assert.equal(convertMinorToMur(10_000n, "EUR", "2026-02-10", rates), 505_000n);
+  assert.equal(convertMinorToMur(10_000n, "USD", "2026-02-10", rates), null);
 });
 
 test("cashflow projection keeps only the most recent row per account+month instead of summing duplicates", () => {

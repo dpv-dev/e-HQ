@@ -280,6 +280,10 @@
     { label: "Expense", value: "expense" },
     { label: "Income", value: "income" }
   ];
+  const vatTreatmentOptions: readonly SelectOption[] = [
+    { label: "No VAT", value: "none" },
+    { label: "VAT applicable", value: "applicable" }
+  ];
   const importEditDirectionOptions: readonly SelectOption[] = [
     { label: "Debit", value: "debit" },
     { label: "Credit", value: "credit" }
@@ -395,6 +399,8 @@
   let editCategoryId = $state("");
   let editProjectId = $state("");
   let editAccountId = $state("");
+  let editVatTreatment = $state<"none" | "applicable">("none");
+  let editVatRatePercent = $state("");
   let creatingTransaction = $state(false);
   let createOccurredOn = $state("");
   let createDescription = $state("");
@@ -403,6 +409,8 @@
   let createProjectId = $state("");
   let createAmount = $state("");
   let createDirection = $state<"expense" | "income">("expense");
+  let createVatTreatment = $state<"none" | "applicable">("none");
+  let createVatRatePercent = $state("");
   let cashflowImportRecords = $state<readonly Readonly<Record<string, string>>[]>([]);
   let cashflowImportMessage = $state("Import a cashflow CSV (Month, Inflow, Outflow, ClosingBalance, Currency).");
   let importState = $state<ImportUiState>({
@@ -1241,6 +1249,34 @@
     return normalized;
   }
 
+  function vatRateBpFromPercent(treatment: "none" | "applicable", input: string): number | null {
+    if (treatment === "none") {
+      return null;
+    }
+
+    const normalized = input.trim().replace(",", ".");
+    const match = /^(\d{1,3})(?:\.(\d{1,2}))?$/u.exec(normalized);
+    if (match === null) {
+      throw new Error("Enter a VAT rate from 0 to 100 with at most two decimals.");
+    }
+    const whole = Number.parseInt(match[1] ?? "0", 10);
+    const fraction = Number.parseInt((match[2] ?? "").padEnd(2, "0") || "0", 10);
+    const rateBp = whole * 100 + fraction;
+    if (rateBp > 10_000) {
+      throw new Error("VAT rate cannot exceed 100%.");
+    }
+    return rateBp;
+  }
+
+  function vatPercentFromBp(rateBp: number | null): string {
+    if (rateBp === null) {
+      return "";
+    }
+    const whole = Math.floor(rateBp / 100);
+    const fraction = rateBp % 100;
+    return fraction === 0 ? String(whole) : `${String(whole)}.${String(fraction).padStart(2, "0").replace(/0$/u, "")}`;
+  }
+
   // The edit/create panels render ABOVE the ledger table in DOM order, so when the user
   // clicks a row action after scrolling down, the panel opens outside the viewport and the
   // click looks like a no-op. Scroll the panel into view once Svelte has rendered it.
@@ -1265,6 +1301,8 @@
     editCategoryId = transaction.categoryId ?? "";
     editProjectId = transaction.projectId ?? "";
     editAccountId = transaction.accountId ?? defaultImportAccountId(importAccounts, transaction.currency);
+    editVatTreatment = transaction.vatApplicable ? "applicable" : "none";
+    editVatRatePercent = vatPercentFromBp(transaction.vatRateBp);
     scrollTransactionPanelIntoView();
   }
 
@@ -1290,6 +1328,8 @@
       description: editDescription,
       amountMicro: normalizeOfficeAmountInput(editAmount),
       currency: transaction.currency,
+      vatApplicable: editVatTreatment === "applicable",
+      vatRateBp: vatRateBpFromPercent(editVatTreatment, editVatRatePercent),
       type: transaction.type
     };
   }
@@ -2824,6 +2864,8 @@
     createProjectId = "";
     createAmount = "";
     createDirection = "expense";
+    createVatTreatment = "none";
+    createVatRatePercent = "";
     scrollTransactionPanelIntoView();
   }
 
@@ -2854,6 +2896,8 @@
         description: createDescription.trim(),
         amountMicro: createDirection === "expense" ? `-${absoluteAmount}` : absoluteAmount,
         currency: account.currency,
+        vatApplicable: createVatTreatment === "applicable",
+        vatRateBp: vatRateBpFromPercent(createVatTreatment, createVatRatePercent),
         type: createDirection
       };
       const receipt = await client.office.createTransaction(request, {
@@ -4392,6 +4436,8 @@
               />
               <Input id="office-create-amount" label="Amount" value={createAmount} placeholder="1200.00" type="text" state="default" message="" oninput={(value: string): void => { createAmount = value; }} />
               <Select id="office-create-direction" label="Direction" value={createDirection} options={createDirectionOptions} state="default" message="" onchange={(value: string): void => { createDirection = value === "income" ? "income" : "expense"; }} />
+              <Select id="office-create-vat-treatment" label="VAT treatment" value={createVatTreatment} options={vatTreatmentOptions} state="default" message="" onchange={(value: string): void => { createVatTreatment = value === "applicable" ? "applicable" : "none"; }} />
+              <Input id="office-create-vat-rate" label="VAT rate (%) · included" value={createVatRatePercent} placeholder="15" type="text" state={createVatTreatment === "applicable" ? "default" : "disabled"} message="" oninput={(value: string): void => { createVatRatePercent = value; }} />
               <Select id="office-create-category" label="Category" value={createCategoryId} options={optionalCategoryOptions} state="default" message="" onchange={(value: string): void => { createCategoryId = value; }} />
               <Select id="office-create-project" label="Project" value={createProjectId} options={optionalProjectOptions} state="default" message="" onchange={(value: string): void => { createProjectId = value; }} />
             </div>
@@ -4422,6 +4468,8 @@
                 onchange={(value: string): void => { editAccountId = value; }}
               />
               <Input id="office-edit-amount" label="Amount" value={editAmount} placeholder="" type="text" state="default" message="" oninput={(value: string): void => { editAmount = value; }} />
+              <Select id="office-edit-vat-treatment" label="VAT treatment" value={editVatTreatment} options={vatTreatmentOptions} state="default" message="" onchange={(value: string): void => { editVatTreatment = value === "applicable" ? "applicable" : "none"; }} />
+              <Input id="office-edit-vat-rate" label="VAT rate (%) · included" value={editVatRatePercent} placeholder="15" type="text" state={editVatTreatment === "applicable" ? "default" : "disabled"} message="" oninput={(value: string): void => { editVatRatePercent = value; }} />
               <Select id="office-edit-category" label="Category" value={editCategoryId} options={optionalCategoryOptions} state="default" message="" onchange={(value: string): void => { editCategoryId = value; }} />
               <Select id="office-edit-project" label="Project" value={editProjectId} options={optionalProjectOptions} state="default" message="" onchange={(value: string): void => { editProjectId = value; }} />
             </div>
