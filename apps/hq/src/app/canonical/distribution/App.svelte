@@ -16,6 +16,7 @@
     type DistributionAliasTargetType,
     type DistributionContract,
     type DistributionContractExpense,
+    type DistributionContractExpenseCategory,
     type DistributionDashboardResponse,
     type DistributionDashboardReadinessItem,
     type DistributionDashboardTopRoyalty,
@@ -34,6 +35,7 @@
     type PageResult,
     type PayeeSummary,
     type PaymentSummary,
+    type DistributionPaymentMethod,
     type ReleaseSummary,
     type StatementPrintLine,
     type StatementPrintResponse,
@@ -87,7 +89,7 @@
   type ImportSource = "kontor" | "routenote";
   type MappingStatusFilter = "all" | "unmapped" | "suggested" | "mapped";
   type SuspenseStatusFilter = "all" | "open" | "resolved";
-  type PaymentStatusFilter = "all" | "draft" | "queued" | "paid" | "voided";
+  type PaymentStatusFilter = "all" | "draft" | "paid" | "voided";
   type RevenueGroupBy = "payee" | "track" | "currency" | "store" | "period";
   type RequestStatus = CanonicalRequestStatus;
   type DistributionPagedTableId =
@@ -161,31 +163,23 @@
       id: "overview",
       label: "Overview",
       items: [
-        { id: "dashboard", label: "Dashboard", title: "Dashboard", subtitle: "Royalty cockpit, blockers and priority actions." },
-        { id: "allocations", label: "Allocations", title: "Allocations", subtitle: "Preview, post and reverse through scheduled, locked runs." },
-        { id: "suspense", label: "Suspense", title: "Suspense", subtitle: "Grouped by cause with a clear resolution path." },
-        { id: "statements", label: "Statements", title: "Statements", subtitle: "Financial summary first, then A4 printing." },
-        { id: "payments", label: "Payments", title: "Payments", subtitle: "Record, edit, void and reconcile payments." },
-        { id: "revenue", label: "Revenue", title: "Revenue", subtitle: "Financial view by payee, track, currency, store or period." },
+        { id: "dashboard", label: "Dashboard", title: "Dashboard", subtitle: "Royalty cockpit, blockers and priority actions." }
       ]
     },
     {
-      id: "imports",
-      label: "Import & mapping",
+      id: "workflow",
+      label: "Royalty workflow",
       items: [
         { id: "imports", label: "Imports", title: "Imports", subtitle: "Kontor/RouteNote exports, preview and confirmation." },
         { id: "mapping", label: "Mapping", title: "Mapping", subtitle: "Review rows, automate safe matches and apply rules." },
-        { id: "aliases", label: "Aliases", title: "Aliases", subtitle: "Catalog aliases route imported names to canonical entities." },
-        { id: "duplicates", label: "Duplicates", title: "Duplicates", subtitle: "Detect potentially duplicated records." }
-      ]
-    },
-    {
-      id: "catalog",
-      label: "Catalog & contracts",
-      items: [
         { id: "catalog", label: "Catalog", title: "Catalog", subtitle: "Releases, tracks, contributors and split health." },
+        { id: "aliases", label: "Aliases", title: "Aliases", subtitle: "Catalog aliases route imported names to canonical entities." },
+        { id: "duplicates", label: "Duplicates", title: "Duplicates", subtitle: "Detect potentially duplicated records." },
         { id: "contracts", label: "Contracts", title: "Contracts", subtitle: "Splits, payees, expenses and recoupments." },
-        { id: "financial-reconciliation", label: "Financial reconciliation", title: "Financial reconciliation", subtitle: "Read-only diagnostics for payments, statements, balances and allocations." }
+        { id: "allocations", label: "Allocations", title: "Allocations", subtitle: "Preview, post and reverse through scheduled, locked runs." },
+        { id: "suspense", label: "Suspense", title: "Suspense", subtitle: "Grouped by cause with a clear resolution path." },
+        { id: "statements", label: "Statements", title: "Statements", subtitle: "Financial summary, payment reconciliation and A4 printing." },
+        { id: "payments", label: "Payments", title: "Payments", subtitle: "Standalone Distribution ledger payments and statement links." }
       ]
     },
     {
@@ -193,11 +187,21 @@
       label: "Administration",
       items: [
         { id: "audit-log", label: "Audit log", title: "Audit log", subtitle: "Distribution audit trail for recorded actions." },
-        { id: "settings", label: "Settings", title: "Settings", subtitle: "Distribution configuration and FX rates." }
+        { id: "settings", label: "Settings", title: "Settings", subtitle: "Distribution configuration and FX rates." },
+        { id: "revenue", label: "Revenue", title: "Revenue", subtitle: "Financial view by payee, track, currency, store or period." }
       ]
     }
   ];
-  const navItems: readonly DistributionNavItem[] = navGroups.flatMap((group: DistributionNavGroup): readonly DistributionNavItem[] => group.items);
+  const reconciliationNavItem: DistributionNavItem = {
+    id: "financial-reconciliation",
+    label: "Financial reconciliation",
+    title: "Financial reconciliation",
+    subtitle: "Compatibility route; operational queues now live on Statements and Payments."
+  };
+  const navItems: readonly DistributionNavItem[] = [
+    ...navGroups.flatMap((group: DistributionNavGroup): readonly DistributionNavItem[] => group.items),
+    reconciliationNavItem
+  ];
   const importSourceOptions: readonly SelectOption[] = [
     { label: "Kontor", value: "kontor" },
     { label: "RouteNote", value: "routenote" }
@@ -229,9 +233,28 @@
   const paymentStatusOptions: readonly SelectOption[] = [
     { label: "All", value: allValue },
     { label: "Draft", value: "draft" },
-    { label: "Queued", value: "queued" },
     { label: "Paid", value: "paid" },
     { label: "Voided", value: "voided" }
+  ];
+  const paymentMethodOptions: readonly SelectOption[] = [
+    { label: "Bank transfer", value: "bank_transfer" },
+    { label: "PayPal", value: "paypal" },
+    { label: "Cash", value: "cash" },
+    { label: "Cheque", value: "cheque" },
+    { label: "Crypto", value: "crypto" },
+    { label: "Other", value: "other" }
+  ];
+  const paymentRecordStatusOptions: readonly SelectOption[] = [
+    { label: "Paid · post now", value: "paid" },
+    { label: "Draft", value: "draft" }
+  ];
+  const expenseCategoryOptions: readonly SelectOption[] = [
+    { label: "Advance", value: "advance" },
+    { label: "Recoupment", value: "recoupment" },
+    { label: "Studio", value: "studio" },
+    { label: "Marketing", value: "marketing" },
+    { label: "Distribution", value: "distribution" },
+    { label: "Other", value: "other" }
   ];
   const catalogStatusOptions: readonly SelectOption[] = [
     { label: "Draft", value: "draft" },
@@ -290,7 +313,10 @@
   const mappingColumns: readonly TableColumn[] = [
     { label: "Source title", align: "left", sortable: true },
     { label: "Artist", align: "left", sortable: true },
+    { label: "Label", align: "left", sortable: true },
     { label: "Store", align: "left", sortable: true },
+    { label: "ISRC / UPC", align: "left", sortable: true },
+    { label: "Gross", align: "right", sortable: true },
     { label: "Suggested match", align: "left", sortable: true },
     { label: "Confidence", align: "left", sortable: true },
     { label: "Resolution path", align: "left", sortable: true },
@@ -311,11 +337,20 @@
     { label: "Open expenses", align: "right", sortable: true },
     { label: "Status", align: "left", sortable: true }
   ];
+  const payeeColumns: readonly TableColumn[] = [
+    { label: "Payee", align: "left", sortable: true },
+    { label: "Email", align: "left", sortable: true },
+    { label: "Preferred currency", align: "left", sortable: true },
+    { label: "Status", align: "left", sortable: true }
+  ];
   const expenseColumns: readonly TableColumn[] = [
-    { label: "Expense", align: "left", sortable: true },
+    { label: "Category", align: "left", sortable: true },
+    { label: "Payee charged", align: "left", sortable: true },
+    { label: "Description", align: "left", sortable: true },
     { label: "Date", align: "left", sortable: true },
     { label: "Original amount", align: "right", sortable: true },
     { label: "Open", align: "right", sortable: true },
+    { label: "Recoverable", align: "left", sortable: true },
     { label: "Status", align: "left", sortable: true }
   ];
   const allocationColumns: readonly TableColumn[] = [
@@ -343,11 +378,16 @@
     { label: "Status", align: "left", sortable: true }
   ];
   const paymentColumns: readonly TableColumn[] = [
+    { label: "ID", align: "left", sortable: true },
     { label: "Payee", align: "left", sortable: true },
     { label: "Amount", align: "right", sortable: true },
+    { label: "Ccy", align: "left", sortable: true },
+    { label: "FX rate", align: "right", sortable: true },
+    { label: "Method", align: "left", sortable: true },
     { label: "Reference", align: "left", sortable: true },
-    { label: "Paid on", align: "left", sortable: true },
-    { label: "Status", align: "left", sortable: true }
+    { label: "Status", align: "left", sortable: true },
+    { label: "Paid at", align: "left", sortable: true },
+    { label: "Statements linked", align: "right", sortable: true }
   ];
   const revenueColumns: readonly TableColumn[] = [
     { label: "Group", align: "left", sortable: true },
@@ -535,9 +575,23 @@
   let selectedPaymentId = $state<string | null>(null);
   let paymentPanelMode = $state<PaymentPanelMode | null>(null);
   let paymentReferenceInput = $state("");
-  let paymentBankTransactionInput = $state("");
+  let paymentNotesInput = $state("");
+  let paymentMethodInput = $state<DistributionPaymentMethod>("bank_transfer");
+  let paymentStatusInput = $state<"draft" | "paid">("paid");
+  let paymentPaidDateInput = $state(today);
+  let paymentExchangeRateInput = $state("");
+  let paymentReconcileStatementId = $state("");
+  let paymentReconcileAmountInput = $state("");
   let recordStatementId = $state("");
+  let recordPaymentPayeeId = $state("");
+  let recordPaymentAmount = $state("");
+  let recordPaymentCurrency = $state("MUR");
+  let recordPaymentExchangeRate = $state("");
+  let recordPaymentMethod = $state<DistributionPaymentMethod>("bank_transfer");
+  let recordPaymentStatus = $state<"draft" | "paid">("paid");
+  let recordPaymentPaidDate = $state(today);
   let recordPaymentReference = $state("");
+  let recordPaymentNotes = $state("");
   let selectedSuspenseId = $state<string | null>(null);
   let suspenseTargetTrackId = $state("");
   let suspenseTrackOptions = $state<readonly TrackSummary[] | null>(null);
@@ -556,6 +610,10 @@
   let trackReleaseIdInput = $state("");
   let trackStatusInput = $state<CatalogEntryStatus>("draft");
   let contractPanelOpen = $state(false);
+  let payeePanelOpen = $state(false);
+  let payeeNameInput = $state("");
+  let payeeEmailInput = $state("");
+  let payeeCurrencyInput = $state("MUR");
   let contractTitleInput = $state("");
   let contractPayeeIdInput = $state("");
   let contractStatusInput = $state<ContractStatus>("draft");
@@ -570,6 +628,9 @@
   let expensePanelOpen = $state(false);
   let expenseContractIdInput = $state("");
   let expenseLabelInput = $state("");
+  let expenseCategoryInput = $state<DistributionContractExpenseCategory>("advance");
+  let expensePayeeIdInput = $state("");
+  let expenseRecoverableInput = $state("yes");
   let expenseAmountInput = $state("");
   let expenseDateInput = $state("");
   let printingStatementId = $state<string | null>(null);
@@ -610,7 +671,9 @@
   const filteredStatements = $derived(
     statements.filter((statement: StatementSummary): boolean => statementCurrencyFilter === allValue || statement.currency === statementCurrencyFilter)
   );
-  const payments = $derived(readPageItems(paymentsState));
+  // Deploys update API and static assets independently. Normalize the previous
+  // payment shape so an in-flight rollout never crashes the Payments page.
+  const payments = $derived(readPageItems(paymentsState).map(normalizePaymentSummary));
   const revenueRows = $derived(readPageItems(revenueState));
   const dashboardReadinessRows = $derived(createDashboardReadinessRows(dashboardState));
   const dashboardArtistRows = $derived(createDashboardTopRows(dashboardState, "artists"));
@@ -626,6 +689,7 @@
   const suspenseTableRows = $derived(createSuspenseRows(suspenseItems));
   const statementRows = $derived(createStatementRows(filteredStatements));
   const paymentRows = $derived(createPaymentRows(payments));
+  const unlinkedPaymentRows = $derived(createPaymentRows(payments.filter((payment) => payment.linkedStatementIds.length === 0 && payment.status !== "voided")));
   const revenueTableRows = $derived(createRevenueRows(revenueRows));
   const revenueChartPoints = $derived(createRevenueChartPoints(revenueRows));
   const reconciliation = $derived(reconciliationState.status === "success" ? reconciliationState.data : null);
@@ -659,6 +723,8 @@
   ], 1));
   const dashboardKpis = $derived(createDashboardKpis(dashboardState));
   const contractKpis = $derived(createContractKpis(contracts, tracks));
+  const payeeRows = $derived(createPayeeRows(payees));
+  const revenueKpis = $derived(createRevenueKpis(revenueRows, payments, suspenseItems));
   const importPagination = $derived<TablePagination | null>(
     createTablePagination(importBatchesState, tablePaginationLoading === "importBatches", tablePaginationError("importBatches"), loadMoreImportBatches, loadAllImportBatches)
   );
@@ -737,6 +803,14 @@
     filteredStatements.filter((statement: StatementSummary): boolean => statement.status === "draft" || statement.status === "posted")
   );
   const recordStatement = $derived(openStatements.find((statement: StatementSummary): boolean => statement.id === recordStatementId) ?? null);
+  const recordPaymentAmountMicro = $derived(parseExpenseAmountMicro(recordPaymentAmount));
+  const recordPaymentExchangeRateNormalized = $derived(
+    recordPaymentExchangeRate.trim() === "" ? null : normalizeFxRateValue(recordPaymentExchangeRate)
+  );
+  const paymentExchangeRateNormalized = $derived(
+    paymentExchangeRateInput.trim() === "" ? null : normalizeFxRateValue(paymentExchangeRateInput)
+  );
+  const paymentReconcileAmountMicro = $derived(parseExpenseAmountMicro(paymentReconcileAmountInput));
   const selectedSuspenseItem = $derived(suspenseItems.find((item: SuspenseItem): boolean => item.id === selectedSuspenseId) ?? null);
   const selectedSuspenseResolution = $derived(selectedSuspenseItem === null ? null : suspenseResolutionFor(selectedSuspenseItem));
   const selectedSuspenseTrack = $derived(
@@ -767,6 +841,10 @@
     { label: "Select a payee", value: "" },
     ...payees.map((payee: PayeeSummary): SelectOption => ({ label: `${payee.displayName} · ${payee.defaultCurrency}`, value: payee.id }))
   ], 1));
+  const expensePayeeOptions = $derived<readonly SelectOption[]>(sortOptionsAlphabetically([
+    { label: "Shared / all payees", value: "" },
+    ...payees.map((payee: PayeeSummary): SelectOption => ({ label: `${payee.displayName} · ${payee.defaultCurrency}`, value: payee.id }))
+  ], 1));
   const trackReleaseSelectOptions = $derived<readonly SelectOption[]>(sortOptionsAlphabetically([
     { label: "No release", value: "" },
     ...releases.map((release: ReleaseSummary): SelectOption => ({ label: `${release.title} · ${release.artistName}`, value: release.id }))
@@ -776,11 +854,24 @@
     ...(suspenseTrackOptions ?? []).map((track: TrackSummary): SelectOption => ({ label: `${track.title} · ${track.artistName}`, value: track.id }))
   ], 1));
   const openStatementSelectOptions = $derived<readonly SelectOption[]>(sortOptionsAlphabetically([
-    { label: "Select an open statement", value: "" },
+    { label: "No statement yet", value: "" },
     ...openStatements.map((statement: StatementSummary): SelectOption => ({
       label: `${statement.payeeName} · ${statement.period} · ${formatMoney(statement.netPayableMicro, statement.currency)}`,
       value: statement.id
     }))
+  ], 1));
+  const paymentReconcileStatementOptions = $derived<readonly SelectOption[]>(sortOptionsAlphabetically([
+    { label: "Select a statement", value: "" },
+    ...openStatements
+      .filter((statement: StatementSummary): boolean =>
+        selectedPayment !== null &&
+        statement.payeeId === selectedPayment.payeeId &&
+        statement.currency === selectedPayment.currency
+      )
+      .map((statement: StatementSummary): SelectOption => ({
+        label: `${statement.payeeName} · ${statement.period} · ${formatMoney(statement.netPayableMicro, statement.currency)}`,
+        value: statement.id
+      }))
   ], 1));
   const statementPayeeOptions = $derived<readonly SelectOption[]>(sortOptionsAlphabetically([
     { label: "All payees", value: allValue },
@@ -791,8 +882,8 @@
     ...Array.from(new Set(statements.map((statement: StatementSummary): CurrencyCode => statement.currency))).map((currency: CurrencyCode): SelectOption => ({ label: currency, value: currency }))
   ]);
   const paymentRowActions: readonly TableRowAction[] = [
-    { label: "Edit reference", onAction: (rowId: string): void => openPaymentPanel(rowId, "edit") },
-    { label: "Reconcile", onAction: (rowId: string): void => openPaymentPanel(rowId, "reconcile") },
+    { label: "Edit payment", onAction: (rowId: string): void => openPaymentPanel(rowId, "edit") },
+    { label: "Link statement", onAction: (rowId: string): void => openPaymentPanel(rowId, "reconcile") },
     { label: "Void", onAction: (rowId: string): void => openPaymentPanel(rowId, "void"), danger: true }
   ];
   const dashboardReadinessRowActions: readonly TableRowAction[] = [
@@ -2367,7 +2458,8 @@
     }
 
     return rows.filter((row: DistributionMappingRow): boolean =>
-      [row.sourceTitle, row.sourceArtist, row.sourceStore, row.suggestedTrackTitle ?? ""].some((value: string): boolean => value.toLocaleLowerCase().includes(normalizedQuery))
+      [row.sourceTitle, row.sourceArtist, row.sourceLabel, row.sourceStore, row.sourceIsrc ?? "", row.sourceUpc ?? "", row.suggestedTrackTitle ?? ""]
+        .some((value: string): boolean => value.toLocaleLowerCase().includes(normalizedQuery))
     );
   }
 
@@ -2409,19 +2501,43 @@
 
   function updateRecordStatement(value: string): void {
     recordStatementId = value;
+    const statement = openStatements.find((candidate) => candidate.id === value);
+    if (statement !== undefined) {
+      recordPaymentPayeeId = statement.payeeId;
+      recordPaymentAmount = statement.netPayableMicro;
+      recordPaymentCurrency = statement.currency;
+    }
   }
 
   function updateRecordPaymentReference(value: string): void {
     recordPaymentReference = value;
   }
 
+  function updateRecordPaymentPayee(value: string): void { recordPaymentPayeeId = value; }
+  function updateRecordPaymentAmount(value: string): void { recordPaymentAmount = value; }
+  function updateRecordPaymentCurrency(value: string): void { recordPaymentCurrency = value.toUpperCase(); }
+  function updateRecordPaymentExchangeRate(value: string): void { recordPaymentExchangeRate = value; }
+  function updateRecordPaymentMethod(value: string): void { recordPaymentMethod = value as DistributionPaymentMethod; }
+  function updateRecordPaymentStatus(value: string): void { recordPaymentStatus = value as "draft" | "paid"; }
+  function updateRecordPaymentPaidDate(event: Event): void { recordPaymentPaidDate = readInputValue(event); }
+  function updateRecordPaymentNotes(value: string): void { recordPaymentNotes = value; }
+
   function updatePaymentReferenceInput(value: string): void {
     paymentReferenceInput = value;
   }
-
-  function updatePaymentBankTransactionInput(value: string): void {
-    paymentBankTransactionInput = value;
+  function updatePaymentNotesInput(value: string): void { paymentNotesInput = value; }
+  function updatePaymentMethodInput(value: string): void { paymentMethodInput = value as DistributionPaymentMethod; }
+  function updatePaymentStatusInput(value: string): void { paymentStatusInput = value as "draft" | "paid"; }
+  function updatePaymentPaidDateInput(event: Event): void { paymentPaidDateInput = readInputValue(event); }
+  function updatePaymentExchangeRateInput(value: string): void { paymentExchangeRateInput = value; }
+  function updatePaymentReconcileStatement(value: string): void {
+    paymentReconcileStatementId = value;
+    const statement = openStatements.find((candidate) => candidate.id === value);
+    if (statement !== undefined) {
+      paymentReconcileAmountInput = statement.netPayableMicro;
+    }
   }
+  function updatePaymentReconcileAmount(value: string): void { paymentReconcileAmountInput = value; }
 
   function updateSuspenseTargetTrack(value: string): void {
     suspenseTargetTrackId = value;
@@ -2676,9 +2792,12 @@
   function openExpensePanel(): void {
     expensePanelOpen = true;
     expenseContractIdInput = expenseContractFilterId;
+    expensePayeeIdInput = selectedExpenseFilterContract?.payeeId ?? "";
+    expenseCategoryInput = "advance";
     expenseLabelInput = "";
     expenseAmountInput = "";
     expenseDateInput = today;
+    expenseRecoverableInput = "yes";
   }
 
   function closeExpensePanel(): void {
@@ -2687,7 +2806,12 @@
 
   function updateExpenseContract(value: string): void {
     expenseContractIdInput = value;
+    expensePayeeIdInput = contracts.find((contract) => contract.id === value)?.payeeId ?? "";
   }
+
+  function updateExpensePayee(value: string): void { expensePayeeIdInput = value; }
+  function updateExpenseCategory(value: string): void { expenseCategoryInput = value as DistributionContractExpenseCategory; }
+  function updateExpenseRecoverable(value: string): void { expenseRecoverableInput = value; }
 
   function updateExpenseContractFilter(value: string): void {
     expenseContractFilterId = value;
@@ -2706,22 +2830,21 @@
     expenseDateInput = readInputValue(event);
   }
 
-  // Interprets the input as a DECIMAL money value ("2500" or "2500.50") and converts
-  // it to micro units (10^6); returns null while the input is not a valid amount yet.
+  // Keep money textual across the UI/API boundary at the Distribution scale (10 decimals).
   function parseExpenseAmountMicro(input: string): string | null {
-    const match = /^(\d+)(?:[.,](\d{1,2}))?$/u.exec(input.trim());
+    const match = /^(\d+)(?:[.,](\d{1,10}))?$/u.exec(input.trim());
 
     if (match === null || match[1] === undefined) {
       return null;
     }
 
-    const micro = BigInt(match[1]) * 1_000_000n + BigInt((match[2] ?? "").padEnd(6, "0"));
+    const micro = BigInt(match[1]) * 10_000_000_000n + BigInt((match[2] ?? "").padEnd(10, "0"));
 
     if (micro <= 0n) {
       return null;
     }
 
-    return micro.toString();
+    return `${String(micro / 10_000_000_000n)}.${String(micro % 10_000_000_000n).padStart(10, "0")}`;
   }
 
   async function recordExpense(): Promise<void> {
@@ -2740,11 +2863,13 @@
         {
           workspaceId: distributionWorkspaceId,
           contractId: contract.id,
-          payeeId: contract.payeeId,
+          payeeId: expensePayeeIdInput === "" ? null : expensePayeeIdInput,
           incurredOn: expenseDateInput,
+          category: expenseCategoryInput,
           label,
           amountMicro,
-          currency: contract.currency
+          currency: contract.currency,
+          recoverable: expenseRecoverableInput === "yes"
         },
         {
           idempotencyKey: createIdempotencyKey("expense-record")
@@ -2837,6 +2962,45 @@
       mutationReceiptPageId = activePageId;
       closeCatalogPanel();
       await Promise.all([loadCatalog(), loadAliases(), loadDuplicates()]);
+    } catch (error: unknown) {
+      reportActionError(error);
+    }
+  }
+
+  function openPayeePanel(): void {
+    payeePanelOpen = true;
+    payeeNameInput = "";
+    payeeEmailInput = "";
+    payeeCurrencyInput = "MUR";
+  }
+
+  function closePayeePanel(): void { payeePanelOpen = false; }
+  function updatePayeeName(value: string): void { payeeNameInput = value; }
+  function updatePayeeEmail(value: string): void { payeeEmailInput = value; }
+  function updatePayeeCurrency(value: string): void { payeeCurrencyInput = value.toUpperCase(); }
+
+  async function createPayee(): Promise<void> {
+    const displayName = payeeNameInput.trim();
+    const defaultCurrency = normalizeCurrencyCode(payeeCurrencyInput);
+    if (displayName === "" || defaultCurrency === null) {
+      return;
+    }
+    clearRunReceipt();
+    try {
+      mutationReceipt = await client.distribution.createPayee(
+        {
+          workspaceId: distributionWorkspaceId,
+          id: null,
+          displayName,
+          email: payeeEmailInput.trim() || null,
+          status: "active",
+          defaultCurrency
+        },
+        { idempotencyKey: createIdempotencyKey("payee-create") }
+      );
+      mutationReceiptPageId = activePageId;
+      closePayeePanel();
+      await Promise.all([loadPayees(), loadContracts(), loadAuditLog()]);
     } catch (error: unknown) {
       reportActionError(error);
     }
@@ -3371,23 +3535,36 @@
 
     selectedPaymentId = paymentId;
     paymentPanelMode = mode;
-    // Void asks for an audit reason, not the wire reference, so it starts empty.
     paymentReferenceInput = mode === "void" ? "" : payment.reference ?? "";
-    paymentBankTransactionInput = "";
+    paymentNotesInput = payment.notes ?? "";
+    paymentMethodInput = payment.method;
+    paymentStatusInput = payment.status === "draft" ? "draft" : "paid";
+    paymentPaidDateInput = payment.paidAt?.slice(0, 10) ?? today;
+    paymentExchangeRateInput = payment.exchangeRate ?? "";
+    paymentReconcileStatementId = "";
+    paymentReconcileAmountInput = payment.amountMicro;
   }
 
   function closePaymentPanel(): void {
     selectedPaymentId = null;
     paymentPanelMode = null;
     paymentReferenceInput = "";
-    paymentBankTransactionInput = "";
+    paymentNotesInput = "";
+    paymentReconcileStatementId = "";
+    paymentReconcileAmountInput = "";
   }
 
   async function recordPayment(): Promise<void> {
-    const statement = recordStatement;
-    const reference = recordPaymentReference.trim();
+    const amountMicro = recordPaymentAmountMicro;
+    const currency = normalizeCurrencyCode(recordPaymentCurrency);
 
-    if (statement === null || reference === "") {
+    if (
+      recordPaymentPayeeId === "" ||
+      amountMicro === null ||
+      currency === null ||
+      (recordPaymentExchangeRate.trim() !== "" && recordPaymentExchangeRateNormalized === null) ||
+      (recordPaymentStatus === "paid" && recordPaymentPaidDate === "")
+    ) {
       return;
     }
 
@@ -3397,12 +3574,16 @@
       mutationReceipt = await client.distribution.recordPayment(
         {
           workspaceId: distributionWorkspaceId,
-          statementId: statement.id,
-          payeeId: statement.payeeId,
-          amountMicro: statement.netPayableMicro,
-          currency: statement.currency,
-          paidAt: new Date().toISOString(),
-          reference
+          statementId: recordStatement?.id ?? null,
+          payeeId: recordPaymentPayeeId,
+          amountMicro,
+          currency,
+          exchangeRate: recordPaymentExchangeRateNormalized,
+          method: recordPaymentMethod,
+          status: recordPaymentStatus,
+          paidAt: recordPaymentStatus === "paid" ? `${recordPaymentPaidDate}T00:00:00.000Z` : null,
+          reference: recordPaymentReference.trim() || null,
+          notes: recordPaymentNotes.trim() || null
         },
         {
           idempotencyKey: createIdempotencyKey("payment-record")
@@ -3410,7 +3591,15 @@
       );
       mutationReceiptPageId = activePageId;
       recordStatementId = "";
+      recordPaymentPayeeId = "";
+      recordPaymentAmount = "";
+      recordPaymentCurrency = "MUR";
+      recordPaymentExchangeRate = "";
+      recordPaymentMethod = "bank_transfer";
+      recordPaymentStatus = "paid";
+      recordPaymentPaidDate = today;
       recordPaymentReference = "";
+      recordPaymentNotes = "";
       await Promise.all([loadPayments(), loadStatements(), loadRevenue(), loadReconciliation(), loadAuditLog()]);
     } catch (error: unknown) {
       reportActionError(error);
@@ -3419,9 +3608,11 @@
 
   async function editPayment(): Promise<void> {
     const payment = selectedPayment;
-    const reference = paymentReferenceInput.trim();
-
-    if (payment === null || reference === "") {
+    if (
+      payment === null ||
+      (paymentExchangeRateInput.trim() !== "" && paymentExchangeRateNormalized === null) ||
+      (paymentStatusInput === "paid" && paymentPaidDateInput === "")
+    ) {
       return;
     }
 
@@ -3434,7 +3625,12 @@
           workspaceId: distributionWorkspaceId,
           amountMicro: payment.amountMicro,
           currency: payment.currency,
-          reference
+          exchangeRate: paymentExchangeRateNormalized,
+          method: paymentMethodInput,
+          status: paymentStatusInput,
+          paidAt: paymentStatusInput === "paid" ? `${paymentPaidDateInput}T00:00:00.000Z` : null,
+          reference: paymentReferenceInput.trim() || null,
+          notes: paymentNotesInput.trim() || null
         },
         {
           idempotencyKey: createIdempotencyKey("payment-edit")
@@ -3450,9 +3646,9 @@
 
   async function reconcilePayment(): Promise<void> {
     const payment = selectedPayment;
-    const bankTransactionId = paymentBankTransactionInput.trim();
+    const amountAppliedMicro = paymentReconcileAmountMicro;
 
-    if (payment === null || bankTransactionId === "") {
+    if (payment === null || paymentReconcileStatementId === "" || amountAppliedMicro === null) {
       return;
     }
 
@@ -3463,7 +3659,8 @@
         payment.id,
         {
           workspaceId: distributionWorkspaceId,
-          bankTransactionId,
+          statementId: paymentReconcileStatementId,
+          amountAppliedMicro,
           reconciledAt: new Date().toISOString()
         },
         {
@@ -3543,8 +3740,12 @@
             payeeId: statement.payeeId,
             amountMicro: statement.netPayableMicro,
             currency: statement.currency,
+            exchangeRate: null,
+            method: "bank_transfer",
+            status: "paid",
             paidAt: new Date().toISOString(),
-            reference: "CODEx-RECON-LINK"
+            reference: "DISTRIBUTION-RECON-LINK",
+            notes: "Created from the Distribution statement reconciliation queue."
           },
           { idempotencyKey: createIdempotencyKey("recon-link-payment") }
         );
@@ -3854,34 +4055,18 @@
     URL.revokeObjectURL(url);
   }
 
-  function microToDecimalCsv(value: string): string {
-    try {
-      const parsed = BigInt(value);
-      const sign = parsed < 0n ? "-" : "";
-      const absolute = parsed < 0n ? -parsed : parsed;
-      const whole = absolute / 1_000_000n;
-      const fraction = (absolute % 1_000_000n).toString().padStart(6, "0");
-      return `${sign}${whole.toString()}.${fraction}`;
-    } catch {
-      return "0.000000";
-    }
-  }
-
   function exportRevenueCsv(): void {
     const rows = revenueRows.map((row: DistributionRevenueRow): readonly string[] => [
       row.label,
       row.grossMicro,
       row.netMicro,
       row.payableMicro,
-      microToDecimalCsv(row.grossMicro),
-      microToDecimalCsv(row.netMicro),
-      microToDecimalCsv(row.payableMicro),
       row.currency,
       String(row.barLevel)
     ]);
     downloadCsv(
       `distribution-revenue-${revenueGroupBy}-${distributionPeriod}.csv`,
-      ["Group", "Gross (micro)", "Net (micro)", "Payable (micro)", "Gross", "Net", "Payable", "Currency", "Bar level"],
+      ["Group", "Gross", "Net", "Payable", "Currency", "Bar level"],
       rows
     );
   }
@@ -3894,12 +4079,32 @@
       item.status,
       item.currency,
       item.amountMicro,
-      microToDecimalCsv(item.amountMicro),
       item.period
     ]);
     downloadCsv(
       `distribution-suspense-${suspenseStatusFilter}-${distributionPeriod}.csv`,
-      ["Source", "Reason", "Fix path", "Status", "Currency", "Amount (micro)", "Amount", "Period"],
+      ["Source", "Reason", "Fix path", "Status", "Currency", "Amount", "Period"],
+      rows
+    );
+  }
+
+  function exportPaymentsCsv(): void {
+    const rows = payments.map((payment: PaymentSummary): readonly string[] => [
+      payment.id,
+      payment.payeeName,
+      payment.amountMicro,
+      payment.currency,
+      payment.exchangeRate ?? "",
+      payment.method,
+      payment.reference ?? "",
+      payment.status,
+      payment.paidAt ?? "",
+      payment.linkedStatementIds.join(" | "),
+      payment.notes ?? ""
+    ]);
+    downloadCsv(
+      `distribution-payments-${paymentStatusFilter}-${distributionPeriod}.csv`,
+      ["Payment ID", "Payee", "Amount", "Currency", "FX rate", "Method", "Reference", "Status", "Paid at", "Linked statements", "Notes"],
       rows
     );
   }
@@ -3949,7 +4154,10 @@
       cells: [
         { kind: "text", value: row.sourceTitle, strong: true },
         { kind: "text", value: row.sourceArtist, strong: false },
+        { kind: "text", value: row.sourceLabel || "—", strong: false },
         { kind: "text", value: row.sourceStore, strong: false },
+        { kind: "text", value: row.sourceIsrc ?? row.sourceUpc ?? "missing", strong: false },
+        { kind: "money", value: formatMoney(row.grossMicro, row.currency), tone: moneyTone(row.grossMicro) },
         { kind: "text", value: row.suggestedTrackTitle ?? "manual track required", strong: false },
         { kind: "badge", value: formatConfidence(row.confidenceBp), tone: confidenceTone(row.confidenceBp) },
         { kind: "badge", value: row.exactFixPath, tone: "active" },
@@ -4012,14 +4220,76 @@
     ];
   }
 
+  function createPayeeRows(items: readonly PayeeSummary[]): readonly TableRow[] {
+    return items.map((payee): TableRow => ({
+      id: payee.id,
+      cells: [
+        { kind: "text", value: payee.displayName, strong: true },
+        { kind: "text", value: payee.email ?? "—", strong: false },
+        { kind: "badge", value: payee.defaultCurrency, tone: "muted" },
+        { kind: "badge", value: payee.status, tone: payee.status === "active" ? "success" : "muted" }
+      ]
+    }));
+  }
+
+  function createRevenueKpis(
+    rows: readonly DistributionRevenueRow[],
+    paymentItems: readonly PaymentSummary[],
+    suspense: readonly SuspenseItem[]
+  ): readonly DistributionKpi[] {
+    return [
+      { label: "Gross", value: currencyTotalsLabel(rows, (row) => row.grossMicro, (row) => row.currency), detail: "allocated revenue view", tone: "info", accent: true },
+      { label: "Allocated / payable", value: currencyTotalsLabel(rows, (row) => row.payableMicro, (row) => row.currency), detail: "after recoupment", tone: "active", accent: false },
+      { label: "Paid", value: currencyTotalsLabel(paymentItems.filter((payment) => payment.status === "paid"), (payment) => payment.amountMicro, (payment) => payment.currency), detail: "Distribution ledger", tone: "success", accent: false },
+      { label: "Suspense", value: currencyTotalsLabel(suspense.filter((item) => item.status === "open"), (item) => item.amountMicro, (item) => item.currency), detail: "awaiting resolution", tone: "warning", accent: false }
+    ];
+  }
+
+  function currencyTotalsLabel<T>(
+    items: readonly T[],
+    amount: (item: T) => string,
+    currency: (item: T) => CurrencyCode
+  ): string {
+    const totals = new Map<CurrencyCode, bigint>();
+    for (const item of items) {
+      const code = currency(item);
+      totals.set(code, (totals.get(code) ?? 0n) + parseScale10Units(amount(item)));
+    }
+    if (totals.size === 0) {
+      return "—";
+    }
+    return [...totals.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([code, units]) => formatMoney(formatScale10Units(units), code))
+      .join(" · ");
+  }
+
+  function parseScale10Units(value: string): bigint {
+    const match = /^(-?)(\d+)(?:\.(\d{1,10}))?$/u.exec(value.trim());
+    if (match === null || match[2] === undefined) {
+      return 0n;
+    }
+    const units = BigInt(match[2]) * 10_000_000_000n + BigInt((match[3] ?? "").padEnd(10, "0"));
+    return match[1] === "-" ? -units : units;
+  }
+
+  function formatScale10Units(units: bigint): string {
+    const negative = units < 0n;
+    const absolute = negative ? -units : units;
+    return `${negative ? "-" : ""}${String(absolute / 10_000_000_000n)}.${String(absolute % 10_000_000_000n).padStart(10, "0")}`;
+  }
+
   function createExpenseRows(items: readonly DistributionContractExpense[]): readonly TableRow[] {
     return items.map((expense: DistributionContractExpense): TableRow => ({
       id: expense.id,
       cells: [
+        { kind: "badge", value: expense.category, tone: "muted" },
+        { kind: "text", value: expense.payeeId === null ? "Shared" : payeeName(expense.payeeId, payees), strong: false },
         { kind: "text", value: expense.label, strong: true },
         { kind: "text", value: formatDateOnly(expense.incurredOn), strong: false },
         { kind: "money", value: formatMoney(expense.originalAmountMicro, expense.currency), tone: "info" },
         { kind: "money", value: formatMoney(expense.openAmountMicro, expense.currency), tone: moneyTone(expense.openAmountMicro) },
+        { kind: "badge", value: expense.recoverable ? "yes" : "no", tone: expense.recoverable ? "active" : "muted" },
         { kind: "badge", value: expense.status, tone: expense.status === "open" ? "warning" : "success" }
       ]
     }));
@@ -4067,15 +4337,39 @@
     }));
   }
 
+  function normalizePaymentSummary(payment: PaymentSummary): PaymentSummary {
+    const rolloutPayment = payment as PaymentSummary & {
+      readonly linkedStatementIds?: readonly string[];
+      readonly exchangeRate?: string | null;
+      readonly method?: DistributionPaymentMethod;
+      readonly notes?: string | null;
+    };
+    const linkedStatementIds = rolloutPayment.linkedStatementIds
+      ?? (payment.statementId === null ? [] : [payment.statementId]);
+
+    return {
+      ...payment,
+      linkedStatementIds,
+      exchangeRate: rolloutPayment.exchangeRate ?? null,
+      method: rolloutPayment.method ?? "bank_transfer",
+      notes: rolloutPayment.notes ?? null
+    };
+  }
+
   function createPaymentRows(items: readonly PaymentSummary[]): readonly TableRow[] {
     return items.map((payment: PaymentSummary): TableRow => ({
       id: payment.id,
       cells: [
+        { kind: "text", value: payment.id, strong: false },
         { kind: "text", value: payment.payeeName, strong: true },
         { kind: "money", value: formatMoney(payment.amountMicro, payment.currency), tone: moneyTone(payment.amountMicro) },
+        { kind: "badge", value: payment.currency, tone: "muted" },
+        { kind: "text", value: payment.exchangeRate ?? "—", strong: false },
+        { kind: "text", value: payment.method.replaceAll("_", " "), strong: false },
         { kind: "text", value: payment.reference ?? "missing", strong: false },
+        { kind: "badge", value: payment.status, tone: payment.status === "paid" ? "success" : "warning" },
         { kind: "text", value: payment.paidAt === null ? "unpaid" : formatDateOnly(payment.paidAt), strong: false },
-        { kind: "badge", value: payment.status, tone: payment.status === "paid" ? "success" : "warning" }
+        { kind: "text", value: String(payment.linkedStatementIds.length), strong: false }
       ]
     }));
   }
@@ -4386,8 +4680,8 @@
     return null;
   }
 
-  function toNullablePaymentStatus(value: PaymentStatusFilter): "draft" | "queued" | "paid" | "voided" | null {
-    if (value === "draft" || value === "queued" || value === "paid" || value === "voided") {
+  function toNullablePaymentStatus(value: PaymentStatusFilter): "draft" | "paid" | "voided" | null {
+    if (value === "draft" || value === "paid" || value === "voided") {
       return value;
     }
 
@@ -4720,8 +5014,6 @@
           <BarsChart title="Revenue by source" points={revenueChartPoints} tone="active" />
           <Table title="Distribution readiness" columns={dashboardReadinessColumns} rows={dashboardReadinessRows} state={tableStateFor(dashboardState.status, dashboardReadinessRows.length)} actionLabel="" rowActions={dashboardReadinessRowActions} />
         </section>
-        <section class="dashboard-grid">
-        </section>
         <section class="dashboard-top-grid">
           <Table title="Top artists" columns={dashboardTopColumns} rows={dashboardArtistRows} state={tableStateFor(dashboardState.status, dashboardArtistRows.length)} actionLabel="" />
           <Table title="Top tracks" columns={dashboardTopColumns} rows={dashboardTrackRows} state={tableStateFor(dashboardState.status, dashboardTrackRows.length)} actionLabel="" />
@@ -4845,15 +5137,32 @@
           {/each}
         </section>
         <section class="contracts-actions ehq-edge-surface">
+          <Button label="New payee" variant="secondary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="New Distribution payee" title={writeDisabledTitle()} onclick={openPayeePanel} />
           <Button label="New contract" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="New contract" onclick={openContractPanel} />
           <Button label="Record recoupable expense" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Record recoupable expense" title={writeDisabledTitle()} onclick={openExpensePanel} />
           <span>Expenses remain source data; corrections become audited overrides.</span>
         </section>
+        {#if payeePanelOpen}
+          <section class="form-panel ehq-edge-surface" aria-label="New Distribution payee">
+            <Input id="distribution-payee-name" label="Name" value={payeeNameInput} placeholder="Artist, staff member, supplier or freelancer" type="text" state="default" message="Any royalty or expense counterparty can be a payee." oninput={updatePayeeName} />
+            <Input id="distribution-payee-email" label="Email (optional)" value={payeeEmailInput} placeholder="" type="text" state="default" message="" oninput={updatePayeeEmail} />
+            <Input id="distribution-payee-currency" label="Preferred currency" value={payeeCurrencyInput} placeholder="MUR" type="text" state={normalizeCurrencyCode(payeeCurrencyInput) === null ? "error" : "default"} message="ISO 3-letter code" oninput={updatePayeeCurrency} />
+            <Button label="Create payee" variant="primary" size="medium" type="button" disabled={!writesEnabled || payeeNameInput.trim() === "" || normalizeCurrencyCode(payeeCurrencyInput) === null} loading={false} locked={false} focus={false} ariaLabel="Create Distribution payee" title={writeDisabledTitle()} onclick={createPayee} />
+            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel payee creation" onclick={closePayeePanel} />
+          </section>
+        {/if}
         {#if expensePanelOpen}
           <section class="form-panel ehq-edge-surface" aria-label="Record recoupable expense">
             <Select id="distribution-expense-contract" label="Contract" value={expenseContractIdInput} options={expenseContractSelectOptions} state="default" message="" onchange={updateExpenseContract} />
-            <Input id="distribution-expense-label" label="Label" value={expenseLabelInput} placeholder="Advance" type="text" state="default" message="" oninput={updateExpenseLabel} />
+            <Select id="distribution-expense-category" label="Category" value={expenseCategoryInput} options={expenseCategoryOptions} state="default" message="" onchange={updateExpenseCategory} />
+            <Select id="distribution-expense-payee" label="Payee charged" value={expensePayeeIdInput} options={expensePayeeOptions} state="default" message="" onchange={updateExpensePayee} />
+            <Input id="distribution-expense-label" label="Description" value={expenseLabelInput} placeholder="Advance, studio session, campaign…" type="text" state="default" message="" oninput={updateExpenseLabel} />
             <Input id="distribution-expense-amount" label="Amount" value={expenseAmountInput} placeholder="2500.00" type="text" state="default" message="" oninput={updateExpenseAmount} />
+            <label>
+              <span>Currency</span>
+              <input value={selectedExpenseContract?.currency ?? ""} readonly />
+            </label>
+            <Select id="distribution-expense-recoverable" label="Recoverable from payee share" value={expenseRecoverableInput} options={[{ label: "Yes", value: "yes" }, { label: "No", value: "no" }]} state="default" message="" onchange={updateExpenseRecoverable} />
             <label>
               <span>Expense date</span>
               <input type="date" value={expenseDateInput} onchange={updateExpenseDate} />
@@ -4901,6 +5210,7 @@
           <Table title="Splits / contracts" columns={contractColumns} rows={contractRows} state={tableStateFor(contractsState.status, contracts.length)} actionLabel="" rowActions={contractRowActions} pagination={contractsPagination} />
           <Table title={expenseTableTitle} columns={expenseColumns} rows={expenseRows} state={tableStateFor(expensesState.status, expenses.length)} actionLabel="" pagination={expensesPagination} />
         </section>
+        <Table title="Payees" columns={payeeColumns} rows={payeeRows} state={tableStateFor(payeesState.status, payees.length)} actionLabel="" />
       {:else if activePageId === "allocations"}
         <section class="lock-panel ehq-edge-surface">
           <SectionTemplate
@@ -4974,6 +5284,7 @@
             <Button label="Generate statements" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Generate statements" title={writeDisabledTitle()} onclick={generateStatements} />
           </div>
         </section>
+        <Table title="Statement payment reconciliation" columns={reconStatementColumns} rows={reconStatementRows} state={isLoadingStatus(reconciliationState.status) ? "loading" : reconciliationState.status === "error" ? "error" : reconStatementRows.length === 0 ? "empty" : "default"} actionLabel="" />
         <section class="statement-pdf ehq-edge-surface" aria-label="A4 statement PDF preview">
           <header>
             <strong>ë • Distribution</strong>
@@ -4992,18 +5303,26 @@
           <Table title="Statements" columns={statementColumns} rows={statementRows} state={tableStateFor(statementsState.status, statements.length)} actionLabel="" rowActions={statementRowActions} pagination={statementsPagination} />
         </section>
       {:else if activePageId === "payments"}
+        <Alert tone="info" title="Distribution subledger" message="Payments are recorded and linked to Distribution statements here. Office bank and accounting integration is intentionally out of scope." dismissible={false} />
         <section class="filter-strip ehq-edge-surface" aria-label="Payment filters">
           <Select id="distribution-payment-status" label="Status" value={paymentStatusFilter} options={paymentStatusOptions} state="default" message="" onchange={updatePaymentStatus} />
           <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Apply payment filters" onclick={loadPayments} />
+          <Button label="Export CSV" variant="secondary" size="medium" type="button" disabled={payments.length === 0} loading={false} locked={false} focus={false} ariaLabel="Export payments as CSV" onclick={exportPaymentsCsv} />
         </section>
         <section class="form-panel ehq-edge-surface" aria-label="Record a payment">
-          <Select id="distribution-record-statement" label="Statement" value={recordStatementId} options={openStatementSelectOptions} state="default" message="" onchange={updateRecordStatement} />
-          <label>
-            <span>Amount (from statement)</span>
-            <input value={recordStatement === null ? "" : formatMoney(recordStatement.netPayableMicro, recordStatement.currency)} readonly />
-          </label>
-          <Input id="distribution-record-reference" label="Reference" value={recordPaymentReference} placeholder="" type="text" state="default" message="" oninput={updateRecordPaymentReference} />
-          <Button label="Record payment" variant="primary" size="medium" type="button" disabled={!writesEnabled || recordStatement === null || recordPaymentReference.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Record payment" title={writesEnabled ? (recordStatement === null ? "Select an open statement first" : recordPaymentReference.trim() === "" ? "Enter a payment reference first" : "") : writeGateMessage} onclick={recordPayment} />
+          <Select id="distribution-record-payee" label="Payee" value={recordPaymentPayeeId} options={payeeSelectOptions} state="default" message="" onchange={updateRecordPaymentPayee} />
+          <Input id="distribution-record-amount" label="Amount" value={recordPaymentAmount} placeholder="2500.00" type="text" state={recordPaymentAmount !== "" && recordPaymentAmountMicro === null ? "error" : "default"} message={recordPaymentAmount !== "" && recordPaymentAmountMicro === null ? "Enter a positive amount with up to 10 decimals." : ""} oninput={updateRecordPaymentAmount} />
+          <Input id="distribution-record-currency" label="Currency" value={recordPaymentCurrency} placeholder="MUR" type="text" state={normalizeCurrencyCode(recordPaymentCurrency) === null ? "error" : "default"} message="ISO 3-letter code" oninput={updateRecordPaymentCurrency} />
+          <Input id="distribution-record-fx" label="Exchange rate (optional)" value={recordPaymentExchangeRate} placeholder="" type="text" state={recordPaymentExchangeRate.trim() !== "" && recordPaymentExchangeRateNormalized === null ? "error" : "default"} message="Reference rate only; stored values are never rewritten." oninput={updateRecordPaymentExchangeRate} />
+          <Select id="distribution-record-method" label="Method" value={recordPaymentMethod} options={paymentMethodOptions} state="default" message="" onchange={updateRecordPaymentMethod} />
+          <Input id="distribution-record-reference" label="Reference (optional)" value={recordPaymentReference} placeholder="" type="text" state="default" message="" oninput={updateRecordPaymentReference} />
+          <Select id="distribution-record-status" label="Status" value={recordPaymentStatus} options={paymentRecordStatusOptions} state="default" message="" onchange={updateRecordPaymentStatus} />
+          {#if recordPaymentStatus === "paid"}
+            <label><span>Paid date</span><input type="date" value={recordPaymentPaidDate} onchange={updateRecordPaymentPaidDate} /></label>
+          {/if}
+          <Input id="distribution-record-notes" label="Notes (optional)" value={recordPaymentNotes} placeholder="" type="text" state="default" message="" oninput={updateRecordPaymentNotes} />
+          <Select id="distribution-record-statement" label="Link statement now (optional)" value={recordStatementId} options={openStatementSelectOptions} state="default" message="Can be linked later from the reconciliation queue." onchange={updateRecordStatement} />
+          <Button label="Record payment" variant="primary" size="medium" type="button" disabled={!writesEnabled || recordPaymentPayeeId === "" || recordPaymentAmountMicro === null || normalizeCurrencyCode(recordPaymentCurrency) === null || (recordPaymentStatus === "paid" && recordPaymentPaidDate === "")} loading={false} locked={false} focus={false} ariaLabel="Record payment" title={writeDisabledTitle()} onclick={recordPayment} />
         </section>
         {#if selectedPayment !== null && paymentPanelMode !== null}
           <section class="form-panel ehq-edge-surface" aria-label="Payment action">
@@ -5012,11 +5331,19 @@
               <span>{formatMoney(selectedPayment.amountMicro, selectedPayment.currency)} · {selectedPayment.status} · {selectedPayment.reference ?? "no reference"}</span>
             </div>
             {#if paymentPanelMode === "edit"}
-              <Input id="distribution-payment-reference" label="New reference" value={paymentReferenceInput} placeholder="" type="text" state="default" message="" oninput={updatePaymentReferenceInput} />
-              <Button label="Save reference" variant="primary" size="medium" type="button" disabled={!writesEnabled || paymentReferenceInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Save payment reference" title={writesEnabled ? (paymentReferenceInput.trim() === "" ? "Enter the new reference first" : "") : writeGateMessage} onclick={editPayment} />
+              <Input id="distribution-payment-fx" label="Exchange rate (optional)" value={paymentExchangeRateInput} placeholder="" type="text" state={paymentExchangeRateInput.trim() !== "" && paymentExchangeRateNormalized === null ? "error" : "default"} message="Reference rate only." oninput={updatePaymentExchangeRateInput} />
+              <Select id="distribution-payment-method" label="Method" value={paymentMethodInput} options={paymentMethodOptions} state="default" message="" onchange={updatePaymentMethodInput} />
+              <Input id="distribution-payment-reference" label="Reference (optional)" value={paymentReferenceInput} placeholder="" type="text" state="default" message="" oninput={updatePaymentReferenceInput} />
+              <Select id="distribution-payment-edit-status" label="Status" value={paymentStatusInput} options={paymentRecordStatusOptions} state="default" message="" onchange={updatePaymentStatusInput} />
+              {#if paymentStatusInput === "paid"}
+                <label><span>Paid date</span><input type="date" value={paymentPaidDateInput} onchange={updatePaymentPaidDateInput} /></label>
+              {/if}
+              <Input id="distribution-payment-notes" label="Notes (optional)" value={paymentNotesInput} placeholder="" type="text" state="default" message="" oninput={updatePaymentNotesInput} />
+              <Button label="Save payment" variant="primary" size="medium" type="button" disabled={!writesEnabled || (paymentStatusInput === "paid" && paymentPaidDateInput === "")} loading={false} locked={false} focus={false} ariaLabel="Save payment" title={writeDisabledTitle()} onclick={editPayment} />
             {:else if paymentPanelMode === "reconcile"}
-              <Input id="distribution-payment-bank-transaction" label="Bank transaction ID" value={paymentBankTransactionInput} placeholder="" type="text" state="default" message="" oninput={updatePaymentBankTransactionInput} />
-              <Button label="Reconcile payment" variant="primary" size="medium" type="button" disabled={!writesEnabled || paymentBankTransactionInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Reconcile payment" title={writesEnabled ? (paymentBankTransactionInput.trim() === "" ? "Enter the bank transaction ID first" : "") : writeGateMessage} onclick={reconcilePayment} />
+              <Select id="distribution-payment-statement" label="Distribution statement" value={paymentReconcileStatementId} options={paymentReconcileStatementOptions} state="default" message="Only same-payee, same-currency statements are eligible." onchange={updatePaymentReconcileStatement} />
+              <Input id="distribution-payment-applied" label="Amount applied" value={paymentReconcileAmountInput} placeholder="" type="text" state={paymentReconcileAmountInput !== "" && paymentReconcileAmountMicro === null ? "error" : "default"} message="Cannot exceed the payment or open statement balance." oninput={updatePaymentReconcileAmount} />
+              <Button label="Link statement" variant="primary" size="medium" type="button" disabled={!writesEnabled || paymentReconcileStatementId === "" || paymentReconcileAmountMicro === null || selectedPayment.status !== "paid"} loading={false} locked={false} focus={false} ariaLabel="Link payment to statement" title={selectedPayment.status === "draft" ? "Post the draft payment first." : writeDisabledTitle()} onclick={reconcilePayment} />
             {:else}
               <Input id="distribution-payment-void-reason" label="Void reason" value={paymentReferenceInput} placeholder="" type="text" state="default" message="" oninput={updatePaymentReferenceInput} />
               <Button label="Void payment" variant="danger" size="medium" type="button" disabled={!writesEnabled || paymentReferenceInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Void payment" title={writesEnabled ? (paymentReferenceInput.trim() === "" ? "Enter a void reason first" : "") : writeGateMessage} onclick={voidPayment} />
@@ -5024,8 +5351,14 @@
             <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Close payment panel" onclick={closePaymentPanel} />
           </section>
         {/if}
-        <Table title="Payments" columns={paymentColumns} rows={paymentRows} state={isLoadingStatus(paymentsState.status) ? "loading" : paymentsState.status === "error" ? "error" : payments.length === 0 ? "empty" : "default"} actionLabel="" rowActions={paymentRowActions} pagination={paymentsPagination} />
+        <Table title="Payment reconciliation queue" columns={paymentColumns} rows={unlinkedPaymentRows} state={isLoadingStatus(paymentsState.status) ? "loading" : paymentsState.status === "error" ? "error" : unlinkedPaymentRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={paymentRowActions} />
+        <Table title="Payments ledger" columns={paymentColumns} rows={paymentRows} state={isLoadingStatus(paymentsState.status) ? "loading" : paymentsState.status === "error" ? "error" : payments.length === 0 ? "empty" : "default"} actionLabel="" rowActions={paymentRowActions} pagination={paymentsPagination} />
       {:else if activePageId === "revenue"}
+        <section class="kpi-grid" aria-label="Revenue totals">
+          {#each revenueKpis as kpi (kpi.label)}
+            <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state={isLoadingStatus(revenueState.status) ? "loading" : "default"} accent={kpi.accent} />
+          {/each}
+        </section>
         <section class="filter-strip ehq-edge-surface" aria-label="Revenue filters">
           <Select id="distribution-revenue-group" label="Group by" value={revenueGroupBy} options={revenueGroupOptions} state="default" message="" onchange={updateRevenueGroup} />
           <Select id="distribution-revenue-payee" label="Payee" value={revenuePayeeFilter} options={revenuePayeeOptions} state="default" message="" onchange={updateRevenuePayee} />

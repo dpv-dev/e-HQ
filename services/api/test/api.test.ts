@@ -11,6 +11,7 @@ import { createApiStartupReadiness, requiredStartupPhases } from "../src/startup
 
 interface PaymentReceipt {
   readonly paymentId: string;
+  readonly statementId: string | null;
   readonly auditEventId: string | null;
   readonly paymentStatus: "recorded" | "edited" | "reconciled" | "voided";
   readonly statementBalance: {
@@ -1320,6 +1321,62 @@ test("Distribution reads migrated royalty results as fixture checksums, not reca
   assert.equal(statements.items[0].netPayableMicro, "44.9000000000");
 });
 
+test("Distribution payee and catalog writes read back real names, statuses, and workspace-owned records", async () => {
+  const app = createWriteEnabledFixtureApiService();
+  const payee = await jsonWrite(app, "/erh/v1/payees", "POST", "distribution-payee-create-1", {
+    workspaceId: "workspace_1",
+    id: null,
+    displayName: "Session Musician",
+    email: "musician@example.com",
+    status: "active",
+    defaultCurrency: "MUR"
+  });
+  assert.ok(payee.id !== undefined);
+
+  const release = await jsonWrite(app, "/erh/v1/releases", "POST", "distribution-release-create-1", {
+    workspaceId: "workspace_1",
+    id: null,
+    title: "Island Sessions",
+    artistName: "Various Artists",
+    upc: "609999999998",
+    status: "draft",
+    releaseDate: "2026-07-01"
+  });
+  assert.ok(release.id !== undefined);
+
+  const track = await jsonWrite(app, "/erh/v1/tracks", "POST", "distribution-track-create-1", {
+    workspaceId: "workspace_1",
+    id: null,
+    releaseId: release.id,
+    title: "Night Session",
+    artistName: "Guest Performer",
+    isrc: "MUAAA2600999",
+    status: "draft"
+  });
+  assert.ok(track.id !== undefined);
+
+  const payees = await app.request("/erh/v1/payees?workspaceId=workspace_1&limit=100", { headers: authHeaders() });
+  const payeePage = (await payees.json()) as { readonly items: readonly { readonly id: string; readonly email: string | null }[] };
+  assert.equal(payeePage.items.find((item) => item.id === payee.id)?.email, "musician@example.com");
+
+  const releases = await app.request("/erh/v1/releases?workspaceId=workspace_1&limit=100", { headers: authHeaders() });
+  const releasePage = (await releases.json()) as { readonly items: readonly { readonly id: string; readonly artistName: string; readonly status: string }[] };
+  assert.deepEqual(releasePage.items.find((item) => item.id === release.id), {
+    id: release.id,
+    title: "Island Sessions",
+    artistName: "Various Artists",
+    upc: "609999999998",
+    status: "draft",
+    releaseDate: "2026-07-01",
+    trackCount: 1
+  });
+
+  const tracks = await app.request(`/erh/v1/tracks?workspaceId=workspace_1&releaseId=${release.id}&limit=100`, { headers: authHeaders() });
+  const trackPage = (await tracks.json()) as { readonly items: readonly { readonly id: string; readonly artistName: string; readonly status: string }[] };
+  assert.equal(trackPage.items.find((item) => item.id === track.id)?.artistName, "Guest Performer");
+  assert.equal(trackPage.items.find((item) => item.id === track.id)?.status, "draft");
+});
+
 test("distribution aliases create persists a new alias and exposes it in the read list", async () => {
   const app = createWriteEnabledFixtureApiService();
 
@@ -1979,9 +2036,11 @@ test("formerly disabled write routes are activated with receipts and audit ids",
     contractId: "contract_1",
     payeeId: "payee_alma",
     incurredOn: "2026-05-18",
+    category: "advance",
     label: "Activated expense",
     amountMicro: "1.0000000000",
-    currency: "USD"
+    currency: "USD",
+    recoverable: true
   }));
   assertReceipt(await jsonWrite(app, "/erh/v1/allocations/runs/run_1/unpost", "POST", "activated-allocation-unpost", {
     workspaceId: "workspace_1",
@@ -2535,8 +2594,12 @@ test("payment record is honestly disabled when writes are off", async () => {
       payeeId: "payee_alma",
       amountMicro: "0.0000000001",
       currency: "USD",
+      exchangeRate: null,
+      method: "bank_transfer",
+      status: "paid",
       paidAt: "2026-06-21T10:00:00.000Z",
-      reference: "PAY-DISABLED"
+      reference: "PAY-DISABLED",
+      notes: null
     })
   });
 
@@ -2544,6 +2607,57 @@ test("payment record is honestly disabled when writes are off", async () => {
   const disabled = (await response.json()) as { readonly error: string; readonly action: string };
   assert.equal(disabled.error, "action_not_enabled_yet");
   assert.equal(disabled.action, "distribution_payment_record");
+});
+
+test("Distribution payments can be recorded standalone and linked to a statement without Office", async () => {
+  const app = createWriteEnabledFixtureApiService();
+  const record = await app.request("/erh/v1/payments", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "payment-standalone-1" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      statementId: null,
+      payeeId: "payee_alma",
+      amountMicro: "5.0000000000",
+      currency: "USD",
+      exchangeRate: "46.5000000000",
+      method: "paypal",
+      status: "paid",
+      paidAt: "2026-06-21T10:00:00.000Z",
+      reference: "PAY-STANDALONE",
+      notes: "Distribution subledger only"
+    })
+  });
+  assert.equal(record.status, 200);
+  const receipt = (await record.json()) as { readonly paymentId: string; readonly statementId: null; readonly statementBalance: null };
+  assert.equal(receipt.statementId, null);
+  assert.equal(receipt.statementBalance, null);
+
+  const listedBeforeLink = await app.request("/erh/v1/payments?workspaceId=workspace_1&payeeId=payee_alma&limit=10", {
+    headers: authHeaders()
+  });
+  const beforePage = (await listedBeforeLink.json()) as {
+    readonly items: readonly { readonly id: string; readonly linkedStatementIds: readonly string[]; readonly method: string; readonly notes: string | null }[];
+  };
+  const standalone = beforePage.items.find((item) => item.id === receipt.paymentId);
+  assert.deepEqual(standalone?.linkedStatementIds, []);
+  assert.equal(standalone?.method, "paypal");
+  assert.equal(standalone?.notes, "Distribution subledger only");
+
+  const link = await app.request(`/erh/v1/payments/${receipt.paymentId}/reconcile`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "payment-standalone-link-1" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      statementId: "statement_alma",
+      amountAppliedMicro: "5.0000000000",
+      reconciledAt: "2026-06-21T11:00:00.000Z"
+    })
+  });
+  assert.equal(link.status, 200);
+  const linked = (await link.json()) as PaymentReceipt;
+  assert.equal(linked.statementId, "statement_alma");
+  assert.equal(linked.statementBalance.paymentsApplied, "20.1000000000");
 });
 
 test("payment record, update, and reconcile recompute balances exactly and read after write", async () => {
@@ -2554,8 +2668,12 @@ test("payment record, update, and reconcile recompute balances exactly and read 
     payeeId: "payee_alma",
     amountMicro: "0.0000000001",
     currency: "USD",
+    exchangeRate: null,
+    method: "bank_transfer",
+    status: "paid",
     paidAt: "2026-06-21T10:00:00.000Z",
-    reference: "PAY-DRIFT"
+    reference: "PAY-DRIFT",
+    notes: null
   };
 
   const record = await app.request("/erh/v1/payments", {
@@ -2586,20 +2704,26 @@ test("payment record, update, and reconcile recompute balances exactly and read 
       workspaceId: "workspace_1",
       amountMicro: "0.1000000001",
       currency: "USD",
-      reference: "PAY-DRIFT-EDITED"
+      exchangeRate: null,
+      method: "paypal",
+      status: "paid",
+      paidAt: "2026-06-21T10:00:00.000Z",
+      reference: "PAY-DRIFT-EDITED",
+      notes: "Edited in the Distribution ledger."
     })
   });
   assert.equal(update.status, 200);
   const updated = (await update.json()) as PaymentReceipt;
-  assert.equal(updated.statementBalance.paymentsApplied, "15.2000000001");
-  assert.equal(updated.statementBalance.statementBalance, "44.7999999999");
+  assert.equal(updated.statementBalance.paymentsApplied, "15.1000000001");
+  assert.equal(updated.statementBalance.statementBalance, "44.8999999999");
 
   const reconcile = await app.request(`/erh/v1/payments/${receipt.paymentId}/reconcile`, {
     method: "POST",
     headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "payment-reconcile-memory-1" },
     body: JSON.stringify({
       workspaceId: "workspace_1",
-      bankTransactionId: "bank_tx_1",
+      statementId: "statement_alma",
+      amountAppliedMicro: "0.1000000001",
       reconciledAt: "2026-06-21T11:00:00.000Z"
     })
   });
@@ -2641,8 +2765,12 @@ test("payment void sets status voided, restores the balance, replays idempotentl
       payeeId: "payee_alma",
       amountMicro: "5.0000000000",
       currency: "USD",
+      exchangeRate: null,
+      method: "bank_transfer",
+      status: "paid",
       paidAt: "2026-06-21T10:00:00.000Z",
-      reference: "PAY-VOID-TARGET"
+      reference: "PAY-VOID-TARGET",
+      notes: null
     })
   });
   assert.equal(record.status, 200);
@@ -2713,8 +2841,12 @@ test("payment writes persist, replay idempotently, reconcile, audit, and rollbac
       payeeId: "payee_alma",
       amountMicro: "0.1000000001",
       currency: "USD",
+      exchangeRate: null,
+      method: "bank_transfer",
+      status: "paid",
       paidAt: "2026-06-21T10:00:00.000Z",
-      reference: "PAY-PGLITE"
+      reference: "PAY-PGLITE",
+      notes: null
     };
     const record = await app.request("/erh/v1/payments", {
       method: "POST",
@@ -2744,7 +2876,12 @@ test("payment writes persist, replay idempotently, reconcile, audit, and rollbac
         workspaceId: "workspace_1",
         amountMicro: "0.2000000001",
         currency: "USD",
-        reference: "PAY-PGLITE-EDITED"
+        exchangeRate: null,
+        method: "bank_transfer",
+        status: "paid",
+        paidAt: "2026-06-21T10:00:00.000Z",
+        reference: "PAY-PGLITE-EDITED",
+        notes: null
       })
     });
     assert.equal(update.status, 200);
@@ -2758,7 +2895,8 @@ test("payment writes persist, replay idempotently, reconcile, audit, and rollbac
       headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "payment-reconcile-pglite-1" },
       body: JSON.stringify({
         workspaceId: "workspace_1",
-        bankTransactionId: "bank_tx_pglite",
+        statementId: "statement_alma",
+        amountAppliedMicro: "0.1000000001",
         reconciledAt: "2026-06-21T11:00:00.000Z"
       })
     });
@@ -2794,8 +2932,12 @@ test("payment record rolls back atomically when link persistence fails", async (
         payeeId: "payee_alma",
         amountMicro: "1.0000000000",
         currency: "USD",
+        exchangeRate: null,
+        method: "bank_transfer",
+        status: "paid",
         paidAt: "2026-06-21T10:00:00.000Z",
-        reference: "PAY-ROLLBACK"
+        reference: "PAY-ROLLBACK",
+        notes: null
       })
     });
     assert.equal(response.status, 500);
@@ -5804,13 +5946,16 @@ async function createPglitePaymentTables(pglite: PGlite): Promise<void> {
   await pglite.exec(`
     create table payments (
       id text primary key,
+      workspace_id text not null,
       payee_id text not null,
       amount numeric(28, 10) not null,
       currency char(3) not null,
       exchange_rate numeric(24, 10),
+      method text not null default 'bank_transfer',
       status text not null default 'recorded',
       paid_at timestamp with time zone,
       reference text,
+      notes text,
       created_at timestamp with time zone default now() not null,
       updated_at timestamp with time zone default now() not null
     );

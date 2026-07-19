@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { parse as parseScaledUnits } from "@ehq/domain-finance";
 import {
   type DistributionAllocationPlan,
   type DistributionAllocationSuspenseOutcome,
@@ -301,6 +302,84 @@ test("missing cross-currency recoupment FX sends the whole earning to suspense",
 
   assert.equal(outcome.suspense.reasonCode, "missing_fx_rate");
   assert.equal(outcome.suspense.message, "Missing recoupment FX rate from EUR to USD for 2026-01-31.");
+});
+
+test("cross-currency recoupment converts the cost once and applies it in the cost currency", () => {
+  const plan = assertPlan(
+    buildAllocationPlan(earning("100.0000000000"), [rule("rule_a", "100.000000", "payee_a", "artist", "contract_1")], {
+      costTerms: [
+        {
+          id: "cost_eur",
+          contractId: "contract_1",
+          payeeId: "payee_a",
+          amount: "50.0000000000",
+          currency: "EUR",
+          recoupable: true,
+          status: "open",
+          expenseDate: "2026-01-01"
+        }
+      ],
+      expenseApplications: [],
+      fxRates: [
+        {
+          fromCurrency: "EUR",
+          toCurrency: "USD",
+          effectiveDate: "2026-01-01",
+          rate: "1.2000000000"
+        }
+      ]
+    })
+  );
+
+  assert.equal(plan.allocations[0]?.recoupmentApplied, "60.0000000000");
+  assert.equal(plan.allocations[0]?.netPayable, "40.0000000000");
+  assert.deepEqual(plan.expenseApplications, [
+    {
+      costTermId: "cost_eur",
+      payeeId: "payee_a",
+      amountApplied: "50.0000000000",
+      currency: "EUR",
+      calculationRunId: "run_1"
+    }
+  ]);
+  assert.deepEqual(plan.costTermStatusUpdates, [{ id: "cost_eur", status: "recovered" }]);
+});
+
+test("partial cross-currency recoupment preserves the earning invariant at scale 10", () => {
+  const plan = assertPlan(
+    buildAllocationPlan(earning("10.0000000000"), [rule("rule_a", "100.000000", "payee_a", "artist", "contract_1")], {
+      costTerms: [
+        {
+          id: "cost_eur_partial",
+          contractId: "contract_1",
+          payeeId: "payee_a",
+          amount: "50.0000000000",
+          currency: "EUR",
+          recoupable: true,
+          status: "open",
+          expenseDate: "2026-01-01"
+        }
+      ],
+      expenseApplications: [],
+      fxRates: [
+        {
+          fromCurrency: "EUR",
+          toCurrency: "USD",
+          effectiveDate: "2026-01-01",
+          rate: "1.2000000000"
+        }
+      ]
+    })
+  );
+
+  const allocation = plan.allocations[0];
+  assert.ok(allocation !== undefined);
+  assert.equal(
+    parseScaledUnits(allocation.recoupmentApplied, 10, "HALF_UP") + parseScaledUnits(allocation.netPayable, 10, "HALF_UP"),
+    parseScaledUnits(allocation.grossShare, 10, "HALF_UP")
+  );
+  assert.deepEqual(plan.costTermStatusUpdates, [{ id: "cost_eur_partial", status: "partially_recovered" }]);
+  assert.equal(plan.expenseApplications[0]?.currency, "EUR");
 });
 
 test("negative earning behaviour is pinned for domain review", () => {

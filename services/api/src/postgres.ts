@@ -34,6 +34,7 @@ import type {
   OfficeManagedAdvanceRow,
   OfficeTransactionRow
 } from "@ehq/domain-office";
+import { erhMoney } from "@ehq/domain-finance";
 import { createEmptyApiFixtureStore, type ApiDistributionRoyaltyRuleInput, type ApiFixtureStore } from "./fixtures.js";
 import { sanitizeOfficeBankDescription } from "./office-bank-description.js";
 import { createPostgresPersistenceRuntime, type ApiPersistenceRuntime } from "./persistence.js";
@@ -425,6 +426,7 @@ async function readDistributionDataset(pool: Pool): Promise<DistributionReadData
     statementPaymentLinks,
     payments,
     payees,
+    releases,
     tracks
   ] = await Promise.all([
     queryRows(pool, "select id::text, source, file_name, status, imported_at from import_batches order by legacy_id nulls last, id", []),
@@ -451,9 +453,10 @@ async function readDistributionDataset(pool: Pool): Promise<DistributionReadData
       []
     ),
     queryRows(pool, "select id::text, statement_id::text, payment_id::text, amount_applied::text from statement_payment_links order by legacy_id nulls last, id", []),
-    queryRows(pool, "select id::text, payee_id::text, amount::text, currency, status, paid_at, reference from payments order by legacy_id nulls last, id", []),
-    queryRows(pool, "select id::text, name, preferred_currency, is_active from payees order by legacy_id nulls last, id", []),
-    queryRows(pool, "select id::text, title, isrc, release_id::text from tracks order by legacy_id nulls last, id", [])
+    queryRows(pool, "select id::text, payee_id::text, amount::text, currency, exchange_rate::text, method, status, paid_at, reference, notes from payments order by legacy_id nulls last, id", []),
+    queryRows(pool, "select id::text, name, email, preferred_currency, is_active from payees order by legacy_id nulls last, id", []),
+    queryRows(pool, "select id::text, title, artist_name, catalog_status, upc, release_date from releases order by legacy_id nulls last, id", []),
+    queryRows(pool, "select id::text, title, artist_name, catalog_status, isrc, release_id::text from tracks order by legacy_id nulls last, id", [])
   ]);
 
   return {
@@ -467,6 +470,7 @@ async function readDistributionDataset(pool: Pool): Promise<DistributionReadData
     statementPaymentLinks: statementPaymentLinks.map(toDistributionStatementPaymentLink),
     payments: payments.map(toDistributionPayment),
     payees: payees.map(toDistributionPayee),
+    releases: releases.map(toDistributionRelease),
     tracks: tracks.map(toDistributionTrack)
   };
 }
@@ -504,11 +508,13 @@ async function readDistributionContracts(pool: Pool): Promise<readonly Distribut
 async function readDistributionContractExpenses(pool: Pool): Promise<readonly DistributionContractExpense[]> {
   const rows = await queryRows(
     pool,
-    `select cct.id::text, cct.contract_id::text, cct.payee_id::text, cct.amount::text, cct.currency, cct.status, cct.created_at,
+    `select cct.id::text, cct.contract_id::text, cct.payee_id::text, cct.category, cct.description, cct.incurred_on,
+      cct.amount::text, cct.currency, cct.recoupable, cct.status, cct.created_at,
       coalesce(sum(ea.amount_applied), 0)::text as applied_amount
      from contract_cost_terms cct
      left join expense_applications ea on ea.cost_term_id = cct.id
-     group by cct.id, cct.contract_id, cct.payee_id, cct.amount, cct.currency, cct.status, cct.created_at
+     group by cct.id, cct.contract_id, cct.payee_id, cct.category, cct.description, cct.incurred_on,
+       cct.amount, cct.currency, cct.recoupable, cct.status, cct.created_at
      order by cct.legacy_id nulls last, cct.id`,
     []
   );
@@ -520,20 +526,20 @@ async function readDistributionContractExpenses(pool: Pool): Promise<readonly Di
     // Use integer arithmetic on the scale-10 micro strings.
     let openAmountMicro = "0.0000000000";
     if (isOpen) {
-      const full = BigInt(Math.round(Number(fullAmount) * 1e10));
-      const applied = BigInt(Math.round(Number(appliedAmount) * 1e10));
-      const remaining = full - applied > 0n ? full - applied : 0n;
-      openAmountMicro = (remaining / 10_000_000_000n).toString() + "." + String(remaining % 10_000_000_000n).padStart(10, "0");
+      const remaining = erhMoney.sub(erhMoney.parse(fullAmount), erhMoney.parse(appliedAmount));
+      openAmountMicro = erhMoney.format(remaining > 0n ? remaining : 0n);
     }
     return {
       id: stringCell(row, "id"),
       contractId: stringCell(row, "contract_id"),
-      payeeId: nullableStringCell(row, "payee_id") ?? "unassigned",
-      incurredOn: timestampCell(row, "created_at").slice(0, 10),
-      label: "Contract cost term",
+      payeeId: nullableStringCell(row, "payee_id"),
+      incurredOn: nullableDateCell(row, "incurred_on") ?? timestampCell(row, "created_at").slice(0, 10),
+      category: toApiExpenseCategory(nullableStringCell(row, "category")),
+      label: nullableStringCell(row, "description") ?? "Contract cost term",
       originalAmountMicro: fullAmount,
       openAmountMicro,
       currency: currencyCell(row, "currency"),
+      recoverable: booleanCell(row, "recoupable"),
       status: toApiExpenseStatus(stringCell(row, "status"))
     };
   });
@@ -542,7 +548,8 @@ async function readDistributionContractExpenses(pool: Pool): Promise<readonly Di
 async function readDistributionMappingRows(pool: Pool): Promise<readonly DistributionMappingRow[]> {
   const rows = await queryRows(
     pool,
-    `select ne.id::text, ne.batch_id::text, ne.raw_title, ne.raw_artist, ne.dsp, ne.mapping_status, etm.track_id::text, t.title as track_title, etm.confidence::text
+    `select ne.id::text, ne.batch_id::text, ne.raw_title, ne.raw_artist, ne.raw_label, ne.dsp, ne.isrc, ne.upc,
+      ne.gross_amount::text, ne.currency, ne.mapping_status, etm.track_id::text, t.title as track_title, etm.confidence::text
      from normalized_earnings ne
      left join earning_track_matches etm on etm.earning_id = ne.id
      left join tracks t on t.id = etm.track_id
@@ -555,7 +562,12 @@ async function readDistributionMappingRows(pool: Pool): Promise<readonly Distrib
     batchId: stringCell(row, "batch_id"),
     sourceTitle: nullableStringCell(row, "raw_title") ?? "",
     sourceArtist: nullableStringCell(row, "raw_artist") ?? "",
+    sourceLabel: nullableStringCell(row, "raw_label") ?? "",
     sourceStore: stringCell(row, "dsp"),
+    sourceIsrc: nullableStringCell(row, "isrc"),
+    sourceUpc: nullableStringCell(row, "upc"),
+    grossMicro: stringCell(row, "gross_amount"),
+    currency: currencyCell(row, "currency"),
     suggestedTrackId: nullableStringCell(row, "track_id"),
     suggestedTrackTitle: nullableStringCell(row, "track_title"),
     confidenceBp: percentageToBasisPoints(nullableStringCell(row, "confidence") ?? "0"),
@@ -1069,9 +1081,12 @@ function toDistributionPayment(row: PgRow): DistributionReadDataset["payments"][
     payeeId: stringCell(row, "payee_id"),
     amount: stringCell(row, "amount"),
     currency: currencyCell(row, "currency"),
+    exchangeRate: nullableStringCell(row, "exchange_rate"),
+    method: stringCell(row, "method"),
     status: enumCell<DistributionPaymentStatus>(row, "status", ["recorded", "edited", "void", "reconciled"]),
     paidAt: nullableTimestampCell(row, "paid_at"),
-    reference: nullableStringCell(row, "reference")
+    reference: nullableStringCell(row, "reference"),
+    notes: nullableStringCell(row, "notes")
   };
 }
 
@@ -1079,8 +1094,20 @@ function toDistributionPayee(row: PgRow): DistributionReadDataset["payees"][numb
   return {
     id: stringCell(row, "id"),
     name: stringCell(row, "name"),
+    email: nullableStringCell(row, "email"),
     preferredCurrency: currencyCell(row, "preferred_currency"),
     isActive: booleanCell(row, "is_active")
+  };
+}
+
+function toDistributionRelease(row: PgRow): DistributionReadDataset["releases"][number] {
+  return {
+    id: stringCell(row, "id"),
+    title: stringCell(row, "title"),
+    artistName: stringCell(row, "artist_name"),
+    catalogStatus: stringCell(row, "catalog_status"),
+    upc: nullableStringCell(row, "upc"),
+    releaseDate: nullableDateCell(row, "release_date")
   };
 }
 
@@ -1088,6 +1115,8 @@ function toDistributionTrack(row: PgRow): DistributionReadDataset["tracks"][numb
   return {
     id: stringCell(row, "id"),
     title: stringCell(row, "title"),
+    artistName: stringCell(row, "artist_name"),
+    catalogStatus: stringCell(row, "catalog_status"),
     isrc: nullableStringCell(row, "isrc"),
     releaseId: nullableStringCell(row, "release_id")
   };
@@ -1327,6 +1356,14 @@ function toApiExpenseStatus(value: string): DistributionContractExpense["status"
   }
 
   return "open";
+}
+
+function toApiExpenseCategory(value: string | null): DistributionContractExpense["category"] {
+  if (value === "advance" || value === "recoupment" || value === "studio" || value === "marketing" || value === "distribution") {
+    return value;
+  }
+
+  return "other";
 }
 
 function isOpenExpenseStatus(value: string): boolean {

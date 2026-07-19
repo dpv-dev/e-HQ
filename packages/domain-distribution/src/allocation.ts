@@ -1,4 +1,10 @@
-import { erhMoney, format as formatScaledUnits, parse as parseScaledUnits } from "@ehq/domain-finance";
+import {
+  erhMoney,
+  format as formatScaledUnits,
+  parse as parseScaledUnits,
+  pickEffectiveFxRate,
+  roundRatioHalfUp
+} from "@ehq/domain-finance";
 
 export type DistributionAllocationOutcome = DistributionAllocationPlan | DistributionAllocationSuspenseOutcome;
 export type DistributionCostTermStatus =
@@ -200,7 +206,14 @@ export function buildAllocationPlan(
   }
 
   for (const share of split) {
-    const recoupment = applyRecoupmentForShare(earning, share, parsedCostTerms, appliedByTerm);
+    const recoupment = applyRecoupmentForShare(
+      earning,
+      share,
+      parsedCostTerms,
+      appliedByTerm,
+      costState.fxRates,
+      referenceDate
+    );
     for (const application of recoupment.expenseApplications) {
       expenseApplications.push(application);
     }
@@ -267,32 +280,28 @@ function applyRecoupmentForShare(
   earning: DistributionEarningInput,
   share: ParsedRoyaltyShare,
   costTerms: readonly ParsedCostTerm[],
-  appliedByTerm: Map<string, bigint>
+  appliedByTerm: Map<string, bigint>,
+  fxRates: readonly DistributionFxRateInput[],
+  referenceDate: string
 ): RecoupmentResult {
   if (share.rule.role === "label" || share.rule.contractId === null) {
     return emptyRecoupment(share.grossShareUnits);
   }
 
-  const eligibleTerms = findEligibleSameCurrencyCostTerms(share.rule.contractId, share.rule.payeeId, earning.currency, costTerms);
-  const recoupableRemaining = sumRemainingCostTerms(eligibleTerms, appliedByTerm);
-  if (recoupableRemaining <= 0n) {
+  const eligibleTerms = findEligibleCostTerms(share.rule.contractId, share.rule.payeeId, costTerms);
+  if (eligibleTerms.length === 0) {
     return emptyRecoupment(share.grossShareUnits);
   }
-
-  // VERIFY: PHP currently lets negative earning shares flow through min(remaining, gross_share);
-  // this pins chargeback/refund behaviour until the F4 carry-forward domain decision.
-  const recoupmentAppliedUnits = minUnits(recoupableRemaining, share.grossShareUnits);
-  const netPayableUnits = erhMoney.sub(share.grossShareUnits, recoupmentAppliedUnits);
-  if (recoupmentAppliedUnits <= 0n) {
+  if (share.grossShareUnits <= 0n) {
     return {
-      recoupmentAppliedUnits,
-      netPayableUnits,
+      recoupmentAppliedUnits: share.grossShareUnits,
+      netPayableUnits: 0n,
       expenseApplications: [],
       costTermStatusUpdates: []
     };
   }
 
-  return distributeRecoupment(earning, share.rule.payeeId, eligibleTerms, appliedByTerm, recoupmentAppliedUnits, netPayableUnits);
+  return distributeRecoupment(earning, share.rule.payeeId, eligibleTerms, appliedByTerm, fxRates, referenceDate, share.grossShareUnits);
 }
 
 function distributeRecoupment(
@@ -300,15 +309,17 @@ function distributeRecoupment(
   payeeId: string,
   terms: readonly ParsedCostTerm[],
   appliedByTerm: Map<string, bigint>,
-  recoupmentAppliedUnits: bigint,
-  netPayableUnits: bigint
+  fxRates: readonly DistributionFxRateInput[],
+  referenceDate: string,
+  grossShareUnits: bigint
 ): RecoupmentResult {
   const expenseApplications: ExpenseApplicationInsert[] = [];
   const costTermStatusUpdates: CostTermStatusUpdate[] = [];
-  let remainingToApply = recoupmentAppliedUnits;
+  let remainingEarningUnits = grossShareUnits;
+  let recoupmentAppliedUnits = 0n;
 
   for (const term of [...terms].sort(compareCostTermByFifo)) {
-    if (remainingToApply <= 0n) {
+    if (remainingEarningUnits <= 0n) {
       break;
     }
 
@@ -317,16 +328,52 @@ function distributeRecoupment(
       continue;
     }
 
-    const chunk = minUnits(remainingToApply, termRemaining);
+    const rate = term.currency === earning.currency
+      ? null
+      : pickEffectiveFxRate(fxRates, term.currency, earning.currency, referenceDate);
+    if (term.currency !== earning.currency && rate === null) {
+      throw new Error(`Missing prevalidated FX rate from ${term.currency} to ${earning.currency}.`);
+    }
+    const availableInEarning = term.currency === earning.currency
+      ? termRemaining
+      : convertAtRate(termRemaining, requireFxRateUnits(rate));
+    const requestedInEarning = minUnits(remainingEarningUnits, availableInEarning);
+    if (requestedInEarning <= 0n) {
+      continue;
+    }
+    let chunkInTerm = term.currency === earning.currency
+      ? minUnits(requestedInEarning, termRemaining)
+      : requestedInEarning === availableInEarning
+        ? termRemaining
+        : minUnits(termRemaining, convertAtInverseRateFloor(requestedInEarning, requireFxRateUnits(rate)));
+    if (chunkInTerm <= 0n) {
+      continue;
+    }
+    let chunkInEarning = term.currency === earning.currency
+      ? chunkInTerm
+      : convertAtRate(chunkInTerm, requireFxRateUnits(rate));
+    // Inverse flooring plus half-up forward conversion can differ by one unit.
+    // Keep the application and reported recoupment exactly equivalent without
+    // ever consuming more of the earning than is available.
+    if (chunkInEarning > requestedInEarning && chunkInTerm > 0n) {
+      chunkInTerm -= 1n;
+      chunkInEarning = term.currency === earning.currency
+        ? chunkInTerm
+        : convertAtRate(chunkInTerm, requireFxRateUnits(rate));
+    }
+    if (chunkInTerm <= 0n || chunkInEarning <= 0n) {
+      continue;
+    }
     const previousApplied = appliedByTerm.get(term.id) ?? 0n;
-    const nextApplied = erhMoney.add(previousApplied, chunk);
+    const nextApplied = erhMoney.add(previousApplied, chunkInTerm);
     appliedByTerm.set(term.id, nextApplied);
-    remainingToApply = erhMoney.sub(remainingToApply, chunk);
+    remainingEarningUnits = erhMoney.sub(remainingEarningUnits, chunkInEarning);
+    recoupmentAppliedUnits = erhMoney.add(recoupmentAppliedUnits, chunkInEarning);
     expenseApplications.push({
       costTermId: term.id,
       payeeId,
-      amountApplied: formatErhAmount(chunk),
-      currency: earning.currency,
+      amountApplied: formatErhAmount(chunkInTerm),
+      currency: term.currency,
       calculationRunId: earning.calculationRunId
     });
     costTermStatusUpdates.push({
@@ -337,7 +384,7 @@ function distributeRecoupment(
 
   return {
     recoupmentAppliedUnits,
-    netPayableUnits,
+    netPayableUnits: erhMoney.sub(grossShareUnits, recoupmentAppliedUnits),
     expenseApplications,
     costTermStatusUpdates
   };
@@ -355,9 +402,6 @@ function findMissingFxCurrency(
     return null;
   }
 
-  // LIMITATION: PHP gates foreign recoupable balances on FX availability but
-  // does not apply cross-currency recoupment here. Converting advances across
-  // currencies changes recovered money and is deferred for a domain call.
   const foreignTerms = costTerms.filter(
     (term) =>
       term.contractId === share.rule.contractId &&
@@ -367,33 +411,24 @@ function findMissingFxCurrency(
       payeeScopeMatches(term.payeeId, share.rule.payeeId) &&
       remainingForTerm(term, appliedByTerm) > 0n
   );
-  const missingTerm = foreignTerms.find((term) => !hasFxRate(fxRates, term.currency, earningCurrency, referenceDate));
+  const missingTerm = foreignTerms.find(
+    (term) => pickEffectiveFxRate(fxRates, term.currency, earningCurrency, referenceDate) === null
+  );
   return missingTerm?.currency ?? null;
 }
 
-function findEligibleSameCurrencyCostTerms(
+function findEligibleCostTerms(
   contractId: string,
   payeeId: string,
-  currency: string,
   costTerms: readonly ParsedCostTerm[]
 ): readonly ParsedCostTerm[] {
-  // Use the same open-gate predicate as the FX path so that cancelled/satisfied/
-  // recovered terms are excluded from recoupment in both currency branches.
   return costTerms.filter(
     (term) =>
       term.contractId === contractId &&
       term.recoupable &&
       isOpenForFxGate(term.status) &&
-      term.currency === currency &&
       payeeScopeMatches(term.payeeId, payeeId)
   );
-}
-
-function sumRemainingCostTerms(terms: readonly ParsedCostTerm[], appliedByTerm: ReadonlyMap<string, bigint>): bigint {
-  return terms.reduce((sum: bigint, term: ParsedCostTerm) => {
-    const remaining = remainingForTerm(term, appliedByTerm);
-    return remaining > 0n ? erhMoney.add(sum, remaining) : sum;
-  }, 0n);
 }
 
 function remainingForTerm(term: ParsedCostTerm, appliedByTerm: ReadonlyMap<string, bigint>): bigint {
@@ -471,8 +506,25 @@ function payeeScopeMatches(termPayeeId: string | null, sharePayeeId: string): bo
   return termPayeeId === null || termPayeeId === "0" || termPayeeId === sharePayeeId;
 }
 
-function hasFxRate(fxRates: readonly DistributionFxRateInput[], fromCurrency: string, toCurrency: string, referenceDate: string): boolean {
-  return fxRates.some((rate) => rate.fromCurrency === fromCurrency && rate.toCurrency === toCurrency && rate.effectiveDate === referenceDate);
+const FX_RATE_SCALE_UNITS = 10_000_000_000n;
+
+function requireFxRateUnits(rate: DistributionFxRateInput | null): bigint {
+  if (rate === null) {
+    throw new Error("Missing prevalidated FX rate.");
+  }
+  const units = parseScaledUnits(rate.rate, 10, "HALF_UP");
+  if (units <= 0n) {
+    throw new Error("FX rate must be positive.");
+  }
+  return units;
+}
+
+function convertAtRate(amountUnits: bigint, rateUnits: bigint): bigint {
+  return roundRatioHalfUp(amountUnits * rateUnits, FX_RATE_SCALE_UNITS);
+}
+
+function convertAtInverseRateFloor(amountUnits: bigint, rateUnits: bigint): bigint {
+  return (amountUnits * FX_RATE_SCALE_UNITS) / rateUnits;
 }
 
 function isOpenForFxGate(status: DistributionCostTermStatus): boolean {

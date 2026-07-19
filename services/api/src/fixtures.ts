@@ -88,6 +88,7 @@ export function createEmptyApiFixtureStore(): ApiFixtureStore {
       statementPaymentLinks: [],
       payments: [],
       payees: [],
+      releases: [],
       tracks: []
     },
     distributionContracts: [],
@@ -645,38 +646,58 @@ function createDistributionFixture(): DistributionReadDataset {
         payeeId: "payee_alma",
         amount: "15.1000000000",
         currency: "USD",
+        exchangeRate: null,
+        method: "bank_transfer",
         status: "recorded",
         paidAt: "2026-05-05T10:00:00.000Z",
-        reference: "PAY-1"
+        reference: "PAY-1",
+        notes: null
       },
       {
         id: "payment_void",
         payeeId: "payee_alma",
         amount: "99.0000000000",
         currency: "USD",
+        exchangeRate: null,
+        method: "bank_transfer",
         status: "void",
         paidAt: "2026-05-06T10:00:00.000Z",
-        reference: "VOID"
+        reference: "VOID",
+        notes: null
       }
     ],
     payees: [
       {
         id: "payee_alma",
         name: "Alma",
+        email: "alma@example.com",
         preferredCurrency: "USD",
         isActive: true
       },
       {
         id: "payee_david",
         name: "David",
+        email: "david@example.com",
         preferredCurrency: "USD",
         isActive: true
+      }
+    ],
+    releases: [
+      {
+        id: "release_1",
+        title: "Seggae light",
+        artistName: "Kaya",
+        catalogStatus: "released",
+        upc: "609999999999",
+        releaseDate: "2026-01-09"
       }
     ],
     tracks: [
       {
         id: "track_1",
         title: "Seggae light",
+        artistName: "Kaya",
+        catalogStatus: "released",
         isrc: "MUAAA2600001",
         releaseId: "release_1"
       }
@@ -707,10 +728,12 @@ function createDistributionContractExpensesFixture(): readonly DistributionContr
       contractId: "contract_1",
       payeeId: "payee_alma",
       incurredOn: "2026-01-15",
+      category: "advance",
       label: "Advance recoupment balance",
       originalAmountMicro: "20.0000000000",
       openAmountMicro: "10.0000000000",
       currency: "USD",
+      recoverable: true,
       status: "open"
     }
   ];
@@ -723,7 +746,12 @@ function createDistributionMappingRowsFixture(): readonly DistributionMappingRow
       batchId: "batch_kontor",
       sourceTitle: "Unknown",
       sourceArtist: "Unknown",
+      sourceLabel: "Unknown label",
       sourceStore: "Apple Music",
+      sourceIsrc: null,
+      sourceUpc: null,
+      grossMicro: "20.0000000000",
+      currency: "USD",
       suggestedTrackId: null,
       suggestedTrackTitle: null,
       confidenceBp: 0,

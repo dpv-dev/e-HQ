@@ -233,20 +233,28 @@ export interface PersistDistributionStatementVoidInput {
 
 export interface PersistDistributionPaymentRecordInput {
   readonly paymentId: string;
-  readonly statementPaymentLinkId: string;
-  readonly statementId: string;
+  readonly workspaceId: string;
+  readonly statementPaymentLinkId: string | null;
+  readonly statementId: string | null;
   readonly payeeId: string;
   readonly amount: string;
   readonly currency: string;
-  readonly paidAt: string;
-  readonly reference: string;
+  readonly exchangeRate: string | null;
+  readonly method: string;
+  readonly paidAt: string | null;
+  readonly reference: string | null;
+  readonly notes: string | null;
 }
 
 export interface PersistDistributionPaymentUpdateInput {
   readonly paymentId: string;
   readonly amount: string;
   readonly currency: string;
-  readonly reference: string;
+  readonly exchangeRate: string | null;
+  readonly method: string;
+  readonly paidAt: string | null;
+  readonly reference: string | null;
+  readonly notes: string | null;
 }
 
 export interface PersistDistributionPaymentReconcileInput {
@@ -254,7 +262,6 @@ export interface PersistDistributionPaymentReconcileInput {
   readonly statementPaymentLinkId: string;
   readonly statementId: string;
   readonly amountApplied: string;
-  readonly bankTransactionId: string;
   readonly reconciledAt: string;
 }
 
@@ -1304,38 +1311,48 @@ export async function persistDistributionPaymentRecord(tx: ApiWriteTransaction, 
   await tx.executor.execute(sql`
     insert into payments (
       id,
+      workspace_id,
       payee_id,
       amount,
       currency,
+      exchange_rate,
+      method,
       status,
       paid_at,
-      reference
+      reference,
+      notes
     )
     values (
       ${input.paymentId},
+      ${input.workspaceId},
       ${input.payeeId},
       ${input.amount},
       ${input.currency},
+      ${input.exchangeRate},
+      ${input.method},
       'recorded',
       ${input.paidAt},
-      ${input.reference}
+      ${input.reference},
+      ${input.notes}
     )
   `);
 
-  await tx.executor.execute(sql`
-    insert into statement_payment_links (
-      id,
-      statement_id,
-      payment_id,
-      amount_applied
-    )
-    values (
-      ${input.statementPaymentLinkId},
-      ${input.statementId},
-      ${input.paymentId},
-      ${input.amount}
-    )
-  `);
+  if (input.statementId !== null && input.statementPaymentLinkId !== null) {
+    await tx.executor.execute(sql`
+      insert into statement_payment_links (
+        id,
+        statement_id,
+        payment_id,
+        amount_applied
+      )
+      values (
+        ${input.statementPaymentLinkId},
+        ${input.statementId},
+        ${input.paymentId},
+        ${input.amount}
+      )
+    `);
+  }
 }
 
 export async function persistDistributionPaymentUpdate(tx: ApiWriteTransaction, input: PersistDistributionPaymentUpdateInput): Promise<void> {
@@ -1348,17 +1365,16 @@ export async function persistDistributionPaymentUpdate(tx: ApiWriteTransaction, 
     set
       amount = ${input.amount},
       currency = ${input.currency},
+      exchange_rate = ${input.exchangeRate},
+      method = ${input.method},
       status = 'edited',
+      paid_at = ${input.paidAt},
       reference = ${input.reference},
+      notes = ${input.notes},
       updated_at = now()
     where id = ${input.paymentId}
   `);
 
-  await tx.executor.execute(sql`
-    update statement_payment_links
-    set amount_applied = ${input.amount}
-    where payment_id = ${input.paymentId}
-  `);
 }
 
 export async function persistDistributionPaymentReconcile(tx: ApiWriteTransaction, input: PersistDistributionPaymentReconcileInput): Promise<void> {

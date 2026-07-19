@@ -1317,7 +1317,7 @@ export interface DistributionScreenQuery {
   readonly importStatus: "uploaded" | "mapped" | "validated" | "failed" | "voided" | null;
   readonly mappingStatus: "unmapped" | "suggested" | "mapped" | null;
   readonly suspenseStatus: "open" | "resolved" | null;
-  readonly paymentStatus: "draft" | "queued" | "paid" | "voided" | null;
+  readonly paymentStatus: "draft" | "paid" | "voided" | null;
   readonly revenueGroupBy: "payee" | "track" | "currency" | "store" | "period";
 }
 
@@ -1425,7 +1425,12 @@ export interface DistributionMappingRow {
   readonly batchId: EntityId;
   readonly sourceTitle: string;
   readonly sourceArtist: string;
+  readonly sourceLabel: string;
   readonly sourceStore: string;
+  readonly sourceIsrc: string | null;
+  readonly sourceUpc: string | null;
+  readonly grossMicro: MoneyMicroString;
+  readonly currency: CurrencyCode;
   readonly suggestedTrackId: EntityId | null;
   readonly suggestedTrackTitle: string | null;
   readonly confidenceBp: BasisPoints;
@@ -1466,14 +1471,24 @@ export interface DistributionContractExpenseQuery extends PageQuery {
 export interface DistributionContractExpense {
   readonly id: EntityId;
   readonly contractId: EntityId;
-  readonly payeeId: EntityId;
+  readonly payeeId: EntityId | null;
   readonly incurredOn: IsoDateString;
+  readonly category: DistributionContractExpenseCategory;
   readonly label: string;
   readonly originalAmountMicro: MoneyMicroString;
   readonly openAmountMicro: MoneyMicroString;
   readonly currency: CurrencyCode;
+  readonly recoverable: boolean;
   readonly status: "open" | "recouped" | "waived";
 }
+
+export type DistributionContractExpenseCategory =
+  | "advance"
+  | "recoupment"
+  | "studio"
+  | "marketing"
+  | "distribution"
+  | "other";
 
 export interface DistributionContractUpsertRequest {
   readonly workspaceId: EntityId;
@@ -1506,11 +1521,13 @@ export interface ContractRoyaltyRulesUpdateRequest {
 export interface DistributionContractExpenseRecordRequest {
   readonly workspaceId: EntityId;
   readonly contractId: EntityId;
-  readonly payeeId: EntityId;
+  readonly payeeId: EntityId | null;
   readonly incurredOn: IsoDateString;
+  readonly category: DistributionContractExpenseCategory;
   readonly label: string;
   readonly amountMicro: MoneyMicroString;
   readonly currency: CurrencyCode;
+  readonly recoverable: boolean;
 }
 
 export interface PayeesQuery extends PageQuery {
@@ -1779,43 +1796,59 @@ export interface PaymentsQuery extends PageQuery {
   readonly workspaceId: EntityId;
   readonly period: IsoMonthString | null;
   readonly payeeId: EntityId | null;
-  readonly status: "draft" | "queued" | "paid" | "voided" | null;
+  readonly status: "draft" | "paid" | "voided" | null;
   readonly dateFrom?: IsoDateString | null;
   readonly dateTo?: IsoDateString | null;
 }
 
 export interface PaymentSummary {
   readonly id: EntityId;
-  readonly statementId: EntityId;
+  readonly statementId: EntityId | null;
+  readonly linkedStatementIds: readonly EntityId[];
   readonly payeeId: EntityId;
   readonly payeeName: string;
   readonly amountMicro: MoneyMicroString;
   readonly currency: CurrencyCode;
-  readonly status: "draft" | "queued" | "paid" | "voided";
+  readonly exchangeRate: DecimalString | null;
+  readonly method: DistributionPaymentMethod;
+  readonly status: "draft" | "paid" | "voided";
   readonly paidAt: IsoDateTimeString | null;
   readonly reference: string | null;
+  readonly notes: string | null;
 }
+
+export type DistributionPaymentMethod = "bank_transfer" | "paypal" | "cash" | "cheque" | "crypto" | "other";
 
 export interface PaymentRecordRequest {
   readonly workspaceId: EntityId;
-  readonly statementId: EntityId;
+  readonly statementId: EntityId | null;
   readonly payeeId: EntityId;
   readonly amountMicro: MoneyMicroString;
   readonly currency: CurrencyCode;
-  readonly paidAt: IsoDateTimeString;
-  readonly reference: string;
+  readonly exchangeRate: DecimalString | null;
+  readonly method: DistributionPaymentMethod;
+  readonly status: "draft" | "paid";
+  readonly paidAt: IsoDateTimeString | null;
+  readonly reference: string | null;
+  readonly notes: string | null;
 }
 
 export interface PaymentUpdateRequest {
   readonly workspaceId: EntityId;
   readonly amountMicro: MoneyMicroString;
   readonly currency: CurrencyCode;
-  readonly reference: string;
+  readonly exchangeRate: DecimalString | null;
+  readonly method: DistributionPaymentMethod;
+  readonly status: "draft" | "paid";
+  readonly paidAt: IsoDateTimeString | null;
+  readonly reference: string | null;
+  readonly notes: string | null;
 }
 
 export interface PaymentReconcileRequest {
   readonly workspaceId: EntityId;
-  readonly bankTransactionId: EntityId;
+  readonly statementId: EntityId;
+  readonly amountAppliedMicro: MoneyMicroString;
   readonly reconciledAt: IsoDateTimeString;
 }
 

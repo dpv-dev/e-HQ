@@ -5,6 +5,7 @@ import type {
   NormalizedEarning,
   Payee,
   Payment,
+  Release,
   Statement,
   StatementLine,
   StatementPaymentLink,
@@ -25,6 +26,7 @@ export interface DistributionReadDataset {
   readonly statementPaymentLinks: readonly DistributionStatementPaymentLinkRow[];
   readonly payments: readonly DistributionPaymentRow[];
   readonly payees: readonly DistributionPayeeRow[];
+  readonly releases: readonly DistributionReleaseRow[];
   readonly tracks: readonly DistributionTrackRow[];
 }
 
@@ -85,9 +87,13 @@ export type DistributionStatementLineRow = Pick<
   "id" | "statementId" | "earningAllocationId" | "trackId" | "grossShare" | "recoupmentApplied" | "netPayable" | "quantity" | "currency"
 >;
 export type DistributionStatementPaymentLinkRow = Pick<StatementPaymentLink, "id" | "statementId" | "paymentId" | "amountApplied">;
-export type DistributionPaymentRow = Pick<Payment, "id" | "payeeId" | "amount" | "currency" | "status" | "paidAt" | "reference">;
-export type DistributionPayeeRow = Pick<Payee, "id" | "name" | "preferredCurrency" | "isActive">;
-export type DistributionTrackRow = Pick<Track, "id" | "title" | "isrc" | "releaseId">;
+export type DistributionPaymentRow = Pick<
+  Payment,
+  "id" | "payeeId" | "amount" | "currency" | "exchangeRate" | "method" | "status" | "paidAt" | "reference" | "notes"
+>;
+export type DistributionPayeeRow = Pick<Payee, "id" | "name" | "email" | "preferredCurrency" | "isActive">;
+export type DistributionReleaseRow = Pick<Release, "id" | "title" | "artistName" | "catalogStatus" | "upc" | "releaseDate">;
+export type DistributionTrackRow = Pick<Track, "id" | "title" | "artistName" | "catalogStatus" | "isrc" | "releaseId">;
 
 export interface DistributionEarningsPreviewFilters {
   readonly batchId: string | null;

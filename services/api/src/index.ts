@@ -11,7 +11,12 @@ import {
   officeCashflowManualEntryWriteSchema,
   officeAdvanceApplicationSchema,
   officeAdvanceMarkPaidSchema,
-  officeAdvanceWriteSchema
+  officeAdvanceWriteSchema,
+  distributionContractExpenseWriteSchema,
+  distributionContractExpenseUpdateSchema,
+  distributionPaymentRecordSchema,
+  distributionPaymentUpdateSchema,
+  distributionPaymentReconcileSchema
 } from "@ehq/api-contracts";
 import {
   basisPointsInputSchema,
@@ -396,11 +401,11 @@ interface StatementVoidMutationResponse extends ApiMutationReceipt, ApiMutationR
 
 interface PaymentMutationResponse extends ApiMutationReceipt, ApiMutationResponse {
   readonly paymentId: string;
-  readonly statementId: string;
+  readonly statementId: string | null;
   readonly amountMicro: string;
   readonly currency: string;
   readonly paymentStatus: "recorded" | "edited" | "reconciled" | "voided";
-  readonly statementBalance: StatementBalanceResult;
+  readonly statementBalance: StatementBalanceResult | null;
   readonly groupTotals: readonly StatementGroupTotal[];
 }
 
@@ -617,7 +622,7 @@ interface OfficeAuditFixturePatch {
 
 interface DistributionPaymentFixturePatch {
   readonly payment: DistributionReadDataset["payments"][number];
-  readonly link: DistributionReadDataset["statementPaymentLinks"][number];
+  readonly link: DistributionReadDataset["statementPaymentLinks"][number] | null;
 }
 
 interface PaymentBalanceProjection {
@@ -821,14 +826,6 @@ const distributionMappingApplyRulesSchema = workspaceBodySchema.extend({
   batchId: z.string().min(1),
   rowIds: z.array(z.string().min(1)).min(1)
 });
-const distributionContractExpenseRecordSchema = workspaceBodySchema.extend({
-  contractId: z.string().min(1),
-  payeeId: z.string().min(1),
-  incurredOn: isoDateSchema,
-  label: z.string().min(1),
-  amountMicro: decimalMoneyStringSchema,
-  currency: currencyCodeInputSchema
-});
 const distributionContractUpsertSchema = workspaceBodySchema.extend({
   id: nullableStringSchema,
   payeeId: nullableStringSchema,
@@ -838,9 +835,6 @@ const distributionContractUpsertSchema = workspaceBodySchema.extend({
   effectiveTo: isoDateSchema.nullable(),
   splitBp: basisPointsInputSchema,
   currency: currencyCodeInputSchema
-});
-const distributionContractExpenseUpdateSchema = distributionContractExpenseRecordSchema.extend({
-  status: z.enum(["open", "recouped", "waived"])
 });
 const distributionPayeeUpsertSchema = workspaceBodySchema.extend({
   id: nullableStringSchema,
@@ -1759,6 +1753,9 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
     const suspenseStatus = nullableQuery(context, "suspenseStatus") ?? "open";
     const paymentStatus = nullableQuery(context, "paymentStatus");
     const revenueGroupBy = nullableQuery(context, "revenueGroupBy") ?? "store";
+    // Keep the aggregate screen endpoint compatible with period-only callers.
+    const dateFrom = nullableQuery(context, "dateFrom") ?? `${period}-01`;
+    const dateTo = nullableQuery(context, "dateTo") ?? lastDayOfMonth(period);
 
     const importBatches = dependencies.fixtures.distribution.importBatches
       .map((batch) => toDistributionImportBatch(dependencies.fixtures.distribution, batch.id))
@@ -1770,7 +1767,7 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
     const payees: readonly PayeeSummary[] = dependencies.fixtures.distribution.payees.map((payee) => ({
       id: payee.id,
       displayName: payee.name,
-      email: null,
+      email: payee.email,
       status: payee.isActive ? "active" : "inactive",
       defaultCurrency: payee.preferredCurrency
     }));
@@ -1779,9 +1776,9 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
       id: track.id,
       releaseId: track.releaseId,
       title: track.title,
-      artistName: "Kaya",
+      artistName: track.artistName,
       isrc: track.isrc,
-      status: "released",
+      status: toApiCatalogStatus(track.catalogStatus),
       splitStatus: "balanced",
       contributorCount: 1
     }));
@@ -1802,9 +1799,9 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
       payeeId: null,
       status: null
     }).rows.map(toApiStatementSummary);
-    const payments = toPaymentSummaries(dependencies.fixtures.distribution).filter(
-      (payment) => paymentStatus === null || payment.status === paymentStatus
-    );
+    const payments = toPaymentSummaries(dependencies.fixtures.distribution)
+      .filter((payment) => paymentStatus === null || payment.status === paymentStatus)
+      .filter((payment) => payment.paidAt === null || isDateInRange(payment.paidAt.slice(0, 10), dateFrom, dateTo));
     const response: DistributionScreenResponse = {
       status: { writesEnabled: dependencies.persistence.writesEnabled },
       dashboard: toDistributionDashboard(
@@ -1828,7 +1825,14 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
       suspense: pageItems(context, suspense),
       statements: pageItems(context, statements),
       payments: pageItems(context, payments),
-      revenue: pageItems(context, toRevenueRows(dependencies.fixtures.distribution, revenueGroupBy)),
+      revenue: pageItems(context, toRevenueRows(dependencies.fixtures.distribution, revenueGroupBy, {
+        period,
+        payeeId: null,
+        store: null,
+        currency: null,
+        dateFrom,
+        dateTo
+      })),
       reconciliation: toDistributionReconciliation(dependencies.fixtures),
       aliases: pageItems(context, toDistributionAliases(dependencies.fixtures)),
       duplicates: pageItems(context, toDistributionDuplicates(dependencies.fixtures)),
@@ -1949,7 +1953,7 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
       .map((payee) => ({
         id: payee.id,
         displayName: payee.name,
-        email: null,
+        email: payee.email,
         status: payee.isActive ? "active" : "inactive",
         defaultCurrency: payee.preferredCurrency
       }))
@@ -1968,7 +1972,7 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
     return context.json({
       id: payee.id,
       displayName: payee.name,
-      email: null,
+      email: payee.email,
       status: payee.isActive ? "active" : "inactive",
       defaultCurrency: payee.preferredCurrency
     });
@@ -1997,9 +2001,9 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
         id: track.id,
         releaseId: track.releaseId,
         title: track.title,
-        artistName: "Kaya",
+        artistName: track.artistName,
         isrc: track.isrc,
-        status: "released",
+        status: toApiCatalogStatus(track.catalogStatus),
         splitStatus: "balanced",
         contributorCount: 1
       }));
@@ -2139,9 +2143,12 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
     requireQuery(context, "workspaceId");
     const payeeId = nullableQuery(context, "payeeId");
     const status = nullableQuery(context, "status");
+    const dateFrom = nullableQuery(context, "dateFrom");
+    const dateTo = nullableQuery(context, "dateTo");
     const payments = toPaymentSummaries(dependencies.fixtures.distribution)
       .filter((payment) => payeeId === null || payment.payeeId === payeeId)
-      .filter((payment) => status === null || payment.status === status);
+      .filter((payment) => status === null || payment.status === status)
+      .filter((payment) => payment.paidAt === null || isDateInRange(payment.paidAt.slice(0, 10), dateFrom, dateTo));
     return context.json(pageItems(context, payments));
   });
 
@@ -2164,7 +2171,14 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
   app.get("/erh/v1/revenue", (context) => {
     requireQuery(context, "workspaceId");
     const groupBy = nullableQuery(context, "groupBy") ?? "payee";
-    const rows = toRevenueRows(dependencies.fixtures.distribution, groupBy);
+    const rows = toRevenueRows(dependencies.fixtures.distribution, groupBy, {
+      period: nullableQuery(context, "period"),
+      payeeId: nullableQuery(context, "payeeId"),
+      store: nullableQuery(context, "store"),
+      currency: nullableQuery(context, "currency"),
+      dateFrom: nullableQuery(context, "dateFrom"),
+      dateTo: nullableQuery(context, "dateTo")
+    });
     return context.json(pageItems(context, rows));
   });
 
@@ -4468,31 +4482,6 @@ function officeAdvancesWorkbenchResponse(context: ApiContext, dependencies: ApiS
     throw new ApiRouteError(400, "advance_kind_invalid", "Advance beneficiary type is invalid.", [`kind=${kind}`]);
   }
 
-  // Distribution fixtures currently represent the canonical eeee-mu workspace.
-  // Do not expose them through another workspace until workspaceId is part of the read model.
-  const artistRows = (workspaceId === DEFAULT_WORKSPACE_ID ? dependencies.fixtures.distributionContractExpenses : []).map((expense): OfficeAdvanceRow => {
-    const contract = dependencies.fixtures.distributionContracts.find((candidate) => candidate.id === expense.contractId);
-    const payee = dependencies.fixtures.distribution.payees.find((candidate) => candidate.id === expense.payeeId);
-    const originalMinor = distributionMoneyToEofMinor(expense.originalAmountMicro);
-    const outstandingMinor = distributionMoneyToEofMinor(expense.openAmountMicro);
-    return {
-      id: expense.id,
-      kind: "artist",
-      counterpartyId: expense.payeeId,
-      counterpartyLabel: payee?.name ?? expense.payeeId,
-      contextId: expense.contractId,
-      contextLabel: contract?.title ?? null,
-      label: expense.label,
-      plannedOn: expense.incurredOn,
-      paidOn: expense.incurredOn,
-      originalAmountMicro: eofMoney.format(originalMinor),
-      appliedAmountMicro: eofMoney.format(originalMinor - outstandingMinor),
-      outstandingAmountMicro: eofMoney.format(outstandingMinor),
-      currency: expense.currency,
-      status: expense.status,
-      source: "distribution_contract"
-    };
-  });
   const managedRows = dependencies.fixtures.officeAdvances
     .filter((advance) => advance.workspaceId === workspaceId)
     .map((advance): OfficeAdvanceRow => {
@@ -4517,7 +4506,7 @@ function officeAdvancesWorkbenchResponse(context: ApiContext, dependencies: ApiS
         source: "office_managed"
       };
     });
-  const rows = [...artistRows, ...managedRows]
+  const rows = managedRows
     .filter((row) => kind === null || row.kind === kind)
     .filter((row) => status === null || row.status === status)
     .sort((left, right) => right.plannedOn.localeCompare(left.plannedOn) || left.label.localeCompare(right.label));
@@ -4531,7 +4520,7 @@ function officeAdvancesWorkbenchResponse(context: ApiContext, dependencies: ApiS
     ...page,
     totalOutstandingMicro: eofMoney.format(sumOutstanding(murRows)),
     managedOutstandingMicro: eofMoney.format(sumOutstanding(murRows.filter((row) => row.source === "office_managed"))),
-    distributionOutstandingMicro: eofMoney.format(sumOutstanding(murRows.filter((row) => row.source === "distribution_contract"))),
+    distributionOutstandingMicro: eofMoney.format(0n),
     plannedManagedMicro: eofMoney.format(sumOutstanding(murRows.filter((row) => row.source === "office_managed" && row.status === "planned")))
   };
 }
@@ -4818,10 +4807,6 @@ function assertOfficeOptionalReferences(
   if (projectId !== null) {
     requireProject(dataset, projectId);
   }
-}
-
-function distributionMoneyToEofMinor(value: string): bigint {
-  return roundRatioHalfUp(erhMoney.parse(value), 100_000_000n);
 }
 
 interface PersistOfficeCashflowImportInput {
@@ -5297,7 +5282,7 @@ async function distributionMappingApplyRulesResponse(context: ApiContext, depend
 
 async function distributionContractExpenseCreateResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
   const contractId = requirePathParam(context, "contractId");
-  const request = await readZodBody<DistributionContractExpenseRecordRequest>(context, distributionContractExpenseRecordSchema);
+  const request = await readZodBody<DistributionContractExpenseRecordRequest>(context, distributionContractExpenseWriteSchema);
   if (request.contractId !== contractId) {
     throw new ApiRouteError(400, "body_path_mismatch", "Contract expense body must match the route contract id.", [
       `pathContractId=${contractId}`,
@@ -5305,7 +5290,9 @@ async function distributionContractExpenseCreateResponse(context: ApiContext, de
     ]);
   }
   requireDistributionContract(dependencies, contractId);
-  requireDistributionPayee(dependencies.fixtures.distribution, request.payeeId);
+  if (request.payeeId !== null) {
+    requireDistributionPayee(dependencies.fixtures.distribution, request.payeeId);
+  }
   const amount = normalizeErhAmountField(context, request.amountMicro, "amountMicro");
   const expenseId = randomUUID();
   const idempotencyKey = requireIdempotencyKey(context);
@@ -5384,7 +5371,9 @@ async function distributionContractExpenseUpdateResponse(context: ApiContext, de
     ]);
   }
   requireDistributionContract(dependencies, contractId);
-  requireDistributionPayee(dependencies.fixtures.distribution, request.payeeId);
+  if (request.payeeId !== null) {
+    requireDistributionPayee(dependencies.fixtures.distribution, request.payeeId);
+  }
   const before = requireDistributionContractExpense(dependencies.fixtures, expenseId);
   const amount = normalizeErhAmountField(context, request.amountMicro, "amountMicro");
   const idempotencyKey = requireIdempotencyKey(context);
@@ -5452,6 +5441,7 @@ async function distributionPayeeUpsertResponse(context: ApiContext, dependencies
 async function distributionReleaseUpsertResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
   const request = await readZodBody<DistributionReleaseUpsertRequest>(context, distributionReleaseUpsertSchema);
   const releaseId = request.id ?? randomUUID();
+  const before = dependencies.fixtures.distribution.releases.find((release) => release.id === releaseId) ?? null;
   const idempotencyKey = requireIdempotencyKey(context);
   const actor = context.get("authUser");
   const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
@@ -5464,15 +5454,17 @@ async function distributionReleaseUpsertResponse(context: ApiContext, dependenci
     write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
       await acquireAdvisoryLock(tx, `distribution:release:${releaseId}`);
       await persistDistributionReleaseUpsert(tx, releaseId, request);
+      const after = distributionReleaseFromUpsertRequest(releaseId, request);
       const auditEventId = await appendAuditEvent(tx, {
         actor,
         action: "distribution_release_upsert",
         targetType: "release",
         targetId: releaseId,
-        before: {},
-        after: { releaseId, request },
+        before: { release: before },
+        after: { release: after },
         idempotencyKey: resolvedIdempotencyKey
       });
+      upsertDistributionReleaseFixture(dependencies.fixtures, after);
       return mutationReceipt(releaseId, auditEventId);
     }
   });
@@ -7000,6 +6992,9 @@ async function persistDistributionContractExpenseCreate(
       id,
       contract_id,
       payee_id,
+      category,
+      description,
+      incurred_on,
       amount,
       currency,
       recoupable,
@@ -7012,13 +7007,16 @@ async function persistDistributionContractExpenseCreate(
       ${expenseId},
       ${request.contractId},
       ${request.payeeId},
+      ${request.category},
+      ${request.label.trim()},
+      ${request.incurredOn},
       ${request.amountMicro},
       ${request.currency},
-      true,
+      ${request.recoverable},
       'statement_recoupment',
       'open',
       'operator_expense',
-      ${request.incurredOn}
+      null
     )
   `);
 }
@@ -7033,10 +7031,12 @@ function appendDistributionContractExpenseFixture(
     contractId: request.contractId,
     payeeId: request.payeeId,
     incurredOn: request.incurredOn,
+    category: request.category,
     label: request.label.trim(),
     originalAmountMicro: request.amountMicro,
     openAmountMicro: request.amountMicro,
     currency: request.currency,
+    recoverable: request.recoverable,
     status: "open"
   };
   const mutableFixtures = fixtures as Mutable<ApiFixtureStore>;
@@ -7048,7 +7048,7 @@ function appendDistributionContractExpenseFixture(
       payeeId: request.payeeId,
       amount: request.amountMicro,
       currency: request.currency,
-      recoupable: true,
+      recoupable: request.recoverable,
       status: "open",
       expenseDate: request.incurredOn
     },
@@ -7068,6 +7068,7 @@ async function persistDistributionContractUpsert(
   await tx.executor.execute(sql`
     insert into contracts (
       id,
+      workspace_id,
       title,
       status,
       effective_from,
@@ -7076,6 +7077,7 @@ async function persistDistributionContractUpsert(
     )
     values (
       ${contractId},
+      ${request.workspaceId},
       ${request.title.trim()},
       ${apiContractStatusToDb(request.status)},
       ${request.effectiveFrom},
@@ -7134,10 +7136,13 @@ async function persistDistributionContractExpenseUpdate(
     update contract_cost_terms
     set
       payee_id = ${request.payeeId},
+      category = ${request.category},
+      description = ${request.label.trim()},
+      incurred_on = ${request.incurredOn},
       amount = ${request.amountMicro},
       currency = ${request.currency},
+      recoupable = ${request.recoverable},
       status = ${apiExpenseStatusToDb(request.status)},
-      scope_id = ${request.incurredOn},
       updated_at = now()
     where id = ${expenseId}
   `);
@@ -7152,10 +7157,12 @@ function distributionContractExpenseFromUpdateRequest(
     contractId: request.contractId,
     payeeId: request.payeeId,
     incurredOn: request.incurredOn,
+    category: request.category,
     label: request.label.trim(),
     originalAmountMicro: request.amountMicro,
     openAmountMicro: request.status === "open" ? request.amountMicro : "0.0000000000",
     currency: request.currency,
+    recoverable: request.recoverable,
     status: request.status
   };
 }
@@ -7180,7 +7187,7 @@ function upsertDistributionContractExpenseFixture(fixtures: ApiFixtureStore, exp
     payeeId: expense.payeeId,
     amount: expense.originalAmountMicro,
     currency: expense.currency,
-    recoupable: true,
+    recoupable: expense.recoverable,
     status: apiExpenseStatusToCostTermStatus(expense.status),
     expenseDate: expense.incurredOn
   });
@@ -7198,19 +7205,24 @@ async function persistDistributionPayeeUpsert(
   await tx.executor.execute(sql`
     insert into payees (
       id,
+      workspace_id,
       name,
+      email,
       preferred_currency,
       is_active
     )
     values (
       ${payeeId},
+      ${request.workspaceId},
       ${request.displayName.trim()},
+      ${request.email},
       ${request.defaultCurrency},
       ${request.status === "active"}
     )
     on conflict (id) do update
     set
       name = excluded.name,
+      email = excluded.email,
       preferred_currency = excluded.preferred_currency,
       is_active = excluded.is_active,
       updated_at = now()
@@ -7224,6 +7236,7 @@ function distributionPayeeFromUpsertRequest(
   return {
     id: payeeId,
     name: request.displayName.trim(),
+    email: request.email,
     preferredCurrency: request.defaultCurrency as CurrencyCode,
     isActive: request.status === "active"
   };
@@ -7246,14 +7259,20 @@ async function persistDistributionReleaseUpsert(
   await tx.executor.execute(sql`
     insert into releases (
       id,
+      workspace_id,
       title,
+      artist_name,
+      catalog_status,
       upc,
       label_name,
       release_date
     )
     values (
       ${releaseId},
+      ${request.workspaceId},
       ${request.title.trim()},
+      ${request.artistName.trim()},
+      ${request.status},
       ${request.upc},
       ${request.artistName.trim()},
       ${request.releaseDate}
@@ -7261,11 +7280,35 @@ async function persistDistributionReleaseUpsert(
     on conflict (id) do update
     set
       title = excluded.title,
+      artist_name = excluded.artist_name,
+      catalog_status = excluded.catalog_status,
       upc = excluded.upc,
       label_name = excluded.label_name,
       release_date = excluded.release_date,
       updated_at = now()
   `);
+}
+
+function distributionReleaseFromUpsertRequest(
+  releaseId: string,
+  request: DistributionReleaseUpsertRequest
+): DistributionReadDataset["releases"][number] {
+  return {
+    id: releaseId,
+    title: request.title.trim(),
+    artistName: request.artistName.trim(),
+    catalogStatus: request.status,
+    upc: request.upc,
+    releaseDate: request.releaseDate
+  };
+}
+
+function upsertDistributionReleaseFixture(
+  fixtures: ApiFixtureStore,
+  release: DistributionReadDataset["releases"][number]
+): void {
+  const mutableDistribution = fixtures.distribution as Mutable<DistributionReadDataset>;
+  mutableDistribution.releases = upsertById(fixtures.distribution.releases, release);
 }
 
 async function persistDistributionTrackUpsert(
@@ -7280,19 +7323,27 @@ async function persistDistributionTrackUpsert(
   await tx.executor.execute(sql`
     insert into tracks (
       id,
+      workspace_id,
       title,
+      artist_name,
+      catalog_status,
       isrc,
       release_id
     )
     values (
       ${trackId},
+      ${request.workspaceId},
       ${request.title.trim()},
+      ${request.artistName.trim()},
+      ${request.status},
       ${request.isrc},
       ${request.releaseId}
     )
     on conflict (id) do update
     set
       title = excluded.title,
+      artist_name = excluded.artist_name,
+      catalog_status = excluded.catalog_status,
       isrc = excluded.isrc,
       release_id = excluded.release_id,
       updated_at = now()
@@ -7306,6 +7357,8 @@ function distributionTrackFromUpsertRequest(
   return {
     id: trackId,
     title: request.title.trim(),
+    artistName: request.artistName.trim(),
+    catalogStatus: request.status,
     isrc: request.isrc,
     releaseId: request.releaseId
   };
@@ -7651,8 +7704,7 @@ async function distributionStatementVoidResponse(context: ApiContext, dependenci
 }
 
 async function distributionPaymentRecordResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
-  const request = await readJsonBody<PaymentRecordRequest>(context);
-  assertPaymentRecordRequest(context, request);
+  const request = await readZodBody<PaymentRecordRequest>(context, distributionPaymentRecordSchema);
   const amount = normalizeErhAmountField(context, request.amountMicro, "amountMicro");
   const idempotencyKey = requireIdempotencyKey(context);
   const actor = context.get("authUser");
@@ -7664,32 +7716,37 @@ async function distributionPaymentRecordResponse(context: ApiContext, dependenci
     idempotencyKey,
     requestBody: request,
     write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<PaymentMutationResponse> => {
-      // Serialize against every other payment mutation on this statement: balances are
-      // computed by summing all of a statement's payments, so two concurrent writes
-      // (even on different payments) must not interleave their read-compute-write.
-      await acquireAdvisoryLock(tx, `distribution:payment:statement:${request.statementId}`);
-      const statement = requireDistributionStatement(dependencies.fixtures.distribution, request.statementId);
-      // P4b: reject payments against a void statement.
-      if (statement.status === "void") {
-        throw new ApiRouteError(409, "statement_void", "Cannot record a payment against a void statement.", [`statementId=${request.statementId}`]);
+      requireDistributionPayee(dependencies.fixtures.distribution, request.payeeId);
+      if (request.statementId !== null) {
+        await acquireAdvisoryLock(tx, `distribution:payment:statement:${request.statementId}`);
+        const statement = requireDistributionStatement(dependencies.fixtures.distribution, request.statementId);
+        if (statement.status === "void") {
+          throw new ApiRouteError(409, "statement_void", "Cannot record a payment against a void statement.", [`statementId=${request.statementId}`]);
+        }
+        assertPaymentMatchesStatement(context, request.payeeId, request.currency, statement);
+      } else {
+        await acquireAdvisoryLock(tx, `distribution:payment:payee:${request.payeeId}:${request.currency}`);
       }
-      assertPaymentMatchesStatement(context, request.payeeId, request.currency, statement);
       const paymentId = randomUUID();
-      const statementPaymentLinkId = randomUUID();
+      const statementPaymentLinkId = request.statementId === null ? null : randomUUID();
       const persistInput: PersistDistributionPaymentRecordInput = {
         paymentId,
+        workspaceId: request.workspaceId,
         statementPaymentLinkId,
         statementId: request.statementId,
         payeeId: request.payeeId,
         amount,
         currency: request.currency,
+        exchangeRate: request.exchangeRate,
+        method: request.method,
         paidAt: request.paidAt,
-        reference: request.reference.trim()
+        reference: request.reference?.trim() ?? null,
+        notes: request.notes?.trim() ?? null
       };
       await persistDistributionPaymentRecord(tx, persistInput);
       const patch = paymentRecordFixturePatch(persistInput);
       const projected = distributionDatasetWithPaymentPatch(dependencies.fixtures.distribution, patch);
-      const balances = computePaymentBalances(projected, request.statementId);
+      const balances = request.statementId === null ? null : computePaymentBalances(projected, request.statementId);
       const auditEventId = await appendAuditEvent(tx, {
         actor,
         action: "distribution_payment_record",
@@ -7699,9 +7756,9 @@ async function distributionPaymentRecordResponse(context: ApiContext, dependenci
         after: {
           payment: patch.payment,
           statementPaymentLink: patch.link,
-          statementBalance: balances.statementBalance,
-          groupTotals: balances.groupTotals,
-          note: "Payment record only; no external money movement is triggered."
+          statementBalance: balances?.statementBalance ?? null,
+          groupTotals: balances?.groupTotals ?? [],
+          note: "Distribution payment ledger record only; no Office or external money movement is triggered."
         },
         idempotencyKey: resolvedIdempotencyKey
       });
@@ -7714,8 +7771,7 @@ async function distributionPaymentRecordResponse(context: ApiContext, dependenci
 
 async function distributionPaymentUpdateResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
   const paymentId = requirePathParam(context, "paymentId");
-  const request = await readJsonBody<PaymentUpdateRequest>(context);
-  assertPaymentUpdateRequest(context, request);
+  const request = await readZodBody<PaymentUpdateRequest>(context, distributionPaymentUpdateSchema);
   const amount = normalizeErhAmountField(context, request.amountMicro, "amountMicro");
   const idempotencyKey = requireIdempotencyKey(context);
   const actor = context.get("authUser");
@@ -7728,26 +7784,33 @@ async function distributionPaymentUpdateResponse(context: ApiContext, dependenci
     requestBody: request,
     write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<PaymentMutationResponse> => {
       const payment = requireDistributionPayment(dependencies.fixtures.distribution, paymentId);
-      const link = requireDistributionPaymentLink(dependencies.fixtures.distribution, paymentId);
-      // Serialize against every other payment mutation on this statement (see record's lock comment).
-      await acquireAdvisoryLock(tx, `distribution:payment:statement:${link.statementId}`);
-      const statement = requireDistributionStatement(dependencies.fixtures.distribution, link.statementId);
+      const link = findDistributionPaymentLink(dependencies.fixtures.distribution, paymentId);
+      await acquireAdvisoryLock(
+        tx,
+        link === null ? `distribution:payment:${paymentId}` : `distribution:payment:statement:${link.statementId}`
+      );
       assertPaymentIsMutable(context, payment);
-      // P4b: reject updates against a void statement.
-      if (statement.status === "void") {
-        throw new ApiRouteError(409, "statement_void", "Cannot update a payment against a void statement.", [`statementId=${link.statementId}`]);
+      if (link !== null) {
+        const statement = requireDistributionStatement(dependencies.fixtures.distribution, link.statementId);
+        if (statement.status === "void") {
+          throw new ApiRouteError(409, "statement_void", "Cannot update a payment against a void statement.", [`statementId=${link.statementId}`]);
+        }
+        assertPaymentMatchesStatement(context, payment.payeeId, request.currency, statement);
       }
-      assertPaymentMatchesStatement(context, payment.payeeId, request.currency, statement);
       const persistInput: PersistDistributionPaymentUpdateInput = {
         paymentId,
         amount,
         currency: request.currency,
-        reference: request.reference.trim()
+        exchangeRate: request.exchangeRate,
+        method: request.method,
+        paidAt: request.paidAt,
+        reference: request.reference?.trim() ?? null,
+        notes: request.notes?.trim() ?? null
       };
       await persistDistributionPaymentUpdate(tx, persistInput);
       const patch = paymentUpdateFixturePatch(payment, link, persistInput);
       const projected = distributionDatasetWithPaymentPatch(dependencies.fixtures.distribution, patch);
-      const balances = computePaymentBalances(projected, link.statementId);
+      const balances = link === null ? null : computePaymentBalances(projected, link.statementId);
       const auditEventId = await appendAuditEvent(tx, {
         actor,
         action: "distribution_payment_update",
@@ -7756,19 +7819,19 @@ async function distributionPaymentUpdateResponse(context: ApiContext, dependenci
         before: {
           payment,
           statementPaymentLink: link,
-          statementBalance: computePaymentBalances(dependencies.fixtures.distribution, link.statementId).statementBalance
+          statementBalance: link === null ? null : computePaymentBalances(dependencies.fixtures.distribution, link.statementId).statementBalance
         },
         after: {
           payment: patch.payment,
           statementPaymentLink: patch.link,
-          statementBalance: balances.statementBalance,
-          groupTotals: balances.groupTotals,
-          note: "Payment record update only; no external money movement is triggered."
+          statementBalance: balances?.statementBalance ?? null,
+          groupTotals: balances?.groupTotals ?? [],
+          note: "Distribution payment ledger update only; no Office or external money movement is triggered."
         },
         idempotencyKey: resolvedIdempotencyKey
       });
       applyDistributionPaymentPatchFixture(dependencies.fixtures, patch);
-      return paymentMutationResponse(paymentId, link.statementId, amount, request.currency, "edited", balances, auditEventId);
+      return paymentMutationResponse(paymentId, link?.statementId ?? null, amount, request.currency, "edited", balances, auditEventId);
     }
   });
   return context.json(result.body, result.status);
@@ -7776,8 +7839,8 @@ async function distributionPaymentUpdateResponse(context: ApiContext, dependenci
 
 async function distributionPaymentReconcileResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
   const paymentId = requirePathParam(context, "paymentId");
-  const request = await readJsonBody<PaymentReconcileRequest>(context);
-  assertPaymentReconcileRequest(context, request);
+  const request = await readZodBody<PaymentReconcileRequest>(context, distributionPaymentReconcileSchema);
+  const amountApplied = normalizeErhAmountField(context, request.amountAppliedMicro, "amountAppliedMicro");
   const idempotencyKey = requireIdempotencyKey(context);
   const actor = context.get("authUser");
   const result = await runIdempotentMutation<PaymentMutationResponse>({
@@ -7789,28 +7852,48 @@ async function distributionPaymentReconcileResponse(context: ApiContext, depende
     requestBody: request,
     write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<PaymentMutationResponse> => {
       const payment = requireDistributionPayment(dependencies.fixtures.distribution, paymentId);
-      const link = requireDistributionPaymentLink(dependencies.fixtures.distribution, paymentId);
-      // Serialize against every other payment mutation on this statement (see record's lock comment).
-      await acquireAdvisoryLock(tx, `distribution:payment:statement:${link.statementId}`);
-      const statement = requireDistributionStatement(dependencies.fixtures.distribution, link.statementId);
+      const existingLink = dependencies.fixtures.distribution.statementPaymentLinks.find(
+        (candidate) => candidate.paymentId === paymentId && candidate.statementId === request.statementId
+      ) ?? null;
+      await acquireAdvisoryLock(tx, `distribution:payment:statement:${request.statementId}`);
+      const statement = requireDistributionStatement(dependencies.fixtures.distribution, request.statementId);
       assertPaymentIsMutable(context, payment);
-      // P4b: reject reconciliation against a void statement.
+      if (payment.paidAt === null) {
+        throw new ApiRouteError(409, "distribution_payment_draft", "Post the payment before linking it to a statement.", [`paymentId=${paymentId}`]);
+      }
       if (statement.status === "void") {
-        throw new ApiRouteError(409, "statement_void", "Cannot reconcile a payment against a void statement.", [`statementId=${link.statementId}`]);
+        throw new ApiRouteError(409, "statement_void", "Cannot link a payment to a void statement.", [`statementId=${request.statementId}`]);
       }
       assertPaymentMatchesStatement(context, payment.payeeId, payment.currency, statement);
+      const alreadyApplied = dependencies.fixtures.distribution.statementPaymentLinks
+        .filter((candidate) => candidate.paymentId === paymentId && candidate.id !== existingLink?.id)
+        .reduce((total, candidate) => erhMoney.add(total, erhMoney.parse(candidate.amountApplied)), 0n);
+      if (erhMoney.add(alreadyApplied, erhMoney.parse(amountApplied)) > erhMoney.parse(payment.amount)) {
+        throw new ApiRouteError(409, "distribution_payment_overapplied", "Statement links cannot exceed the payment amount.", [
+          `paymentId=${paymentId}`,
+          `paymentAmount=${payment.amount}`,
+          `requestedAmount=${amountApplied}`
+        ]);
+      }
+      const currentBalance = computePaymentBalances(dependencies.fixtures.distribution, request.statementId).statementBalance;
+      if (erhMoney.parse(amountApplied) > erhMoney.parse(currentBalance.statementBalance)) {
+        throw new ApiRouteError(409, "distribution_statement_overpaid", "Applied payment cannot exceed the open statement balance.", [
+          `statementId=${request.statementId}`,
+          `statementBalance=${currentBalance.statementBalance}`,
+          `requestedAmount=${amountApplied}`
+        ]);
+      }
       const persistInput: PersistDistributionPaymentReconcileInput = {
         paymentId,
-        statementPaymentLinkId: link.id,
-        statementId: link.statementId,
-        amountApplied: payment.amount,
-        bankTransactionId: request.bankTransactionId,
+        statementPaymentLinkId: existingLink?.id ?? randomUUID(),
+        statementId: request.statementId,
+        amountApplied,
         reconciledAt: request.reconciledAt
       };
       await persistDistributionPaymentReconcile(tx, persistInput);
-      const patch = paymentReconcileFixturePatch(payment, link, persistInput);
+      const patch = paymentReconcileFixturePatch(payment, existingLink, persistInput);
       const projected = distributionDatasetWithPaymentPatch(dependencies.fixtures.distribution, patch);
-      const balances = computePaymentBalances(projected, link.statementId);
+      const balances = computePaymentBalances(projected, request.statementId);
       const auditEventId = await appendAuditEvent(tx, {
         actor,
         action: "distribution_payment_reconcile",
@@ -7818,22 +7901,21 @@ async function distributionPaymentReconcileResponse(context: ApiContext, depende
         targetId: paymentId,
         before: {
           payment,
-          statementPaymentLink: link,
-          statementBalance: computePaymentBalances(dependencies.fixtures.distribution, link.statementId).statementBalance
+          statementPaymentLink: existingLink,
+          statementBalance: computePaymentBalances(dependencies.fixtures.distribution, request.statementId).statementBalance
         },
         after: {
           payment: patch.payment,
           statementPaymentLink: patch.link,
-          bankTransactionId: request.bankTransactionId,
           reconciledAt: request.reconciledAt,
           statementBalance: balances.statementBalance,
           groupTotals: balances.groupTotals,
-          note: "Payment reconciliation only; no external money movement is triggered."
+          note: "Distribution statement link only; no Office bank transaction or external money movement is triggered."
         },
         idempotencyKey: resolvedIdempotencyKey
       });
       applyDistributionPaymentPatchFixture(dependencies.fixtures, patch);
-      return paymentMutationResponse(paymentId, link.statementId, payment.amount, payment.currency, "reconciled", balances, auditEventId);
+      return paymentMutationResponse(paymentId, request.statementId, payment.amount, payment.currency, "reconciled", balances, auditEventId);
     }
   });
   return context.json(result.body, result.status);
@@ -7854,16 +7936,17 @@ async function distributionPaymentVoidResponse(context: ApiContext, dependencies
     requestBody: request,
     write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<PaymentMutationResponse> => {
       const payment = requireDistributionPayment(dependencies.fixtures.distribution, paymentId);
-      const link = requireDistributionPaymentLink(dependencies.fixtures.distribution, paymentId);
+      const link = findDistributionPaymentLink(dependencies.fixtures.distribution, paymentId);
       assertPaymentIsMutable(context, payment);
-      // Statement-scoped, not payment-scoped: a per-payment lock wouldn't block a concurrent
-      // record/update/reconcile on a DIFFERENT payment of the same statement (see record's lock comment).
-      await acquireAdvisoryLock(tx, `distribution:payment:statement:${link.statementId}`);
+      await acquireAdvisoryLock(
+        tx,
+        link === null ? `distribution:payment:${paymentId}` : `distribution:payment:statement:${link.statementId}`
+      );
       const persistInput: PersistDistributionPaymentVoidInput = { paymentId };
       await persistDistributionPaymentVoid(tx, persistInput);
       const patch = paymentVoidFixturePatch(payment, link);
       const projected = distributionDatasetWithPaymentPatch(dependencies.fixtures.distribution, patch);
-      const balances = computePaymentBalances(projected, link.statementId);
+      const balances = link === null ? null : computePaymentBalances(projected, link.statementId);
       const auditEventId = await appendAuditEvent(tx, {
         actor,
         action: "distribution_payment_void",
@@ -7872,19 +7955,19 @@ async function distributionPaymentVoidResponse(context: ApiContext, dependencies
         before: {
           payment,
           statementPaymentLink: link,
-          statementBalance: computePaymentBalances(dependencies.fixtures.distribution, link.statementId).statementBalance
+          statementBalance: link === null ? null : computePaymentBalances(dependencies.fixtures.distribution, link.statementId).statementBalance
         },
         after: {
           payment: patch.payment,
           reason: request.reason,
-          statementBalance: balances.statementBalance,
-          groupTotals: balances.groupTotals,
-          note: "Payment void only; no external money movement is triggered."
+          statementBalance: balances?.statementBalance ?? null,
+          groupTotals: balances?.groupTotals ?? [],
+          note: "Distribution payment void only; no Office or external money movement is triggered."
         },
         idempotencyKey: resolvedIdempotencyKey
       });
       applyDistributionPaymentPatchFixture(dependencies.fixtures, patch);
-      return paymentMutationResponse(paymentId, link.statementId, payment.amount, payment.currency, "voided", balances, auditEventId);
+      return paymentMutationResponse(paymentId, link?.statementId ?? null, payment.amount, payment.currency, "voided", balances, auditEventId);
     }
   });
   return context.json(result.body, result.status);
@@ -8953,29 +9036,6 @@ function assertStatementGenerateRequest(context: ApiContext, request: StatementG
   assertPeriodField(context, request.period, "period");
   assertStringArray(context, request.payeeIds, "payeeIds");
   assertStringField(context, request.lockKey, "lockKey");
-}
-
-function assertPaymentRecordRequest(context: ApiContext, request: PaymentRecordRequest): void {
-  assertStringField(context, request.workspaceId, "workspaceId");
-  assertStringField(context, request.statementId, "statementId");
-  assertStringField(context, request.payeeId, "payeeId");
-  assertPositiveErhAmountField(context, request.amountMicro, "amountMicro");
-  assertCurrencyField(context, request.currency, "currency");
-  assertIsoDateTimeField(context, request.paidAt, "paidAt");
-  assertStringField(context, request.reference, "reference");
-}
-
-function assertPaymentUpdateRequest(context: ApiContext, request: PaymentUpdateRequest): void {
-  assertStringField(context, request.workspaceId, "workspaceId");
-  assertPositiveErhAmountField(context, request.amountMicro, "amountMicro");
-  assertCurrencyField(context, request.currency, "currency");
-  assertStringField(context, request.reference, "reference");
-}
-
-function assertPaymentReconcileRequest(context: ApiContext, request: PaymentReconcileRequest): void {
-  assertStringField(context, request.workspaceId, "workspaceId");
-  assertStringField(context, request.bankTransactionId, "bankTransactionId");
-  assertIsoDateTimeField(context, request.reconciledAt, "reconciledAt");
 }
 
 function assertPaymentVoidRequest(context: ApiContext, request: PaymentVoidRequest): void {
@@ -10567,11 +10627,14 @@ function paymentRecordFixturePatch(input: PersistDistributionPaymentRecordInput)
       payeeId: input.payeeId,
       amount: input.amount,
       currency: input.currency,
+      exchangeRate: input.exchangeRate,
+      method: input.method,
       status: "recorded",
       paidAt: input.paidAt,
-      reference: input.reference
+      reference: input.reference,
+      notes: input.notes
     },
-    link: {
+    link: input.statementId === null || input.statementPaymentLinkId === null ? null : {
       id: input.statementPaymentLinkId,
       statementId: input.statementId,
       paymentId: input.paymentId,
@@ -10582,7 +10645,7 @@ function paymentRecordFixturePatch(input: PersistDistributionPaymentRecordInput)
 
 function paymentUpdateFixturePatch(
   payment: DistributionReadDataset["payments"][number],
-  link: DistributionReadDataset["statementPaymentLinks"][number],
+  link: DistributionReadDataset["statementPaymentLinks"][number] | null,
   input: PersistDistributionPaymentUpdateInput
 ): DistributionPaymentFixturePatch {
   return {
@@ -10590,19 +10653,20 @@ function paymentUpdateFixturePatch(
       ...payment,
       amount: input.amount,
       currency: input.currency,
+      exchangeRate: input.exchangeRate,
+      method: input.method,
       status: "edited",
-      reference: input.reference
+      paidAt: input.paidAt,
+      reference: input.reference,
+      notes: input.notes
     },
-    link: {
-      ...link,
-      amountApplied: input.amount
-    }
+    link
   };
 }
 
 function paymentReconcileFixturePatch(
   payment: DistributionReadDataset["payments"][number],
-  link: DistributionReadDataset["statementPaymentLinks"][number],
+  link: DistributionReadDataset["statementPaymentLinks"][number] | null,
   input: PersistDistributionPaymentReconcileInput
 ): DistributionPaymentFixturePatch {
   return {
@@ -10611,9 +10675,10 @@ function paymentReconcileFixturePatch(
       status: "reconciled"
     },
     link: {
-      ...link,
+      ...(link ?? {}),
       id: input.statementPaymentLinkId,
       statementId: input.statementId,
+      paymentId: input.paymentId,
       amountApplied: input.amountApplied
     }
   };
@@ -10621,7 +10686,7 @@ function paymentReconcileFixturePatch(
 
 function paymentVoidFixturePatch(
   payment: DistributionReadDataset["payments"][number],
-  link: DistributionReadDataset["statementPaymentLinks"][number]
+  link: DistributionReadDataset["statementPaymentLinks"][number] | null
 ): DistributionPaymentFixturePatch {
   // The link is kept untouched: balance projections zero out applied amounts
   // for void payments, so the statement balance recomputes without deletion.
@@ -10637,14 +10702,18 @@ function paymentVoidFixturePatch(
 function applyDistributionPaymentPatchFixture(fixtures: ApiFixtureStore, patch: DistributionPaymentFixturePatch): void {
   const mutableDistribution = fixtures.distribution as Mutable<DistributionReadDataset>;
   mutableDistribution.payments = upsertPayment(fixtures.distribution.payments, patch.payment);
-  mutableDistribution.statementPaymentLinks = upsertStatementPaymentLink(fixtures.distribution.statementPaymentLinks, patch.link);
+  if (patch.link !== null) {
+    mutableDistribution.statementPaymentLinks = upsertStatementPaymentLink(fixtures.distribution.statementPaymentLinks, patch.link);
+  }
 }
 
 function distributionDatasetWithPaymentPatch(dataset: DistributionReadDataset, patch: DistributionPaymentFixturePatch): DistributionReadDataset {
   return {
     ...dataset,
     payments: upsertPayment(dataset.payments, patch.payment),
-    statementPaymentLinks: upsertStatementPaymentLink(dataset.statementPaymentLinks, patch.link)
+    statementPaymentLinks: patch.link === null
+      ? dataset.statementPaymentLinks
+      : upsertStatementPaymentLink(dataset.statementPaymentLinks, patch.link)
   };
 }
 
@@ -10718,11 +10787,11 @@ function statementPaymentBalanceInputs(dataset: DistributionReadDataset): readon
 
 function paymentMutationResponse(
   paymentId: string,
-  statementId: string,
+  statementId: string | null,
   amount: string,
   currency: string,
   paymentStatus: "recorded" | "edited" | "reconciled" | "voided",
-  balances: PaymentBalanceProjection,
+  balances: PaymentBalanceProjection | null,
   auditEventId: string
 ): PaymentMutationResponse {
   return {
@@ -10734,8 +10803,8 @@ function paymentMutationResponse(
     amountMicro: amount,
     currency,
     paymentStatus,
-    statementBalance: balances.statementBalance,
-    groupTotals: balances.groupTotals
+    statementBalance: balances?.statementBalance ?? null,
+    groupTotals: balances?.groupTotals ?? []
   };
 }
 
@@ -10950,16 +11019,11 @@ function requireDistributionPayment(
   return payment;
 }
 
-function requireDistributionPaymentLink(
+function findDistributionPaymentLink(
   dataset: DistributionReadDataset,
   paymentId: string
-): DistributionReadDataset["statementPaymentLinks"][number] {
-  const link = dataset.statementPaymentLinks.find((candidate) => candidate.paymentId === paymentId);
-  if (link === undefined) {
-    throw new ApiRouteError(404, "distribution_payment_link_not_found", "Distribution payment is not linked to a statement.", [`paymentId=${paymentId}`]);
-  }
-
-  return link;
+): DistributionReadDataset["statementPaymentLinks"][number] | null {
+  return dataset.statementPaymentLinks.find((candidate) => candidate.paymentId === paymentId) ?? null;
 }
 
 function assertPaymentMatchesStatement(
@@ -13230,7 +13294,7 @@ function toDistributionDashboard(
   const contractBlockerCount = dataset.normalizedEarnings.filter(
     (earning) => earning.mappingStatus === "matched" && !postedAllocations.some((allocation) => allocation.earningId === earning.id && allocation.contractId !== null)
   ).length;
-  const expenseMissingPayeeCount = expenses.filter((expense) => expense.payeeId.trim() === "").length;
+  const expenseMissingPayeeCount = expenses.filter((expense) => expense.payeeId !== null && expense.payeeId.trim() === "").length;
   const pendingAllocationCount = dataset.normalizedEarnings.filter((earning) => earning.calculationStatus === "pending").length;
   const openSuspenseCount = countOpenSuspense(dataset, { status: "open", reasonCode: null });
   const readiness: readonly DistributionDashboardReadinessItem[] = [
@@ -13435,22 +13499,23 @@ function toApiImportStatus(status: string): DistributionImportBatch["status"] {
 }
 
 function toReleaseSummaries(dataset: DistributionReadDataset): readonly ReleaseSummary[] {
-  const releaseIds = new Set<string>();
-  for (const track of dataset.tracks) {
-    if (track.releaseId !== null) {
-      releaseIds.add(track.releaseId);
-    }
+  return dataset.releases.map((release) => ({
+    id: release.id,
+    title: release.title,
+    artistName: release.artistName,
+    upc: release.upc,
+    status: toApiCatalogStatus(release.catalogStatus),
+    releaseDate: release.releaseDate,
+    trackCount: dataset.tracks.filter((track) => track.releaseId === release.id).length
+  }));
+}
+
+function toApiCatalogStatus(status: string): ReleaseSummary["status"] {
+  if (status === "draft" || status === "archived") {
+    return status;
   }
 
-  return [...releaseIds].map((releaseId) => ({
-    id: releaseId,
-    title: "Seggae light",
-    artistName: "Kaya",
-    upc: "742000000001",
-    status: "released",
-    releaseDate: "2026-04-01",
-    trackCount: dataset.tracks.filter((track) => track.releaseId === releaseId).length
-  }));
+  return "released";
 }
 
 function toAllocationRunSummary(dataset: DistributionReadDataset, run: DistributionCalculationRunRow): AllocationRunSummary {
@@ -13543,35 +13608,71 @@ function toApiStatementStatus(status: string): StatementSummary["status"] {
 function toPaymentSummaries(dataset: DistributionReadDataset): readonly PaymentSummary[] {
   return dataset.payments.map((payment) => {
     const payee = dataset.payees.find((candidate) => candidate.id === payment.payeeId);
-    const link = dataset.statementPaymentLinks.find((candidate) => candidate.paymentId === payment.id);
+    const linkedStatementIds = dataset.statementPaymentLinks
+      .filter((candidate) => candidate.paymentId === payment.id)
+      .map((candidate) => candidate.statementId);
     return {
       id: payment.id,
-      statementId: link?.statementId ?? "statement_unlinked",
+      statementId: linkedStatementIds[0] ?? null,
+      linkedStatementIds,
       payeeId: payment.payeeId,
       payeeName: payee?.name ?? payment.payeeId,
       amountMicro: payment.amount,
       currency: payment.currency,
-      status: toApiPaymentStatus(payment.status),
+      exchangeRate: payment.exchangeRate,
+      method: toApiPaymentMethod(payment.method),
+      status: toApiPaymentStatus(payment.status, payment.paidAt),
       paidAt: payment.paidAt,
-      reference: payment.reference
+      reference: payment.reference,
+      notes: payment.notes
     };
   });
 }
 
-function toApiPaymentStatus(status: string): PaymentSummary["status"] {
+function toApiPaymentStatus(status: string, paidAt: string | null): PaymentSummary["status"] {
   if (status === "void") {
     return "voided";
   }
 
-  if (status === "reconciled") {
-    return "paid";
-  }
-
-  return "draft";
+  return paidAt === null ? "draft" : "paid";
 }
 
-function toRevenueRows(dataset: DistributionReadDataset, groupBy: string): readonly DistributionRevenueRow[] {
-  const allocations = readAllocationList(dataset, { calculationRunId: null, payeeId: null, status: "posted" }).rows;
+function toApiPaymentMethod(method: string): PaymentSummary["method"] {
+  if (method === "paypal" || method === "cash" || method === "cheque" || method === "crypto" || method === "other") {
+    return method;
+  }
+
+  return "bank_transfer";
+}
+
+interface DistributionRevenueFilters {
+  readonly period: string | null;
+  readonly payeeId: string | null;
+  readonly store: string | null;
+  readonly currency: string | null;
+  readonly dateFrom: string | null;
+  readonly dateTo: string | null;
+}
+
+function toRevenueRows(
+  dataset: DistributionReadDataset,
+  groupBy: string,
+  filters: DistributionRevenueFilters
+): readonly DistributionRevenueRow[] {
+  const hasDateRange = isIsoDate(filters.dateFrom) && isIsoDate(filters.dateTo);
+  const allocations = readAllocationList(dataset, { calculationRunId: null, payeeId: filters.payeeId, status: "posted" }).rows
+    .filter((allocation) => filters.currency === null || allocation.currency === filters.currency)
+    .filter((allocation) => {
+      const earning = dataset.normalizedEarnings.find((candidate) => candidate.id === allocation.earningId);
+      return filters.store === null || earning?.dsp === filters.store;
+    })
+    .filter((allocation) => {
+      const date = revenueDateFor(dataset, allocation);
+      if (hasDateRange) {
+        return isDateInRange(date, filters.dateFrom, filters.dateTo);
+      }
+      return filters.period === null || date.startsWith(filters.period);
+    });
   const groups = new Map<string, { readonly label: string; readonly currency: CurrencyCode; readonly rows: DistributionAllocationReadRow[] }>();
   for (const allocation of allocations) {
     const group = revenueGroup(dataset, allocation, groupBy);
@@ -13627,9 +13728,10 @@ function revenueGroup(
   }
 
   if (groupBy === "period") {
+    const period = revenueDateFor(dataset, allocation).slice(0, 7);
     return {
-      id: "2026-04",
-      label: "2026-04"
+      id: period,
+      label: period
     };
   }
 
@@ -13637,6 +13739,20 @@ function revenueGroup(
     id: allocation.payeeId,
     label: allocation.payeeName
   };
+}
+
+function revenueDateFor(dataset: DistributionReadDataset, allocation: DistributionAllocationReadRow): string {
+  const earning = dataset.normalizedEarnings.find((candidate) => candidate.id === allocation.earningId);
+  const batch = earning === undefined ? undefined : dataset.importBatches.find((candidate) => candidate.id === earning.batchId);
+  return batch?.importedAt?.slice(0, 10) ?? "1970-01-01";
+}
+
+function isDateInRange(value: string, dateFrom: string | null, dateTo: string | null): boolean {
+  if (!isIsoDate(dateFrom) || !isIsoDate(dateTo)) {
+    return true;
+  }
+
+  return value >= dateFrom && value <= dateTo;
 }
 
 function maxDistributionNetUnits(groups: readonly (readonly DistributionAllocationReadRow[])[]): bigint {
@@ -13680,7 +13796,9 @@ function toDistributionReconciliation(store: ApiFixtureStore): DistributionRecon
     (earning) => earning.mappingStatus === "matched" && !allocatedEarningIds.has(earning.id)
   );
 
-  const expenseTermsMissingPayee = store.distributionCostTerms.filter((term) => term.payeeId === null);
+  const sharedExpenseTerms = store.distributionCostTerms.filter((term) => term.payeeId === null);
+  // Null payee is an intentional shared-cost scope, not a broken identity link.
+  const expenseTermsMissingPayee: typeof sharedExpenseTerms = [];
 
   const balanceGroups = new Map<string, { readonly payeeId: string; readonly currency: string; ids: string[]; latest: string }>();
   for (const balance of store.distributionPayeeBalances) {
@@ -13709,7 +13827,7 @@ function toDistributionReconciliation(store: ApiFixtureStore): DistributionRecon
     { id: "statements", label: "Statements", value: String(dataset.statements.length), detail: `${String(dataset.statementLines.length)} statement lines`, tone: "info" },
     { id: "payee_balances", label: "Payee balances", value: String(store.distributionPayeeBalances.length), detail: `${String(balanceGroups.size)} payee/currency rows`, tone: "info" },
     { id: "expense_applications", label: "Expense applications", value: String(store.distributionExpenseApplications.length), detail: "applied cost terms", tone: "info" },
-    { id: "missing_expense_payees", label: "Missing expense payees", value: String(expenseTermsMissingPayee.length), detail: "cost terms with null payee", tone: expenseTermsMissingPayee.length > 0 ? "warning" : "success" },
+    { id: "shared_expense_terms", label: "Shared expense terms", value: String(sharedExpenseTerms.length), detail: "recoup across eligible payee shares", tone: "info" },
     { id: "allocations", label: "Allocations", value: String(dataset.earningAllocations.length), detail: "earning allocations", tone: "info" },
     { id: "matched_unallocated", label: "Matched unallocated", value: String(matchedUnallocated.length), detail: "matched, no allocation", tone: matchedUnallocated.length > 0 ? "warning" : "success" }
   ];
