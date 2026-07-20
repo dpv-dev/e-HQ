@@ -12,8 +12,8 @@
       "default": "./src/index.ts"
     },
     "./tokens": {
-      "types": "./dist/tokens/tokens.d.ts",
-      "default": "./dist/tokens/tokens.js"
+      "types": "./tokens/tokens.ts",
+      "default": "./tokens/tokens.ts"
     },
     "./tokens/visual-tokens.css": "./tokens/visual-tokens.css",
     "./assets/*": "./assets/*"
