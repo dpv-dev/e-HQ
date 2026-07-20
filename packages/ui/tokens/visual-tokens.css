@@ -124,7 +124,8 @@
   --ehq-shell-sidebar-width:264px;
   --ehq-shell-sidebar-collapsed-width:76px;
   --ehq-shell-topbar-height:72px;
-  --ehq-shell-content-max:1480px;
+  /* Data workspaces use the available desktop rail before centering. */
+  --ehq-shell-content-max:1760px;
   --ehq-page-gap:24px;
   --ehq-section-gap:16px;
   --ehq-table-min-width:760px;
