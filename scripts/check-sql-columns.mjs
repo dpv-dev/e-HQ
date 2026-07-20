@@ -102,6 +102,15 @@ const REQUIRED_COLUMNS = {
     "currency",
     "reason_code"
   ],
+  suspense_resolution_overrides: [
+    "id",
+    "workspace_id",
+    "suspense_id",
+    "resolution",
+    "note",
+    "created_by_user_id",
+    "idempotency_key"
+  ],
   expense_applications: [
     "id",
     "cost_term_id",

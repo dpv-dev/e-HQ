@@ -14,6 +14,7 @@ import type {
 } from "@ehq/db";
 import { erhMoney } from "@ehq/domain-finance";
 import { computeStatementBalance } from "./statements.js";
+import { distributionSuspenseReasonDefinition, type DistributionSuspenseFixPath } from "./suspense.js";
 
 export interface DistributionReadDataset {
   readonly importBatches: readonly DistributionImportBatchRow[];
@@ -158,8 +159,6 @@ export interface DistributionAllocationReadResponse {
 }
 
 export type DistributionSuspenseStatusFilter = "open" | "resolved" | null;
-export type DistributionSuspenseFixPath = "mapping" | "contracts" | "imports" | "catalog";
-
 export interface DistributionSuspenseReadFilters {
   readonly status: DistributionSuspenseStatusFilter;
   readonly reasonCode: string | null;
@@ -615,19 +614,7 @@ function matchesSuspenseStatus(item: DistributionSuspenseItemRow, status: Distri
 }
 
 function fixPathForSuspenseReason(reasonCode: string): DistributionSuspenseFixPath {
-  if (reasonCode === "invalid_split" || reasonCode === "missing_split") {
-    return "contracts";
-  }
-
-  if (reasonCode === "unmapped_track") {
-    return "mapping";
-  }
-
-  if (reasonCode === "import_retry") {
-    return "imports";
-  }
-
-  return "catalog";
+  return distributionSuspenseReasonDefinition(reasonCode).fixPath;
 }
 
 function requireImportBatch(resolved: DistributionResolvedDataset, batchId: string): DistributionImportBatchRow {

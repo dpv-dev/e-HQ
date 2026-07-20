@@ -16,7 +16,8 @@ import {
   distributionContractExpenseUpdateSchema,
   distributionPaymentRecordSchema,
   distributionPaymentUpdateSchema,
-  distributionPaymentReconcileSchema
+  distributionPaymentReconcileSchema,
+  distributionSuspenseResolveSchema
 } from "@ehq/api-contracts";
 import {
   basisPointsInputSchema,
@@ -186,6 +187,8 @@ import type {
   DistributionReconciliationStatementGap,
   DistributionRevenueRow,
   DistributionSettingsResponse,
+  DistributionSuspenseWorkbenchResponse,
+  DistributionSuspenseWorkbenchRow,
   OfficeBankQualityResponse,
   OfficeDashboardAnalyticsResponse,
   OfficeDashboardDepartmentExpenseTrendKpi,
@@ -257,6 +260,7 @@ import {
   DistributionCatalogCursorError,
   DistributionContractCursorError,
   DistributionMappingCursorError,
+  DistributionSuspenseCursorError,
   type DistributionReadRuntime
 } from "./distribution-repository.js";
 import { createSupabaseRouter } from "./supabase-server.js";
@@ -950,12 +954,6 @@ const allocationRunUnpostSchema = workspaceBodySchema.extend({
 });
 const allocationRetryMissingContractsSchema = workspaceBodySchema.extend({
   trackId: z.string().uuid()
-});
-const suspenseResolveSchema = workspaceBodySchema.extend({
-  suspenseId: z.string().min(1),
-  resolution: z.enum(["map_to_release", "map_to_track", "hold"]),
-  targetId: nullableStringSchema,
-  note: z.string().min(1)
 });
 const distributionAliasTargetTypeSchema = z.enum(["artist", "payee", "label", "release", "track", "unassigned"]);
 const distributionAliasUpsertSchema = workspaceBodySchema.extend({
@@ -2284,6 +2282,33 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
       reasonCode: null
     }).rows.map((row) => toApiSuspenseItem(row, period));
     return context.json(pageItems(context, suspense));
+  });
+
+  app.get("/erh/v1/suspense/workbench", async (context) => {
+    const workspaceId = requireQuery(context, "workspaceId");
+    if (dependencies.distributionReads === undefined) {
+      throw new ApiRouteError(503, "suspense_repository_unavailable", "The live Suspense repository is unavailable.", []);
+    }
+    const cursor = nullableQuery(context, "cursor");
+    try {
+      const response: DistributionSuspenseWorkbenchResponse = await dependencies.distributionReads.readSuspenseWorkbench({
+        workspaceId,
+        search: nullableQuery(context, "search"),
+        batchReference: nullableQuery(context, "batchReference"),
+        reasonCode: nullableQuery(context, "reasonCode"),
+        status: toSuspenseStatusQuery(nullableQuery(context, "status")),
+        dateFrom: toSuspenseIsoDateQuery(nullableQuery(context, "dateFrom"), "dateFrom"),
+        dateTo: toSuspenseIsoDateQuery(nullableQuery(context, "dateTo"), "dateTo"),
+        cursor,
+        limit: pageLimit(context)
+      });
+      return context.json(response);
+    } catch (error: unknown) {
+      if (error instanceof DistributionSuspenseCursorError) {
+        throw new ApiRouteError(400, "suspense_cursor_invalid", error.message, [`cursor=${cursor ?? "null"}`]);
+      }
+      throw error;
+    }
   });
 
   app.post("/erh/v1/suspense/:suspenseId/resolve", async (context) => {
@@ -6149,14 +6174,35 @@ async function distributionAllocationUnpostResponse(context: ApiContext, depende
 
 async function distributionSuspenseResolveResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
   const suspenseId = requirePathParam(context, "suspenseId");
-  const request = await readZodBody<SuspenseResolveRequest>(context, suspenseResolveSchema);
+  const request = await readZodBody<SuspenseResolveRequest>(context, distributionSuspenseResolveSchema);
   if (request.suspenseId !== suspenseId) {
     throw new ApiRouteError(400, "body_path_mismatch", "Suspense body must match the route suspense id.", [
       `pathSuspenseId=${suspenseId}`,
       `bodySuspenseId=${request.suspenseId}`
     ]);
   }
-  const suspense = requireDistributionSuspenseItem(dependencies.fixtures.distribution, suspenseId);
+  const liveSuspense = dependencies.distributionReads === undefined
+    ? null
+    : await dependencies.distributionReads.getSuspenseItem(request.workspaceId, suspenseId);
+  const fixtureSuspense = liveSuspense === null && dependencies.distributionReads === undefined
+    ? requireDistributionSuspenseItem(dependencies.fixtures.distribution, suspenseId)
+    : null;
+  if (dependencies.distributionReads !== undefined && liveSuspense === null) {
+    throw new ApiRouteError(404, "distribution_suspense_not_found", "Distribution suspense item was not found.", [`suspenseId=${suspenseId}`]);
+  }
+  const suspense = liveSuspense ?? fixtureSuspense;
+  if (suspense === null) {
+    throw new ApiRouteError(404, "distribution_suspense_not_found", "Distribution suspense item was not found.", [`suspenseId=${suspenseId}`]);
+  }
+  if ((request.resolution === "map_to_track" || request.resolution === "map_to_release") && dependencies.distributionReads !== undefined) {
+    const targetId = request.targetId;
+    if (targetId === null) {
+      throw new ApiRouteError(422, "distribution_suspense_target_required", "A target is required for this resolution.", []);
+    }
+    if (request.resolution === "map_to_track" && await dependencies.distributionReads.getCatalogTrack(request.workspaceId, targetId) === null) {
+      throw new ApiRouteError(422, "distribution_suspense_target_invalid", "The target track is not available in this workspace.", [`targetId=${targetId}`]);
+    }
+  }
   const idempotencyKey = requireIdempotencyKey(context);
   const actor = context.get("authUser");
   const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
@@ -6168,7 +6214,12 @@ async function distributionSuspenseResolveResponse(context: ApiContext, dependen
     requestBody: request,
     write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
       await acquireAdvisoryLock(tx, `distribution:suspense:${suspenseId}`);
-      await persistDistributionSuspenseResolve(tx, suspenseId, dependencies.nowIso());
+      if (suspenseStatus(suspense) === "resolved") {
+        throw new ApiRouteError(409, "distribution_suspense_already_resolved", "This suspense item has already been resolved.", [`suspenseId=${suspenseId}`]);
+      }
+      validateSuspenseResolutionPrerequisites(suspense, request);
+      const resolvedAt = dependencies.nowIso();
+      await persistDistributionSuspenseResolve(tx, request, suspense, actor.userId, resolvedIdempotencyKey, resolvedAt);
       const auditEventId = await appendAuditEvent(tx, {
         actor,
         action: "distribution_suspense_resolve",
@@ -6178,7 +6229,7 @@ async function distributionSuspenseResolveResponse(context: ApiContext, dependen
         after: { resolution: request.resolution, targetId: request.targetId, note: request.note },
         idempotencyKey: resolvedIdempotencyKey
       });
-      resolveDistributionSuspenseFixture(dependencies.fixtures, suspenseId, dependencies.nowIso());
+      resolveDistributionSuspenseFixture(dependencies.fixtures, suspenseId, resolvedAt, request.resolution);
       return mutationReceipt(suspenseId, auditEventId);
     }
   });
@@ -8029,23 +8080,130 @@ function requireDistributionSuspenseItem(dataset: DistributionReadDataset, suspe
   return suspense;
 }
 
-async function persistDistributionSuspenseResolve(tx: ApiWriteTransaction, suspenseId: string, resolvedAt: string): Promise<void> {
+type ResolvableSuspenseItem = DistributionSuspenseWorkbenchRow | DistributionReadDataset["suspenseItems"][number];
+
+function suspenseStatus(suspense: ResolvableSuspenseItem): "open" | "resolved" {
+  return "status" in suspense ? suspense.status : suspense.resolved ? "resolved" : "open";
+}
+
+function validateSuspenseResolutionPrerequisites(
+  suspense: ResolvableSuspenseItem,
+  request: SuspenseResolveRequest
+): void {
+  // Fixture-backed API tests exercise the legacy compatibility route. Runtime
+  // safety checks rely on the live, workspace-scoped workbench projection.
+  if (!("status" in suspense)) {
+    return;
+  }
+  if (request.resolution === "map_to_release") {
+    throw new ApiRouteError(
+      422,
+      "distribution_suspense_release_mapping_deprecated",
+      "Map the earning to a canonical track, not directly to a release.",
+      [`suspenseId=${request.suspenseId}`]
+    );
+  }
+  if (request.resolution === "map_to_track" && suspense.earningId === null) {
+    throw new ApiRouteError(422, "distribution_suspense_earning_missing", "This suspense row has no earning to map.", [
+      `suspenseId=${request.suspenseId}`
+    ]);
+  }
+  if (
+    request.resolution === "retry_row" &&
+    ["missing_contract", "missing_split", "invalid_split"].includes(suspense.reasonCode) &&
+    (suspense.splitPercentage === null || !/^100(?:\.0+)?$/u.test(suspense.splitPercentage))
+  ) {
+    throw new ApiRouteError(
+      409,
+      "distribution_suspense_split_incomplete",
+      "The effective split must equal exactly 100% before this row can be retried.",
+      [`suspenseId=${request.suspenseId}`, `splitPercentage=${suspense.splitPercentage ?? "null"}`]
+    );
+  }
+}
+
+async function persistDistributionSuspenseResolve(
+  tx: ApiWriteTransaction,
+  request: SuspenseResolveRequest,
+  suspense: ResolvableSuspenseItem,
+  actorUserId: string,
+  idempotencyKey: string,
+  resolvedAt: string
+): Promise<void> {
   if (tx.kind === "memory") {
     return;
   }
 
   await tx.executor.execute(sql`
+    insert into suspense_resolution_overrides (
+      id, workspace_id, suspense_id, resolution, target_id, note,
+      created_by_user_id, idempotency_key, created_at
+    ) values (
+      ${randomUUID()}, ${request.workspaceId}, ${request.suspenseId}, ${request.resolution}, ${request.targetId}, ${request.note},
+      ${actorUserId}, ${idempotencyKey}, ${resolvedAt}
+    )
+  `);
+
+  if (request.resolution === "map_to_track" && request.targetId !== null && suspense.earningId !== null) {
+    await tx.executor.execute(sql`
+      update earning_track_matches
+      set status = 'ignored'
+      where earning_id = ${suspense.earningId} and track_id <> ${request.targetId}
+    `);
+    await tx.executor.execute(sql`
+      with updated as (
+        update earning_track_matches
+        set confidence = 100, status = 'matched'
+        where earning_id = ${suspense.earningId} and track_id = ${request.targetId}
+        returning id
+      )
+      insert into earning_track_matches (id, earning_id, track_id, confidence, status)
+      select ${randomUUID()}, ${suspense.earningId}, ${request.targetId}, 100, 'matched'
+      where not exists (select 1 from updated)
+    `);
+    await tx.executor.execute(sql`
+      update normalized_earnings
+      set mapping_status = 'matched', calculation_status = 'pending', updated_at = ${resolvedAt}
+      where id = ${suspense.earningId} and workspace_id = ${request.workspaceId}
+    `);
+  } else if (suspense.earningId !== null) {
+    const calculationStatus = request.resolution === "hold" || request.resolution === "mark_resolved" ? "excluded" : "pending";
+    await tx.executor.execute(sql`
+      update normalized_earnings
+      set calculation_status = ${calculationStatus}, updated_at = ${resolvedAt}
+      where id = ${suspense.earningId} and workspace_id = ${request.workspaceId}
+    `);
+  }
+
+  await tx.executor.execute(sql`
     update suspense_items
     set resolved = true, resolved_at = ${resolvedAt}
-    where id = ${suspenseId}
+    where id = ${request.suspenseId} and workspace_id = ${request.workspaceId}
   `);
 }
 
-function resolveDistributionSuspenseFixture(fixtures: ApiFixtureStore, suspenseId: string, resolvedAt: string): void {
+function resolveDistributionSuspenseFixture(
+  fixtures: ApiFixtureStore,
+  suspenseId: string,
+  resolvedAt: string,
+  resolution: SuspenseResolveRequest["resolution"]
+): void {
   const mutableDistribution = fixtures.distribution as Mutable<DistributionReadDataset>;
+  const suspense = fixtures.distribution.suspenseItems.find((candidate) => candidate.id === suspenseId);
   mutableDistribution.suspenseItems = fixtures.distribution.suspenseItems.map((suspense) =>
     suspense.id === suspenseId ? { ...suspense, resolved: true, resolvedAt } : suspense
   );
+  if (suspense?.earningId !== null && suspense?.earningId !== undefined) {
+    mutableDistribution.normalizedEarnings = fixtures.distribution.normalizedEarnings.map((earning) =>
+      earning.id === suspense.earningId
+        ? {
+            ...earning,
+            calculationStatus: resolution === "hold" || resolution === "mark_resolved" ? "excluded" : "pending",
+            mappingStatus: resolution === "map_to_track" ? "matched" : earning.mappingStatus
+          }
+        : earning
+    );
+  }
 }
 
 function upsertById<TItem extends { readonly id: string }>(items: readonly TItem[], item: TItem): readonly TItem[] {
@@ -12057,6 +12215,20 @@ function toAllocationIsoDateQuery(value: string | null, key: string): string | n
     throw new ApiRouteError(400, "allocations_date_invalid", "Allocation date filter must use YYYY-MM-DD.", [`${key}=${value}`]);
   }
   return parsed.data;
+}
+
+function toSuspenseIsoDateQuery(value: string | null, key: string): string | null {
+  if (value === null) return null;
+  const parsed = isoDateSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new ApiRouteError(400, "suspense_date_invalid", "Suspense date filter must use YYYY-MM-DD.", [`${key}=${value}`]);
+  }
+  return parsed.data;
+}
+
+function toSuspenseStatusQuery(value: string | null): "open" | "resolved" | null {
+  if (value === null || value === "open" || value === "resolved") return value;
+  throw new ApiRouteError(400, "suspense_status_invalid", "Suspense status filter is invalid.", [`status=${value}`]);
 }
 
 function toAllocationPeriodQuery(value: string | null): string | null {

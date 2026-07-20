@@ -5733,6 +5733,126 @@ test("Distribution mapping route delegates filters and opaque cursors to the liv
   assert.equal((await invalidAllocationDate.json()).error.code, "allocations_date_invalid");
 });
 
+test("Distribution Suspense workbench delegates live filters and resolutions remain audited and idempotent", async () => {
+  let receivedQuery: Readonly<Record<string, unknown>> | null = null;
+  const fixtures = createFixtureStore();
+  const suspenseItem = {
+    id: "suspense_1",
+    earningId: "earning_suspense",
+    batchId: "batch_kontor",
+    batchReference: "#28",
+    reasonCode: "unmapped_track",
+    reasonTitle: "Unmapped track",
+    reasonDescription: "Map the earning to its canonical track before allocation.",
+    fixPath: "mapping" as const,
+    actionLabel: "Map track",
+    resolutionMode: "map" as const,
+    trackId: null,
+    trackTitle: "Unknown",
+    artistName: "Unknown",
+    isrc: null,
+    upc: "742000000002",
+    amountMicro: "50.0000000000",
+    currency: "USD" as const,
+    splitPercentage: null,
+    status: "open" as const,
+    createdAt: "2026-07-20T00:00:00.000Z",
+    resolvedAt: null
+  };
+  const catalogTrack = {
+    id: "track_1",
+    title: "Seggae light",
+    versionTitle: null,
+    artistImport: "Kaya",
+    catalogArtist: "Kaya",
+    isrc: "MUAAA2600001",
+    upc: "742000000001",
+    releaseId: null,
+    releaseTitle: null,
+    releaseDate: null,
+    label: "Babani",
+    status: "released" as const,
+    contributors: [],
+    contributorSource: "imported" as const,
+    reviewReason: null
+  };
+  const app = createApiService({
+    fixtures,
+    persistence: createMemoryPersistenceRuntime({ WRITES_ENABLED: "true" }),
+    distributionReads: {
+      listMappingRows: async () => ({ items: [], nextCursor: null }),
+      listCatalogTracks: async () => ({
+        items: [], nextCursor: null, facets: { labels: [], roles: [], releases: [] },
+        summary: { trackCount: 0, needsReviewCount: 0, artistMismatchCount: 0, noContributorCount: 0 }
+      }),
+      getCatalogTrack: async (_workspaceId, trackId) => trackId === catalogTrack.id ? catalogTrack : null,
+      listContractTracks: async () => ({
+        items: [], nextCursor: null,
+        summary: {
+          activeTrackOnlyCount: 0, activeEffectiveCount: 0, expiredContractCount: 0, draftContractCount: 0,
+          directTrackRuleCount: 0, noEffectiveSplitCount: 0, ambiguousCount: 0, unallocatedRowCount: 0, openRecoupmentTotals: []
+        }
+      }),
+      getContractTrack: async () => null,
+      validateContractPayees: async () => false,
+      readAllocationWorkbench: async () => emptyAllocationWorkbench(),
+      listAllocationRuns: async () => ({ items: [], nextCursor: null }),
+      getAllocationBatch: async () => null,
+      readSuspenseWorkbench: async (query) => {
+        receivedQuery = query;
+        return {
+          summary: { filteredRowCount: 1, reasonTypeCount: 1, totals: [{ currency: "USD", amountMicro: "50.0000000000" }] },
+          reasonGroups: [{
+            reasonCode: suspenseItem.reasonCode, title: suspenseItem.reasonTitle, description: suspenseItem.reasonDescription,
+            fixPath: suspenseItem.fixPath, actionLabel: suspenseItem.actionLabel, resolutionMode: suspenseItem.resolutionMode,
+            rowCount: 1, totals: [{ currency: "USD", amountMicro: "50.0000000000" }]
+          }],
+          items: { items: [suspenseItem], nextCursor: "suspense-next-opaque" }
+        };
+      },
+      getSuspenseItem: async (_workspaceId, suspenseId) => suspenseId === suspenseItem.id ? suspenseItem : null
+    },
+    health: null,
+    nowIso: (): string => "2026-07-20T00:00:00.000Z",
+    auth: createTestAuthVerifier()
+  });
+
+  const workbench = await app.request(
+    "/erh/v1/suspense/workbench?workspaceId=eeee-mu&search=Unknown&batchReference=%2328&reasonCode=unmapped_track&status=open&dateFrom=2026-07-01&dateTo=2026-07-31&cursor=current-opaque&limit=25",
+    { headers: authHeaders() }
+  );
+  assert.equal(workbench.status, 200);
+  assert.equal(((await workbench.json()) as { readonly items: { readonly nextCursor: string | null } }).items.nextCursor, "suspense-next-opaque");
+  assert.deepEqual(receivedQuery, {
+    workspaceId: "eeee-mu", search: "Unknown", batchReference: "#28", reasonCode: "unmapped_track", status: "open",
+    dateFrom: "2026-07-01", dateTo: "2026-07-31", cursor: "current-opaque", limit: 25
+  });
+
+  const invalidDate = await app.request("/erh/v1/suspense/workbench?workspaceId=eeee-mu&dateFrom=20-07-2026", { headers: authHeaders() });
+  assert.equal(invalidDate.status, 400);
+  assert.equal((await invalidDate.json()).error.code, "suspense_date_invalid");
+
+  const resolve = (): Promise<Response> => app.request("/erh/v1/suspense/suspense_1/resolve", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "suspense-map-1" },
+    body: JSON.stringify({
+      workspaceId: "eeee-mu", suspenseId: "suspense_1", resolution: "map_to_track", targetId: "track_1", note: "Matched against verified ISRC"
+    })
+  });
+  const first = await resolve();
+  assert.equal(first.status, 200);
+  const receipt = (await first.json()) as { readonly id: string; readonly auditEventId: string | null };
+  assert.equal(receipt.id, "suspense_1");
+  assert.ok(receipt.auditEventId !== null);
+  assert.equal(fixtures.distribution.suspenseItems.find((item) => item.id === "suspense_1")?.resolved, true);
+  assert.equal(fixtures.distribution.normalizedEarnings.find((item) => item.id === "earning_suspense")?.calculationStatus, "pending");
+  assert.deepEqual(await (await resolve()).json(), receipt);
+  const audit = await app.request("/erh/v1/audit-log?workspaceId=eeee-mu&limit=100", { headers: authHeaders() });
+  assert.equal(((await audit.json()) as { readonly items: readonly { readonly action: string; readonly idempotencyKey: string | null }[] }).items.filter((entry) =>
+    entry.action === "distribution_suspense_resolve" && entry.idempotencyKey === "suspense-map-1"
+  ).length, 1);
+});
+
 test("Distribution Catalog workbench delegates parity filters to the live repository", async () => {
   let receivedQuery: Readonly<Record<string, unknown>> | null = null;
   const catalogTrack = {

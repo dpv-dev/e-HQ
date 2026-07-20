@@ -1,4 +1,5 @@
 import type { Pool } from "pg";
+import { distributionSuspenseReasonDefinition } from "@ehq/domain-distribution";
 import type {
   AllocationRunSummary,
   DistributionAllocationBatchCurrencyTotal,
@@ -20,6 +21,9 @@ import type {
   DistributionContractWorkbenchResponse,
   DistributionContractWorkflowFilter,
   DistributionMappingRow,
+  DistributionSuspenseCurrencyTotal,
+  DistributionSuspenseWorkbenchResponse,
+  DistributionSuspenseWorkbenchRow,
   PageResult
 } from "@ehq/api-client";
 
@@ -76,6 +80,18 @@ export interface DistributionAllocationRunPageQuery {
   readonly limit: number;
 }
 
+export interface DistributionSuspenseWorkbenchPageQuery {
+  readonly workspaceId: string;
+  readonly search: string | null;
+  readonly batchReference: string | null;
+  readonly reasonCode: string | null;
+  readonly status: "open" | "resolved" | null;
+  readonly dateFrom: string | null;
+  readonly dateTo: string | null;
+  readonly cursor: string | null;
+  readonly limit: number;
+}
+
 export interface DistributionAllocationBatchIdentity {
   readonly id: string;
   readonly period: string;
@@ -91,6 +107,8 @@ export interface DistributionReadRuntime {
   readonly readAllocationWorkbench: (query: DistributionAllocationWorkbenchPageQuery) => Promise<DistributionAllocationWorkbenchResponse>;
   readonly listAllocationRuns: (query: DistributionAllocationRunPageQuery) => Promise<PageResult<AllocationRunSummary>>;
   readonly getAllocationBatch: (workspaceId: string, batchId: string) => Promise<DistributionAllocationBatchIdentity | null>;
+  readonly readSuspenseWorkbench: (query: DistributionSuspenseWorkbenchPageQuery) => Promise<DistributionSuspenseWorkbenchResponse>;
+  readonly getSuspenseItem: (workspaceId: string, suspenseId: string) => Promise<DistributionSuspenseWorkbenchRow | null>;
 }
 
 interface MappingCursor {
@@ -153,6 +171,16 @@ interface AllocationRunRowWithCursor {
   readonly cursor: AllocationRunCursor;
 }
 
+interface SuspenseCursor {
+  readonly createdAt: string;
+  readonly id: string;
+}
+
+interface SuspenseRowWithCursor {
+  readonly item: DistributionSuspenseWorkbenchRow;
+  readonly cursor: SuspenseCursor;
+}
+
 export class DistributionMappingCursorError extends Error {
   constructor() {
     super("Invalid Distribution mapping cursor.");
@@ -181,6 +209,13 @@ export class DistributionAllocationCursorError extends Error {
   }
 }
 
+export class DistributionSuspenseCursorError extends Error {
+  constructor() {
+    super("Invalid Distribution suspense cursor.");
+    this.name = "DistributionSuspenseCursorError";
+  }
+}
+
 export function createPostgresDistributionReadRuntime(pool: Pick<Pool, "query">): DistributionReadRuntime {
   return {
     listMappingRows: async (query: DistributionMappingPageQuery): Promise<PageResult<DistributionMappingRow>> =>
@@ -200,7 +235,11 @@ export function createPostgresDistributionReadRuntime(pool: Pick<Pool, "query">)
     listAllocationRuns: async (query: DistributionAllocationRunPageQuery): Promise<PageResult<AllocationRunSummary>> =>
       readDistributionAllocationRuns(pool, query),
     getAllocationBatch: async (workspaceId: string, batchId: string): Promise<DistributionAllocationBatchIdentity | null> =>
-      readDistributionAllocationBatchIdentity(pool, workspaceId, batchId)
+      readDistributionAllocationBatchIdentity(pool, workspaceId, batchId),
+    readSuspenseWorkbench: async (query: DistributionSuspenseWorkbenchPageQuery): Promise<DistributionSuspenseWorkbenchResponse> =>
+      readDistributionSuspenseWorkbench(pool, query),
+    getSuspenseItem: async (workspaceId: string, suspenseId: string): Promise<DistributionSuspenseWorkbenchRow | null> =>
+      readDistributionSuspenseItem(pool, workspaceId, suspenseId)
   };
 }
 
@@ -609,6 +648,279 @@ export async function readDistributionAllocationBatchIdentity(
   );
   const row = result.rows[0];
   return row === undefined ? null : { id: stringCell(row, "id"), period: stringCell(row, "period") };
+}
+
+export async function readDistributionSuspenseWorkbench(
+  pool: Pick<Pool, "query">,
+  query: DistributionSuspenseWorkbenchPageQuery
+): Promise<DistributionSuspenseWorkbenchResponse> {
+  const [summary, reasonGroups, items] = await Promise.all([
+    readSuspenseSummary(pool, query),
+    readSuspenseReasonGroups(pool, query),
+    readSuspensePage(pool, query)
+  ]);
+  return { summary, reasonGroups, items };
+}
+
+export async function readDistributionSuspenseItem(
+  pool: Pick<Pool, "query">,
+  workspaceId: string,
+  suspenseId: string
+): Promise<DistributionSuspenseWorkbenchRow | null> {
+  const result = await pool.query(
+    `${suspenseWorkbenchSelectSql()}
+     where si.workspace_id = $1 and si.id = $2::uuid
+     limit 1`,
+    [workspaceId, suspenseId]
+  );
+  const row = result.rows[0];
+  return row === undefined ? null : toSuspenseRowWithCursor(row).item;
+}
+
+async function readSuspenseSummary(
+  pool: Pick<Pool, "query">,
+  query: DistributionSuspenseWorkbenchPageQuery
+): Promise<DistributionSuspenseWorkbenchResponse["summary"]> {
+  const filter = suspenseFilter(query, { includeBatch: true, includeReason: true, includeSearch: true, includeCursor: false });
+  const [countResult, totalsResult] = await Promise.all([
+    pool.query(
+      `select count(*)::int as filtered_row_count, count(distinct si.reason_code)::int as reason_type_count
+       from suspense_items si
+       left join normalized_earnings ne on ne.id = si.earning_id and ne.workspace_id = si.workspace_id
+       left join import_batches b on b.id = ne.batch_id and b.workspace_id = si.workspace_id
+       where ${filter.where.join("\n         and ")}`,
+      filter.parameters
+    ),
+    pool.query(
+      `select si.currency, sum(si.amount)::text as amount_micro
+       from suspense_items si
+       left join normalized_earnings ne on ne.id = si.earning_id and ne.workspace_id = si.workspace_id
+       left join import_batches b on b.id = ne.batch_id and b.workspace_id = si.workspace_id
+       where ${filter.where.join("\n         and ")}
+       group by si.currency
+       order by si.currency`,
+      filter.parameters
+    )
+  ]);
+  const countRow = countResult.rows[0] ?? {};
+  return {
+    filteredRowCount: integerCell(countRow, "filtered_row_count"),
+    reasonTypeCount: integerCell(countRow, "reason_type_count"),
+    totals: totalsResult.rows.map(toSuspenseCurrencyTotal)
+  };
+}
+
+async function readSuspenseReasonGroups(
+  pool: Pick<Pool, "query">,
+  query: DistributionSuspenseWorkbenchPageQuery
+): Promise<DistributionSuspenseWorkbenchResponse["reasonGroups"]> {
+  // The playbook remains global for the selected status/date window while the
+  // queue below can be narrowed to one reason, batch, or search term.
+  const filter = suspenseFilter(query, { includeBatch: false, includeReason: false, includeSearch: false, includeCursor: false });
+  const result = await pool.query(
+    `select si.reason_code, si.currency, count(*)::int as row_count, sum(si.amount)::text as amount_micro
+     from suspense_items si
+     left join normalized_earnings ne on ne.id = si.earning_id and ne.workspace_id = si.workspace_id
+     left join import_batches b on b.id = ne.batch_id and b.workspace_id = si.workspace_id
+     where ${filter.where.join("\n       and ")}
+     group by si.reason_code, si.currency
+     order by si.reason_code, si.currency`,
+    filter.parameters
+  );
+  const grouped = new Map<string, { rowCount: number; totals: DistributionSuspenseCurrencyTotal[] }>();
+  for (const row of result.rows) {
+    const reasonCode = stringCell(row, "reason_code");
+    const current = grouped.get(reasonCode) ?? { rowCount: 0, totals: [] };
+    current.rowCount += integerCell(row, "row_count");
+    current.totals.push(toSuspenseCurrencyTotal(row));
+    grouped.set(reasonCode, current);
+  }
+  return [...grouped.entries()].map(([reasonCode, group]) => {
+    const definition = distributionSuspenseReasonDefinition(reasonCode);
+    return { reasonCode, ...definition, rowCount: group.rowCount, totals: group.totals };
+  });
+}
+
+async function readSuspensePage(
+  pool: Pick<Pool, "query">,
+  query: DistributionSuspenseWorkbenchPageQuery
+): Promise<PageResult<DistributionSuspenseWorkbenchRow>> {
+  const limit = normalizeLimit(query.limit);
+  const filter = suspenseFilter(query, { includeBatch: true, includeReason: true, includeSearch: true, includeCursor: true });
+  filter.parameters.push(limit + 1);
+  const result = await pool.query(
+    `${suspenseWorkbenchSelectSql()}
+     where ${filter.where.join("\n       and ")}
+     order by si.created_at desc, si.id
+     limit $${String(filter.parameters.length)}`,
+    filter.parameters
+  );
+  const mapped = result.rows.map(toSuspenseRowWithCursor);
+  const hasMore = mapped.length > limit;
+  const pageRows = mapped.slice(0, limit);
+  const last = pageRows[pageRows.length - 1];
+  return {
+    items: pageRows.map((row) => row.item),
+    nextCursor: hasMore && last !== undefined ? encodeSuspenseCursor(last.cursor) : null
+  };
+}
+
+interface SuspenseFilterOptions {
+  readonly includeBatch: boolean;
+  readonly includeReason: boolean;
+  readonly includeSearch: boolean;
+  readonly includeCursor: boolean;
+}
+
+function suspenseFilter(
+  query: DistributionSuspenseWorkbenchPageQuery,
+  options: SuspenseFilterOptions
+): { parameters: unknown[]; where: string[] } {
+  const parameters: unknown[] = [query.workspaceId];
+  const where = ["si.workspace_id = $1"];
+  if (query.status === "open") where.push("si.resolved = false");
+  if (query.status === "resolved") where.push("si.resolved = true");
+  const batchReference = query.batchReference?.trim() ?? "";
+  if (options.includeBatch && batchReference !== "") {
+    parameters.push(batchReference.toLocaleLowerCase());
+    const parameter = `$${String(parameters.length)}`;
+    where.push(`(
+      lower(ne.batch_id::text) = ${parameter}
+      or lower(coalesce(b.legacy_id::text, '')) = ltrim(${parameter}, '#')
+      or strpos(lower(coalesce(b.file_name, '')), ${parameter}) > 0
+    )`);
+  }
+  if (options.includeReason && query.reasonCode !== null) {
+    parameters.push(query.reasonCode);
+    where.push(`si.reason_code = $${String(parameters.length)}`);
+  }
+  const search = query.search?.trim().toLocaleLowerCase() ?? "";
+  if (options.includeSearch && search !== "") {
+    parameters.push(search);
+    const parameter = `$${String(parameters.length)}`;
+    where.push(`(
+      strpos(lower(si.reason_code), ${parameter}) > 0
+      or strpos(lower(coalesce(ne.raw_title, '')), ${parameter}) > 0
+      or strpos(lower(coalesce(ne.raw_artist, '')), ${parameter}) > 0
+      or strpos(lower(coalesce(ne.isrc, '')), ${parameter}) > 0
+      or strpos(lower(coalesce(ne.upc, '')), ${parameter}) > 0
+      or strpos(lower(coalesce(b.file_name, '')), ${parameter}) > 0
+    )`);
+  }
+  const dateExpression = "coalesce(b.imported_at, b.created_at, si.created_at)::date";
+  if (query.dateFrom !== null) {
+    parameters.push(query.dateFrom);
+    where.push(`${dateExpression} >= $${String(parameters.length)}::date`);
+  }
+  if (query.dateTo !== null) {
+    parameters.push(query.dateTo);
+    where.push(`${dateExpression} <= $${String(parameters.length)}::date`);
+  }
+  if (options.includeCursor) {
+    const cursor = decodeSuspenseCursor(query.cursor);
+    if (cursor !== null) {
+      parameters.push(cursor.createdAt, cursor.id);
+      const createdAtParameter = `$${String(parameters.length - 1)}`;
+      const idParameter = `$${String(parameters.length)}`;
+      where.push(`(si.created_at < ${createdAtParameter}::timestamptz or (si.created_at = ${createdAtParameter}::timestamptz and si.id::text > ${idParameter}))`);
+    }
+  }
+  return { parameters, where };
+}
+
+function suspenseWorkbenchSelectSql(): string {
+  return `select
+    si.id::text,
+    si.earning_id::text,
+    ne.batch_id::text,
+    b.legacy_id as batch_legacy_id,
+    b.file_name as batch_file_name,
+    si.reason_code,
+    coalesce(track_match.track_id, null)::text as track_id,
+    coalesce(track_match.track_title, ne.raw_title) as track_title,
+    coalesce(track_match.artist_name, ne.raw_artist) as artist_name,
+    coalesce(track_match.isrc, ne.isrc) as isrc,
+    coalesce(track_match.upc, ne.upc) as upc,
+    si.amount::text as amount_micro,
+    si.currency,
+    split.split_percentage,
+    si.resolved,
+    si.created_at,
+    si.resolved_at
+  from suspense_items si
+  left join normalized_earnings ne on ne.id = si.earning_id and ne.workspace_id = si.workspace_id
+  left join import_batches b on b.id = ne.batch_id and b.workspace_id = si.workspace_id
+  left join lateral (
+    select t.id::text as track_id, t.title as track_title, t.artist_name, t.isrc, r.upc
+    from earning_track_matches etm
+    join tracks t on t.id = etm.track_id and t.workspace_id = si.workspace_id
+    left join releases r on r.id = t.release_id and r.workspace_id = t.workspace_id
+    where etm.earning_id = si.earning_id and etm.status not in ('ignored', 'suspense')
+    order by case when etm.status = 'matched' then 0 else 1 end, etm.confidence desc, etm.id
+    limit 1
+  ) track_match on true
+  left join lateral (
+    select coalesce(
+      (select sum((rule.value->>'percentage')::numeric)::text
+       from (
+         select rules_json from contract_rule_set_overrides
+         where workspace_id = si.workspace_id and track_id::text = track_match.track_id
+         order by created_at desc, id desc limit 1
+       ) latest
+       cross join lateral jsonb_array_elements(latest.rules_json) rule(value)),
+      (select sum(rr.percentage)::text
+       from royalty_rules rr
+       join contracts c on c.id = rr.contract_id and c.workspace_id = si.workspace_id and c.status = 'active'
+       where rr.status = 'active' and rr.scope_type = 'track'
+         and rr.scope_id = track_match.track_id),
+      (select sum(rr.percentage)::text
+       from royalty_rules rr
+       join contracts c on c.id = rr.contract_id and c.workspace_id = si.workspace_id and c.status = 'active'
+       join tracks t on t.id::text = track_match.track_id and t.workspace_id = si.workspace_id
+       where rr.status = 'active' and rr.scope_type = 'release'
+         and rr.scope_id = t.release_id::text)
+    ) as split_percentage
+  ) split on true`;
+}
+
+function toSuspenseRowWithCursor(row: PgRow): SuspenseRowWithCursor {
+  const reasonCode = stringCell(row, "reason_code");
+  const definition = distributionSuspenseReasonDefinition(reasonCode);
+  const batchId = nullableStringCell(row, "batch_id");
+  const batchLegacyId = nullableIntegerCell(row, "batch_legacy_id");
+  const batchFileName = nullableStringCell(row, "batch_file_name");
+  const createdAt = timestampStringCell(row, "created_at");
+  const resolved = booleanCell(row, "resolved");
+  return {
+    item: {
+      id: stringCell(row, "id"),
+      earningId: nullableStringCell(row, "earning_id"),
+      batchId,
+      batchReference: batchLegacyId === null ? (batchFileName ?? batchId?.slice(0, 8) ?? "—") : `#${String(batchLegacyId)}`,
+      reasonCode,
+      reasonTitle: definition.title,
+      reasonDescription: definition.description,
+      fixPath: definition.fixPath,
+      actionLabel: definition.actionLabel,
+      resolutionMode: definition.resolutionMode,
+      trackId: nullableStringCell(row, "track_id"),
+      trackTitle: nullableStringCell(row, "track_title"),
+      artistName: nullableStringCell(row, "artist_name"),
+      isrc: nullableStringCell(row, "isrc"),
+      upc: nullableStringCell(row, "upc"),
+      amountMicro: stringCell(row, "amount_micro"),
+      currency: stringCell(row, "currency"),
+      splitPercentage: nullableStringCell(row, "split_percentage"),
+      status: resolved ? "resolved" : "open",
+      createdAt,
+      resolvedAt: nullableTimestampStringCell(row, "resolved_at")
+    },
+    cursor: { createdAt, id: stringCell(row, "id") }
+  };
+}
+
+function toSuspenseCurrencyTotal(row: PgRow): DistributionSuspenseCurrencyTotal {
+  return { currency: stringCell(row, "currency"), amountMicro: stringCell(row, "amount_micro") };
 }
 
 async function readAllocationSummary(
@@ -1807,6 +2119,27 @@ function encodeAllocationRunCursor(cursor: AllocationRunCursor): string {
   return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
 }
 
+function encodeSuspenseCursor(cursor: SuspenseCursor): string {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+function decodeSuspenseCursor(value: string | null): SuspenseCursor | null {
+  if (value === null) return null;
+  try {
+    const parsed: unknown = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
+    if (
+      typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) &&
+      "createdAt" in parsed && typeof parsed.createdAt === "string" && parsed.createdAt !== "" &&
+      "id" in parsed && typeof parsed.id === "string" && parsed.id !== ""
+    ) {
+      return { createdAt: parsed.createdAt, id: parsed.id };
+    }
+  } catch {
+    // The API edge turns repository validation errors into a typed envelope.
+  }
+  throw new DistributionSuspenseCursorError();
+}
+
 function decodeAllocationRunCursor(value: string | null): AllocationRunCursor | null {
   const parsed = decodeAllocationCursor(value);
   if (parsed === null) return null;
@@ -1920,6 +2253,14 @@ function nullableIntegerCell(row: PgRow, column: string): number | null {
   const value = row[column];
   if (value === null || value === undefined) return null;
   return integerCell(row, column);
+}
+
+function booleanCell(row: PgRow, column: string): boolean {
+  const value = row[column];
+  if (typeof value !== "boolean") {
+    throw new Error(`Postgres column ${column} must be boolean.`);
+  }
+  return value;
 }
 
 function catalogStatusCell(row: PgRow, column: string): DistributionCatalogTrackRow["status"] {

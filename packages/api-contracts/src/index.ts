@@ -139,6 +139,22 @@ export const distributionPaymentReconcileSchema = z.object({
   reconciledAt: z.string().regex(isoDateTimePattern)
 }).strict();
 
+export const distributionSuspenseResolveSchema = z.object({
+  workspaceId: workspaceIdSchema,
+  suspenseId: z.string().min(1),
+  resolution: z.enum(["map_to_release", "map_to_track", "retry_row", "mark_resolved", "hold"]),
+  targetId: nullableIdSchema,
+  note: z.string().trim().min(1).max(4000)
+}).superRefine((value, refinementContext) => {
+  if ((value.resolution === "map_to_release" || value.resolution === "map_to_track") && value.targetId === null) {
+    refinementContext.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["targetId"],
+      message: "targetId is required for a mapping resolution."
+    });
+  }
+});
+
 export interface ApiErrorEnvelope {
   readonly code: string;
   readonly message: string;
@@ -199,6 +215,18 @@ export function createOpenApiDocument(): Readonly<Record<string, unknown>> {
         post: {
           operationId: "retryDistributionMissingContractAllocations",
           summary: "Reset missing-contract earnings with idempotency and an audit event after a complete track split exists"
+        }
+      },
+      "/erh/v1/suspense/workbench": {
+        get: {
+          operationId: "readDistributionSuspenseWorkbench",
+          summary: "Read the live scoped suspense playbook, totals, filters, and opaque cursor queue"
+        }
+      },
+      "/erh/v1/suspense/{suspenseId}/resolve": {
+        post: {
+          operationId: "resolveDistributionSuspenseItem",
+          summary: "Retry, map, or explicitly resolve one suspense item with idempotency and audit"
         }
       },
       "/erh/v1/payments": {

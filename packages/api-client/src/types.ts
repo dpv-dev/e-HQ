@@ -1954,12 +1954,77 @@ export interface SuspenseQuery extends PageQuery {
   readonly dateTo?: IsoDateString | null;
 }
 
+export type DistributionSuspenseFixPath = "contracts" | "mapping" | "imports" | "catalog" | "settings" | "suspense";
+export type DistributionSuspenseResolutionMode = "retry" | "map" | "manual_review";
+
+export interface DistributionSuspenseWorkbenchQuery extends PageQuery {
+  readonly workspaceId: EntityId;
+  readonly search: string | null;
+  readonly batchReference: string | null;
+  readonly reasonCode: string | null;
+  readonly status: "open" | "resolved" | null;
+  readonly dateFrom: IsoDateString | null;
+  readonly dateTo: IsoDateString | null;
+}
+
+export interface DistributionSuspenseCurrencyTotal {
+  readonly currency: CurrencyCode;
+  readonly amountMicro: MoneyMicroString;
+}
+
+export interface DistributionSuspenseReasonGroup {
+  readonly reasonCode: string;
+  readonly title: string;
+  readonly description: string;
+  readonly fixPath: DistributionSuspenseFixPath;
+  readonly actionLabel: string;
+  readonly resolutionMode: DistributionSuspenseResolutionMode;
+  readonly rowCount: number;
+  readonly totals: readonly DistributionSuspenseCurrencyTotal[];
+}
+
+export interface DistributionSuspenseWorkbenchRow {
+  readonly id: EntityId;
+  readonly earningId: EntityId | null;
+  readonly batchId: EntityId | null;
+  readonly batchReference: string;
+  readonly reasonCode: string;
+  readonly reasonTitle: string;
+  readonly reasonDescription: string;
+  readonly fixPath: DistributionSuspenseFixPath;
+  readonly actionLabel: string;
+  readonly resolutionMode: DistributionSuspenseResolutionMode;
+  readonly trackId: EntityId | null;
+  readonly trackTitle: string | null;
+  readonly artistName: string | null;
+  readonly isrc: string | null;
+  readonly upc: string | null;
+  readonly amountMicro: MoneyMicroString;
+  readonly currency: CurrencyCode;
+  readonly splitPercentage: string | null;
+  readonly status: "open" | "resolved";
+  readonly createdAt: IsoDateTimeString;
+  readonly resolvedAt: IsoDateTimeString | null;
+}
+
+export interface DistributionSuspenseWorkbenchSummary {
+  readonly filteredRowCount: number;
+  readonly reasonTypeCount: number;
+  readonly totals: readonly DistributionSuspenseCurrencyTotal[];
+}
+
+export interface DistributionSuspenseWorkbenchResponse {
+  readonly summary: DistributionSuspenseWorkbenchSummary;
+  readonly reasonGroups: readonly DistributionSuspenseReasonGroup[];
+  readonly items: PageResult<DistributionSuspenseWorkbenchRow>;
+}
+
 export interface SuspenseItem {
   readonly id: EntityId;
   readonly period: IsoMonthString;
   readonly sourceReference: string;
   readonly reason: "missing_split" | "unmapped_track" | "import_retry" | "contract_hold";
-  readonly exactFixPath: "contracts" | "mapping" | "imports" | "catalog";
+  readonly exactFixPath: DistributionSuspenseFixPath;
   readonly amountMicro: MoneyMicroString;
   readonly currency: CurrencyCode;
   readonly status: "open" | "resolved";
@@ -1968,7 +2033,7 @@ export interface SuspenseItem {
 export interface SuspenseResolveRequest {
   readonly workspaceId: EntityId;
   readonly suspenseId: EntityId;
-  readonly resolution: "map_to_release" | "map_to_track" | "hold";
+  readonly resolution: "map_to_release" | "map_to_track" | "retry_row" | "mark_resolved" | "hold";
   readonly targetId: EntityId | null;
   readonly note: string;
 }

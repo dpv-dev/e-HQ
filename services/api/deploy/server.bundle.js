@@ -23595,6 +23595,21 @@ var distributionPaymentReconcileSchema = external_exports.object({
   amountAppliedMicro: external_exports.string().regex(positiveDecimalPattern),
   reconciledAt: external_exports.string().regex(isoDateTimePattern)
 }).strict();
+var distributionSuspenseResolveSchema = external_exports.object({
+  workspaceId: workspaceIdSchema,
+  suspenseId: external_exports.string().min(1),
+  resolution: external_exports.enum(["map_to_release", "map_to_track", "retry_row", "mark_resolved", "hold"]),
+  targetId: nullableIdSchema,
+  note: external_exports.string().trim().min(1).max(4e3)
+}).superRefine((value, refinementContext) => {
+  if ((value.resolution === "map_to_release" || value.resolution === "map_to_track") && value.targetId === null) {
+    refinementContext.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["targetId"],
+      message: "targetId is required for a mapping resolution."
+    });
+  }
+});
 var apiErrorEnvelopeSchema = external_exports.object({
   code: external_exports.string().min(1),
   message: external_exports.string().min(1),
@@ -24507,6 +24522,83 @@ function formatErhAmount2(value) {
   return erhMoney.format(value);
 }
 
+// ../../packages/domain-distribution/src/suspense.ts
+var reasonDefinitions = {
+  missing_contract: {
+    title: "Missing contract",
+    description: "Create or complete the track split, then retry the affected rows.",
+    fixPath: "contracts",
+    actionLabel: "Fix exact split",
+    resolutionMode: "retry"
+  },
+  missing_split: {
+    title: "Missing split",
+    description: "Create a complete effective split, then retry the affected row.",
+    fixPath: "contracts",
+    actionLabel: "Fix exact split",
+    resolutionMode: "retry"
+  },
+  invalid_split: {
+    title: "Invalid split",
+    description: "Correct the split so it equals exactly 100%, then retry the row.",
+    fixPath: "contracts",
+    actionLabel: "Correct split",
+    resolutionMode: "retry"
+  },
+  missing_fx_rate: {
+    title: "Missing FX rate",
+    description: "Add the dated conversion rate required by recoupment, then retry the row.",
+    fixPath: "settings",
+    actionLabel: "Add FX rate",
+    resolutionMode: "retry"
+  },
+  unmapped_track: {
+    title: "Unmapped track",
+    description: "Map the earning to its canonical track before allocation.",
+    fixPath: "mapping",
+    actionLabel: "Map track",
+    resolutionMode: "map"
+  },
+  mapping_low_confidence: {
+    title: "Low-confidence mapping",
+    description: "Review and confirm the suggested catalog match before allocation.",
+    fixPath: "mapping",
+    actionLabel: "Review mapping",
+    resolutionMode: "map"
+  },
+  import_retry: {
+    title: "Import retry required",
+    description: "Review the source batch and retry the corrected import row.",
+    fixPath: "imports",
+    actionLabel: "Review import",
+    resolutionMode: "retry"
+  },
+  negative_amount: {
+    title: "Negative amount",
+    description: "Review the refund or chargeback, then retry or record an explicit manual decision.",
+    fixPath: "suspense",
+    actionLabel: "Review row",
+    resolutionMode: "manual_review"
+  },
+  contract_hold: {
+    title: "Contract hold",
+    description: "Review the contract hold and release it before retrying allocation.",
+    fixPath: "contracts",
+    actionLabel: "Review contract",
+    resolutionMode: "manual_review"
+  }
+};
+var fallbackDefinition = {
+  title: "Catalog review",
+  description: "Review the exact source row and correct its catalog data before retrying.",
+  fixPath: "catalog",
+  actionLabel: "Review catalog",
+  resolutionMode: "manual_review"
+};
+function distributionSuspenseReasonDefinition(reasonCode) {
+  return reasonDefinitions[reasonCode] ?? fallbackDefinition;
+}
+
 // ../../packages/domain-distribution/src/reads.ts
 function readAllocationList(dataset, filters) {
   const resolved = resolveDataset(dataset);
@@ -24748,16 +24840,7 @@ function matchesSuspenseStatus(item, status) {
   return !item.resolved;
 }
 function fixPathForSuspenseReason(reasonCode) {
-  if (reasonCode === "invalid_split" || reasonCode === "missing_split") {
-    return "contracts";
-  }
-  if (reasonCode === "unmapped_track") {
-    return "mapping";
-  }
-  if (reasonCode === "import_retry") {
-    return "imports";
-  }
-  return "catalog";
+  return distributionSuspenseReasonDefinition(reasonCode).fixPath;
 }
 function requirePayee(resolved, payeeId) {
   const payee = resolved.payeesById.get(payeeId);
@@ -25891,6 +25974,12 @@ var DistributionAllocationCursorError = class extends Error {
     this.name = "DistributionAllocationCursorError";
   }
 };
+var DistributionSuspenseCursorError = class extends Error {
+  constructor() {
+    super("Invalid Distribution suspense cursor.");
+    this.name = "DistributionSuspenseCursorError";
+  }
+};
 function createPostgresDistributionReadRuntime(pool) {
   return {
     listMappingRows: async (query) => readDistributionMappingPage(pool, query),
@@ -25901,7 +25990,9 @@ function createPostgresDistributionReadRuntime(pool) {
     validateContractPayees: async (workspaceId, payeeIds) => validateDistributionContractPayees(pool, workspaceId, payeeIds),
     readAllocationWorkbench: async (query) => readDistributionAllocationWorkbench(pool, query),
     listAllocationRuns: async (query) => readDistributionAllocationRuns(pool, query),
-    getAllocationBatch: async (workspaceId, batchId) => readDistributionAllocationBatchIdentity(pool, workspaceId, batchId)
+    getAllocationBatch: async (workspaceId, batchId) => readDistributionAllocationBatchIdentity(pool, workspaceId, batchId),
+    readSuspenseWorkbench: async (query) => readDistributionSuspenseWorkbench(pool, query),
+    getSuspenseItem: async (workspaceId, suspenseId) => readDistributionSuspenseItem(pool, workspaceId, suspenseId)
   };
 }
 async function readDistributionMappingPage(pool, query) {
@@ -26239,6 +26330,242 @@ async function readDistributionAllocationBatchIdentity(pool, workspaceId, batchI
   );
   const row = result.rows[0];
   return row === void 0 ? null : { id: stringCell(row, "id"), period: stringCell(row, "period") };
+}
+async function readDistributionSuspenseWorkbench(pool, query) {
+  const [summary, reasonGroups, items] = await Promise.all([
+    readSuspenseSummary(pool, query),
+    readSuspenseReasonGroups(pool, query),
+    readSuspensePage(pool, query)
+  ]);
+  return { summary, reasonGroups, items };
+}
+async function readDistributionSuspenseItem(pool, workspaceId, suspenseId) {
+  const result = await pool.query(
+    `${suspenseWorkbenchSelectSql()}
+     where si.workspace_id = $1 and si.id = $2::uuid
+     limit 1`,
+    [workspaceId, suspenseId]
+  );
+  const row = result.rows[0];
+  return row === void 0 ? null : toSuspenseRowWithCursor(row).item;
+}
+async function readSuspenseSummary(pool, query) {
+  const filter = suspenseFilter(query, { includeBatch: true, includeReason: true, includeSearch: true, includeCursor: false });
+  const [countResult, totalsResult] = await Promise.all([
+    pool.query(
+      `select count(*)::int as filtered_row_count, count(distinct si.reason_code)::int as reason_type_count
+       from suspense_items si
+       left join normalized_earnings ne on ne.id = si.earning_id and ne.workspace_id = si.workspace_id
+       left join import_batches b on b.id = ne.batch_id and b.workspace_id = si.workspace_id
+       where ${filter.where.join("\n         and ")}`,
+      filter.parameters
+    ),
+    pool.query(
+      `select si.currency, sum(si.amount)::text as amount_micro
+       from suspense_items si
+       left join normalized_earnings ne on ne.id = si.earning_id and ne.workspace_id = si.workspace_id
+       left join import_batches b on b.id = ne.batch_id and b.workspace_id = si.workspace_id
+       where ${filter.where.join("\n         and ")}
+       group by si.currency
+       order by si.currency`,
+      filter.parameters
+    )
+  ]);
+  const countRow = countResult.rows[0] ?? {};
+  return {
+    filteredRowCount: integerCell(countRow, "filtered_row_count"),
+    reasonTypeCount: integerCell(countRow, "reason_type_count"),
+    totals: totalsResult.rows.map(toSuspenseCurrencyTotal)
+  };
+}
+async function readSuspenseReasonGroups(pool, query) {
+  const filter = suspenseFilter(query, { includeBatch: false, includeReason: false, includeSearch: false, includeCursor: false });
+  const result = await pool.query(
+    `select si.reason_code, si.currency, count(*)::int as row_count, sum(si.amount)::text as amount_micro
+     from suspense_items si
+     left join normalized_earnings ne on ne.id = si.earning_id and ne.workspace_id = si.workspace_id
+     left join import_batches b on b.id = ne.batch_id and b.workspace_id = si.workspace_id
+     where ${filter.where.join("\n       and ")}
+     group by si.reason_code, si.currency
+     order by si.reason_code, si.currency`,
+    filter.parameters
+  );
+  const grouped = /* @__PURE__ */ new Map();
+  for (const row of result.rows) {
+    const reasonCode = stringCell(row, "reason_code");
+    const current = grouped.get(reasonCode) ?? { rowCount: 0, totals: [] };
+    current.rowCount += integerCell(row, "row_count");
+    current.totals.push(toSuspenseCurrencyTotal(row));
+    grouped.set(reasonCode, current);
+  }
+  return [...grouped.entries()].map(([reasonCode, group]) => {
+    const definition = distributionSuspenseReasonDefinition(reasonCode);
+    return { reasonCode, ...definition, rowCount: group.rowCount, totals: group.totals };
+  });
+}
+async function readSuspensePage(pool, query) {
+  const limit = normalizeLimit(query.limit);
+  const filter = suspenseFilter(query, { includeBatch: true, includeReason: true, includeSearch: true, includeCursor: true });
+  filter.parameters.push(limit + 1);
+  const result = await pool.query(
+    `${suspenseWorkbenchSelectSql()}
+     where ${filter.where.join("\n       and ")}
+     order by si.created_at desc, si.id
+     limit $${String(filter.parameters.length)}`,
+    filter.parameters
+  );
+  const mapped = result.rows.map(toSuspenseRowWithCursor);
+  const hasMore = mapped.length > limit;
+  const pageRows = mapped.slice(0, limit);
+  const last = pageRows[pageRows.length - 1];
+  return {
+    items: pageRows.map((row) => row.item),
+    nextCursor: hasMore && last !== void 0 ? encodeSuspenseCursor(last.cursor) : null
+  };
+}
+function suspenseFilter(query, options) {
+  const parameters = [query.workspaceId];
+  const where = ["si.workspace_id = $1"];
+  if (query.status === "open") where.push("si.resolved = false");
+  if (query.status === "resolved") where.push("si.resolved = true");
+  const batchReference = query.batchReference?.trim() ?? "";
+  if (options.includeBatch && batchReference !== "") {
+    parameters.push(batchReference.toLocaleLowerCase());
+    const parameter = `$${String(parameters.length)}`;
+    where.push(`(
+      lower(ne.batch_id::text) = ${parameter}
+      or lower(coalesce(b.legacy_id::text, '')) = ltrim(${parameter}, '#')
+      or strpos(lower(coalesce(b.file_name, '')), ${parameter}) > 0
+    )`);
+  }
+  if (options.includeReason && query.reasonCode !== null) {
+    parameters.push(query.reasonCode);
+    where.push(`si.reason_code = $${String(parameters.length)}`);
+  }
+  const search = query.search?.trim().toLocaleLowerCase() ?? "";
+  if (options.includeSearch && search !== "") {
+    parameters.push(search);
+    const parameter = `$${String(parameters.length)}`;
+    where.push(`(
+      strpos(lower(si.reason_code), ${parameter}) > 0
+      or strpos(lower(coalesce(ne.raw_title, '')), ${parameter}) > 0
+      or strpos(lower(coalesce(ne.raw_artist, '')), ${parameter}) > 0
+      or strpos(lower(coalesce(ne.isrc, '')), ${parameter}) > 0
+      or strpos(lower(coalesce(ne.upc, '')), ${parameter}) > 0
+      or strpos(lower(coalesce(b.file_name, '')), ${parameter}) > 0
+    )`);
+  }
+  const dateExpression = "coalesce(b.imported_at, b.created_at, si.created_at)::date";
+  if (query.dateFrom !== null) {
+    parameters.push(query.dateFrom);
+    where.push(`${dateExpression} >= $${String(parameters.length)}::date`);
+  }
+  if (query.dateTo !== null) {
+    parameters.push(query.dateTo);
+    where.push(`${dateExpression} <= $${String(parameters.length)}::date`);
+  }
+  if (options.includeCursor) {
+    const cursor = decodeSuspenseCursor(query.cursor);
+    if (cursor !== null) {
+      parameters.push(cursor.createdAt, cursor.id);
+      const createdAtParameter = `$${String(parameters.length - 1)}`;
+      const idParameter = `$${String(parameters.length)}`;
+      where.push(`(si.created_at < ${createdAtParameter}::timestamptz or (si.created_at = ${createdAtParameter}::timestamptz and si.id::text > ${idParameter}))`);
+    }
+  }
+  return { parameters, where };
+}
+function suspenseWorkbenchSelectSql() {
+  return `select
+    si.id::text,
+    si.earning_id::text,
+    ne.batch_id::text,
+    b.legacy_id as batch_legacy_id,
+    b.file_name as batch_file_name,
+    si.reason_code,
+    coalesce(track_match.track_id, null)::text as track_id,
+    coalesce(track_match.track_title, ne.raw_title) as track_title,
+    coalesce(track_match.artist_name, ne.raw_artist) as artist_name,
+    coalesce(track_match.isrc, ne.isrc) as isrc,
+    coalesce(track_match.upc, ne.upc) as upc,
+    si.amount::text as amount_micro,
+    si.currency,
+    split.split_percentage,
+    si.resolved,
+    si.created_at,
+    si.resolved_at
+  from suspense_items si
+  left join normalized_earnings ne on ne.id = si.earning_id and ne.workspace_id = si.workspace_id
+  left join import_batches b on b.id = ne.batch_id and b.workspace_id = si.workspace_id
+  left join lateral (
+    select t.id::text as track_id, t.title as track_title, t.artist_name, t.isrc, r.upc
+    from earning_track_matches etm
+    join tracks t on t.id = etm.track_id and t.workspace_id = si.workspace_id
+    left join releases r on r.id = t.release_id and r.workspace_id = t.workspace_id
+    where etm.earning_id = si.earning_id and etm.status not in ('ignored', 'suspense')
+    order by case when etm.status = 'matched' then 0 else 1 end, etm.confidence desc, etm.id
+    limit 1
+  ) track_match on true
+  left join lateral (
+    select coalesce(
+      (select sum((rule.value->>'percentage')::numeric)::text
+       from (
+         select rules_json from contract_rule_set_overrides
+         where workspace_id = si.workspace_id and track_id::text = track_match.track_id
+         order by created_at desc, id desc limit 1
+       ) latest
+       cross join lateral jsonb_array_elements(latest.rules_json) rule(value)),
+      (select sum(rr.percentage)::text
+       from royalty_rules rr
+       join contracts c on c.id = rr.contract_id and c.workspace_id = si.workspace_id and c.status = 'active'
+       where rr.status = 'active' and rr.scope_type = 'track'
+         and rr.scope_id = track_match.track_id),
+      (select sum(rr.percentage)::text
+       from royalty_rules rr
+       join contracts c on c.id = rr.contract_id and c.workspace_id = si.workspace_id and c.status = 'active'
+       join tracks t on t.id::text = track_match.track_id and t.workspace_id = si.workspace_id
+       where rr.status = 'active' and rr.scope_type = 'release'
+         and rr.scope_id = t.release_id::text)
+    ) as split_percentage
+  ) split on true`;
+}
+function toSuspenseRowWithCursor(row) {
+  const reasonCode = stringCell(row, "reason_code");
+  const definition = distributionSuspenseReasonDefinition(reasonCode);
+  const batchId = nullableStringCell(row, "batch_id");
+  const batchLegacyId = nullableIntegerCell(row, "batch_legacy_id");
+  const batchFileName = nullableStringCell(row, "batch_file_name");
+  const createdAt = timestampStringCell(row, "created_at");
+  const resolved = booleanCell(row, "resolved");
+  return {
+    item: {
+      id: stringCell(row, "id"),
+      earningId: nullableStringCell(row, "earning_id"),
+      batchId,
+      batchReference: batchLegacyId === null ? batchFileName ?? batchId?.slice(0, 8) ?? "\u2014" : `#${String(batchLegacyId)}`,
+      reasonCode,
+      reasonTitle: definition.title,
+      reasonDescription: definition.description,
+      fixPath: definition.fixPath,
+      actionLabel: definition.actionLabel,
+      resolutionMode: definition.resolutionMode,
+      trackId: nullableStringCell(row, "track_id"),
+      trackTitle: nullableStringCell(row, "track_title"),
+      artistName: nullableStringCell(row, "artist_name"),
+      isrc: nullableStringCell(row, "isrc"),
+      upc: nullableStringCell(row, "upc"),
+      amountMicro: stringCell(row, "amount_micro"),
+      currency: stringCell(row, "currency"),
+      splitPercentage: nullableStringCell(row, "split_percentage"),
+      status: resolved ? "resolved" : "open",
+      createdAt,
+      resolvedAt: nullableTimestampStringCell(row, "resolved_at")
+    },
+    cursor: { createdAt, id: stringCell(row, "id") }
+  };
+}
+function toSuspenseCurrencyTotal(row) {
+  return { currency: stringCell(row, "currency"), amountMicro: stringCell(row, "amount_micro") };
 }
 async function readAllocationSummary(pool, query) {
   const parameters = [query.workspaceId];
@@ -27332,6 +27659,20 @@ function decodeAllocationBankCursor(value) {
 function encodeAllocationRunCursor(cursor) {
   return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
 }
+function encodeSuspenseCursor(cursor) {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+function decodeSuspenseCursor(value) {
+  if (value === null) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) && "createdAt" in parsed && typeof parsed.createdAt === "string" && parsed.createdAt !== "" && "id" in parsed && typeof parsed.id === "string" && parsed.id !== "") {
+      return { createdAt: parsed.createdAt, id: parsed.id };
+    }
+  } catch {
+  }
+  throw new DistributionSuspenseCursorError();
+}
 function decodeAllocationRunCursor(value) {
   const parsed = decodeAllocationCursor(value);
   if (parsed === null) return null;
@@ -27423,6 +27764,13 @@ function nullableIntegerCell(row, column) {
   const value = row[column];
   if (value === null || value === void 0) return null;
   return integerCell(row, column);
+}
+function booleanCell(row, column) {
+  const value = row[column];
+  if (typeof value !== "boolean") {
+    throw new Error(`Postgres column ${column} must be boolean.`);
+  }
+  return value;
 }
 function catalogStatusCell(row, column) {
   const value = stringCell(row, column);
@@ -42464,12 +42812,6 @@ var allocationRunUnpostSchema = workspaceBodySchema.extend({
 var allocationRetryMissingContractsSchema = workspaceBodySchema.extend({
   trackId: external_exports.string().uuid()
 });
-var suspenseResolveSchema = workspaceBodySchema.extend({
-  suspenseId: external_exports.string().min(1),
-  resolution: external_exports.enum(["map_to_release", "map_to_track", "hold"]),
-  targetId: nullableStringSchema,
-  note: external_exports.string().min(1)
-});
 var distributionAliasTargetTypeSchema = external_exports.enum(["artist", "payee", "label", "release", "track", "unassigned"]);
 var distributionAliasUpsertSchema = workspaceBodySchema.extend({
   aliasText: external_exports.string().min(1),
@@ -43124,7 +43466,7 @@ function registerDistributionRoutes(app, dependencies) {
     const source = nullableQuery(context, "importSource");
     const importStatus = nullableQuery(context, "importStatus");
     const mappingStatus = nullableQuery(context, "mappingStatus") ?? "unmapped";
-    const suspenseStatus = nullableQuery(context, "suspenseStatus") ?? "open";
+    const suspenseStatus2 = nullableQuery(context, "suspenseStatus") ?? "open";
     const paymentStatus = nullableQuery(context, "paymentStatus");
     const revenueGroupBy = nullableQuery(context, "revenueGroupBy") ?? "store";
     const dateFrom = nullableQuery(context, "dateFrom") ?? `${period}-01`;
@@ -43160,7 +43502,7 @@ function registerDistributionRoutes(app, dependencies) {
       (run) => toAllocationRunSummary(dependencies.fixtures.distribution, run)
     );
     const suspense = readSuspense(dependencies.fixtures.distribution, {
-      status: toDomainSuspenseStatus(suspenseStatus),
+      status: toDomainSuspenseStatus(suspenseStatus2),
       reasonCode: null
     }).rows.map((row) => toApiSuspenseItem(row, period));
     const statements = readStatementSummaries(dependencies.fixtures.distribution, {
@@ -43508,6 +43850,32 @@ function registerDistributionRoutes(app, dependencies) {
       reasonCode: null
     }).rows.map((row) => toApiSuspenseItem(row, period));
     return context.json(pageItems(context, suspense));
+  });
+  app.get("/erh/v1/suspense/workbench", async (context) => {
+    const workspaceId = requireQuery(context, "workspaceId");
+    if (dependencies.distributionReads === void 0) {
+      throw new ApiRouteError(503, "suspense_repository_unavailable", "The live Suspense repository is unavailable.", []);
+    }
+    const cursor = nullableQuery(context, "cursor");
+    try {
+      const response = await dependencies.distributionReads.readSuspenseWorkbench({
+        workspaceId,
+        search: nullableQuery(context, "search"),
+        batchReference: nullableQuery(context, "batchReference"),
+        reasonCode: nullableQuery(context, "reasonCode"),
+        status: toSuspenseStatusQuery(nullableQuery(context, "status")),
+        dateFrom: toSuspenseIsoDateQuery(nullableQuery(context, "dateFrom"), "dateFrom"),
+        dateTo: toSuspenseIsoDateQuery(nullableQuery(context, "dateTo"), "dateTo"),
+        cursor,
+        limit: pageLimit(context)
+      });
+      return context.json(response);
+    } catch (error) {
+      if (error instanceof DistributionSuspenseCursorError) {
+        throw new ApiRouteError(400, "suspense_cursor_invalid", error.message, [`cursor=${cursor ?? "null"}`]);
+      }
+      throw error;
+    }
   });
   app.post("/erh/v1/suspense/:suspenseId/resolve", async (context) => {
     return distributionSuspenseResolveResponse(context, dependencies);
@@ -46955,14 +47323,31 @@ async function distributionAllocationUnpostResponse(context, dependencies) {
 }
 async function distributionSuspenseResolveResponse(context, dependencies) {
   const suspenseId = requirePathParam(context, "suspenseId");
-  const request = await readZodBody(context, suspenseResolveSchema);
+  const request = await readZodBody(context, distributionSuspenseResolveSchema);
   if (request.suspenseId !== suspenseId) {
     throw new ApiRouteError(400, "body_path_mismatch", "Suspense body must match the route suspense id.", [
       `pathSuspenseId=${suspenseId}`,
       `bodySuspenseId=${request.suspenseId}`
     ]);
   }
-  const suspense = requireDistributionSuspenseItem(dependencies.fixtures.distribution, suspenseId);
+  const liveSuspense = dependencies.distributionReads === void 0 ? null : await dependencies.distributionReads.getSuspenseItem(request.workspaceId, suspenseId);
+  const fixtureSuspense = liveSuspense === null && dependencies.distributionReads === void 0 ? requireDistributionSuspenseItem(dependencies.fixtures.distribution, suspenseId) : null;
+  if (dependencies.distributionReads !== void 0 && liveSuspense === null) {
+    throw new ApiRouteError(404, "distribution_suspense_not_found", "Distribution suspense item was not found.", [`suspenseId=${suspenseId}`]);
+  }
+  const suspense = liveSuspense ?? fixtureSuspense;
+  if (suspense === null) {
+    throw new ApiRouteError(404, "distribution_suspense_not_found", "Distribution suspense item was not found.", [`suspenseId=${suspenseId}`]);
+  }
+  if ((request.resolution === "map_to_track" || request.resolution === "map_to_release") && dependencies.distributionReads !== void 0) {
+    const targetId = request.targetId;
+    if (targetId === null) {
+      throw new ApiRouteError(422, "distribution_suspense_target_required", "A target is required for this resolution.", []);
+    }
+    if (request.resolution === "map_to_track" && await dependencies.distributionReads.getCatalogTrack(request.workspaceId, targetId) === null) {
+      throw new ApiRouteError(422, "distribution_suspense_target_invalid", "The target track is not available in this workspace.", [`targetId=${targetId}`]);
+    }
+  }
   const idempotencyKey = requireIdempotencyKey(context);
   const actor = context.get("authUser");
   const result = await runIdempotentMutation({
@@ -46974,7 +47359,12 @@ async function distributionSuspenseResolveResponse(context, dependencies) {
     requestBody: request,
     write: async (tx, resolvedIdempotencyKey) => {
       await acquireAdvisoryLock(tx, `distribution:suspense:${suspenseId}`);
-      await persistDistributionSuspenseResolve(tx, suspenseId, dependencies.nowIso());
+      if (suspenseStatus(suspense) === "resolved") {
+        throw new ApiRouteError(409, "distribution_suspense_already_resolved", "This suspense item has already been resolved.", [`suspenseId=${suspenseId}`]);
+      }
+      validateSuspenseResolutionPrerequisites(suspense, request);
+      const resolvedAt = dependencies.nowIso();
+      await persistDistributionSuspenseResolve(tx, request, suspense, actor.userId, resolvedIdempotencyKey, resolvedAt);
       const auditEventId = await appendAuditEvent(tx, {
         actor,
         action: "distribution_suspense_resolve",
@@ -46984,7 +47374,7 @@ async function distributionSuspenseResolveResponse(context, dependencies) {
         after: { resolution: request.resolution, targetId: request.targetId, note: request.note },
         idempotencyKey: resolvedIdempotencyKey
       });
-      resolveDistributionSuspenseFixture(dependencies.fixtures, suspenseId, dependencies.nowIso());
+      resolveDistributionSuspenseFixture(dependencies.fixtures, suspenseId, resolvedAt, request.resolution);
       return mutationReceipt(suspenseId, auditEventId);
     }
   });
@@ -48497,21 +48887,99 @@ function requireDistributionSuspenseItem(dataset, suspenseId) {
   }
   return suspense;
 }
-async function persistDistributionSuspenseResolve(tx, suspenseId, resolvedAt) {
+function suspenseStatus(suspense) {
+  return "status" in suspense ? suspense.status : suspense.resolved ? "resolved" : "open";
+}
+function validateSuspenseResolutionPrerequisites(suspense, request) {
+  if (!("status" in suspense)) {
+    return;
+  }
+  if (request.resolution === "map_to_release") {
+    throw new ApiRouteError(
+      422,
+      "distribution_suspense_release_mapping_deprecated",
+      "Map the earning to a canonical track, not directly to a release.",
+      [`suspenseId=${request.suspenseId}`]
+    );
+  }
+  if (request.resolution === "map_to_track" && suspense.earningId === null) {
+    throw new ApiRouteError(422, "distribution_suspense_earning_missing", "This suspense row has no earning to map.", [
+      `suspenseId=${request.suspenseId}`
+    ]);
+  }
+  if (request.resolution === "retry_row" && ["missing_contract", "missing_split", "invalid_split"].includes(suspense.reasonCode) && (suspense.splitPercentage === null || !/^100(?:\.0+)?$/u.test(suspense.splitPercentage))) {
+    throw new ApiRouteError(
+      409,
+      "distribution_suspense_split_incomplete",
+      "The effective split must equal exactly 100% before this row can be retried.",
+      [`suspenseId=${request.suspenseId}`, `splitPercentage=${suspense.splitPercentage ?? "null"}`]
+    );
+  }
+}
+async function persistDistributionSuspenseResolve(tx, request, suspense, actorUserId, idempotencyKey, resolvedAt) {
   if (tx.kind === "memory") {
     return;
   }
   await tx.executor.execute(sql`
+    insert into suspense_resolution_overrides (
+      id, workspace_id, suspense_id, resolution, target_id, note,
+      created_by_user_id, idempotency_key, created_at
+    ) values (
+      ${randomUUID2()}, ${request.workspaceId}, ${request.suspenseId}, ${request.resolution}, ${request.targetId}, ${request.note},
+      ${actorUserId}, ${idempotencyKey}, ${resolvedAt}
+    )
+  `);
+  if (request.resolution === "map_to_track" && request.targetId !== null && suspense.earningId !== null) {
+    await tx.executor.execute(sql`
+      update earning_track_matches
+      set status = 'ignored'
+      where earning_id = ${suspense.earningId} and track_id <> ${request.targetId}
+    `);
+    await tx.executor.execute(sql`
+      with updated as (
+        update earning_track_matches
+        set confidence = 100, status = 'matched'
+        where earning_id = ${suspense.earningId} and track_id = ${request.targetId}
+        returning id
+      )
+      insert into earning_track_matches (id, earning_id, track_id, confidence, status)
+      select ${randomUUID2()}, ${suspense.earningId}, ${request.targetId}, 100, 'matched'
+      where not exists (select 1 from updated)
+    `);
+    await tx.executor.execute(sql`
+      update normalized_earnings
+      set mapping_status = 'matched', calculation_status = 'pending', updated_at = ${resolvedAt}
+      where id = ${suspense.earningId} and workspace_id = ${request.workspaceId}
+    `);
+  } else if (suspense.earningId !== null) {
+    const calculationStatus = request.resolution === "hold" || request.resolution === "mark_resolved" ? "excluded" : "pending";
+    await tx.executor.execute(sql`
+      update normalized_earnings
+      set calculation_status = ${calculationStatus}, updated_at = ${resolvedAt}
+      where id = ${suspense.earningId} and workspace_id = ${request.workspaceId}
+    `);
+  }
+  await tx.executor.execute(sql`
     update suspense_items
     set resolved = true, resolved_at = ${resolvedAt}
-    where id = ${suspenseId}
+    where id = ${request.suspenseId} and workspace_id = ${request.workspaceId}
   `);
 }
-function resolveDistributionSuspenseFixture(fixtures, suspenseId, resolvedAt) {
+function resolveDistributionSuspenseFixture(fixtures, suspenseId, resolvedAt, resolution) {
   const mutableDistribution = fixtures.distribution;
+  const suspense = fixtures.distribution.suspenseItems.find((candidate) => candidate.id === suspenseId);
   mutableDistribution.suspenseItems = fixtures.distribution.suspenseItems.map(
-    (suspense) => suspense.id === suspenseId ? { ...suspense, resolved: true, resolvedAt } : suspense
+    (suspense2) => suspense2.id === suspenseId ? { ...suspense2, resolved: true, resolvedAt } : suspense2
   );
+  if (suspense?.earningId !== null && suspense?.earningId !== void 0) {
+    mutableDistribution.normalizedEarnings = fixtures.distribution.normalizedEarnings.map(
+      (earning) => earning.id === suspense.earningId ? {
+        ...earning,
+        calculationStatus: resolution === "hold" || resolution === "mark_resolved" ? "excluded" : "pending",
+        mappingStatus: resolution === "map_to_track" ? "matched" : earning.mappingStatus
+      } : earning
+    );
+  }
 }
 function upsertById(items, item) {
   const exists2 = items.some((candidate) => candidate.id === item.id);
@@ -51772,6 +52240,18 @@ function toAllocationIsoDateQuery(value, key) {
   }
   return parsed.data;
 }
+function toSuspenseIsoDateQuery(value, key) {
+  if (value === null) return null;
+  const parsed = isoDateSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new ApiRouteError(400, "suspense_date_invalid", "Suspense date filter must use YYYY-MM-DD.", [`${key}=${value}`]);
+  }
+  return parsed.data;
+}
+function toSuspenseStatusQuery(value) {
+  if (value === null || value === "open" || value === "resolved") return value;
+  throw new ApiRouteError(400, "suspense_status_invalid", "Suspense status filter is invalid.", [`status=${value}`]);
+}
 function toAllocationPeriodQuery(value) {
   if (value === null) return null;
   if (!/^\d{4}-(0[1-9]|1[0-2])$/u.test(value)) {
@@ -54915,7 +55395,7 @@ async function readDistributionContractExpenses(pool) {
       originalAmountMicro: fullAmount,
       openAmountMicro,
       currency: currencyCell(row, "currency"),
-      recoverable: booleanCell(row, "recoupable"),
+      recoverable: booleanCell2(row, "recoupable"),
       status: toApiExpenseStatus(stringCell2(row, "status"))
     };
   });
@@ -55050,7 +55530,7 @@ async function readDistributionAllocationCostTerms(pool) {
     payeeId: nullableStringCell2(row, "payee_id"),
     amount: stringCell2(row, "amount"),
     currency: currencyCell(row, "currency"),
-    recoupable: booleanCell(row, "recoupable"),
+    recoupable: booleanCell2(row, "recoupable"),
     status: enumCell(row, "status", [
       "draft",
       "active",
@@ -55149,7 +55629,7 @@ function toOfficeDepartment(row) {
     name: stringCell2(row, "name"),
     type: enumCell(row, "type", ["income", "expense", "mixed"]),
     color: nullableStringCell2(row, "color"),
-    isActive: booleanCell(row, "is_active")
+    isActive: booleanCell2(row, "is_active")
   };
 }
 function toOfficeDivision(row) {
@@ -55157,7 +55637,7 @@ function toOfficeDivision(row) {
     id: stringCell2(row, "id"),
     departmentId: stringCell2(row, "department_id"),
     name: stringCell2(row, "name"),
-    isActive: booleanCell(row, "is_active")
+    isActive: booleanCell2(row, "is_active")
   };
 }
 function toOfficeCategory(row) {
@@ -55168,7 +55648,7 @@ function toOfficeCategory(row) {
     type: enumCell(row, "type", ["income", "expense"]),
     accountCode: nullableStringCell2(row, "account_code"),
     accountLabel: nullableStringCell2(row, "account_label"),
-    isActive: booleanCell(row, "is_active")
+    isActive: booleanCell2(row, "is_active")
   };
 }
 function toOfficePartner(row) {
@@ -55176,7 +55656,7 @@ function toOfficePartner(row) {
     id: stringCell2(row, "id"),
     name: stringCell2(row, "name"),
     type: enumCell(row, "type", ["client", "supplier", "both"]),
-    isActive: booleanCell(row, "is_active")
+    isActive: booleanCell2(row, "is_active")
   };
 }
 function toOfficeProject(row) {
@@ -55186,7 +55666,7 @@ function toOfficeProject(row) {
     description: nullableStringCell2(row, "description"),
     status: enumCell(row, "status", ["draft", "active", "paused", "completed", "cancelled", "archived"]),
     state: stringCell2(row, "state"),
-    isActive: booleanCell(row, "is_active")
+    isActive: booleanCell2(row, "is_active")
   };
 }
 function toOfficeProjectBudgetLine(row) {
@@ -55205,7 +55685,7 @@ function toOfficeTransaction2(row) {
     transactionDate: timestampCell(row, "transaction_date"),
     type: enumCell(row, "type", ["income", "expense"]),
     status: enumCell(row, "status", ["validated", "draft", "cancelled"]),
-    isActive: booleanCell(row, "is_active"),
+    isActive: booleanCell2(row, "is_active"),
     description: nullableStringCell2(row, "description"),
     categoryId: nullableStringCell2(row, "category_id"),
     partnerId: nullableStringCell2(row, "partner_id"),
@@ -55214,7 +55694,7 @@ function toOfficeTransaction2(row) {
     amountMinor: bigintCell(row, "amount_minor"),
     originalCurrency: nullableStringCell2(row, "original_currency"),
     exchangeRateE10: nullableBigintCell(row, "exchange_rate_e10"),
-    vatApplicable: booleanCell(row, "vat_applicable"),
+    vatApplicable: booleanCell2(row, "vat_applicable"),
     vatRateBp: nullableIntegerCell2(row, "vat_rate_bp"),
     vatAmountMinor: bigintCell(row, "vat_amount_minor")
   };
@@ -55237,7 +55717,7 @@ function toOfficeBankAccount(row) {
     currency: currencyCell(row, "currency"),
     currentBalanceMinor: bigintCell(row, "current_balance_minor"),
     currentBalanceMurMinor: nullableBigintCell(row, "current_balance_mur_minor"),
-    isActive: booleanCell(row, "is_active"),
+    isActive: booleanCell2(row, "is_active"),
     balanceAsOf: nullableTimestampCell(row, "balance_as_of")
   };
 }
@@ -55286,7 +55766,7 @@ function toOfficeBankStatementLine(row) {
     currency: currencyCell(row, "currency"),
     amountMurMinor: bigintCell(row, "amount_mur_minor"),
     balanceMurMinor: nullableBigintCell(row, "balance_mur_minor"),
-    isDuplicateCandidate: booleanCell(row, "is_duplicate_candidate"),
+    isDuplicateCandidate: booleanCell2(row, "is_duplicate_candidate"),
     reconciliationStatus: enumCell(row, "reconciliation_status", ["unmatched", "suggested", "matched", "rejected", "ignored"]),
     matchedTransactionId: nullableStringCell2(row, "matched_transaction_id"),
     rawData: jsonRecordCell(row, "raw_data")
@@ -55432,7 +55912,7 @@ function toDistributionSuspenseItem(row) {
     amount: stringCell2(row, "amount"),
     currency: currencyCell(row, "currency"),
     reasonCode: stringCell2(row, "reason_code"),
-    resolved: booleanCell(row, "resolved"),
+    resolved: booleanCell2(row, "resolved"),
     resolvedAt: nullableTimestampCell(row, "resolved_at"),
     createdAt: timestampCell(row, "created_at")
   };
@@ -55495,7 +55975,7 @@ function toDistributionPayee(row) {
     name: stringCell2(row, "name"),
     email: nullableStringCell2(row, "email"),
     preferredCurrency: currencyCell(row, "preferred_currency"),
-    isActive: booleanCell(row, "is_active")
+    isActive: booleanCell2(row, "is_active")
   };
 }
 function toDistributionRelease(row) {
@@ -55542,7 +56022,7 @@ async function readOfficePartnerPayeeLinks(pool) {
       payeeId: stringCell2(row, "payee_id"),
       payeeName: stringCell2(row, "payee_name"),
       resolution: "stored_link",
-      status: booleanCell(row, "payee_is_active") ? "active" : "inactive",
+      status: booleanCell2(row, "payee_is_active") ? "active" : "inactive",
       source: "identity_link",
       confidence: stringCell2(row, "confidence")
     };
@@ -55592,7 +56072,7 @@ function nullableStringCell2(row, columnName) {
   }
   return String(value);
 }
-function booleanCell(row, columnName) {
+function booleanCell2(row, columnName) {
   const value = row[columnName];
   if (typeof value === "boolean") {
     return value;

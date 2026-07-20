@@ -81,6 +81,8 @@ import type {
   StatementVoidRequest,
   StatementSummary,
   StatementsQuery,
+  DistributionSuspenseWorkbenchQuery,
+  DistributionSuspenseWorkbenchResponse,
   SuspenseItem,
   SuspenseQuery,
   SuspenseResolveRequest,
@@ -195,6 +197,9 @@ export interface DistributionApiClient {
     query: DistributionAllocationQuery
   ) => Promise<PageResult<DistributionAllocationTotal>>;
   readonly listSuspense: (query: SuspenseQuery) => Promise<PageResult<SuspenseItem>>;
+  readonly getSuspenseWorkbench: (
+    query: DistributionSuspenseWorkbenchQuery
+  ) => Promise<DistributionSuspenseWorkbenchResponse>;
   readonly resolveSuspense: (
     request: SuspenseResolveRequest,
     options: WriteRequestOptions
@@ -550,6 +555,20 @@ export function createDistributionApiClient(config: ApiClientConfig): Distributi
         status: query.status,
         dateFrom: query.dateFrom ?? null,
         dateTo: query.dateTo ?? null,
+        cursor: query.cursor,
+        limit: query.limit
+      }),
+    getSuspenseWorkbench: (
+      query: DistributionSuspenseWorkbenchQuery
+    ): Promise<DistributionSuspenseWorkbenchResponse> =>
+      transport.get<DistributionSuspenseWorkbenchResponse>("suspense/workbench", {
+        workspaceId: query.workspaceId,
+        search: query.search,
+        batchReference: query.batchReference,
+        reasonCode: query.reasonCode,
+        status: query.status,
+        dateFrom: query.dateFrom,
+        dateTo: query.dateTo,
         cursor: query.cursor,
         limit: query.limit
       }),

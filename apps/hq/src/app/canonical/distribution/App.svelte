@@ -48,6 +48,10 @@
     type DistributionRevenueRow,
     type DistributionScreenResponse,
     type DistributionSettingsResponse,
+    type DistributionSuspenseCurrencyTotal,
+    type DistributionSuspenseReasonGroup,
+    type DistributionSuspenseWorkbenchResponse,
+    type DistributionSuspenseWorkbenchRow,
     type PageResult,
     type PayeeSummary,
     type PaymentSummary,
@@ -56,7 +60,6 @@
     type StatementPrintLine,
     type StatementPrintResponse,
     type StatementSummary,
-    type SuspenseItem,
     type TrackSummary
   } from "@ehq/api-client";
   import { Alert, BarsChart, Button, Input, KPI, Loader, PageHeader, SectionTemplate, Select, Table, Toolbar, WorkspaceShell } from "@ehq/ui";
@@ -455,11 +458,24 @@
     { label: "Seen", align: "left", sortable: true }
   ];
   const suspenseColumns: readonly TableColumn[] = [
+    { label: "ID", align: "left", sortable: true },
+    { label: "Batch", align: "left", sortable: true },
     { label: "Reason", align: "left", sortable: true },
-    { label: "Source", align: "left", sortable: true },
+    { label: "Fix path", align: "left", sortable: true },
+    { label: "Track", align: "left", sortable: true },
+    { label: "Artist", align: "left", sortable: true },
+    { label: "ISRC", align: "left", sortable: true },
+    { label: "UPC / EAN", align: "left", sortable: true },
     { label: "Amount", align: "right", sortable: true },
-    { label: "Resolution path", align: "left", sortable: true },
+    { label: "Split", align: "right", sortable: true },
     { label: "Status", align: "left", sortable: true }
+  ];
+  const suspensePlaybookColumns: readonly TableColumn[] = [
+    { label: "Reason", align: "left", sortable: true },
+    { label: "Rows", align: "right", sortable: true },
+    { label: "Exposure", align: "right", sortable: true },
+    { label: "Fix path", align: "left", sortable: true },
+    { label: "Next action", align: "left", sortable: true }
   ];
   const statementColumns: readonly TableColumn[] = [
     { label: "Payee", align: "left", sortable: true },
@@ -611,7 +627,9 @@
   let allocationWorkbenchState = $state<ApiRequestState<DistributionAllocationWorkbenchResponse>>(
     createIdleState<DistributionAllocationWorkbenchResponse>()
   );
-  let suspenseState = $state<ApiRequestState<PageResult<SuspenseItem>>>(createIdleState<PageResult<SuspenseItem>>());
+  let suspenseState = $state<ApiRequestState<DistributionSuspenseWorkbenchResponse>>(
+    createIdleState<DistributionSuspenseWorkbenchResponse>()
+  );
   let statementsState = $state<ApiRequestState<PageResult<StatementSummary>>>(
     createIdleState<PageResult<StatementSummary>>()
   );
@@ -656,6 +674,9 @@
   let contractWorkflowFilter = $state<ContractWorkflowFilter>(allValue);
   let allocationSearch = $state("");
   let suspenseStatusFilter = $state<SuspenseStatusFilter>("open");
+  let suspenseSearch = $state("");
+  let suspenseBatchReference = $state("");
+  let suspenseReasonFilter = $state(allValue);
   let paymentStatusFilter = $state<PaymentStatusFilter>(allValue);
   let statementPayeeFilter = $state<string>(allValue);
   let statementCurrencyFilter = $state<CurrencyCode | "all">(allValue);
@@ -705,6 +726,7 @@
   let recordPaymentNotes = $state("");
   let selectedSuspenseId = $state<string | null>(null);
   let suspenseTargetTrackId = $state("");
+  let suspenseResolutionNote = $state("");
   let suspenseTrackOptions = $state<readonly TrackSummary[] | null>(null);
   let suspenseTrackOptionsError = $state<string | null>(null);
   let selectedRunId = $state<string | null>(null);
@@ -789,7 +811,8 @@
   const allocationWavePeriod = $derived(allocationBatches.find((batch) => batch.pendingRowCount > 0)?.period ?? distributionPeriod);
   const allocationLockKey = $derived(`distribution:allocations:${allocationWavePeriod}`);
   const allocationBankItems = $derived(allocationWorkbench?.unallocatedBank.items ?? []);
-  const suspenseItems = $derived(readPageItems(suspenseState));
+  const suspenseWorkbench = $derived(suspenseState.status === "success" ? suspenseState.data : null);
+  const suspenseItems = $derived(suspenseWorkbench?.items.items ?? []);
   const statements = $derived(readPageItems(statementsState));
   const filteredStatements = $derived(
     statements.filter((statement: StatementSummary): boolean => statementCurrencyFilter === allValue || statement.currency === statementCurrencyFilter)
@@ -817,6 +840,8 @@
   const allocationBatchRows = $derived(createAllocationBatchRows(allocationBatches));
   const allocationBankRows = $derived(createAllocationBankRows(allocationBankItems));
   const suspenseTableRows = $derived(createSuspenseRows(suspenseItems));
+  const suspensePlaybookRows = $derived(createSuspensePlaybookRows(suspenseWorkbench?.reasonGroups ?? []));
+  const suspenseKpis = $derived(createSuspenseKpis(suspenseWorkbench));
   const statementRows = $derived(createStatementRows(filteredStatements));
   const paymentRows = $derived(createPaymentRows(payments));
   const unlinkedPaymentRows = $derived(createPaymentRows(payments.filter((payment) => payment.linkedStatementIds.length === 0 && payment.status !== "voided")));
@@ -854,7 +879,7 @@
   const dashboardKpis = $derived(createDashboardKpis(dashboardState));
   const contractKpis = $derived(createContractKpis(contractWorkbench));
   const payeeRows = $derived(createPayeeRows(payees));
-  const revenueKpis = $derived(createRevenueKpis(revenueRows, payments, suspenseItems));
+  const revenueKpis = $derived(createRevenueKpis(revenueRows, payments, suspenseWorkbench?.summary.totals ?? []));
   const importPagination = $derived<TablePagination | null>(
     createTablePagination(importBatchesState, tablePaginationLoading === "importBatches", tablePaginationError("importBatches"), loadMoreImportBatches, loadAllImportBatches)
   );
@@ -894,7 +919,14 @@
     }
   );
   const suspensePagination = $derived<TablePagination | null>(
-    createTablePagination(suspenseState, tablePaginationLoading === "suspense", tablePaginationError("suspense"), loadMoreSuspense, loadAllSuspense)
+    suspenseWorkbench === null ? null : {
+      loadedCount: suspenseWorkbench.items.items.length,
+      hasMore: suspenseWorkbench.items.nextCursor !== null,
+      loading: tablePaginationLoading === "suspense",
+      error: tablePaginationError("suspense"),
+      onLoadMore: loadMoreSuspense,
+      onLoadAll: loadAllSuspense
+    }
   );
   const statementsPagination = $derived<TablePagination | null>(
     createTablePagination(statementsState, tablePaginationLoading === "statements", tablePaginationError("statements"), loadMoreStatements, loadAllStatements)
@@ -963,12 +995,19 @@
     paymentExchangeRateInput.trim() === "" ? null : normalizeFxRateValue(paymentExchangeRateInput)
   );
   const paymentReconcileAmountMicro = $derived(parseExpenseAmountMicro(paymentReconcileAmountInput));
-  const selectedSuspenseItem = $derived(suspenseItems.find((item: SuspenseItem): boolean => item.id === selectedSuspenseId) ?? null);
+  const selectedSuspenseItem = $derived(suspenseItems.find((item: DistributionSuspenseWorkbenchRow): boolean => item.id === selectedSuspenseId) ?? null);
   const selectedSuspenseResolution = $derived(selectedSuspenseItem === null ? null : suspenseResolutionFor(selectedSuspenseItem));
   const selectedSuspenseTrack = $derived(
     (suspenseTrackOptions ?? []).find((track: TrackSummary): boolean => track.id === suspenseTargetTrackId) ?? null
   );
   const suspenseResolveTarget = $derived(resolveSuspenseTargetFor(selectedSuspenseResolution, selectedSuspenseTrack));
+  const suspenseReasonOptions = $derived<readonly SelectOption[]>([
+    { label: "All reasons", value: allValue },
+    ...(suspenseWorkbench?.reasonGroups ?? []).map((group): SelectOption => ({
+      label: `${group.title} · ${String(group.rowCount)}`,
+      value: group.reasonCode
+    }))
+  ]);
   const selectedRun = $derived(allocationRuns.find((run: AllocationRunSummary): boolean => run.id === selectedRunId) ?? null);
   const contractEditorTracks = $derived(
     contractEditorTrackIds.map((trackId) => contractTracks.find((track) => track.trackId === trackId)).filter((track): track is DistributionContractTrackRow => track !== undefined)
@@ -1113,7 +1152,16 @@
     { label: "Review contributors", onAction: reviewCatalogRow }
   ];
   const suspenseRowActions: readonly TableRowAction[] = [
-    { label: "Resolve", onAction: openSuspenseResolution }
+    { label: "Open fix path", onAction: openSuspenseFixPath },
+    {
+      label: "Resolve",
+      onAction: openSuspenseResolution,
+      isEnabled: suspenseRowCanResolve,
+      disabledReason: suspenseRowResolveDisabledReason
+    }
+  ];
+  const suspensePlaybookRowActions: readonly TableRowAction[] = [
+    { label: "Open exact queue", onAction: openSuspenseReasonQueue }
   ];
   const allocationRowActions: readonly TableRowAction[] = [
     { label: "Request reversal", onAction: selectRunForUnpost, danger: true }
@@ -1178,8 +1226,14 @@
   });
 
   $effect((): void => {
-    if (activePageId === "allocations" && allocationWorkbenchState.status === "idle") {
+    if ((activePageId === "allocations" || activePageId === "suspense") && allocationWorkbenchState.status === "idle") {
       void loadAllocationWorkbench();
+    }
+  });
+
+  $effect((): void => {
+    if (activePageId === "suspense" && suspenseState.status === "idle") {
+      void loadSuspense();
     }
   });
 
@@ -1204,6 +1258,9 @@
       if (activePageId === "allocations") {
         await loadAllocationWorkbench();
       }
+      if (activePageId === "suspense" || activePageId === "revenue") {
+        await loadSuspense();
+      }
     } catch {
       await Promise.all([
         loadWriteGate(),
@@ -1213,7 +1270,7 @@
         loadPayees(),
         activePageId === "catalog" ? loadCatalog() : Promise.resolve(),
         activePageId === "contracts" ? loadContractWorkbench() : Promise.resolve(),
-        activePageId === "allocations" ? loadAllocationWorkbench() : Promise.resolve(),
+        (activePageId === "allocations" || activePageId === "suspense") ? loadAllocationWorkbench() : Promise.resolve(),
         loadAllocationRuns(),
         loadSuspense(),
         loadStatements(),
@@ -1240,7 +1297,9 @@
     tracksState = createSuccessState<PageResult<TrackSummary>>(screen.tracks);
     expensesState = createSuccessState<PageResult<DistributionContractExpense>>(emptyPageResult<DistributionContractExpense>());
     allocationsState = createSuccessState<PageResult<AllocationRunSummary>>(screen.allocations);
-    suspenseState = createSuccessState<PageResult<SuspenseItem>>(screen.suspense);
+    // The bundled screen response is a bounded compatibility snapshot. Suspense
+    // always loads from its live, cursor-paginated Postgres workbench instead.
+    suspenseState = createIdleState<DistributionSuspenseWorkbenchResponse>();
     statementsState = createSuccessState<PageResult<StatementSummary>>(screen.statements);
     paymentsState = createSuccessState<PageResult<PaymentSummary>>(screen.payments);
     revenueState = createSuccessState<PageResult<DistributionRevenueRow>>(screen.revenue);
@@ -1489,24 +1548,25 @@
   }
 
   async function loadSuspensePage(mode: PageLoadMode): Promise<void> {
-    await loadDistributionPageResult(
-      "suspense",
-      suspenseState,
-      (state: ApiRequestState<PageResult<SuspenseItem>>): void => {
-        suspenseState = state;
-      },
-      (cursor: string): Promise<PageResult<SuspenseItem>> =>
-        client.distribution.listSuspense({
-          workspaceId: distributionWorkspaceId,
-          period: allocationWavePeriod,
-          status: toNullableSuspenseStatus(suspenseStatusFilter),
-          dateFrom: activeRange.from,
-          dateTo: activeRange.to,
-          cursor,
-          limit: TABLE_PAGE_SIZE
-        }),
-      mode
-    );
+    if (suspenseState.status !== "success" || tablePaginationLoading !== null) return;
+    let current = suspenseState.data;
+    let cursor = current.items.nextCursor;
+    if (cursor === null) return;
+    tablePaginationLoading = "suspense";
+    setTablePaginationError("suspense", null);
+    try {
+      while (cursor !== null) {
+        const next = await client.distribution.getSuspenseWorkbench(suspenseWorkbenchQuery(cursor));
+        current = { ...next, items: appendPageResult(current.items, next.items) };
+        suspenseState = createSuccessState<DistributionSuspenseWorkbenchResponse>(current);
+        cursor = current.items.nextCursor;
+        if (mode === "one") break;
+      }
+    } catch (error: unknown) {
+      setTablePaginationError("suspense", getErrorMessage(error));
+    } finally {
+      tablePaginationLoading = null;
+    }
   }
 
   async function loadMoreStatements(): Promise<void> {
@@ -1924,24 +1984,30 @@
   }
 
   async function loadSuspense(): Promise<void> {
-    suspenseState = beginReload<PageResult<SuspenseItem>>(suspenseState);
+    suspenseState = beginReload<DistributionSuspenseWorkbenchResponse>(suspenseState);
 
     try {
-      suspenseState = createSuccessState<PageResult<SuspenseItem>>(
-        await client.distribution.listSuspense({
-          workspaceId: distributionWorkspaceId,
-          period: distributionPeriod,
-          status: toNullableSuspenseStatus(suspenseStatusFilter),
-          dateFrom: activeRange.from,
-          dateTo: activeRange.to,
-          cursor: null,
-          limit: TABLE_PAGE_SIZE
-        })
+      suspenseState = createSuccessState<DistributionSuspenseWorkbenchResponse>(
+        await client.distribution.getSuspenseWorkbench(suspenseWorkbenchQuery(null))
       );
       setTablePaginationError("suspense", null);
     } catch (error: unknown) {
-      suspenseState = createErrorState<PageResult<SuspenseItem>>(error);
+      suspenseState = createErrorState<DistributionSuspenseWorkbenchResponse>(error);
     }
+  }
+
+  function suspenseWorkbenchQuery(cursor: string | null) {
+    return {
+      workspaceId: distributionWorkspaceId,
+      search: suspenseSearch.trim() === "" ? null : suspenseSearch.trim(),
+      batchReference: suspenseBatchReference.trim() === "" ? null : suspenseBatchReference.trim(),
+      reasonCode: suspenseReasonFilter === allValue ? null : suspenseReasonFilter,
+      status: toNullableSuspenseStatus(suspenseStatusFilter),
+      dateFrom: activeRange.from,
+      dateTo: activeRange.to,
+      cursor,
+      limit: TABLE_PAGE_SIZE
+    };
   }
 
   async function loadStatements(): Promise<void> {
@@ -2766,6 +2832,19 @@
 
   function updateSuspenseStatus(value: string): void {
     suspenseStatusFilter = value as SuspenseStatusFilter;
+  }
+
+  function updateSuspenseSearch(value: string): void { suspenseSearch = value; }
+  function updateSuspenseBatchReference(value: string): void { suspenseBatchReference = value; }
+  function updateSuspenseReason(value: string): void { suspenseReasonFilter = value; }
+  function updateSuspenseResolutionNote(value: string): void { suspenseResolutionNote = value; }
+
+  async function clearSuspenseFilters(): Promise<void> {
+    suspenseSearch = "";
+    suspenseBatchReference = "";
+    suspenseReasonFilter = allValue;
+    suspenseStatusFilter = "open";
+    await loadSuspense();
   }
 
   function updatePaymentStatus(value: string): void {
@@ -3608,7 +3687,7 @@
   }
 
   function openSuspenseResolution(rowId: string): void {
-    const item = suspenseItems.find((candidate: SuspenseItem): boolean => candidate.id === rowId);
+    const item = suspenseItems.find((candidate: DistributionSuspenseWorkbenchRow): boolean => candidate.id === rowId);
 
     if (item === undefined || item.status !== "open") {
       return;
@@ -3616,12 +3695,16 @@
 
     selectedSuspenseId = rowId;
     suspenseTargetTrackId = "";
-    void ensureSuspenseTrackOptions();
+    suspenseResolutionNote = "";
+    if (item.resolutionMode === "map") {
+      void ensureSuspenseTrackOptions();
+    }
   }
 
   function closeSuspensePanel(): void {
     selectedSuspenseId = null;
     suspenseTargetTrackId = "";
+    suspenseResolutionNote = "";
   }
 
   async function ensureSuspenseTrackOptions(): Promise<void> {
@@ -3661,14 +3744,14 @@
   }
 
   function resolveSuspenseTargetFor(
-    resolution: "map_to_release" | "map_to_track" | "hold" | null,
+    resolution: "map_to_track" | "retry_row" | "mark_resolved" | null,
     track: TrackSummary | null
   ): SuspenseResolveTarget {
     if (resolution === null) {
       return { ready: false, targetId: null, hint: "Select a suspense item first." };
     }
 
-    if (resolution === "hold") {
+    if (resolution !== "map_to_track") {
       return { ready: true, targetId: null, hint: "" };
     }
 
@@ -3676,22 +3759,20 @@
       return { ready: false, targetId: null, hint: "Select the target track first." };
     }
 
-    if (resolution === "map_to_track") {
-      return { ready: true, targetId: track.id, hint: "" };
-    }
-
-    if (track.releaseId === null) {
-      return { ready: false, targetId: null, hint: "This track has no release; select a track linked to a release." };
-    }
-
-    return { ready: true, targetId: track.releaseId, hint: "" };
+    return { ready: true, targetId: track.id, hint: "" };
   }
 
-  async function resolveSelectedSuspense(): Promise<void> {
+  async function resolveSelectedSuspense(
+    requestedResolution: "map_to_track" | "retry_row" | "mark_resolved" | null = null
+  ): Promise<void> {
     const item = selectedSuspenseItem;
+    const resolution = requestedResolution ?? selectedSuspenseResolution;
     const target = suspenseResolveTarget;
 
-    if (item === null || !target.ready) {
+    if (item === null || resolution === null || (resolution === "map_to_track" && !target.ready)) {
+      return;
+    }
+    if (resolution === "mark_resolved" && suspenseResolutionNote.trim() === "") {
       return;
     }
 
@@ -3702,9 +3783,9 @@
         {
           workspaceId: distributionWorkspaceId,
           suspenseId: item.id,
-          resolution: suspenseResolutionFor(item),
-          targetId: target.targetId,
-          note: `Resolved through ${item.exactFixPath}`
+          resolution,
+          targetId: resolution === "map_to_track" ? target.targetId : null,
+          note: suspenseResolutionNote.trim() || `${resolution === "retry_row" ? "Retried" : "Mapped"} through ${item.fixPath}`
         },
         {
           idempotencyKey: createIdempotencyKey("suspense-resolve")
@@ -3715,6 +3796,53 @@
       await Promise.all([loadSuspense(), loadReconciliation(), loadAuditLog()]);
     } catch (error: unknown) {
       reportActionError(error);
+    }
+  }
+
+  function suspenseRowCanResolve(rowId: string): boolean {
+    return suspenseItems.some((item) => item.id === rowId && item.status === "open");
+  }
+
+  function suspenseRowResolveDisabledReason(rowId: string): string | null {
+    return suspenseRowCanResolve(rowId) ? null : "This suspense item is already resolved.";
+  }
+
+  async function openSuspenseReasonQueue(reasonCode: string): Promise<void> {
+    suspenseReasonFilter = reasonCode;
+    suspenseStatusFilter = "open";
+    await loadSuspense();
+  }
+
+  function openSuspenseFixPath(rowId: string): void {
+    const item = suspenseItems.find((candidate) => candidate.id === rowId);
+    if (item === undefined) return;
+    const reference = item.isrc ?? item.trackTitle ?? item.artistName ?? "";
+    if (item.fixPath === "mapping") {
+      mappingSearch = reference;
+      mappingStatusFilter = "suggested";
+      selectPage("mapping");
+      void loadMappingRows();
+      return;
+    }
+    if (item.fixPath === "contracts") {
+      contractSearch = reference;
+      contractWorkflowFilter = "needs_attention";
+      selectPage("contracts");
+      void loadContractWorkbench();
+      return;
+    }
+    if (item.fixPath === "catalog") {
+      catalogSearch = reference;
+      selectPage("catalog");
+      void loadCatalog();
+      return;
+    }
+    if (item.fixPath === "settings") {
+      selectPage("settings");
+      return;
+    }
+    if (item.fixPath === "imports") {
+      selectPage("imports");
     }
   }
 
@@ -4416,18 +4544,24 @@
   }
 
   function exportSuspenseCsv(): void {
-    const rows = suspenseItems.map((item: SuspenseItem): readonly string[] => [
-      item.sourceReference,
-      suspenseReason(item.reason),
-      item.exactFixPath,
-      item.status,
-      item.currency,
+    const rows = suspenseItems.map((item: DistributionSuspenseWorkbenchRow): readonly string[] => [
+      item.id,
+      item.batchReference,
+      item.reasonCode,
+      item.fixPath,
+      item.trackTitle ?? "",
+      item.artistName ?? "",
+      item.isrc ?? "",
+      item.upc ?? "",
       item.amountMicro,
-      item.period
+      item.currency,
+      item.splitPercentage ?? "",
+      item.status,
+      item.createdAt
     ]);
     downloadCsv(
-      `distribution-suspense-${suspenseStatusFilter}-${distributionPeriod}.csv`,
-      ["Source", "Reason", "Fix path", "Status", "Currency", "Amount", "Period"],
+      `distribution-suspense-${suspenseStatusFilter}-${today}.csv`,
+      ["ID", "Batch", "Reason", "Fix path", "Track", "Artist", "ISRC", "UPC / EAN", "Amount", "Currency", "Split", "Status", "Created"],
       rows
     );
   }
@@ -4708,13 +4842,13 @@
   function createRevenueKpis(
     rows: readonly DistributionRevenueRow[],
     paymentItems: readonly PaymentSummary[],
-    suspense: readonly SuspenseItem[]
+    suspenseTotals: readonly DistributionSuspenseCurrencyTotal[]
   ): readonly DistributionKpi[] {
     return [
       { label: "Gross", value: currencyTotalsLabel(rows, (row) => row.grossMicro, (row) => row.currency), detail: "allocated revenue view", tone: "info", accent: true },
       { label: "Allocated / payable", value: currencyTotalsLabel(rows, (row) => row.payableMicro, (row) => row.currency), detail: "after recoupment", tone: "active", accent: false },
       { label: "Paid", value: currencyTotalsLabel(paymentItems.filter((payment) => payment.status === "paid"), (payment) => payment.amountMicro, (payment) => payment.currency), detail: "Distribution ledger", tone: "success", accent: false },
-      { label: "Suspense", value: currencyTotalsLabel(suspense.filter((item) => item.status === "open"), (item) => item.amountMicro, (item) => item.currency), detail: "awaiting resolution", tone: "warning", accent: false }
+      { label: "Suspense", value: formatSuspenseTotals(suspenseTotals), detail: "awaiting resolution", tone: "warning", accent: false }
     ];
   }
 
@@ -4880,17 +5014,50 @@
     return totals.map((total) => formatMoney(total.amountMicro, total.currency)).join(" · ");
   }
 
-  function createSuspenseRows(items: readonly SuspenseItem[]): readonly TableRow[] {
-    return items.map((item: SuspenseItem): TableRow => ({
+  function createSuspenseRows(items: readonly DistributionSuspenseWorkbenchRow[]): readonly TableRow[] {
+    return items.map((item: DistributionSuspenseWorkbenchRow): TableRow => ({
       id: item.id,
       cells: [
-        { kind: "badge", value: suspenseReason(item.reason), tone: "warning" },
-        { kind: "text", value: item.sourceReference, strong: true },
+        { kind: "text", value: item.id.slice(0, 8), strong: false },
+        { kind: "text", value: item.batchReference, strong: true },
+        { kind: "badge", value: item.reasonTitle, tone: "warning" },
+        { kind: "badge", value: item.fixPath, tone: "active" },
+        { kind: "text", value: item.trackTitle ?? "—", strong: true },
+        { kind: "text", value: item.artistName ?? "—", strong: false },
+        { kind: "text", value: item.isrc ?? "—", strong: false },
+        { kind: "text", value: item.upc ?? "—", strong: false },
         { kind: "money", value: formatMoney(item.amountMicro, item.currency), tone: moneyTone(item.amountMicro) },
-        { kind: "badge", value: item.exactFixPath, tone: "active" },
+        { kind: "text", value: item.splitPercentage === null ? "—" : `${item.splitPercentage}%`, strong: false },
         { kind: "badge", value: item.status, tone: item.status === "open" ? "warning" : "success" }
       ]
     }));
+  }
+
+  function createSuspensePlaybookRows(items: readonly DistributionSuspenseReasonGroup[]): readonly TableRow[] {
+    return items.map((item) => ({
+      id: item.reasonCode,
+      cells: [
+        { kind: "text", value: item.title, strong: true },
+        { kind: "text", value: String(item.rowCount), strong: true },
+        { kind: "text", value: formatSuspenseTotals(item.totals), strong: true },
+        { kind: "badge", value: item.fixPath, tone: "active" },
+        { kind: "text", value: item.actionLabel, strong: false }
+      ]
+    }));
+  }
+
+  function createSuspenseKpis(workbench: DistributionSuspenseWorkbenchResponse | null): readonly DistributionKpi[] {
+    const summary = workbench?.summary;
+    return [
+      { label: "Filtered rows", value: String(summary?.filteredRowCount ?? 0), detail: "exact live queue", tone: (summary?.filteredRowCount ?? 0) === 0 ? "success" : "warning", accent: true },
+      { label: "Open exposure", value: formatSuspenseTotals(summary?.totals ?? []), detail: "kept separate by currency", tone: "warning", accent: false },
+      { label: "Reason types", value: String(summary?.reasonTypeCount ?? 0), detail: "resolution playbook", tone: "info", accent: false }
+    ];
+  }
+
+  function formatSuspenseTotals(totals: readonly DistributionSuspenseCurrencyTotal[]): string {
+    if (totals.length === 0) return "—";
+    return totals.map((total) => formatMoney(total.amountMicro, total.currency)).join(" · ");
   }
 
   function createStatementRows(items: readonly StatementSummary[]): readonly TableRow[] {
@@ -5424,32 +5591,10 @@
     return "muted";
   }
 
-  function suspenseReason(reason: "missing_split" | "unmapped_track" | "import_retry" | "contract_hold"): string {
-    if (reason === "missing_split") {
-      return "Missing split";
-    }
-
-    if (reason === "unmapped_track") {
-      return "Unmapped track";
-    }
-
-    if (reason === "import_retry") {
-      return "Import retry required";
-    }
-
-    return "Contract on hold";
-  }
-
-  function suspenseResolutionFor(item: SuspenseItem): "map_to_release" | "map_to_track" | "hold" {
-    if (item.exactFixPath === "catalog") {
-      return "map_to_release";
-    }
-
-    if (item.exactFixPath === "contracts") {
-      return "hold";
-    }
-
-    return "map_to_track";
+  function suspenseResolutionFor(item: DistributionSuspenseWorkbenchRow): "map_to_track" | "retry_row" | "mark_resolved" {
+    if (item.resolutionMode === "map") return "map_to_track";
+    if (item.resolutionMode === "retry") return "retry_row";
+    return "mark_resolved";
   }
 
   function pageUsesPeriodControl(pageId: DistributionPageId): boolean {
@@ -5932,28 +6077,57 @@
         {/if}
         <Table title="Allocation runs" columns={allocationColumns} rows={allocationRows} state={tableStateFor(allocationsState.status, allocationRuns.length)} actionLabel="" rowActions={allocationRowActions} pagination={allocationsPagination} />
       {:else if activePageId === "suspense"}
-        <section class="filter-strip ehq-edge-surface" aria-label="Suspense filters">
+        <section class="filter-strip allocation-command-bar ehq-edge-surface" aria-label="Suspense filters">
+          <Input id="distribution-suspense-search" label="Search" value={suspenseSearch} placeholder="Track, artist, ISRC, UPC, reason or file…" type="search" state="default" message="" oninput={updateSuspenseSearch} />
+          <Input id="distribution-suspense-batch" label="Batch ID" value={suspenseBatchReference} placeholder="Reference or file name" type="text" state="default" message="" oninput={updateSuspenseBatchReference} />
+          <Select id="distribution-suspense-reason" label="Reason" value={suspenseReasonFilter} options={suspenseReasonOptions} state="default" message="" onchange={updateSuspenseReason} />
           <Select id="distribution-suspense-status" label="Status" value={suspenseStatusFilter} options={suspenseStatusOptions} state="default" message="" onchange={updateSuspenseStatus} />
-          <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Apply suspense filters" onclick={loadSuspense} />
+          <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={isLoadingStatus(suspenseState.status)} locked={false} focus={false} ariaLabel="Apply suspense filters" onclick={loadSuspense} />
+          <Button label="Clear" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Clear suspense filters" onclick={clearSuspenseFilters} />
           <Button label="Export CSV" variant="secondary" size="medium" type="button" disabled={suspenseItems.length === 0} loading={false} locked={false} focus={false} ariaLabel="Export suspense as CSV" onclick={exportSuspenseCsv} />
+          <Button label="Run safe pending wave" variant="primary" size="medium" type="button" disabled={!writesEnabled || (allocationWorkbench?.summary.readyRowCount ?? 0) === 0} loading={false} locked={false} focus={false} ariaLabel="Run the safe pending allocation wave" title={writeDisabledTitle()} onclick={startCadencedAllocationRun} />
+        </section>
+        <section class="kpi-grid" aria-label="Suspense KPIs">
+          {#each suspenseKpis as kpi (kpi.label)}
+            <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state={isLoadingStatus(suspenseState.status) ? "loading" : "default"} accent={kpi.accent} />
+          {/each}
+        </section>
+        <section class="allocation-health ehq-edge-surface" aria-label="Suspense reason playbook">
+          <div class="allocation-section-heading">
+            <div>
+              <span>Resolution controls</span>
+              <h2>Suspense reason playbook</h2>
+            </div>
+            <p>Resolve the underlying mapping, catalog, or split before retrying. Imported earnings remain immutable.</p>
+          </div>
+          <Table title="Open exposure by reason" columns={suspensePlaybookColumns} rows={suspensePlaybookRows} state={tableStateFor(suspenseState.status, suspensePlaybookRows.length)} actionLabel="" rowActions={suspensePlaybookRowActions} />
         </section>
         {#if selectedSuspenseItem !== null}
           <section class="form-panel ehq-edge-surface" aria-label="Resolve suspense item">
             <div class="panel-context">
-              <strong>{selectedSuspenseItem.sourceReference}</strong>
-              <span>{suspenseReason(selectedSuspenseItem.reason)} · {formatMoney(selectedSuspenseItem.amountMicro, selectedSuspenseItem.currency)} · resolution {selectedSuspenseResolution}</span>
+              <strong>{selectedSuspenseItem.trackTitle ?? "Unmatched ledger line"}</strong>
+              <span>{selectedSuspenseItem.reasonTitle} · {selectedSuspenseItem.artistName ?? "Unknown artist"} · {formatMoney(selectedSuspenseItem.amountMicro, selectedSuspenseItem.currency)} · split {selectedSuspenseItem.splitPercentage ?? "—"}%</span>
             </div>
-            {#if selectedSuspenseResolution !== "hold"}
+            <p>{selectedSuspenseItem.reasonDescription}</p>
+            {#if selectedSuspenseResolution === "map_to_track"}
               <Select id="distribution-suspense-track" label="Target track" value={suspenseTargetTrackId} options={suspenseTrackSelectOptions} state="default" message="" onchange={updateSuspenseTargetTrack} />
               {#if suspenseTrackOptionsError !== null}
                 <span class="panel-error">{suspenseTrackOptionsError}</span>
               {/if}
             {/if}
-            <Button label="Resolve" variant="primary" size="medium" type="button" disabled={!writesEnabled || !suspenseResolveTarget.ready} loading={false} locked={false} focus={false} ariaLabel="Resolve suspense item" title={writesEnabled ? suspenseResolveTarget.hint : writeGateMessage} onclick={resolveSelectedSuspense} />
+            {#if selectedSuspenseResolution === "mark_resolved"}
+              <Input id="distribution-suspense-note" label="Manual decision note" value={suspenseResolutionNote} placeholder="Explain the verified decision" type="text" state={suspenseResolutionNote.trim() === "" ? "error" : "default"} message="Required and recorded in the audit trail." oninput={updateSuspenseResolutionNote} />
+              <Button label="Retry row" variant="secondary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Retry suspense row" title={writeDisabledTitle()} onclick={() => resolveSelectedSuspense("retry_row")} />
+              <Button label="Mark resolved" variant="primary" size="medium" type="button" disabled={!writesEnabled || suspenseResolutionNote.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Mark suspense resolved" title={writesEnabled ? (suspenseResolutionNote.trim() === "" ? "Enter a manual decision note first" : "") : writeGateMessage} onclick={() => resolveSelectedSuspense("mark_resolved")} />
+            {:else if selectedSuspenseResolution === "retry_row"}
+              <Button label="Retry row" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Retry suspense row" title={writeDisabledTitle()} onclick={() => resolveSelectedSuspense("retry_row")} />
+            {:else}
+              <Button label="Map and retry" variant="primary" size="medium" type="button" disabled={!writesEnabled || !suspenseResolveTarget.ready} loading={false} locked={false} focus={false} ariaLabel="Map suspense row to target track and retry" title={writesEnabled ? suspenseResolveTarget.hint : writeGateMessage} onclick={() => resolveSelectedSuspense("map_to_track")} />
+            {/if}
             <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel suspense resolution" onclick={closeSuspensePanel} />
           </section>
         {/if}
-        <Table title="Suspense grouped by reason" columns={suspenseColumns} rows={suspenseTableRows} state={isLoadingStatus(suspenseState.status) ? "loading" : suspenseState.status === "error" ? "error" : suspenseItems.length === 0 ? "empty" : "default"} actionLabel="" rowActions={suspenseRowActions} pagination={suspensePagination} />
+        <Table title="Suspense queue" columns={suspenseColumns} rows={suspenseTableRows} state={isLoadingStatus(suspenseState.status) ? "loading" : suspenseState.status === "error" ? "error" : suspenseItems.length === 0 ? "empty" : "default"} actionLabel="" rowActions={suspenseRowActions} pagination={suspensePagination} />
       {:else if activePageId === "statements"}
         <section class="filter-strip ehq-edge-surface" aria-label="Statement filters">
           <Select id="distribution-statement-payee" label="Payee" value={statementPayeeFilter} options={statementPayeeOptions} state="default" message="" onchange={updateStatementPayee} />

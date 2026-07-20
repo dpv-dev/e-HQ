@@ -784,7 +784,29 @@ export const suspenseItems = pgTable(
     index("suspense_items_earning_id_idx").on(table.earningId),
     index("suspense_items_reason_code_idx").on(table.reasonCode),
     index("suspense_items_resolved_idx").on(table.resolved),
-    index("suspense_items_allocation_workbench_idx").on(table.workspaceId, table.resolved, table.reasonCode, table.earningId)
+    index("suspense_items_allocation_workbench_idx").on(table.workspaceId, table.resolved, table.reasonCode, table.earningId),
+    index("suspense_items_workbench_page_idx").on(table.workspaceId, table.resolved, table.createdAt, table.id)
+  ]
+);
+
+export const suspenseResolutionOverrides = pgTable(
+  "suspense_resolution_overrides",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: text("workspace_id").notNull(),
+    suspenseId: uuid("suspense_id")
+      .notNull()
+      .references(() => suspenseItems.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    resolution: varchar("resolution", { length: 40 }).notNull(),
+    targetId: text("target_id"),
+    note: text("note").notNull(),
+    createdByUserId: text("created_by_user_id").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    createdAt: createdAtColumn()
+  },
+  (table) => [
+    uniqueIndex("suspense_resolution_overrides_workspace_idempotency_unique").on(table.workspaceId, table.idempotencyKey),
+    index("suspense_resolution_overrides_suspense_idx").on(table.workspaceId, table.suspenseId, table.createdAt)
   ]
 );
 

@@ -169,6 +169,13 @@
       "when": 1784572200000,
       "tag": "0023_distribution_allocation_workbench",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1784575800000,
+      "tag": "0024_distribution_suspense_workbench",
+      "breakpoints": true
     }
   ]
 }
