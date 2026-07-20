@@ -33,13 +33,3 @@ jobs:
 
       - name: Canonical build gate
         run: ./deploy-build.sh
-
-      - name: Generate parser parity report
-        run: corepack pnpm --filter @ehq/api parser:parity-report
-
-      - name: Upload parser parity report artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: parser-parity-report
-          path: services/api/output/parser-parity-report.json
-          if-no-files-found: error
