@@ -5993,6 +5993,32 @@ test("Distribution Catalog workbench delegates parity filters to the live reposi
     entry.action === "distribution_catalog_contributors_override" &&
     entry.idempotencyKey === "catalog-contributor-override-1"
   ));
+
+  const promote = await app.request(`/erh/v1/catalog/tracks/${catalogTrack.id}/promote-artist`, {
+    method: "POST",
+    headers: {
+      ...authHeaders(),
+      "Content-Type": "application/json",
+      "Idempotency-Key": "catalog-promote-main-artist-1"
+    },
+    body: JSON.stringify({
+      workspaceId: "eeee-mu",
+      contributorName: "Cømpass",
+      reason: "Confirmed main artist from imported contributor credits"
+    })
+  });
+  assert.equal(promote.status, 200);
+  const promoteReceipt = (await promote.json()) as { readonly id: string; readonly auditEventId: string | null };
+  assert.equal(promoteReceipt.id, catalogTrack.id);
+  assert.ok(promoteReceipt.auditEventId !== null);
+
+  const payeeLink = await app.request(`/erh/v1/catalog/tracks/${catalogTrack.id}/contributors/C%C3%B8mpass/payee-link`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "catalog-contributor-payee-link-1" },
+    body: JSON.stringify({ workspaceId: "eeee-mu", defaultCurrency: "EUR" })
+  });
+  assert.equal(payeeLink.status, 200);
+  assert.ok(((await payeeLink.json()) as { readonly auditEventId: string | null }).auditEventId !== null);
 });
 
 test("Distribution Allocations retries missing-contract earnings only after a complete split and audits idempotently", async () => {

@@ -1467,6 +1467,17 @@ export interface DistributionCatalogContributor {
   readonly role: string;
 }
 
+export interface DistributionCatalogArtistPromoteRequest {
+  readonly workspaceId: EntityId;
+  readonly contributorName: string;
+  readonly reason: string;
+}
+
+export interface DistributionCatalogContributorPayeeLinkRequest {
+  readonly workspaceId: EntityId;
+  readonly defaultCurrency: CurrencyCode;
+}
+
 export interface DistributionCatalogTrackRow {
   readonly id: EntityId;
   readonly title: string;

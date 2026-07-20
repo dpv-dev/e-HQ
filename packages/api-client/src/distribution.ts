@@ -42,6 +42,8 @@ import type {
   DistributionImportPreviewRequest,
   DistributionImportPreviewResponse,
   DistributionMappingApplyRulesRequest,
+  DistributionCatalogArtistPromoteRequest,
+  DistributionCatalogContributorPayeeLinkRequest,
   DistributionMappingRow,
   DistributionMappingRowsQuery,
   DistributionAlias,
@@ -120,6 +122,17 @@ export interface DistributionApiClient {
   readonly saveCatalogContributors: (
     trackId: EntityId,
     request: DistributionCatalogContributorOverrideRequest,
+    options: WriteRequestOptions
+  ) => Promise<ApiMutationReceipt>;
+  readonly promoteCatalogArtist: (
+    trackId: EntityId,
+    request: DistributionCatalogArtistPromoteRequest,
+    options: WriteRequestOptions
+  ) => Promise<ApiMutationReceipt>;
+  readonly linkCatalogContributorPayee: (
+    trackId: EntityId,
+    contributorName: string,
+    request: DistributionCatalogContributorPayeeLinkRequest,
     options: WriteRequestOptions
   ) => Promise<ApiMutationReceipt>;
   readonly getContractWorkbench: (
@@ -358,6 +371,27 @@ export function createDistributionApiClient(config: ApiClientConfig): Distributi
     ): Promise<ApiMutationReceipt> =>
       transport.post<ApiMutationReceipt>(
         `catalog/tracks/${encodePathSegment(trackId)}/contributor-overrides`,
+        request,
+        options.idempotencyKey
+      ),
+    promoteCatalogArtist: (
+      trackId: EntityId,
+      request: DistributionCatalogArtistPromoteRequest,
+      options: WriteRequestOptions
+    ): Promise<ApiMutationReceipt> =>
+      transport.post<ApiMutationReceipt>(
+        `catalog/tracks/${encodePathSegment(trackId)}/promote-artist`,
+        request,
+        options.idempotencyKey
+      ),
+    linkCatalogContributorPayee: (
+      trackId: EntityId,
+      contributorName: string,
+      request: DistributionCatalogContributorPayeeLinkRequest,
+      options: WriteRequestOptions
+    ): Promise<ApiMutationReceipt> =>
+      transport.post<ApiMutationReceipt>(
+        `catalog/tracks/${encodePathSegment(trackId)}/contributors/${encodePathSegment(contributorName)}/payee-link`,
         request,
         options.idempotencyKey
       ),

@@ -872,6 +872,13 @@ const distributionCatalogContributorOverrideSchema = workspaceBodySchema.extend(
     identities.add(identity);
   }
 });
+const distributionCatalogArtistPromoteSchema = workspaceBodySchema.extend({
+  contributorName: z.string().trim().min(1).max(240),
+  reason: z.string().trim().min(1).max(500)
+});
+const distributionCatalogContributorPayeeLinkSchema = workspaceBodySchema.extend({
+  defaultCurrency: z.string().trim().regex(/^[A-Z]{3}$/u)
+});
 const distributionContractTrackRuleSchema = z.object({
   payeeId: z.string().uuid(),
   percentage: z.string().trim().regex(/^\d{1,3}(?:\.\d{1,6})?$/u)
@@ -992,6 +999,8 @@ type DistributionPayeeUpsertRequest = z.infer<typeof distributionPayeeUpsertSche
 type DistributionReleaseUpsertRequest = z.infer<typeof distributionReleaseUpsertSchema>;
 type DistributionTrackUpsertRequest = z.infer<typeof distributionTrackUpsertSchema>;
 type DistributionCatalogContributorOverrideWriteRequest = z.infer<typeof distributionCatalogContributorOverrideSchema>;
+type DistributionCatalogArtistPromoteRequest = z.infer<typeof distributionCatalogArtistPromoteSchema>;
+type DistributionCatalogContributorPayeeLinkRequest = z.infer<typeof distributionCatalogContributorPayeeLinkSchema>;
 type DistributionContractTrackRuleOverrideWriteRequest = z.infer<typeof distributionContractTrackRuleOverrideSchema>;
 type CommandCenterSettingUpdateRequest = z.infer<typeof commandCenterSettingUpdateSchema>;
 type CommandCenterIntegrationToggleRequest = z.infer<typeof commandCenterIntegrationToggleSchema>;
@@ -2033,6 +2042,13 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
 
   app.post("/erh/v1/catalog/tracks/:trackId/contributor-overrides", async (context) => {
     return distributionCatalogContributorOverrideResponse(context, dependencies);
+  });
+
+  app.post("/erh/v1/catalog/tracks/:trackId/promote-artist", async (context) => {
+    return distributionCatalogArtistPromoteResponse(context, dependencies);
+  });
+  app.post("/erh/v1/catalog/tracks/:trackId/contributors/:contributorName/payee-link", async (context) => {
+    return distributionCatalogContributorPayeeLinkResponse(context, dependencies);
   });
 
   app.get("/erh/v1/contracts/workbench", async (context) => {
@@ -5802,6 +5818,152 @@ async function distributionCatalogContributorOverrideResponse(
         idempotencyKey: resolvedIdempotencyKey
       });
       return mutationReceipt(trackId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function distributionCatalogArtistPromoteResponse(
+  context: ApiContext,
+  dependencies: ApiServiceDependencies
+): Promise<Response> {
+  const request = await readZodBody<DistributionCatalogArtistPromoteRequest>(context, distributionCatalogArtistPromoteSchema);
+  const trackId = requirePathParam(context, "trackId");
+  const repository = dependencies.distributionReads;
+  if (repository === undefined) {
+    throw new ApiRouteError(503, "catalog_repository_unavailable", "The live Catalog repository is unavailable.", []);
+  }
+
+  const before = await repository.getCatalogTrack(request.workspaceId, trackId);
+  if (before === null) {
+    throw new ApiRouteError(404, "distribution_catalog_track_not_found", "Distribution catalog track was not found.", [`trackId=${trackId}`]);
+  }
+
+  const mainArtist = before.contributors.find((contributor) =>
+    contributor.role === "main_artist" && contributor.name.trim().toLocaleLowerCase() === request.contributorName.trim().toLocaleLowerCase()
+  );
+  if (mainArtist === undefined) {
+    throw new ApiRouteError(409, "catalog_main_artist_not_confirmed", "Only a confirmed main artist can be promoted to Catalog Artist.", [`trackId=${trackId}`]);
+  }
+
+  const actor = context.get("authUser");
+  requirePermissionForWorkspace(actor, "distribution_catalog_contributors_override", request.workspaceId);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const trackRequest: DistributionTrackUpsertRequest = {
+    workspaceId: request.workspaceId,
+    id: trackId,
+    releaseId: before.releaseId,
+    title: before.title,
+    artistName: mainArtist.name.trim(),
+    isrc: before.isrc,
+    status: before.status
+  };
+
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "distribution_catalog_artist_promote",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `distribution:catalog:track:${trackId}`);
+      await persistDistributionTrackUpsert(tx, trackId, trackRequest);
+      const after = distributionTrackFromUpsertRequest(trackId, trackRequest);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_catalog_artist_promote",
+        targetType: "track",
+        targetId: trackId,
+        before: { catalogArtist: before.catalogArtist },
+        after: { catalogArtist: after.artistName, contributor: mainArtist.name.trim(), reason: request.reason.trim() },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      upsertDistributionTrackFixture(dependencies.fixtures, after);
+      return mutationReceipt(trackId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function distributionCatalogContributorPayeeLinkResponse(
+  context: ApiContext,
+  dependencies: ApiServiceDependencies
+): Promise<Response> {
+  const request = await readZodBody<DistributionCatalogContributorPayeeLinkRequest>(context, distributionCatalogContributorPayeeLinkSchema);
+  const trackId = requirePathParam(context, "trackId");
+  const contributorName = requirePathParam(context, "contributorName").trim();
+  const repository = dependencies.distributionReads;
+  if (repository === undefined) throw new ApiRouteError(503, "catalog_repository_unavailable", "The live Catalog repository is unavailable.", []);
+  const track = await repository.getCatalogTrack(request.workspaceId, trackId);
+  if (track === null) throw new ApiRouteError(404, "distribution_catalog_track_not_found", "Distribution catalog track was not found.", [`trackId=${trackId}`]);
+  if (!track.contributors.some((contributor) => contributor.name.trim().toLocaleLowerCase() === contributorName.toLocaleLowerCase())) {
+    throw new ApiRouteError(409, "catalog_contributor_not_confirmed", "Only a confirmed contributor can be linked to a payee.", [`trackId=${trackId}`]);
+  }
+
+  const actor = context.get("authUser");
+  requirePermissionForWorkspace(actor, "distribution_catalog_contributor_payee_link", request.workspaceId);
+  const existing = dependencies.fixtures.distribution.payees.find((payee) => payee.name.trim().toLocaleLowerCase() === contributorName.toLocaleLowerCase());
+  const payeeId = existing?.id ?? randomUUID();
+  const payeeRequest: DistributionPayeeUpsertRequest = {
+    workspaceId: request.workspaceId,
+    id: payeeId,
+    displayName: existing?.name ?? contributorName,
+    email: existing?.email ?? null,
+    status: existing?.isActive === false ? "inactive" : "active",
+    defaultCurrency: existing?.preferredCurrency ?? request.defaultCurrency
+  };
+  const idempotencyKey = requireIdempotencyKey(context);
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "distribution_catalog_contributor_payee_link",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `distribution:catalog:contributor:${trackId}:${contributorName.toLocaleLowerCase()}`);
+      await persistDistributionPayeeUpsert(tx, payeeId, payeeRequest);
+      if (tx.kind !== "memory") {
+        await tx.executor.execute(sql`
+          update payees p
+          set linked_artist_ids = (
+            select coalesce(jsonb_agg(distinct artist_id), '[]'::jsonb)
+            from (
+              select jsonb_array_elements_text(p.linked_artist_ids) as artist_id
+              union
+              select tc.artist_id::text
+              from track_contributors tc
+              join artists a on a.id = tc.artist_id
+              where tc.track_id = ${trackId}
+                and lower(trim(a.name)) = lower(trim(${contributorName}))
+            ) links
+          ), updated_at = now()
+          where p.id = ${payeeId}
+        `);
+        await tx.executor.execute(sql`
+          update artists a
+          set default_payee_id = ${payeeId}, updated_at = now()
+          where a.default_payee_id is null
+            and a.id in (
+              select tc.artist_id from track_contributors tc
+              where tc.track_id = ${trackId}
+            )
+            and lower(trim(a.name)) = lower(trim(${contributorName}))
+        `);
+      }
+      const after = distributionPayeeFromUpsertRequest(payeeId, payeeRequest);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_catalog_contributor_payee_link",
+        targetType: "payee",
+        targetId: payeeId,
+        before: { payee: existing },
+        after: { payee: after, contributor: contributorName, trackId },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      upsertDistributionPayeeFixture(dependencies.fixtures, after);
+      return mutationReceipt(payeeId, auditEventId);
     }
   });
   return context.json(result.body, result.status);

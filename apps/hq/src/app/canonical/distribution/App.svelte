@@ -23,6 +23,7 @@
     type DistributionAllocationUnallocatedTrack,
     type DistributionAllocationWorkbenchResponse,
     type DistributionCatalogArtistSource,
+    type DistributionCatalogArtistPromoteRequest,
     type DistributionCatalogContributor,
     type DistributionCatalogReviewFilter,
     type DistributionCatalogTrackRow,
@@ -1106,6 +1107,11 @@
   ], 1));
   const selectedCatalogTrack = $derived(
     catalogTracks.find((track: DistributionCatalogTrackRow): boolean => track.id === selectedCatalogTrackId) ?? null
+  );
+  const selectedCatalogMainArtist = $derived(
+    catalogContributorDrafts.filter((contributor) => contributor.role === "main_artist").length === 1
+      ? catalogContributorDrafts.find((contributor) => contributor.role === "main_artist") ?? null
+      : null
   );
   const catalogKpis = $derived(createCatalogKpis(catalogWorkbench));
   const suspenseTrackSelectOptions = $derived<readonly SelectOption[]>(sortOptionsAlphabetically([
@@ -4833,6 +4839,51 @@
     }
   }
 
+  async function promoteCatalogMainArtist(): Promise<void> {
+    const track = selectedCatalogTrack;
+    const mainArtist = selectedCatalogMainArtist;
+    const reason = catalogContributorReasonInput.trim();
+    if (!writesEnabled || track === null || mainArtist === null || reason === "") return;
+
+    try {
+      const request: DistributionCatalogArtistPromoteRequest = {
+        workspaceId: distributionWorkspaceId,
+        contributorName: mainArtist.name,
+        reason
+      };
+      mutationReceipt = await client.distribution.promoteCatalogArtist(
+        track.id,
+        request,
+        { idempotencyKey: createIdempotencyKey("catalog-promote-main-artist") }
+      );
+      mutationReceiptPageId = activePageId;
+      await Promise.all([loadCatalog(), loadAuditLog()]);
+    } catch (error: unknown) {
+      reportActionError(error);
+    }
+  }
+
+  async function ensureContributorPayee(contributorName: string): Promise<void> {
+    const track = selectedCatalogTrack;
+    if (track === null || !writesEnabled) return;
+
+    try {
+      mutationReceipt = await client.distribution.linkCatalogContributorPayee(
+        track.id,
+        contributorName,
+        {
+          workspaceId: distributionWorkspaceId,
+          defaultCurrency: "MUR"
+        },
+        { idempotencyKey: createIdempotencyKey("catalog-contributor-payee-link") }
+      );
+      mutationReceiptPageId = activePageId;
+      await Promise.all([loadPayees(), loadAuditLog()]);
+    } catch (error: unknown) {
+      reportActionError(error);
+    }
+  }
+
   function createImportRows(items: readonly DistributionImportBatch[]): readonly TableRow[] {
     return items.map((batch: DistributionImportBatch): TableRow => ({
       id: batch.id,
@@ -6048,6 +6099,7 @@
                 <div class="catalog-contributor-row">
                   <span>{contributor.name}</span>
                   <span>{formatCatalogRole(contributor.role)}</span>
+                  <Button label={payees.some((payee) => payee.displayName.trim().toLocaleLowerCase() === contributor.name.trim().toLocaleLowerCase()) ? "Link payee" : "Create & link payee"} variant="secondary" size="small" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel={`Create or link payee for ${contributor.name}`} title="Creates or links a Distribution payee only; it does not create a royalty entitlement." onclick={() => ensureContributorPayee(contributor.name)} />
                   <Button label="Remove" variant="secondary" size="small" type="button" disabled={catalogContributorDrafts.length === 1} loading={false} locked={false} focus={false} ariaLabel={`Remove ${contributor.name}`} onclick={() => removeCatalogContributor(index)} />
                 </div>
               {/each}
@@ -6057,6 +6109,9 @@
               <Select id="distribution-catalog-contributor-role" label="Role" value={catalogContributorRoleInput} options={catalogContributorRoleOptions} state="default" message="" onchange={updateCatalogContributorRole} />
               <Button label="Add contributor" variant="secondary" size="medium" type="button" disabled={catalogContributorNameInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Add contributor" onclick={addCatalogContributor} />
               <Input id="distribution-catalog-contributor-reason" label="Review reason" value={catalogContributorReasonInput} placeholder="Why this contributor snapshot is correct" type="text" state="default" message="Required for the audit trail." oninput={updateCatalogContributorReason} />
+              {#if selectedCatalogMainArtist !== null && selectedCatalogMainArtist.name.trim().toLocaleLowerCase() !== selectedCatalogTrack.catalogArtist.trim().toLocaleLowerCase()}
+                <Button label={`Promote ${selectedCatalogMainArtist.name} to Catalog Artist`} variant="primary" size="medium" type="button" disabled={!writesEnabled || catalogContributorReasonInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Promote main artist to Catalog Artist" title={catalogContributorReasonInput.trim() === "" ? "Enter a review reason first." : writeDisabledTitle()} onclick={promoteCatalogMainArtist} />
+              {/if}
               <Button label="Save reviewed contributors" variant="primary" size="medium" type="button" disabled={!writesEnabled || catalogContributorDrafts.length === 0 || catalogContributorReasonInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Save reviewed contributors" title={writeDisabledTitle()} onclick={saveCatalogContributors} />
               <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel contributor review" onclick={closeCatalogContributorPanel} />
             </div>
