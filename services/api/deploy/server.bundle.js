@@ -25866,6 +25866,200 @@ function buildWarnings(source, rejectedRowCount, totalRowCount) {
   return warnings;
 }
 
+// src/distribution-repository.ts
+var DistributionMappingCursorError = class extends Error {
+  constructor() {
+    super("Invalid Distribution mapping cursor.");
+    this.name = "DistributionMappingCursorError";
+  }
+};
+function createPostgresDistributionReadRuntime(pool) {
+  return {
+    listMappingRows: async (query) => readDistributionMappingPage(pool, query)
+  };
+}
+async function readDistributionMappingPage(pool, query) {
+  const limit = normalizeLimit(query.limit);
+  const cursor = decodeMappingCursor(query.cursor);
+  const parameters = [query.workspaceId];
+  const where = ["ne.workspace_id = $1"];
+  if (query.batchId !== null) {
+    parameters.push(query.batchId);
+    where.push(`ne.batch_id = $${String(parameters.length)}::uuid`);
+  }
+  if (query.status !== null) {
+    where.push(mappingStatusPredicate(query.status));
+  }
+  const search = query.search?.trim() ?? "";
+  if (search !== "") {
+    parameters.push(`%${search}%`);
+    const parameter = `$${String(parameters.length)}`;
+    where.push(`(
+      ne.raw_title ilike ${parameter}
+      or ne.raw_artist ilike ${parameter}
+      or ne.raw_label ilike ${parameter}
+      or ne.dsp ilike ${parameter}
+      or ne.isrc ilike ${parameter}
+      or ne.upc ilike ${parameter}
+      or track_match.track_title ilike ${parameter}
+    )`);
+  }
+  if (cursor !== null) {
+    parameters.push(cursor.legacySort, cursor.id);
+    const legacyParameter = `$${String(parameters.length - 1)}`;
+    const idParameter = `$${String(parameters.length)}`;
+    where.push(`(
+      coalesce(ne.legacy_id, 2147483647) > ${legacyParameter}
+      or (
+        coalesce(ne.legacy_id, 2147483647) = ${legacyParameter}
+        and ne.id::text > ${idParameter}
+      )
+    )`);
+  }
+  parameters.push(limit + 1);
+  const limitParameter = `$${String(parameters.length)}`;
+  const result = await pool.query(
+    `select
+       ne.id::text,
+       ne.batch_id::text,
+       ne.raw_title,
+       ne.raw_artist,
+       ne.raw_label,
+       ne.dsp,
+       ne.isrc,
+       ne.upc,
+       ne.gross_amount::text,
+       ne.currency,
+       ne.mapping_status,
+       track_match.track_id,
+       track_match.track_title,
+       track_match.confidence,
+       coalesce(ne.legacy_id, 2147483647) as legacy_sort
+     from normalized_earnings ne
+     left join lateral (
+       select
+         etm.track_id::text,
+         t.title as track_title,
+         etm.confidence::text
+       from earning_track_matches etm
+       join tracks t on t.id = etm.track_id
+       where etm.earning_id = ne.id
+         and etm.status not in ('ignored', 'suspense')
+       order by
+         case when etm.status = 'matched' then 0 else 1 end,
+         etm.confidence desc,
+         etm.id
+       limit 1
+     ) track_match on true
+     where ${where.join("\n       and ")}
+     order by coalesce(ne.legacy_id, 2147483647), ne.id
+     limit ${limitParameter}`,
+    parameters
+  );
+  const mappedRows = result.rows.map(toMappingRowWithCursor);
+  const hasMore = mappedRows.length > limit;
+  const pageRows = mappedRows.slice(0, limit);
+  const last = pageRows[pageRows.length - 1];
+  return {
+    items: pageRows.map((row) => row.item),
+    nextCursor: hasMore && last !== void 0 ? encodeMappingCursor(last.cursor) : null
+  };
+}
+function mappingStatusPredicate(status) {
+  if (status === "mapped") {
+    return "ne.mapping_status = 'matched'";
+  }
+  if (status === "suggested") {
+    return "ne.mapping_status in ('unmapped', 'unmatched', 'suspense') and track_match.track_id is not null";
+  }
+  return "ne.mapping_status in ('unmapped', 'unmatched', 'suspense') and track_match.track_id is null";
+}
+function toMappingRowWithCursor(row) {
+  const suggestedTrackId = nullableStringCell(row, "track_id");
+  const sourceIsrc = nullableStringCell(row, "isrc");
+  const sourceUpc = nullableStringCell(row, "upc");
+  const mappingStatus = stringCell(row, "mapping_status");
+  return {
+    item: {
+      id: stringCell(row, "id"),
+      batchId: stringCell(row, "batch_id"),
+      sourceTitle: nullableStringCell(row, "raw_title") ?? "",
+      sourceArtist: nullableStringCell(row, "raw_artist") ?? "",
+      sourceLabel: nullableStringCell(row, "raw_label") ?? "",
+      sourceStore: stringCell(row, "dsp"),
+      sourceIsrc,
+      sourceUpc,
+      grossMicro: stringCell(row, "gross_amount"),
+      currency: stringCell(row, "currency"),
+      suggestedTrackId,
+      suggestedTrackTitle: nullableStringCell(row, "track_title"),
+      confidenceBp: percentageToBasisPoints(nullableStringCell(row, "confidence") ?? "0"),
+      status: mappingStatus === "matched" ? "mapped" : suggestedTrackId === null ? "unmapped" : "suggested",
+      exactFixPath: suggestedTrackId !== null ? "mapping_rules" : sourceIsrc !== null || sourceUpc !== null ? "catalog" : "manual_track"
+    },
+    cursor: {
+      legacySort: integerCell(row, "legacy_sort"),
+      id: stringCell(row, "id")
+    }
+  };
+}
+function encodeMappingCursor(cursor) {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+function decodeMappingCursor(value) {
+  if (value === null) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
+    if (typeof parsed === "object" && parsed !== null && "legacySort" in parsed && Number.isSafeInteger(parsed.legacySort) && "id" in parsed && typeof parsed.id === "string" && parsed.id !== "") {
+      return { legacySort: parsed.legacySort, id: parsed.id };
+    }
+  } catch {
+  }
+  throw new DistributionMappingCursorError();
+}
+function normalizeLimit(value) {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new Error("Distribution mapping page limit must be a positive integer.");
+  }
+  return Math.min(value, 100);
+}
+function stringCell(row, column) {
+  const value = row[column];
+  if (typeof value !== "string") {
+    throw new Error(`Postgres column ${column} must be text.`);
+  }
+  return value;
+}
+function nullableStringCell(row, column) {
+  const value = row[column];
+  if (value === null || value === void 0) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    throw new Error(`Postgres column ${column} must be nullable text.`);
+  }
+  return value;
+}
+function integerCell(row, column) {
+  const value = row[column];
+  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
+  if (!Number.isSafeInteger(parsed)) {
+    throw new Error(`Postgres column ${column} must be an integer.`);
+  }
+  return parsed;
+}
+function percentageToBasisPoints(value) {
+  const [whole = "0", fraction = ""] = value.split(".");
+  const scaled = BigInt(whole) * 100n + BigInt(fraction.padEnd(2, "0").slice(0, 2));
+  const parsed = Number(scaled);
+  if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > 1e4) {
+    throw new Error(`Mapping confidence is outside the basis-point range: ${value}.`);
+  }
+  return parsed;
+}
+
 // ../../node_modules/.pnpm/@supabase+supabase-js@2.108.2/node_modules/@supabase/supabase-js/dist/index.mjs
 var dist_exports = {};
 __export(dist_exports, {
@@ -41472,11 +41666,31 @@ function registerDistributionRoutes(app, dependencies) {
   app.post("/erh/v1/imports/batches/:batchId/reverse", async (context) => {
     return distributionImportReverseResponse(context, dependencies);
   });
-  app.get("/erh/v1/mapping/rows", (context) => {
-    requireQuery(context, "workspaceId");
+  app.get("/erh/v1/mapping/rows", async (context) => {
+    const workspaceId = requireQuery(context, "workspaceId");
     const batchId = nullableQuery(context, "batchId");
     const status = nullableQuery(context, "status");
-    const rows = dependencies.fixtures.distributionMappingRows.filter((row) => batchId === null || row.batchId === batchId).filter((row) => status === null || row.status === status);
+    const search = nullableQuery(context, "search");
+    const cursor = nullableQuery(context, "cursor");
+    const limit = pageLimit(context);
+    if (dependencies.distributionReads !== void 0) {
+      try {
+        return context.json(await dependencies.distributionReads.listMappingRows({
+          workspaceId,
+          batchId,
+          status: toDistributionMappingStatusFilter(status),
+          search,
+          cursor,
+          limit
+        }));
+      } catch (error) {
+        if (error instanceof DistributionMappingCursorError) {
+          throw new ApiRouteError(400, "mapping_cursor_invalid", error.message, [`cursor=${cursor ?? "null"}`]);
+        }
+        throw error;
+      }
+    }
+    const rows = dependencies.fixtures.distributionMappingRows.filter((row) => batchId === null || row.batchId === batchId).filter((row) => status === null || row.status === status).filter((row) => search === null || distributionMappingRowMatchesSearch(row, search));
     return context.json(pageItems(context, rows));
   });
   app.post("/erh/v1/mapping/apply-rules", async (context) => {
@@ -49433,17 +49647,40 @@ function pageItems(context, items) {
     nextCursor
   };
 }
+function toDistributionMappingStatusFilter(value) {
+  if (value === null || value === "unmapped" || value === "suggested" || value === "mapped") {
+    return value;
+  }
+  throw new ApiRouteError(400, "mapping_status_invalid", "Mapping status filter is invalid.", [`status=${value}`]);
+}
+function distributionMappingRowMatchesSearch(row, search) {
+  const query = search.trim().toLocaleLowerCase();
+  if (query === "") {
+    return true;
+  }
+  return [
+    row.sourceTitle,
+    row.sourceArtist,
+    row.sourceLabel,
+    row.sourceStore,
+    row.sourceIsrc ?? "",
+    row.sourceUpc ?? "",
+    row.suggestedTrackTitle ?? ""
+  ].some((value) => value.toLocaleLowerCase().includes(query));
+}
 function pageWindow(context) {
   const cursorText = optionalCompatQuery(context, ["cursor", "offset", "page"]);
-  const limitText = optionalCompatQuery(context, ["limit", "size", "pageSize"]);
   const parsedOffset = cursorText === null ? 0 : parsePositiveInteger(cursorText, "cursor");
-  const parsedLimit = limitText === null ? 50 : parsePositiveInteger(limitText, "limit");
-  const limit = parsedLimit > 100 ? 100 : parsedLimit;
   return {
     cursor: cursorText,
     offset: parsedOffset,
-    limit
+    limit: pageLimit(context)
   };
+}
+function pageLimit(context) {
+  const limitText = optionalCompatQuery(context, ["limit", "size", "pageSize"]);
+  const parsedLimit = limitText === null ? 50 : parsePositiveInteger(limitText, "limit");
+  return parsedLimit > 100 ? 100 : parsedLimit;
 }
 function parsePositiveInteger(value, label) {
   if (!/^[0-9]+$/.test(value)) {
@@ -52150,6 +52387,7 @@ function startPostgresApiRuntime(env) {
   return {
     fixtures,
     persistence: createPostgresPersistenceRuntime(pool, env),
+    distributionReads: createPostgresDistributionReadRuntime(pool),
     health: async () => readPostgresHealth(pool),
     close: async () => {
       await pool.end();
@@ -52495,14 +52733,14 @@ async function readDistributionContracts(pool) {
     []
   );
   return rows.map((row) => ({
-    id: stringCell(row, "id"),
-    payeeId: nullableStringCell(row, "payee_id") ?? "unassigned",
-    title: stringCell(row, "title"),
-    status: toApiContractStatus(stringCell(row, "status")),
+    id: stringCell2(row, "id"),
+    payeeId: nullableStringCell2(row, "payee_id") ?? "unassigned",
+    title: stringCell2(row, "title"),
+    status: toApiContractStatus(stringCell2(row, "status")),
     effectiveFrom: nullableDateCell(row, "effective_from") ?? "1970-01-01",
     effectiveTo: nullableDateCell(row, "effective_to"),
-    splitBp: percentageToBasisPoints(nullableStringCell(row, "percentage") ?? "0"),
-    openExpenseMicro: stringCell(row, "open_expense"),
+    splitBp: percentageToBasisPoints2(nullableStringCell2(row, "percentage") ?? "0"),
+    openExpenseMicro: stringCell2(row, "open_expense"),
     currency: currencyCell(row, "currency")
   }));
 }
@@ -52520,26 +52758,26 @@ async function readDistributionContractExpenses(pool) {
     []
   );
   return rows.map((row) => {
-    const isOpen = isOpenExpenseStatus(stringCell(row, "status"));
-    const fullAmount = stringCell(row, "amount");
-    const appliedAmount = stringCell(row, "applied_amount");
+    const isOpen = isOpenExpenseStatus(stringCell2(row, "status"));
+    const fullAmount = stringCell2(row, "amount");
+    const appliedAmount = stringCell2(row, "applied_amount");
     let openAmountMicro = "0.0000000000";
     if (isOpen) {
       const remaining = erhMoney.sub(erhMoney.parse(fullAmount), erhMoney.parse(appliedAmount));
       openAmountMicro = erhMoney.format(remaining > 0n ? remaining : 0n);
     }
     return {
-      id: stringCell(row, "id"),
-      contractId: stringCell(row, "contract_id"),
-      payeeId: nullableStringCell(row, "payee_id"),
+      id: stringCell2(row, "id"),
+      contractId: stringCell2(row, "contract_id"),
+      payeeId: nullableStringCell2(row, "payee_id"),
       incurredOn: nullableDateCell(row, "incurred_on") ?? timestampCell(row, "created_at").slice(0, 10),
-      category: toApiExpenseCategory(nullableStringCell(row, "category")),
-      label: nullableStringCell(row, "description") ?? "Contract cost term",
+      category: toApiExpenseCategory(nullableStringCell2(row, "category")),
+      label: nullableStringCell2(row, "description") ?? "Contract cost term",
       originalAmountMicro: fullAmount,
       openAmountMicro,
       currency: currencyCell(row, "currency"),
       recoverable: booleanCell(row, "recoupable"),
-      status: toApiExpenseStatus(stringCell(row, "status"))
+      status: toApiExpenseStatus(stringCell2(row, "status"))
     };
   });
 }
@@ -52556,20 +52794,20 @@ async function readDistributionMappingRows(pool) {
     []
   );
   return rows.map((row) => ({
-    id: stringCell(row, "id"),
-    batchId: stringCell(row, "batch_id"),
-    sourceTitle: nullableStringCell(row, "raw_title") ?? "",
-    sourceArtist: nullableStringCell(row, "raw_artist") ?? "",
-    sourceLabel: nullableStringCell(row, "raw_label") ?? "",
-    sourceStore: stringCell(row, "dsp"),
-    sourceIsrc: nullableStringCell(row, "isrc"),
-    sourceUpc: nullableStringCell(row, "upc"),
-    grossMicro: stringCell(row, "gross_amount"),
+    id: stringCell2(row, "id"),
+    batchId: stringCell2(row, "batch_id"),
+    sourceTitle: nullableStringCell2(row, "raw_title") ?? "",
+    sourceArtist: nullableStringCell2(row, "raw_artist") ?? "",
+    sourceLabel: nullableStringCell2(row, "raw_label") ?? "",
+    sourceStore: stringCell2(row, "dsp"),
+    sourceIsrc: nullableStringCell2(row, "isrc"),
+    sourceUpc: nullableStringCell2(row, "upc"),
+    grossMicro: stringCell2(row, "gross_amount"),
     currency: currencyCell(row, "currency"),
-    suggestedTrackId: nullableStringCell(row, "track_id"),
-    suggestedTrackTitle: nullableStringCell(row, "track_title"),
-    confidenceBp: percentageToBasisPoints(nullableStringCell(row, "confidence") ?? "0"),
-    status: toApiMappingStatus(stringCell(row, "mapping_status")),
+    suggestedTrackId: nullableStringCell2(row, "track_id"),
+    suggestedTrackTitle: nullableStringCell2(row, "track_title"),
+    confidenceBp: percentageToBasisPoints2(nullableStringCell2(row, "confidence") ?? "0"),
+    status: toApiMappingStatus(stringCell2(row, "mapping_status")),
     exactFixPath: "manual_track"
   }));
 }
@@ -52583,16 +52821,16 @@ async function readDistributionRoyaltyRules(pool) {
     []
   );
   return rows.map((row) => {
-    const scopeType = nullableStringCell(row, "scope_type");
-    const scopeId = nullableStringCell(row, "scope_id");
-    const payeeId = stringCell(row, "payee_id");
+    const scopeType = nullableStringCell2(row, "scope_type");
+    const scopeId = nullableStringCell2(row, "scope_id");
+    const payeeId = stringCell2(row, "payee_id");
     return {
-      contractId: stringCell(row, "contract_id"),
-      royaltyRuleId: stringCell(row, "id"),
+      contractId: stringCell2(row, "contract_id"),
+      royaltyRuleId: stringCell2(row, "id"),
       payeeId,
       artistId: scopeType === "artist" && scopeId !== null ? scopeId : payeeId,
       role: scopeType ?? "artist",
-      percentage: stringCell(row, "percentage"),
+      percentage: stringCell2(row, "percentage"),
       scopeType,
       scopeId,
       effectiveFrom: nullableDateCell(row, "effective_from"),
@@ -52610,10 +52848,10 @@ async function readDistributionAllocationCostTerms(pool) {
     []
   );
   return rows.map((row) => ({
-    id: stringCell(row, "id"),
-    contractId: stringCell(row, "contract_id"),
-    payeeId: nullableStringCell(row, "payee_id"),
-    amount: stringCell(row, "amount"),
+    id: stringCell2(row, "id"),
+    contractId: stringCell2(row, "contract_id"),
+    payeeId: nullableStringCell2(row, "payee_id"),
+    amount: stringCell2(row, "amount"),
     currency: currencyCell(row, "currency"),
     recoupable: booleanCell(row, "recoupable"),
     status: enumCell(row, "status", [
@@ -52637,10 +52875,10 @@ async function readDistributionExistingExpenseApplications(pool) {
     []
   );
   return rows.map((row) => ({
-    costTermId: stringCell(row, "cost_term_id"),
-    amountApplied: stringCell(row, "amount_applied"),
+    costTermId: stringCell2(row, "cost_term_id"),
+    amountApplied: stringCell2(row, "amount_applied"),
     currency: currencyCell(row, "currency"),
-    calculationRunId: nullableStringCell(row, "calculation_run_id")
+    calculationRunId: nullableStringCell2(row, "calculation_run_id")
   }));
 }
 async function readDistributionFxRates(pool) {
@@ -52653,7 +52891,7 @@ async function readDistributionFxRates(pool) {
     fromCurrency: currencyCell(row, "from_currency"),
     toCurrency: currencyCell(row, "to_currency"),
     effectiveDate: dateCell(row, "effective_date"),
-    rate: stringCell(row, "rate")
+    rate: stringCell2(row, "rate")
   }));
 }
 async function readDistributionPayeeBalances(pool) {
@@ -52666,13 +52904,13 @@ async function readDistributionPayeeBalances(pool) {
     []
   );
   return rows.map((row) => ({
-    id: stringCell(row, "id"),
-    payeeId: stringCell(row, "payee_id"),
-    statementId: nullableStringCell(row, "statement_id"),
+    id: stringCell2(row, "id"),
+    payeeId: stringCell2(row, "payee_id"),
+    statementId: nullableStringCell2(row, "statement_id"),
     currency: currencyCell(row, "currency"),
-    openingBalance: stringCell(row, "opening_balance"),
-    periodNet: stringCell(row, "period_net"),
-    closingBalance: stringCell(row, "closing_balance"),
+    openingBalance: stringCell2(row, "opening_balance"),
+    periodNet: stringCell2(row, "period_net"),
+    closingBalance: stringCell2(row, "closing_balance"),
     movementType: enumCell(row, "movement_type", ["opening", "period", "statement", "void_reversal", "adjustment", "carry_forward"]),
     createdAt: timestampCell(row, "created_at")
   }));
@@ -52701,83 +52939,83 @@ async function readDistributionAliases(pool) {
     []
   );
   return rows.map((row) => ({
-    id: stringCell(row, "id"),
-    aliasText: stringCell(row, "alias_text"),
-    target: stringCell(row, "target"),
+    id: stringCell2(row, "id"),
+    aliasText: stringCell2(row, "alias_text"),
+    target: stringCell2(row, "target"),
     targetType: enumCell(row, "target_type", ["artist", "payee", "label", "release", "track", "unassigned"]),
-    targetId: nullableStringCell(row, "target_id")
+    targetId: nullableStringCell2(row, "target_id")
   }));
 }
 function toOfficeDepartment(row) {
   return {
-    id: stringCell(row, "id"),
-    name: stringCell(row, "name"),
+    id: stringCell2(row, "id"),
+    name: stringCell2(row, "name"),
     type: enumCell(row, "type", ["income", "expense", "mixed"]),
-    color: nullableStringCell(row, "color"),
+    color: nullableStringCell2(row, "color"),
     isActive: booleanCell(row, "is_active")
   };
 }
 function toOfficeDivision(row) {
   return {
-    id: stringCell(row, "id"),
-    departmentId: stringCell(row, "department_id"),
-    name: stringCell(row, "name"),
+    id: stringCell2(row, "id"),
+    departmentId: stringCell2(row, "department_id"),
+    name: stringCell2(row, "name"),
     isActive: booleanCell(row, "is_active")
   };
 }
 function toOfficeCategory(row) {
   return {
-    id: stringCell(row, "id"),
-    divisionId: nullableStringCell(row, "division_id"),
-    name: stringCell(row, "name"),
+    id: stringCell2(row, "id"),
+    divisionId: nullableStringCell2(row, "division_id"),
+    name: stringCell2(row, "name"),
     type: enumCell(row, "type", ["income", "expense"]),
-    accountCode: nullableStringCell(row, "account_code"),
-    accountLabel: nullableStringCell(row, "account_label"),
+    accountCode: nullableStringCell2(row, "account_code"),
+    accountLabel: nullableStringCell2(row, "account_label"),
     isActive: booleanCell(row, "is_active")
   };
 }
 function toOfficePartner(row) {
   return {
-    id: stringCell(row, "id"),
-    name: stringCell(row, "name"),
+    id: stringCell2(row, "id"),
+    name: stringCell2(row, "name"),
     type: enumCell(row, "type", ["client", "supplier", "both"]),
     isActive: booleanCell(row, "is_active")
   };
 }
 function toOfficeProject(row) {
   return {
-    id: stringCell(row, "id"),
-    name: stringCell(row, "name"),
-    description: nullableStringCell(row, "description"),
+    id: stringCell2(row, "id"),
+    name: stringCell2(row, "name"),
+    description: nullableStringCell2(row, "description"),
     status: enumCell(row, "status", ["draft", "active", "paused", "completed", "cancelled", "archived"]),
-    state: stringCell(row, "state"),
+    state: stringCell2(row, "state"),
     isActive: booleanCell(row, "is_active")
   };
 }
 function toOfficeProjectBudgetLine(row) {
   return {
-    id: stringCell(row, "id"),
-    projectId: stringCell(row, "project_id"),
-    categoryId: stringCell(row, "category_id"),
+    id: stringCell2(row, "id"),
+    projectId: stringCell2(row, "project_id"),
+    categoryId: stringCell2(row, "category_id"),
     type: enumCell(row, "type", ["income", "expense"]),
     plannedAmountMinor: bigintCell(row, "planned_amount_minor")
   };
 }
 function toOfficeTransaction2(row) {
   return {
-    id: stringCell(row, "id"),
-    workspaceId: stringCell(row, "workspace_id"),
+    id: stringCell2(row, "id"),
+    workspaceId: stringCell2(row, "workspace_id"),
     transactionDate: timestampCell(row, "transaction_date"),
     type: enumCell(row, "type", ["income", "expense"]),
     status: enumCell(row, "status", ["validated", "draft", "cancelled"]),
     isActive: booleanCell(row, "is_active"),
-    description: nullableStringCell(row, "description"),
-    categoryId: nullableStringCell(row, "category_id"),
-    partnerId: nullableStringCell(row, "partner_id"),
-    projectId: nullableStringCell(row, "project_id"),
-    accountId: nullableStringCell(row, "account_id"),
+    description: nullableStringCell2(row, "description"),
+    categoryId: nullableStringCell2(row, "category_id"),
+    partnerId: nullableStringCell2(row, "partner_id"),
+    projectId: nullableStringCell2(row, "project_id"),
+    accountId: nullableStringCell2(row, "account_id"),
     amountMinor: bigintCell(row, "amount_minor"),
-    originalCurrency: nullableStringCell(row, "original_currency"),
+    originalCurrency: nullableStringCell2(row, "original_currency"),
     exchangeRateE10: nullableBigintCell(row, "exchange_rate_e10"),
     vatApplicable: booleanCell(row, "vat_applicable"),
     vatRateBp: nullableIntegerCell(row, "vat_rate_bp"),
@@ -52786,19 +53024,19 @@ function toOfficeTransaction2(row) {
 }
 function toOfficeFinancialAllocation(row) {
   return {
-    id: stringCell(row, "id"),
-    transactionId: stringCell(row, "transaction_id"),
-    departmentId: nullableStringCell(row, "department_id"),
+    id: stringCell2(row, "id"),
+    transactionId: stringCell2(row, "transaction_id"),
+    departmentId: nullableStringCell2(row, "department_id"),
     amountMinor: bigintCell(row, "amount_minor")
   };
 }
 function toOfficeBankAccount(row) {
   return {
-    id: stringCell(row, "id"),
-    workspaceId: stringCell(row, "workspace_id"),
-    bankName: stringCell(row, "bank_name"),
-    accountLabel: stringCell(row, "account_label"),
-    accountReferenceHash: stringCell(row, "account_reference_hash"),
+    id: stringCell2(row, "id"),
+    workspaceId: stringCell2(row, "workspace_id"),
+    bankName: stringCell2(row, "bank_name"),
+    accountLabel: stringCell2(row, "account_label"),
+    accountReferenceHash: stringCell2(row, "account_reference_hash"),
     currency: currencyCell(row, "currency"),
     currentBalanceMinor: bigintCell(row, "current_balance_minor"),
     currentBalanceMurMinor: nullableBigintCell(row, "current_balance_mur_minor"),
@@ -52808,20 +53046,20 @@ function toOfficeBankAccount(row) {
 }
 function toOfficeExchangeRate(row) {
   return {
-    fromCurrency: stringCell(row, "from_currency"),
-    toCurrency: stringCell(row, "to_currency"),
+    fromCurrency: stringCell2(row, "from_currency"),
+    toCurrency: stringCell2(row, "to_currency"),
     rateE10: bigintCell(row, "rate_e10"),
     effectiveDate: dateCell(row, "effective_date")
   };
 }
 function toOfficeBankImportBatch(row) {
   return {
-    id: stringCell(row, "id"),
-    workspaceId: stringCell(row, "workspace_id"),
+    id: stringCell2(row, "id"),
+    workspaceId: stringCell2(row, "workspace_id"),
     source: enumCell(row, "source", ["sbi", "mcb", "csv", "cashflow", "pdf"]),
-    fileName: stringCell(row, "file_name"),
-    checksum: stringCell(row, "checksum"),
-    accountId: nullableStringCell(row, "account_id"),
+    fileName: stringCell2(row, "file_name"),
+    checksum: stringCell2(row, "checksum"),
+    accountId: nullableStringCell2(row, "account_id"),
     periodStart: nullableDateCell(row, "period_start"),
     periodEnd: nullableDateCell(row, "period_end"),
     openingBalanceMinor: nullableBigintCell(row, "opening_balance_minor"),
@@ -52830,7 +53068,7 @@ function toOfficeBankImportBatch(row) {
     acceptedRowCount: numberCell(row, "accepted_row_count"),
     rejectedRowCount: numberCell(row, "rejected_row_count"),
     duplicateRowCount: numberCell(row, "duplicate_row_count"),
-    idempotencyFingerprint: stringCell(row, "idempotency_fingerprint"),
+    idempotencyFingerprint: stringCell2(row, "idempotency_fingerprint"),
     status: enumCell(row, "status", ["previewed", "confirmed", "failed", "void"]),
     importedAt: nullableTimestampCell(row, "imported_at"),
     metadata: jsonRecordCell(row, "metadata")
@@ -52838,13 +53076,13 @@ function toOfficeBankImportBatch(row) {
 }
 function toOfficeBankStatementLine(row) {
   return {
-    id: stringCell(row, "id"),
-    importBatchId: stringCell(row, "import_batch_id"),
-    accountId: stringCell(row, "account_id"),
+    id: stringCell2(row, "id"),
+    importBatchId: stringCell2(row, "import_batch_id"),
+    accountId: stringCell2(row, "account_id"),
     occurredOn: dateCell(row, "occurred_on"),
     valueOn: nullableDateCell(row, "value_on"),
-    description: sanitizeOfficeBankDescription(stringCell(row, "description")),
-    reference: nullableStringCell(row, "reference"),
+    description: sanitizeOfficeBankDescription(stringCell2(row, "description")),
+    reference: nullableStringCell2(row, "reference"),
     direction: enumCell(row, "direction", ["credit", "debit"]),
     amountMinor: bigintCell(row, "amount_minor"),
     balanceMinor: nullableBigintCell(row, "balance_minor"),
@@ -52853,28 +53091,28 @@ function toOfficeBankStatementLine(row) {
     balanceMurMinor: nullableBigintCell(row, "balance_mur_minor"),
     isDuplicateCandidate: booleanCell(row, "is_duplicate_candidate"),
     reconciliationStatus: enumCell(row, "reconciliation_status", ["unmatched", "suggested", "matched", "rejected", "ignored"]),
-    matchedTransactionId: nullableStringCell(row, "matched_transaction_id"),
+    matchedTransactionId: nullableStringCell2(row, "matched_transaction_id"),
     rawData: jsonRecordCell(row, "raw_data")
   };
 }
 function toOfficeBankReconciliationMatch(row) {
   return {
-    id: stringCell(row, "id"),
-    bankStatementLineId: stringCell(row, "bank_statement_line_id"),
-    transactionId: stringCell(row, "transaction_id"),
+    id: stringCell2(row, "id"),
+    bankStatementLineId: stringCell2(row, "bank_statement_line_id"),
+    transactionId: stringCell2(row, "transaction_id"),
     confidenceBp: numberCell(row, "confidence_bp"),
     status: enumCell(row, "status", ["unmatched", "suggested", "matched", "rejected"]),
-    approvedByUserId: nullableStringCell(row, "approved_by_user_id"),
+    approvedByUserId: nullableStringCell2(row, "approved_by_user_id"),
     approvedAt: nullableTimestampCell(row, "approved_at")
   };
 }
 function toOfficeCashflowProjectionRow(row) {
   return {
-    id: stringCell(row, "id"),
-    importBatchId: nullableStringCell(row, "import_batch_id"),
-    workspaceId: stringCell(row, "workspace_id"),
-    accountId: nullableStringCell(row, "account_id"),
-    periodMonth: stringCell(row, "period_month"),
+    id: stringCell2(row, "id"),
+    importBatchId: nullableStringCell2(row, "import_batch_id"),
+    workspaceId: stringCell2(row, "workspace_id"),
+    accountId: nullableStringCell2(row, "account_id"),
+    periodMonth: stringCell2(row, "period_month"),
     expectedInflowMinor: bigintCell(row, "expected_inflow_minor"),
     expectedOutflowMinor: bigintCell(row, "expected_outflow_minor"),
     expectedClosingBalanceMinor: bigintCell(row, "expected_closing_balance_minor"),
@@ -52884,88 +53122,88 @@ function toOfficeCashflowProjectionRow(row) {
 }
 function toOfficeCashflowManualEntry(row) {
   return {
-    id: stringCell(row, "id"),
-    workspaceId: stringCell(row, "workspace_id"),
-    accountId: nullableStringCell(row, "account_id"),
-    partnerId: nullableStringCell(row, "partner_id"),
-    projectId: nullableStringCell(row, "project_id"),
+    id: stringCell2(row, "id"),
+    workspaceId: stringCell2(row, "workspace_id"),
+    accountId: nullableStringCell2(row, "account_id"),
+    partnerId: nullableStringCell2(row, "partner_id"),
+    projectId: nullableStringCell2(row, "project_id"),
     entryDate: dateCell(row, "entry_date"),
     direction: enumCell(row, "direction", ["inflow", "outflow"]),
     amountMinor: bigintCell(row, "amount_minor"),
     currency: currencyCell(row, "currency"),
-    label: stringCell(row, "label"),
-    notes: nullableStringCell(row, "notes"),
+    label: stringCell2(row, "label"),
+    notes: nullableStringCell2(row, "notes"),
     status: enumCell(row, "status", ["planned", "confirmed", "cancelled"]),
-    createdByUserId: nullableStringCell(row, "created_by_user_id"),
+    createdByUserId: nullableStringCell2(row, "created_by_user_id"),
     createdAt: timestampCell(row, "created_at"),
     updatedAt: timestampCell(row, "updated_at")
   };
 }
 function toOfficeManagedAdvance(row) {
   return {
-    id: stringCell(row, "id"),
-    workspaceId: stringCell(row, "workspace_id"),
+    id: stringCell2(row, "id"),
+    workspaceId: stringCell2(row, "workspace_id"),
     beneficiaryType: enumCell(row, "beneficiary_type", ["staff", "freelancer", "artist", "supplier", "contractor", "other"]),
-    beneficiaryName: stringCell(row, "beneficiary_name"),
-    partnerId: nullableStringCell(row, "partner_id"),
-    projectId: nullableStringCell(row, "project_id"),
-    bankStatementLineId: nullableStringCell(row, "bank_statement_line_id"),
-    transactionId: nullableStringCell(row, "transaction_id"),
-    label: stringCell(row, "label"),
+    beneficiaryName: stringCell2(row, "beneficiary_name"),
+    partnerId: nullableStringCell2(row, "partner_id"),
+    projectId: nullableStringCell2(row, "project_id"),
+    bankStatementLineId: nullableStringCell2(row, "bank_statement_line_id"),
+    transactionId: nullableStringCell2(row, "transaction_id"),
+    label: stringCell2(row, "label"),
     plannedPaymentOn: dateCell(row, "planned_payment_on"),
     paidOn: nullableDateCell(row, "paid_on"),
     originalAmountMinor: bigintCell(row, "original_amount_minor"),
     currency: currencyCell(row, "currency"),
     status: enumCell(row, "status", ["planned", "paid", "partially_applied", "settled", "refunded", "waived", "written_off"]),
-    notes: nullableStringCell(row, "notes"),
-    createdByUserId: nullableStringCell(row, "created_by_user_id"),
+    notes: nullableStringCell2(row, "notes"),
+    createdByUserId: nullableStringCell2(row, "created_by_user_id"),
     createdAt: timestampCell(row, "created_at"),
     updatedAt: timestampCell(row, "updated_at")
   };
 }
 function toOfficeAdvanceApplication(row) {
   return {
-    id: stringCell(row, "id"),
-    advanceId: stringCell(row, "advance_id"),
+    id: stringCell2(row, "id"),
+    advanceId: stringCell2(row, "advance_id"),
     appliedOn: dateCell(row, "applied_on"),
     amountMinor: bigintCell(row, "amount_minor"),
     kind: enumCell(row, "kind", ["invoice", "expense", "refund", "write_off"]),
-    reference: nullableStringCell(row, "reference"),
-    notes: nullableStringCell(row, "notes"),
-    createdByUserId: nullableStringCell(row, "created_by_user_id"),
+    reference: nullableStringCell2(row, "reference"),
+    notes: nullableStringCell2(row, "notes"),
+    createdByUserId: nullableStringCell2(row, "created_by_user_id"),
     createdAt: timestampCell(row, "created_at")
   };
 }
 function toDistributionImportBatchRow(row) {
   return {
-    id: stringCell(row, "id"),
-    source: stringCell(row, "source"),
-    fileName: stringCell(row, "file_name"),
+    id: stringCell2(row, "id"),
+    source: stringCell2(row, "source"),
+    fileName: stringCell2(row, "file_name"),
     status: enumCell(row, "status", ["draft", "processing", "normalized", "completed", "failed", "void"]),
     importedAt: nullableTimestampCell(row, "imported_at")
   };
 }
 function toDistributionNormalizedEarning(row) {
   return {
-    id: stringCell(row, "id"),
-    batchId: stringCell(row, "batch_id"),
-    dsp: stringCell(row, "dsp"),
-    grossAmount: stringCell(row, "gross_amount"),
-    quantity: stringCell(row, "quantity"),
+    id: stringCell2(row, "id"),
+    batchId: stringCell2(row, "batch_id"),
+    dsp: stringCell2(row, "dsp"),
+    grossAmount: stringCell2(row, "gross_amount"),
+    quantity: stringCell2(row, "quantity"),
     currency: currencyCell(row, "currency"),
-    isrc: nullableStringCell(row, "isrc"),
-    upc: nullableStringCell(row, "upc"),
-    rawTitle: nullableStringCell(row, "raw_title"),
-    rawArtist: nullableStringCell(row, "raw_artist"),
-    rawLabel: nullableStringCell(row, "raw_label"),
+    isrc: nullableStringCell2(row, "isrc"),
+    upc: nullableStringCell2(row, "upc"),
+    rawTitle: nullableStringCell2(row, "raw_title"),
+    rawArtist: nullableStringCell2(row, "raw_artist"),
+    rawLabel: nullableStringCell2(row, "raw_label"),
     mappingStatus: enumCell(row, "mapping_status", ["unmapped", "unmatched", "matched", "suspense", "ignored"]),
     calculationStatus: enumCell(row, "calculation_status", ["pending", "allocated", "calculated", "suspense", "completed", "failed", "running", "error", "excluded"])
   };
 }
 function toDistributionCalculationRun(row) {
   return {
-    id: stringCell(row, "id"),
-    batchId: nullableStringCell(row, "batch_id"),
+    id: stringCell2(row, "id"),
+    batchId: nullableStringCell2(row, "batch_id"),
     status: enumCell(row, "status", ["pending", "allocated", "calculated", "suspense", "completed", "failed", "running", "error", "excluded"]),
     startedAt: nullableTimestampCell(row, "started_at"),
     finishedAt: nullableTimestampCell(row, "finished_at"),
@@ -52974,17 +53212,17 @@ function toDistributionCalculationRun(row) {
 }
 function toDistributionEarningAllocation(row) {
   return {
-    id: stringCell(row, "id"),
-    earningId: stringCell(row, "earning_id"),
-    calculationRunId: stringCell(row, "calculation_run_id"),
-    payeeId: stringCell(row, "payee_id"),
-    contractId: nullableStringCell(row, "contract_id"),
-    trackId: nullableStringCell(row, "track_id"),
-    grossAmount: stringCell(row, "gross_amount"),
-    grossShare: stringCell(row, "gross_share"),
-    recoupmentApplied: stringCell(row, "recoupment_applied"),
-    netPayable: stringCell(row, "net_payable"),
-    splitPercentage: stringCell(row, "split_percentage"),
+    id: stringCell2(row, "id"),
+    earningId: stringCell2(row, "earning_id"),
+    calculationRunId: stringCell2(row, "calculation_run_id"),
+    payeeId: stringCell2(row, "payee_id"),
+    contractId: nullableStringCell2(row, "contract_id"),
+    trackId: nullableStringCell2(row, "track_id"),
+    grossAmount: stringCell2(row, "gross_amount"),
+    grossShare: stringCell2(row, "gross_share"),
+    recoupmentApplied: stringCell2(row, "recoupment_applied"),
+    netPayable: stringCell2(row, "net_payable"),
+    splitPercentage: stringCell2(row, "split_percentage"),
     currency: currencyCell(row, "currency"),
     status: enumCell(row, "status", ["preview", "calculated", "statemented", "posted", "void", "error"]),
     createdAt: timestampCell(row, "created_at")
@@ -52992,11 +53230,11 @@ function toDistributionEarningAllocation(row) {
 }
 function toDistributionSuspenseItem(row) {
   return {
-    id: stringCell(row, "id"),
-    earningId: nullableStringCell(row, "earning_id"),
-    amount: stringCell(row, "amount"),
+    id: stringCell2(row, "id"),
+    earningId: nullableStringCell2(row, "earning_id"),
+    amount: stringCell2(row, "amount"),
     currency: currencyCell(row, "currency"),
-    reasonCode: stringCell(row, "reason_code"),
+    reasonCode: stringCell2(row, "reason_code"),
     resolved: booleanCell(row, "resolved"),
     resolvedAt: nullableTimestampCell(row, "resolved_at"),
     createdAt: timestampCell(row, "created_at")
@@ -53004,16 +53242,16 @@ function toDistributionSuspenseItem(row) {
 }
 function toDistributionStatement(row) {
   return {
-    id: stringCell(row, "id"),
-    payeeId: stringCell(row, "payee_id"),
-    calculationRunId: nullableStringCell(row, "calculation_run_id"),
+    id: stringCell2(row, "id"),
+    payeeId: stringCell2(row, "payee_id"),
+    calculationRunId: nullableStringCell2(row, "calculation_run_id"),
     periodStart: dateCell(row, "period_start"),
     periodEnd: dateCell(row, "period_end"),
     currency: currencyCell(row, "currency"),
-    grossTotal: stringCell(row, "gross_total"),
-    recoupmentTotal: stringCell(row, "recoupment_total"),
-    netPayable: stringCell(row, "net_payable"),
-    amountDue: stringCell(row, "amount_due"),
+    grossTotal: stringCell2(row, "gross_total"),
+    recoupmentTotal: stringCell2(row, "recoupment_total"),
+    netPayable: stringCell2(row, "net_payable"),
+    amountDue: stringCell2(row, "amount_due"),
     version: numberCell(row, "version"),
     status: enumCell(row, "status", ["draft", "generated", "locked", "sent", "paid", "void"]),
     createdAt: timestampCell(row, "created_at")
@@ -53021,66 +53259,66 @@ function toDistributionStatement(row) {
 }
 function toDistributionStatementLine(row) {
   return {
-    id: stringCell(row, "id"),
-    statementId: stringCell(row, "statement_id"),
-    earningAllocationId: nullableStringCell(row, "earning_allocation_id"),
-    trackId: nullableStringCell(row, "track_id"),
-    grossShare: stringCell(row, "gross_share"),
-    recoupmentApplied: stringCell(row, "recoupment_applied"),
-    netPayable: stringCell(row, "net_payable"),
-    quantity: stringCell(row, "quantity"),
+    id: stringCell2(row, "id"),
+    statementId: stringCell2(row, "statement_id"),
+    earningAllocationId: nullableStringCell2(row, "earning_allocation_id"),
+    trackId: nullableStringCell2(row, "track_id"),
+    grossShare: stringCell2(row, "gross_share"),
+    recoupmentApplied: stringCell2(row, "recoupment_applied"),
+    netPayable: stringCell2(row, "net_payable"),
+    quantity: stringCell2(row, "quantity"),
     currency: currencyCell(row, "currency")
   };
 }
 function toDistributionStatementPaymentLink(row) {
   return {
-    id: stringCell(row, "id"),
-    statementId: stringCell(row, "statement_id"),
-    paymentId: stringCell(row, "payment_id"),
-    amountApplied: stringCell(row, "amount_applied")
+    id: stringCell2(row, "id"),
+    statementId: stringCell2(row, "statement_id"),
+    paymentId: stringCell2(row, "payment_id"),
+    amountApplied: stringCell2(row, "amount_applied")
   };
 }
 function toDistributionPayment(row) {
   return {
-    id: stringCell(row, "id"),
-    payeeId: stringCell(row, "payee_id"),
-    amount: stringCell(row, "amount"),
+    id: stringCell2(row, "id"),
+    payeeId: stringCell2(row, "payee_id"),
+    amount: stringCell2(row, "amount"),
     currency: currencyCell(row, "currency"),
-    exchangeRate: nullableStringCell(row, "exchange_rate"),
-    method: stringCell(row, "method"),
+    exchangeRate: nullableStringCell2(row, "exchange_rate"),
+    method: stringCell2(row, "method"),
     status: enumCell(row, "status", ["recorded", "edited", "void", "reconciled"]),
     paidAt: nullableTimestampCell(row, "paid_at"),
-    reference: nullableStringCell(row, "reference"),
-    notes: nullableStringCell(row, "notes")
+    reference: nullableStringCell2(row, "reference"),
+    notes: nullableStringCell2(row, "notes")
   };
 }
 function toDistributionPayee(row) {
   return {
-    id: stringCell(row, "id"),
-    name: stringCell(row, "name"),
-    email: nullableStringCell(row, "email"),
+    id: stringCell2(row, "id"),
+    name: stringCell2(row, "name"),
+    email: nullableStringCell2(row, "email"),
     preferredCurrency: currencyCell(row, "preferred_currency"),
     isActive: booleanCell(row, "is_active")
   };
 }
 function toDistributionRelease(row) {
   return {
-    id: stringCell(row, "id"),
-    title: stringCell(row, "title"),
-    artistName: stringCell(row, "artist_name"),
-    catalogStatus: stringCell(row, "catalog_status"),
-    upc: nullableStringCell(row, "upc"),
+    id: stringCell2(row, "id"),
+    title: stringCell2(row, "title"),
+    artistName: stringCell2(row, "artist_name"),
+    catalogStatus: stringCell2(row, "catalog_status"),
+    upc: nullableStringCell2(row, "upc"),
     releaseDate: nullableDateCell(row, "release_date")
   };
 }
 function toDistributionTrack(row) {
   return {
-    id: stringCell(row, "id"),
-    title: stringCell(row, "title"),
-    artistName: stringCell(row, "artist_name"),
-    catalogStatus: stringCell(row, "catalog_status"),
-    isrc: nullableStringCell(row, "isrc"),
-    releaseId: nullableStringCell(row, "release_id")
+    id: stringCell2(row, "id"),
+    title: stringCell2(row, "title"),
+    artistName: stringCell2(row, "artist_name"),
+    catalogStatus: stringCell2(row, "catalog_status"),
+    isrc: nullableStringCell2(row, "isrc"),
+    releaseId: nullableStringCell2(row, "release_id")
   };
 }
 async function readOfficePartnerPayeeLinks(pool) {
@@ -53097,19 +53335,19 @@ async function readOfficePartnerPayeeLinks(pool) {
   );
   const links = {};
   for (const row of rows) {
-    const partnerId = stringCell(row, "office_partner_id");
+    const partnerId = stringCell2(row, "office_partner_id");
     if (links[partnerId] !== void 0) {
       continue;
     }
     links[partnerId] = {
       partnerId,
-      partnerName: stringCell(row, "partner_name"),
-      payeeId: stringCell(row, "payee_id"),
-      payeeName: stringCell(row, "payee_name"),
+      partnerName: stringCell2(row, "partner_name"),
+      payeeId: stringCell2(row, "payee_id"),
+      payeeName: stringCell2(row, "payee_name"),
       resolution: "stored_link",
       status: booleanCell(row, "payee_is_active") ? "active" : "inactive",
       source: "identity_link",
-      confidence: stringCell(row, "confidence")
+      confidence: stringCell2(row, "confidence")
     };
   }
   return links;
@@ -53132,12 +53370,12 @@ async function readCount(pool, tableName) {
   if (first === void 0) {
     throw new Error(`Postgres count returned no row for ${tableName}.`);
   }
-  return numberFromText(stringCell(first, "n"), `${tableName}.count`);
+  return numberFromText(stringCell2(first, "n"), `${tableName}.count`);
 }
 function emptyRecord() {
   return {};
 }
-function stringCell(row, columnName) {
+function stringCell2(row, columnName) {
   const value = row[columnName];
   if (value === null || value === void 0) {
     throw new Error(`Postgres row is missing required column ${columnName}.`);
@@ -53147,7 +53385,7 @@ function stringCell(row, columnName) {
   }
   return String(value);
 }
-function nullableStringCell(row, columnName) {
+function nullableStringCell2(row, columnName) {
   const value = row[columnName];
   if (value === null || value === void 0) {
     return null;
@@ -53171,18 +53409,18 @@ function booleanCell(row, columnName) {
   throw new Error(`Postgres column ${columnName} is not boolean.`);
 }
 function bigintCell(row, columnName) {
-  return BigInt(stringCell(row, columnName));
+  return BigInt(stringCell2(row, columnName));
 }
 function nullableBigintCell(row, columnName) {
-  const value = nullableStringCell(row, columnName);
+  const value = nullableStringCell2(row, columnName);
   return value === null ? null : BigInt(value);
 }
 function nullableIntegerCell(row, columnName) {
-  const value = nullableStringCell(row, columnName);
+  const value = nullableStringCell2(row, columnName);
   return value === null ? null : numberFromText(value, columnName);
 }
 function numberCell(row, columnName) {
-  return numberFromText(stringCell(row, columnName), columnName);
+  return numberFromText(stringCell2(row, columnName), columnName);
 }
 function numberFromText(value, label) {
   if (!/^-?\d+$/u.test(value)) {
@@ -53195,31 +53433,31 @@ function numberFromText(value, label) {
   return parsed;
 }
 function timestampCell(row, columnName) {
-  const value = stringCell(row, columnName);
+  const value = stringCell2(row, columnName);
   return value.includes("T") ? value : `${value.replace(" ", "T")}.000Z`;
 }
 function nullableTimestampCell(row, columnName) {
-  const value = nullableStringCell(row, columnName);
+  const value = nullableStringCell2(row, columnName);
   if (value === null) {
     return null;
   }
   return value.includes("T") ? value : `${value.replace(" ", "T")}.000Z`;
 }
 function dateCell(row, columnName) {
-  return stringCell(row, columnName).slice(0, 10);
+  return stringCell2(row, columnName).slice(0, 10);
 }
 function nullableDateCell(row, columnName) {
-  return nullableStringCell(row, columnName)?.slice(0, 10) ?? null;
+  return nullableStringCell2(row, columnName)?.slice(0, 10) ?? null;
 }
 function currencyCell(row, columnName) {
-  const value = stringCell(row, columnName);
+  const value = stringCell2(row, columnName);
   if (!/^[A-Z]{3}$/u.test(value)) {
     throw new Error(`Postgres column ${columnName} is not a 3-letter currency: ${value}.`);
   }
   return value;
 }
 function nullableCurrencyCell(row, columnName) {
-  const value = nullableStringCell(row, columnName);
+  const value = nullableStringCell2(row, columnName);
   if (value === null) {
     return null;
   }
@@ -53239,7 +53477,7 @@ function jsonRecordCell(row, columnName) {
   return value;
 }
 function enumCell(row, columnName, allowed) {
-  const value = stringCell(row, columnName);
+  const value = stringCell2(row, columnName);
   for (const candidate of allowed) {
     if (value === candidate) {
       return candidate;
@@ -53247,7 +53485,7 @@ function enumCell(row, columnName, allowed) {
   }
   throw new Error(`Postgres column ${columnName} has unsupported value ${value}.`);
 }
-function percentageToBasisPoints(value) {
+function percentageToBasisPoints2(value) {
   const [whole = "0", fraction = ""] = value.split(".");
   const scaled = BigInt(whole) * 100n + BigInt(fraction.padEnd(2, "0").slice(0, 2));
   const parsed = Number(scaled);
@@ -53386,6 +53624,7 @@ async function bootServer() {
   const app = createApiService({
     fixtures: runtime.fixtures,
     persistence: runtime.persistence,
+    distributionReads: runtime.distributionReads,
     health: runtime.health,
     readiness: runtime.readiness,
     nowIso: () => (/* @__PURE__ */ new Date()).toISOString(),

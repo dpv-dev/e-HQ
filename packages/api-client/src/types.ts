@@ -1418,6 +1418,7 @@ export interface DistributionMappingRowsQuery extends PageQuery {
   readonly workspaceId: EntityId;
   readonly batchId: EntityId | null;
   readonly status: "unmapped" | "suggested" | "mapped" | null;
+  readonly search: string | null;
 }
 
 export interface DistributionMappingRow {

@@ -31,6 +31,7 @@ async function bootServer(): Promise<void> {
   const app = createApiService({
     fixtures: runtime.fixtures,
     persistence: runtime.persistence,
+    distributionReads: runtime.distributionReads,
     health: runtime.health,
     readiness: runtime.readiness,
     nowIso: (): string => new Date().toISOString(),

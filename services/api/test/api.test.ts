@@ -5619,6 +5619,66 @@ function createTestAuthVerifier(): SupabaseJwtVerifier {
   };
 }
 
+test("Distribution mapping route delegates filters and opaque cursors to the live repository", async () => {
+  let receivedQuery: Readonly<Record<string, unknown>> | null = null;
+  const app = createApiService({
+    fixtures: createFixtureStore(),
+    persistence: createMemoryPersistenceRuntime({ WRITES_ENABLED: "false" }),
+    distributionReads: {
+      listMappingRows: async (query) => {
+        receivedQuery = query;
+        return {
+          items: [{
+            id: "earning_live_1",
+            batchId: "batch_live_1",
+            sourceTitle: "Live Alpha",
+            sourceArtist: "Artist",
+            sourceLabel: "Label",
+            sourceStore: "Tidal",
+            sourceIsrc: "ISRC-LIVE",
+            sourceUpc: null,
+            grossMicro: "1.2500000000",
+            currency: "EUR",
+            suggestedTrackId: "track_live_1",
+            suggestedTrackTitle: "Live Alpha",
+            confidenceBp: 9900,
+            status: "suggested",
+            exactFixPath: "mapping_rules"
+          }],
+          nextCursor: "next-opaque"
+        };
+      }
+    },
+    health: null,
+    nowIso: (): string => "2026-07-20T00:00:00.000Z",
+    auth: createTestAuthVerifier()
+  });
+
+  const response = await app.request(
+    "/erh/v1/mapping/rows?workspaceId=eeee-mu&batchId=batch_live_1&status=suggested&search=Alpha&cursor=current-opaque&limit=25",
+    { headers: authHeaders() }
+  );
+  assert.equal(response.status, 200);
+  const page = (await response.json()) as { readonly items: readonly { readonly id: string }[]; readonly nextCursor: string | null };
+  assert.deepEqual(page.items.map((row) => row.id), ["earning_live_1"]);
+  assert.equal(page.nextCursor, "next-opaque");
+  assert.deepEqual(receivedQuery, {
+    workspaceId: "eeee-mu",
+    batchId: "batch_live_1",
+    status: "suggested",
+    search: "Alpha",
+    cursor: "current-opaque",
+    limit: 25
+  });
+
+  const invalidStatus = await app.request(
+    "/erh/v1/mapping/rows?workspaceId=eeee-mu&status=unsafe",
+    { headers: authHeaders() }
+  );
+  assert.equal(invalidStatus.status, 400);
+  assert.equal((await invalidStatus.json()).error.code, "mapping_status_invalid");
+});
+
 async function createPgliteWriteTables(pglite: PGlite): Promise<void> {
   await pglite.exec(`
     create table api_idempotency_keys (

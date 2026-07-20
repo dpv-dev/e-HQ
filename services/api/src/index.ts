@@ -240,6 +240,7 @@ import {
   type SupabaseJwtVerifier
 } from "./auth.js";
 import { parseDistributionImportPreview } from "./distribution-import-parser.js";
+import { DistributionMappingCursorError, type DistributionReadRuntime } from "./distribution-repository.js";
 import { createSupabaseRouter } from "./supabase-server.js";
 import { createFixtureStore, type ApiDistributionRoyaltyRuleInput, type ApiFixtureStore } from "./fixtures.js";
 import type { ApiStartupReadiness } from "./startup.js";
@@ -324,6 +325,7 @@ export interface LegacyAdapterMapping {
 export interface ApiServiceDependencies {
   readonly fixtures: ApiFixtureStore;
   readonly persistence: ApiPersistenceRuntime;
+  readonly distributionReads?: DistributionReadRuntime;
   readonly health: (() => Promise<unknown>) | null;
   readonly readiness?: ApiStartupReadiness;
   readonly nowIso: () => string;
@@ -1879,13 +1881,34 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
     return distributionImportReverseResponse(context, dependencies);
   });
 
-  app.get("/erh/v1/mapping/rows", (context) => {
-    requireQuery(context, "workspaceId");
+  app.get("/erh/v1/mapping/rows", async (context) => {
+    const workspaceId = requireQuery(context, "workspaceId");
     const batchId = nullableQuery(context, "batchId");
     const status = nullableQuery(context, "status");
+    const search = nullableQuery(context, "search");
+    const cursor = nullableQuery(context, "cursor");
+    const limit = pageLimit(context);
+    if (dependencies.distributionReads !== undefined) {
+      try {
+        return context.json(await dependencies.distributionReads.listMappingRows({
+          workspaceId,
+          batchId,
+          status: toDistributionMappingStatusFilter(status),
+          search,
+          cursor,
+          limit
+        }));
+      } catch (error: unknown) {
+        if (error instanceof DistributionMappingCursorError) {
+          throw new ApiRouteError(400, "mapping_cursor_invalid", error.message, [`cursor=${cursor ?? "null"}`]);
+        }
+        throw error;
+      }
+    }
     const rows = dependencies.fixtures.distributionMappingRows
       .filter((row) => batchId === null || row.batchId === batchId)
-      .filter((row) => status === null || row.status === status);
+      .filter((row) => status === null || row.status === status)
+      .filter((row) => search === null || distributionMappingRowMatchesSearch(row, search));
     return context.json(pageItems(context, rows));
   });
 
@@ -11295,17 +11318,45 @@ function pageItems<TItem>(context: ApiContext, items: readonly TItem[]): PageRes
   };
 }
 
+function toDistributionMappingStatusFilter(value: string | null): DistributionMappingRow["status"] | null {
+  if (value === null || value === "unmapped" || value === "suggested" || value === "mapped") {
+    return value;
+  }
+
+  throw new ApiRouteError(400, "mapping_status_invalid", "Mapping status filter is invalid.", [`status=${value}`]);
+}
+
+function distributionMappingRowMatchesSearch(row: DistributionMappingRow, search: string): boolean {
+  const query = search.trim().toLocaleLowerCase();
+  if (query === "") {
+    return true;
+  }
+
+  return [
+    row.sourceTitle,
+    row.sourceArtist,
+    row.sourceLabel,
+    row.sourceStore,
+    row.sourceIsrc ?? "",
+    row.sourceUpc ?? "",
+    row.suggestedTrackTitle ?? ""
+  ].some((value) => value.toLocaleLowerCase().includes(query));
+}
+
 function pageWindow(context: ApiContext): PageWindow {
   const cursorText = optionalCompatQuery(context, ["cursor", "offset", "page"]);
-  const limitText = optionalCompatQuery(context, ["limit", "size", "pageSize"]);
   const parsedOffset = cursorText === null ? 0 : parsePositiveInteger(cursorText, "cursor");
-  const parsedLimit = limitText === null ? 50 : parsePositiveInteger(limitText, "limit");
-  const limit = parsedLimit > 100 ? 100 : parsedLimit;
   return {
     cursor: cursorText,
     offset: parsedOffset,
-    limit
+    limit: pageLimit(context)
   };
+}
+
+function pageLimit(context: ApiContext): number {
+  const limitText = optionalCompatQuery(context, ["limit", "size", "pageSize"]);
+  const parsedLimit = limitText === null ? 50 : parsePositiveInteger(limitText, "limit");
+  return parsedLimit > 100 ? 100 : parsedLimit;
 }
 
 function parsePositiveInteger(value: string, label: string): number {

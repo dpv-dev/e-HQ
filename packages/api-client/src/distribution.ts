@@ -288,6 +288,7 @@ export function createDistributionApiClient(config: ApiClientConfig): Distributi
         workspaceId: query.workspaceId,
         batchId: query.batchId,
         status: query.status,
+        search: query.search,
         cursor: query.cursor,
         limit: query.limit
       }),

@@ -237,6 +237,7 @@ export const normalizedEarnings = pgTable(
     index("normalized_earnings_isrc_idx").on(table.isrc),
     index("normalized_earnings_upc_idx").on(table.upc),
     index("normalized_earnings_mapping_status_idx").on(table.mappingStatus),
+    index("normalized_earnings_mapping_workbench_idx").on(table.workspaceId, table.mappingStatus, table.legacyId, table.id),
     index("normalized_earnings_calculation_status_idx").on(table.calculationStatus)
   ]
 );
@@ -589,6 +590,7 @@ export const earningTrackMatches = pgTable(
     uniqueIndex("earning_track_matches_legacy_id_unique").on(table.legacyId),
     index("earning_track_matches_earning_id_idx").on(table.earningId),
     index("earning_track_matches_track_id_idx").on(table.trackId),
+    index("earning_track_matches_workbench_idx").on(table.earningId, table.status, table.confidence, table.id),
     check("earning_track_matches_confidence_check", sql`${table.confidence} >= 0 and ${table.confidence} <= 100`)
   ]
 );

@@ -156,6 +156,12 @@ export function createOpenApiDocument(): Readonly<Record<string, unknown>> {
     openapi: "3.1.0",
     info: { title: "eHQ Platform API", version: "1.0.0" },
     paths: {
+      "/erh/v1/mapping/rows": {
+        get: {
+          operationId: "listDistributionMappingRows",
+          summary: "Read the live workspace-scoped Distribution mapping queue with opaque cursor pagination"
+        }
+      },
       "/erh/v1/contracts/{contractId}/expenses": {
         post: { operationId: "recordDistributionContractExpense", summary: "Record an audited Distribution expense or advance" }
       },

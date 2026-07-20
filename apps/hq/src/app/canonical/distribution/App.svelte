@@ -540,7 +540,7 @@
   );
   let importSourceFilter = $state<ImportSourceFilter>(allValue);
   let importStatusFilter = $state<ImportBatchStatusFilter>(allValue);
-  let mappingStatusFilter = $state<MappingStatusFilter>("unmapped");
+  let mappingStatusFilter = $state<MappingStatusFilter>("suggested");
   let mappingBatchFilter = $state<string>(allValue);
   let mappingSearch = $state("");
   let catalogStatusFilter = $state<CatalogStatusFilter>(allValue);
@@ -1124,6 +1124,7 @@
           workspaceId: distributionWorkspaceId,
           batchId: toNullableBatchFilter(mappingBatchFilter),
           status: toNullableMappingStatus(mappingStatusFilter),
+          search: mappingSearch.trim() === "" ? null : mappingSearch.trim(),
           cursor,
           limit: TABLE_PAGE_SIZE
         }),
@@ -1547,6 +1548,7 @@
           workspaceId: distributionWorkspaceId,
           batchId: toNullableBatchFilter(mappingBatchFilter),
           status: toNullableMappingStatus(mappingStatusFilter),
+          search: mappingSearch.trim() === "" ? null : mappingSearch.trim(),
           cursor: null,
           limit: TABLE_PAGE_SIZE
         })

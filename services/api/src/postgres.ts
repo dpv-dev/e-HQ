@@ -36,6 +36,7 @@ import type {
 } from "@ehq/domain-office";
 import { erhMoney } from "@ehq/domain-finance";
 import { createEmptyApiFixtureStore, type ApiDistributionRoyaltyRuleInput, type ApiFixtureStore } from "./fixtures.js";
+import { createPostgresDistributionReadRuntime, type DistributionReadRuntime } from "./distribution-repository.js";
 import { sanitizeOfficeBankDescription } from "./office-bank-description.js";
 import { createPostgresPersistenceRuntime, type ApiPersistenceRuntime } from "./persistence.js";
 import { createApiStartupReadiness, type ApiStartupReadiness } from "./startup.js";
@@ -51,6 +52,7 @@ type DistributionPaymentStatus = DistributionReadDataset["payments"][number]["st
 export interface ApiPostgresRuntime {
   readonly fixtures: ApiFixtureStore;
   readonly persistence: ApiPersistenceRuntime;
+  readonly distributionReads: DistributionReadRuntime;
   readonly health: () => Promise<ApiPostgresHealth>;
   readonly close: () => Promise<void>;
 }
@@ -100,6 +102,7 @@ export function startPostgresApiRuntime(
   return {
     fixtures,
     persistence: createPostgresPersistenceRuntime(pool, env),
+    distributionReads: createPostgresDistributionReadRuntime(pool),
     health: async (): Promise<ApiPostgresHealth> => readPostgresHealth(pool),
     close: async (): Promise<void> => {
       await pool.end();
@@ -115,6 +118,7 @@ export async function createPostgresApiRuntime(env: Readonly<Record<string, stri
     return {
       fixtures,
       persistence: createPostgresPersistenceRuntime(pool, env),
+      distributionReads: createPostgresDistributionReadRuntime(pool),
       health: async (): Promise<ApiPostgresHealth> => readPostgresHealth(pool),
       close: async (): Promise<void> => {
         await pool.end();
