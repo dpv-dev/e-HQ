@@ -2531,6 +2531,18 @@ test("statement void appends a reversal and never deletes the original balance",
   assert.equal(secondVoid.status, 409);
 });
 
+test("statement removal is blocked while an active payment remains linked", async () => {
+  const app = createWriteEnabledFixtureApiService();
+  const response = await app.request("/erh/v1/statements/statement_alma/void", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "statement-remove-linked-payment-1" },
+    body: JSON.stringify({ workspaceId: "workspace_1", reason: "remove obsolete statement" })
+  });
+  assert.equal(response.status, 409);
+  const payload = (await response.json()) as { readonly error: { readonly code: string } };
+  assert.equal(payload.error.code, "statement_has_active_payment");
+});
+
 test("statement generation and void persist statements, lines, and append-only balances in PGlite", async () => {
   const pglite = new PGlite();
   await createPgliteWriteTables(pglite);

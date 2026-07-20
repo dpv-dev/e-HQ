@@ -8514,6 +8514,7 @@ async function distributionStatementVoidResponse(context: ApiContext, dependenci
     requestBody: body,
     write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<StatementVoidMutationResponse> => {
       const statement = requireStatementForVoid(dependencies, statementId);
+      assertStatementHasNoActivePayments(dependencies, statementId);
       const ledgerRow = requireStatementLedgerRow(dependencies, statementId);
       // P4a: use the same lock key as payment mutations so void and payment
       // operations on the same statement are fully serialized.
@@ -11928,6 +11929,22 @@ function requireStatementForVoid(
   }
 
   return statement;
+}
+
+function assertStatementHasNoActivePayments(dependencies: ApiServiceDependencies, statementId: string): void {
+  const activePayment = dependencies.fixtures.distribution.statementPaymentLinks
+    .filter((link) => link.statementId === statementId)
+    .map((link) => dependencies.fixtures.distribution.payments.find((payment) => payment.id === link.paymentId) ?? null)
+    .find((payment) => payment !== null && payment.status !== "void");
+
+  if (activePayment !== undefined && activePayment !== null) {
+    throw new ApiRouteError(
+      409,
+      "statement_has_active_payment",
+      "Unlink or void the active payment before removing this statement.",
+      [`statementId=${statementId}`, `paymentId=${activePayment.id}`]
+    );
+  }
 }
 
 function requireStatementLedgerRow(dependencies: ApiServiceDependencies, statementId: string): PayeeBalanceLedgerInput {

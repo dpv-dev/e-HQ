@@ -824,8 +824,12 @@
   const suspenseWorkbench = $derived(suspenseState.status === "success" ? suspenseState.data : null);
   const suspenseItems = $derived(suspenseWorkbench?.items.items ?? []);
   const statements = $derived(readPageItems(statementsState));
-  const filteredStatements = $derived(
+  const statementsMatchingFilters = $derived(
     statements.filter((statement: StatementSummary): boolean => statementCurrencyFilter === allValue || statement.currency === statementCurrencyFilter)
+  );
+  // Removed statements remain auditable but do not clutter the operational queue.
+  const filteredStatements = $derived(
+    statementsMatchingFilters.filter((statement: StatementSummary): boolean => statement.status !== "void")
   );
   const selectedStatement = $derived(
     selectedStatementId === null ? null : filteredStatements.find((statement: StatementSummary): boolean => statement.id === selectedStatementId) ?? null
@@ -833,7 +837,7 @@
   const statementDraftCount = $derived(filteredStatements.filter((statement: StatementSummary): boolean => statement.status === "draft").length);
   const statementLockedDueCount = $derived(filteredStatements.filter((statement: StatementSummary): boolean => statement.status === "posted").length);
   const statementPaidCount = $derived(filteredStatements.filter((statement: StatementSummary): boolean => statement.status === "paid").length);
-  const statementVoidCount = $derived(filteredStatements.filter((statement: StatementSummary): boolean => statement.status === "void").length);
+  const statementVoidCount = $derived(statementsMatchingFilters.filter((statement: StatementSummary): boolean => statement.status === "void").length);
   // Deploys update API and static assets independently. Normalize the previous
   // payment shape so an in-flight rollout never crashes the Payments page.
   const payments = $derived(readPageItems(paymentsState).map(normalizePaymentSummary));
@@ -1151,7 +1155,7 @@
     { label: "Open lines", onAction: openStatementDetail },
     { label: "Export CSV", onAction: exportStatementCsv },
     { label: "Print PDF", onAction: printStatementPdf },
-    { label: "Void", onAction: openStatementVoidPanel, danger: true, isEnabled: statementCanVoid, disabledReason: statementVoidDisabledReason }
+    { label: "Remove", onAction: openStatementVoidPanel, danger: true, isEnabled: statementCanVoid, disabledReason: statementVoidDisabledReason }
   ];
   const importRowActions: readonly TableRowAction[] = [
     {
@@ -3965,13 +3969,23 @@
   }
 
   function statementCanVoid(statementId: string): boolean {
-    return writesEnabled && statements.some((statement: StatementSummary): boolean => statement.id === statementId && statement.status !== "void");
+    return writesEnabled
+      && statements.some((statement: StatementSummary): boolean => statement.id === statementId && statement.status !== "void")
+      && !hasActivePaymentForStatement(statementId);
   }
 
   function statementVoidDisabledReason(statementId: string): string | null {
     if (!writesEnabled) return writeGateMessage;
     const statement = statements.find((candidate: StatementSummary): boolean => candidate.id === statementId);
-    return statement?.status === "void" ? "This statement is already void." : null;
+    if (statement?.status === "void") return "This statement is already removed from the active list.";
+    if (hasActivePaymentForStatement(statementId)) return "Unlink or void the active payment before removing this statement.";
+    return null;
+  }
+
+  function hasActivePaymentForStatement(statementId: string): boolean {
+    return payments.some((payment: PaymentSummary): boolean =>
+      payment.status !== "voided" && payment.linkedStatementIds.includes(statementId)
+    );
   }
 
   async function printStatementPdf(statementId: string): Promise<void> {
@@ -6277,15 +6291,15 @@
         </section>
         <Table title="Statement payment reconciliation" columns={reconStatementColumns} rows={reconStatementRows} state={isLoadingStatus(reconciliationState.status) ? "loading" : reconciliationState.status === "error" ? "error" : reconStatementRows.length === 0 ? "empty" : "default"} actionLabel="" />
         {#if selectedStatement !== null && statementDetailState.status === "idle"}
-          <section class="form-panel ehq-edge-surface" aria-label="Void statement">
+          <section class="form-panel ehq-edge-surface" aria-label="Remove statement from active list">
             <div class="panel-context">
-              <strong>Void statement for {selectedStatement.payeeName}</strong>
+              <strong>Remove statement for {selectedStatement.payeeName}</strong>
               <span>{formatMoney(selectedStatement.netPayableMicro, selectedStatement.currency)} · {formatDateRange(selectedStatement.period_start, selectedStatement.period_end)}</span>
             </div>
-            <p>This creates an audited reversal. The statement and its imported source data remain visible.</p>
-            <Input id="distribution-statement-void-reason" label="Void reason" value={statementVoidReason} placeholder="Explain the reversal" type="text" state={statementVoidReason.trim() === "" ? "error" : "default"} message="Required and recorded in the audit trail." oninput={(value: string): void => { statementVoidReason = value; }} />
-            <Button label="Void statement" variant="danger" size="medium" type="button" disabled={!writesEnabled || statementVoidReason.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Void statement" title={writeDisabledTitle()} onclick={voidSelectedStatement} />
-            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel statement void" onclick={closeStatementDetail} />
+            <p>This removes the statement from the active list without changing source calculations. It remains in the audit trail with its reversal.</p>
+            <Input id="distribution-statement-void-reason" label="Removal reason" value={statementVoidReason} placeholder="Explain why this statement is not needed" type="text" state={statementVoidReason.trim() === "" ? "error" : "default"} message="Required and recorded in the audit trail." oninput={(value: string): void => { statementVoidReason = value; }} />
+            <Button label="Remove statement" variant="danger" size="medium" type="button" disabled={!writesEnabled || statementVoidReason.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Remove statement from active list" title={writeDisabledTitle()} onclick={voidSelectedStatement} />
+            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel statement removal" onclick={closeStatementDetail} />
           </section>
         {:else if selectedStatement !== null}
           <section class="statement-pdf ehq-edge-surface" aria-label="Statement lines">
