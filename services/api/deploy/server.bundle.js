@@ -27463,6 +27463,7 @@ function toCatalogRowWithCursor(row) {
       status: catalogStatusCell(row, "catalog_status"),
       contributors,
       contributorSource: overrideId === null ? "imported" : "override",
+      suggestedCatalogArtist: overrideId === null ? catalogArtistSuggestion(contributors, catalogArtist) : null,
       reviewReason: catalogReviewReason(contributors, artistImport, catalogArtist, overrideId)
     },
     cursor: {
@@ -27470,6 +27471,12 @@ function toCatalogRowWithCursor(row) {
       id: stringCell(row, "id")
     }
   };
+}
+function catalogArtistSuggestion(contributors, catalogArtist) {
+  const mainArtists = contributors.filter((contributor) => contributor.role === "main_artist");
+  if (mainArtists.length !== 1) return null;
+  const suggestion = mainArtists[0]?.name.trim() ?? "";
+  return suggestion === "" || suggestion.toLocaleLowerCase() === catalogArtist.trim().toLocaleLowerCase() ? null : suggestion;
 }
 function toContractRowWithCursor(row) {
   return {
@@ -54481,10 +54488,11 @@ function toDistributionDuplicates(store) {
   return [...groups.entries()].filter(([, group]) => group.ids.length > 1).map(([isrc, group]) => ({
     id: isrc,
     label: group.title,
-    kind: "normalized_earning_isrc",
+    kind: "same_isrc_earnings",
     count: group.ids.length,
     sampleIds: group.ids.slice(0, distributionReconciliationSampleLimit),
-    sampleLabels: group.labels.slice(0, distributionReconciliationSampleLimit)
+    sampleLabels: [...new Set(group.labels)].slice(0, 3),
+    resolutionAllowed: false
   }));
 }
 function distributionAliasFromUpsertRequest(fixtures, aliasId, request) {
@@ -54560,6 +54568,9 @@ function requireDistributionAliasTarget(fixtures, targetType, targetId) {
   }
 }
 function duplicateGroupEarningIds(fixtures, duplicateId) {
+  if (!toDistributionDuplicates(fixtures).some((group) => group.id === duplicateId && group.resolutionAllowed)) {
+    return [];
+  }
   return fixtures.distribution.normalizedEarnings.filter((earning) => earning.isrc === duplicateId).filter((earning) => earning.calculationStatus !== "excluded").map((earning) => earning.id);
 }
 function applyDistributionPayeeBalanceAdjustmentsFixture(fixtures, rows) {
