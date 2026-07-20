@@ -865,8 +865,9 @@
   const suspenseKpis = $derived(createSuspenseKpis(suspenseWorkbench));
   const statementRows = $derived(createStatementRows(filteredStatements));
   const statementDetailRows = $derived(
-    statementDetailState.status === "success" ? createStatementLineRows(statementDetailState.data.lines, tracks) : []
+    statementDetailState.status === "success" ? createStatementLineRows(summarizeStatementPrintLines(statementDetailState.data.lines), tracks) : []
   );
+  const statementDetailSourceLineCount = $derived(statementDetailState.status === "success" ? statementDetailState.data.lines.length : 0);
   const paymentRows = $derived(createPaymentRows(payments));
   const unlinkedPaymentRows = $derived(createPaymentRows(payments.filter((payment) => payment.linkedStatementIds.length === 0 && payment.status !== "voided")));
   const revenueTableRows = $derived(createRevenueRows(revenueRows));
@@ -4030,7 +4031,8 @@
 
   function renderStatementPrintHtml(payload: StatementPrintResponse, trackItems: readonly TrackSummary[]): string {
     const statement = payload.statement;
-    const lineRows = payload.lines
+    const groupedLines = summarizeStatementPrintLines(payload.lines);
+    const lineRows = groupedLines
       .map((line: StatementPrintLine): string => `
         <tr>
           <td>${escapeHtml(printTrackLabel(line.trackId, trackItems))}</td>
@@ -4057,6 +4059,7 @@
   table { width: 100%; border-collapse: collapse; font-size: var(--ehq-type-caption-size, 12px); }
   th, td { border-bottom: 1px solid var(--ehq-border, color-mix(in srgb, CanvasText 20%, Canvas)); padding: 6px 8px; text-align: left; }
   .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .detail-note { color: color-mix(in srgb, CanvasText 65%, Canvas); font-size: var(--ehq-type-caption-size, 12px); }
 </style>
 </head>
 <body>
@@ -4069,6 +4072,7 @@
   <dt>Net payable</dt><dd>${escapeHtml(formatPrintAmount(statement.netPayable, statement.currency))}</dd>
   <dt>Amount due</dt><dd>${escapeHtml(formatPrintAmount(statement.amountDue, statement.currency))}</dd>
 </dl>
+<p class="detail-note">${groupedLines.length} title summaries from ${payload.lines.length} source lines. The detailed source ledger is available as CSV.</p>
 <table>
   <thead><tr><th>Track</th><th class="num">Quantity</th><th class="num">Gross share</th><th class="num">Recoupment</th><th class="num">Net payable</th></tr></thead>
   <tbody>${lineRows}</tbody>
@@ -4090,6 +4094,54 @@
     }
 
     return `${track.title} · ${track.artistName}`;
+  }
+
+  /** Groups printable source rows without altering the immutable statement ledger. */
+  function summarizeStatementPrintLines(items: readonly StatementPrintLine[]): readonly StatementPrintLine[] {
+    const grouped = new Map<string, StatementPrintLine>();
+
+    for (const line of items) {
+      const key = `${line.currency}:${line.trackId ?? "unallocated"}`;
+      const existing = grouped.get(key);
+
+      if (existing === undefined) {
+        grouped.set(key, line);
+        continue;
+      }
+
+      grouped.set(key, {
+        ...existing,
+        quantity: addPrintableDecimal(existing.quantity, line.quantity),
+        grossShare: addPrintableDecimal(existing.grossShare, line.grossShare),
+        recoupmentApplied: addPrintableDecimal(existing.recoupmentApplied, line.recoupmentApplied),
+        netPayable: addPrintableDecimal(existing.netPayable, line.netPayable)
+      });
+    }
+
+    return [...grouped.values()].sort((left, right): number =>
+      `${left.trackId ?? ""}`.localeCompare(`${right.trackId ?? ""}`)
+    );
+  }
+
+  /** Exact decimal addition for display-only aggregation; no floating-point coercion. */
+  function addPrintableDecimal(left: string, right: string): string {
+    const leftFraction = left.includes(".") ? left.split(".")[1]?.length ?? 0 : 0;
+    const rightFraction = right.includes(".") ? right.split(".")[1]?.length ?? 0 : 0;
+    const scale = Math.max(leftFraction, rightFraction);
+    const factor = 10n ** BigInt(scale);
+    const toScaledInteger = (value: string): bigint => {
+      const negative = value.startsWith("-");
+      const absolute = negative ? value.slice(1) : value;
+      const [whole = "0", fraction = ""] = absolute.split(".");
+      const scaled = BigInt(whole) * factor + BigInt(fraction.padEnd(scale, "0").slice(0, scale) || "0");
+      return negative ? -scaled : scaled;
+    };
+    const sum = toScaledInteger(left) + toScaledInteger(right);
+    const negative = sum < 0n;
+    const absolute = negative ? -sum : sum;
+    const whole = absolute / factor;
+    const fraction = String(absolute % factor).padStart(scale, "0").replace(/0+$/u, "");
+    return `${negative ? "-" : ""}${whole}${fraction === "" ? "" : `.${fraction}`}`;
   }
 
   // The print payload carries 10-decimal money strings; round to cents for A4 output.
@@ -6312,7 +6364,8 @@
             {:else if statementDetailState.status === "error"}
               <Alert tone="error" title="Statement detail unavailable" message="The line detail could not be loaded. Retry from the statement row." dismissible={false} />
             {:else}
-              <Table title="Statement lines" columns={statementLineColumns} rows={statementDetailRows} state={statementDetailRows.length === 0 ? "empty" : "default"} actionLabel="" />
+              <p class="statement-detail-note">{statementDetailRows.length} title summaries from {statementDetailSourceLineCount} source lines. Export CSV keeps every source line.</p>
+              <Table title="Statement summary by track" columns={statementLineColumns} rows={statementDetailRows} state={statementDetailRows.length === 0 ? "empty" : "default"} actionLabel="" />
             {/if}
             <Button label="Close detail" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Close statement detail" onclick={closeStatementDetail} />
           </section>
@@ -7130,6 +7183,11 @@
     font-size: var(--ehq-type-caption-size);
     letter-spacing: 0.12em;
     text-transform: uppercase;
+  }
+
+  .statement-detail-note {
+    color: var(--ehq-text-muted);
+    font-size: var(--ehq-type-caption-size);
   }
 
   .statement-summary dl {
