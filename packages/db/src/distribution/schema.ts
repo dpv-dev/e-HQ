@@ -395,6 +395,7 @@ export const releases = pgTable(
   (table) => [
     uniqueIndex("releases_legacy_id_unique").on(table.legacyId),
     index("releases_workspace_id_idx").on(table.workspaceId),
+    index("releases_catalog_workbench_idx").on(table.workspaceId, table.releaseDate, table.labelId, table.id),
     index("releases_label_id_idx").on(table.labelId),
     index("releases_upc_idx").on(table.upc)
   ]
@@ -418,6 +419,7 @@ export const tracks = pgTable(
   (table) => [
     uniqueIndex("tracks_legacy_id_unique").on(table.legacyId),
     index("tracks_workspace_id_idx").on(table.workspaceId),
+    index("tracks_catalog_workbench_idx").on(table.workspaceId, table.catalogStatus, table.legacyId, table.id),
     index("tracks_isrc_idx").on(table.isrc),
     index("tracks_release_id_idx").on(table.releaseId)
   ]
@@ -442,6 +444,28 @@ export const trackContributors = pgTable(
     uniqueIndex("track_contributors_track_artist_role_unique").on(table.trackId, table.artistId, table.role),
     index("track_contributors_track_id_idx").on(table.trackId),
     index("track_contributors_artist_id_idx").on(table.artistId)
+  ]
+);
+
+export const catalogContributorOverrides = pgTable(
+  "catalog_contributor_overrides",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: text("workspace_id").notNull(),
+    trackId: uuid("track_id")
+      .notNull()
+      .references(() => tracks.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    contributorsJson: jsonb("contributors_json")
+      .$type<readonly Readonly<{ name: string; role: string }>[]>()
+      .notNull(),
+    reason: text("reason").notNull(),
+    createdByUserId: text("created_by_user_id").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("catalog_contributor_overrides_workspace_idempotency_unique").on(table.workspaceId, table.idempotencyKey),
+    index("catalog_contributor_overrides_latest_idx").on(table.workspaceId, table.trackId, table.createdAt, table.id)
   ]
 );
 

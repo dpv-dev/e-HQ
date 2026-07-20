@@ -1338,6 +1338,7 @@ test("Distribution payee and catalog writes read back real names, statuses, and 
     id: null,
     title: "Island Sessions",
     artistName: "Various Artists",
+    labelName: "Island Label",
     upc: "609999999998",
     status: "draft",
     releaseDate: "2026-07-01"
@@ -5647,7 +5648,14 @@ test("Distribution mapping route delegates filters and opaque cursors to the liv
           }],
           nextCursor: "next-opaque"
         };
-      }
+      },
+      listCatalogTracks: async () => ({
+        items: [],
+        nextCursor: null,
+        facets: { labels: [], roles: [], releases: [] },
+        summary: { trackCount: 0, needsReviewCount: 0, artistMismatchCount: 0, noContributorCount: 0 }
+      }),
+      getCatalogTrack: async () => null
     },
     health: null,
     nowIso: (): string => "2026-07-20T00:00:00.000Z",
@@ -5677,6 +5685,109 @@ test("Distribution mapping route delegates filters and opaque cursors to the liv
   );
   assert.equal(invalidStatus.status, 400);
   assert.equal((await invalidStatus.json()).error.code, "mapping_status_invalid");
+});
+
+test("Distribution Catalog workbench delegates parity filters to the live repository", async () => {
+  let receivedQuery: Readonly<Record<string, unknown>> | null = null;
+  const catalogTrack = {
+    id: "20000000-0000-0000-0000-000000000001",
+    title: "Spica",
+    versionTitle: null,
+    artistImport: "Cømpass",
+    catalogArtist: "Cømpass",
+    isrc: "ITH641491109",
+    upc: "UPC-SPICA",
+    releaseId: "10000000-0000-0000-0000-000000000001",
+    releaseTitle: "Spica EP",
+    releaseDate: "2024-06-01",
+    label: "mutewax",
+    status: "released" as const,
+    contributors: [{ name: "Cømpass", role: "main_artist" }],
+    contributorSource: "imported" as const,
+    reviewReason: "needs_review" as const
+  };
+  const app = createApiService({
+    fixtures: createFixtureStore(),
+    persistence: createMemoryPersistenceRuntime({ WRITES_ENABLED: "true" }),
+    distributionReads: {
+      listMappingRows: async () => ({ items: [], nextCursor: null }),
+      listCatalogTracks: async (query) => {
+        receivedQuery = query;
+        return {
+          items: [catalogTrack],
+          nextCursor: "catalog-next-opaque",
+          facets: {
+            labels: [{ value: "mutewax", label: "mutewax", count: 1 }],
+            roles: [{ value: "main_artist", label: "Main artist", count: 1 }],
+            releases: [{ id: catalogTrack.releaseId, title: "Spica EP", artistName: "Cømpass" }]
+          },
+          summary: { trackCount: 1, needsReviewCount: 1, artistMismatchCount: 0, noContributorCount: 0 }
+        };
+      },
+      getCatalogTrack: async (_workspaceId, trackId) => trackId === catalogTrack.id ? catalogTrack : null
+    },
+    health: null,
+    nowIso: (): string => "2026-07-20T00:00:00.000Z",
+    auth: createTestAuthVerifier()
+  });
+
+  const response = await app.request(
+    "/erh/v1/catalog/workbench?workspaceId=eeee-mu&search=Spica&artistSource=catalog_contributors&isrc=ITH&role=main_artist&review=needs_review&label=mutewax&releaseFrom=2024-01-01&releaseTo=2024-12-31&status=released&cursor=current-opaque&limit=25",
+    { headers: authHeaders() }
+  );
+  assert.equal(response.status, 200);
+  const page = (await response.json()) as { readonly items: readonly { readonly id: string }[]; readonly nextCursor: string | null };
+  assert.deepEqual(page.items.map((row) => row.id), [catalogTrack.id]);
+  assert.equal(page.nextCursor, "catalog-next-opaque");
+  assert.deepEqual(receivedQuery, {
+    workspaceId: "eeee-mu",
+    search: "Spica",
+    artistSource: "catalog_contributors",
+    isrc: "ITH",
+    role: "main_artist",
+    review: "needs_review",
+    label: "mutewax",
+    releaseFrom: "2024-01-01",
+    releaseTo: "2024-12-31",
+    status: "released",
+    cursor: "current-opaque",
+    limit: 25
+  });
+
+  const invalidDate = await app.request(
+    "/erh/v1/catalog/workbench?workspaceId=eeee-mu&artistSource=catalog_import&releaseFrom=20-07-2026",
+    { headers: authHeaders() }
+  );
+  assert.equal(invalidDate.status, 400);
+  assert.equal(((await invalidDate.json()) as { readonly error: { readonly code: string } }).error.code, "catalog_date_invalid");
+
+  const write = await app.request(`/erh/v1/catalog/tracks/${catalogTrack.id}/contributor-overrides`, {
+    method: "POST",
+    headers: {
+      ...authHeaders(),
+      "Content-Type": "application/json",
+      "Idempotency-Key": "catalog-contributor-override-1"
+    },
+    body: JSON.stringify({
+      workspaceId: "eeee-mu",
+      contributors: [{ name: "Cømpass", role: "main_artist" }],
+      reason: "Confirmed against the catalog source"
+    })
+  });
+  assert.equal(write.status, 200);
+  const receipt = (await write.json()) as { readonly id: string; readonly auditEventId: string | null };
+  assert.equal(receipt.id, catalogTrack.id);
+  assert.ok(receipt.auditEventId !== null);
+
+  const audit = await app.request("/erh/v1/audit-log?workspaceId=eeee-mu&limit=100", { headers: authHeaders() });
+  const auditPage = (await audit.json()) as {
+    readonly items: readonly { readonly id: string; readonly action: string; readonly idempotencyKey: string | null }[];
+  };
+  assert.ok(auditPage.items.some((entry) =>
+    entry.id === receipt.auditEventId &&
+    entry.action === "distribution_catalog_contributors_override" &&
+    entry.idempotencyKey === "catalog-contributor-override-1"
+  ));
 });
 
 async function createPgliteWriteTables(pglite: PGlite): Promise<void> {

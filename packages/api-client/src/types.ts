@@ -1445,6 +1445,80 @@ export interface DistributionMappingApplyRulesRequest {
   readonly rowIds: readonly EntityId[];
 }
 
+export type DistributionCatalogArtistSource = "catalog_import" | "catalog_contributors" | "import_only";
+export type DistributionCatalogReviewFilter = "needs_review" | "artist_mismatch" | "no_contributors";
+export type DistributionCatalogReviewReason = DistributionCatalogReviewFilter | null;
+
+export interface DistributionCatalogWorkbenchQuery extends PageQuery {
+  readonly workspaceId: EntityId;
+  readonly search: string | null;
+  readonly artistSource: DistributionCatalogArtistSource;
+  readonly isrc: string | null;
+  readonly role: string | null;
+  readonly review: DistributionCatalogReviewFilter | null;
+  readonly label: string | null;
+  readonly releaseFrom: IsoDateString | null;
+  readonly releaseTo: IsoDateString | null;
+  readonly status: "draft" | "released" | "archived" | null;
+}
+
+export interface DistributionCatalogContributor {
+  readonly name: string;
+  readonly role: string;
+}
+
+export interface DistributionCatalogTrackRow {
+  readonly id: EntityId;
+  readonly title: string;
+  readonly versionTitle: string | null;
+  readonly artistImport: string | null;
+  readonly catalogArtist: string;
+  readonly isrc: string | null;
+  readonly upc: string | null;
+  readonly releaseId: EntityId | null;
+  readonly releaseTitle: string | null;
+  readonly releaseDate: IsoDateString | null;
+  readonly label: string | null;
+  readonly status: "draft" | "released" | "archived";
+  readonly contributors: readonly DistributionCatalogContributor[];
+  readonly contributorSource: "imported" | "override";
+  readonly reviewReason: DistributionCatalogReviewReason;
+}
+
+export interface DistributionCatalogFacetOption {
+  readonly value: string;
+  readonly label: string;
+  readonly count: number;
+}
+
+export interface DistributionCatalogReleaseOption {
+  readonly id: EntityId;
+  readonly title: string;
+  readonly artistName: string;
+}
+
+export interface DistributionCatalogSummary {
+  readonly trackCount: number;
+  readonly needsReviewCount: number;
+  readonly artistMismatchCount: number;
+  readonly noContributorCount: number;
+}
+
+export interface DistributionCatalogWorkbenchResponse extends PageResult<DistributionCatalogTrackRow> {
+  readonly facets: {
+    readonly labels: readonly DistributionCatalogFacetOption[];
+    readonly roles: readonly DistributionCatalogFacetOption[];
+    readonly releases: readonly DistributionCatalogReleaseOption[];
+  };
+  readonly summary: DistributionCatalogSummary;
+}
+
+export interface DistributionCatalogContributorOverrideRequest {
+  readonly workspaceId: EntityId;
+  readonly contributors: readonly DistributionCatalogContributor[];
+  readonly reason: string;
+}
+
 export interface DistributionContractsQuery extends PageQuery {
   readonly workspaceId: EntityId;
   readonly payeeId: EntityId | null;
@@ -1592,6 +1666,7 @@ export interface DistributionReleaseUpsertRequest {
   readonly id: EntityId | null;
   readonly title: string;
   readonly artistName: string;
+  readonly labelName: string | null;
   readonly upc: string | null;
   readonly status: "draft" | "released" | "archived";
   readonly releaseDate: IsoDateString | null;

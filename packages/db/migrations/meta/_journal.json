@@ -148,6 +148,13 @@
       "when": 1784563200000,
       "tag": "0020_distribution_mapping_workbench",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1784566800000,
+      "tag": "0021_distribution_catalog_workbench",
+      "breakpoints": true
     }
   ]
 }

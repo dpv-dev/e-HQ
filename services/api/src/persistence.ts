@@ -373,6 +373,7 @@ const SENSITIVE_ACTIONS = new Set<string>([
   "office_settings_update",
   "command_center_user_permission_update",
   "distribution_alias_upsert",
+  "distribution_catalog_contributors_override",
   "distribution_allocations_preview",
   "distribution_allocations_run",
   "distribution_allocations_unpost",

@@ -14,6 +14,11 @@
     type CurrencyCode,
     type DistributionAlias,
     type DistributionAliasTargetType,
+    type DistributionCatalogArtistSource,
+    type DistributionCatalogContributor,
+    type DistributionCatalogReviewFilter,
+    type DistributionCatalogTrackRow,
+    type DistributionCatalogWorkbenchResponse,
     type DistributionContract,
     type DistributionContractExpense,
     type DistributionContractExpenseCategory,
@@ -143,6 +148,7 @@
   type CatalogPanelMode = "release" | "track";
   type CatalogEntryStatus = "draft" | "released" | "archived";
   type CatalogStatusFilter = "all" | CatalogEntryStatus;
+  type CatalogReviewFilter = "all" | DistributionCatalogReviewFilter;
   type ContractStatus = "draft" | "active" | "paused" | "ended";
 
   interface DistributionKpi {
@@ -265,6 +271,26 @@
     { label: "All statuses", value: allValue },
     ...catalogStatusOptions
   ];
+  const catalogArtistSourceOptions: readonly SelectOption[] = [
+    { label: "Catalog + import", value: "catalog_import" },
+    { label: "Catalog contributors", value: "catalog_contributors" },
+    { label: "Import artist only", value: "import_only" }
+  ];
+  const catalogReviewOptions: readonly SelectOption[] = [
+    { label: "All", value: allValue },
+    { label: "Needs review", value: "needs_review" },
+    { label: "Artist mismatch", value: "artist_mismatch" },
+    { label: "No contributors", value: "no_contributors" }
+  ];
+  const catalogContributorRoleOptions: readonly SelectOption[] = [
+    { label: "Main artist", value: "main_artist" },
+    { label: "Featured artist", value: "featured_artist" },
+    { label: "Remixer", value: "remixer" },
+    { label: "Producer", value: "producer" },
+    { label: "Composer", value: "composer" },
+    { label: "Lyricist", value: "lyricist" },
+    { label: "Other", value: "other" }
+  ];
   const contractStatusOptions: readonly SelectOption[] = [
     { label: "Draft", value: "draft" },
     { label: "Active", value: "active" },
@@ -323,12 +349,23 @@
     { label: "Selection", align: "left", sortable: true }
   ];
   const catalogColumns: readonly TableColumn[] = [
-    { label: "Title", align: "left", sortable: true },
-    { label: "Artist", align: "left", sortable: true },
-    { label: "ID", align: "left", sortable: true },
+    { label: "Review", align: "left", sortable: true },
+    { label: "Artist import", align: "left", sortable: true },
+    { label: "Catalog artist", align: "left", sortable: true },
+    { label: "Track", align: "left", sortable: true },
+    { label: "ISRC", align: "left", sortable: true },
+    { label: "UPC / EAN", align: "left", sortable: true },
+    { label: "Release", align: "left", sortable: true },
+    { label: "Label", align: "left", sortable: true },
+    { label: "Contributors", align: "left", sortable: true },
     { label: "Status", align: "left", sortable: true },
-    { label: "Contributors", align: "right", sortable: true },
-    { label: "Split", align: "left", sortable: true }
+  ];
+  const catalogReviewColumns: readonly TableColumn[] = [
+    { label: "Reason", align: "left", sortable: true },
+    { label: "Artist import", align: "left", sortable: true },
+    { label: "Catalog artist", align: "left", sortable: true },
+    { label: "Track", align: "left", sortable: true },
+    { label: "ISRC", align: "left", sortable: true }
   ];
   const contractColumns: readonly TableColumn[] = [
     { label: "Contract", align: "left", sortable: true },
@@ -503,6 +540,9 @@
   let payeesState = $state<ApiRequestState<PageResult<PayeeSummary>>>(createIdleState<PageResult<PayeeSummary>>());
   let releasesState = $state<ApiRequestState<PageResult<ReleaseSummary>>>(createIdleState<PageResult<ReleaseSummary>>());
   let tracksState = $state<ApiRequestState<PageResult<TrackSummary>>>(createIdleState<PageResult<TrackSummary>>());
+  let catalogState = $state<ApiRequestState<DistributionCatalogWorkbenchResponse>>(
+    createIdleState<DistributionCatalogWorkbenchResponse>()
+  );
   let contractsState = $state<ApiRequestState<PageResult<DistributionContract>>>(
     createIdleState<PageResult<DistributionContract>>()
   );
@@ -544,6 +584,14 @@
   let mappingBatchFilter = $state<string>(allValue);
   let mappingSearch = $state("");
   let catalogStatusFilter = $state<CatalogStatusFilter>(allValue);
+  let catalogSearch = $state("");
+  let catalogArtistSource = $state<DistributionCatalogArtistSource>("catalog_import");
+  let catalogIsrc = $state("");
+  let catalogRoleFilter = $state(allValue);
+  let catalogReviewFilter = $state<CatalogReviewFilter>(allValue);
+  let catalogLabelFilter = $state(allValue);
+  let catalogReleaseFrom = $state("");
+  let catalogReleaseTo = $state("");
   let suspenseStatusFilter = $state<SuspenseStatusFilter>("open");
   let paymentStatusFilter = $state<PaymentStatusFilter>(allValue);
   let statementPayeeFilter = $state<string>(allValue);
@@ -601,6 +649,7 @@
   let catalogPanelMode = $state<CatalogPanelMode | null>(null);
   let releaseTitleInput = $state("");
   let releaseArtistInput = $state("");
+  let releaseLabelInput = $state("");
   let releaseUpcInput = $state("");
   let releaseStatusInput = $state<CatalogEntryStatus>("draft");
   let releaseDateInput = $state("");
@@ -609,6 +658,11 @@
   let trackIsrcInput = $state("");
   let trackReleaseIdInput = $state("");
   let trackStatusInput = $state<CatalogEntryStatus>("draft");
+  let selectedCatalogTrackId = $state<string | null>(null);
+  let catalogContributorDrafts = $state<readonly DistributionCatalogContributor[]>([]);
+  let catalogContributorNameInput = $state("");
+  let catalogContributorRoleInput = $state("main_artist");
+  let catalogContributorReasonInput = $state("");
   let contractPanelOpen = $state(false);
   let payeePanelOpen = $state(false);
   let payeeNameInput = $state("");
@@ -663,6 +717,8 @@
   const payees = $derived(readPageItems(payeesState));
   const releases = $derived(readPageItems(releasesState));
   const tracks = $derived(readPageItems(tracksState));
+  const catalogWorkbench = $derived(catalogState.status === "success" ? catalogState.data : null);
+  const catalogTracks = $derived(catalogWorkbench?.items ?? []);
   const contracts = $derived(readPageItems(contractsState));
   const expenses = $derived(readPageItems(expensesState));
   const allocationRuns = $derived(readPageItems(allocationsState));
@@ -682,7 +738,8 @@
   const dashboardMappingBlockerCount = $derived(dashboardReadinessCount(dashboardState, "mapping"));
   const importRows = $derived(createImportRows(importBatches));
   const mappingTableRows = $derived(createMappingRows(filteredMappingRows, selectedMappingRowIds));
-  const catalogRows = $derived(createCatalogRows(releases, tracks));
+  const catalogRows = $derived(createCatalogRows(catalogTracks));
+  const catalogReviewRows = $derived(createCatalogReviewRows(catalogTracks));
   const contractRows = $derived(createContractRows(contracts, payees));
   const expenseRows = $derived(createExpenseRows(expenses));
   const allocationRows = $derived(createAllocationRows(allocationRuns));
@@ -731,7 +788,9 @@
   const mappingPagination = $derived<TablePagination | null>(
     createTablePagination(mappingState, tablePaginationLoading === "mapping", tablePaginationError("mapping"), loadMoreMappingRows, loadAllMappingRows)
   );
-  const catalogPagination = $derived<TablePagination | null>(createCatalogPagination());
+  const catalogPagination = $derived<TablePagination | null>(
+    createTablePagination(catalogState, tablePaginationLoading === "catalog", tablePaginationError("catalog"), loadMoreCatalog, loadAllCatalog)
+  );
   const contractsPagination = $derived<TablePagination | null>(
     createTablePagination(contractsState, tablePaginationLoading === "contracts", tablePaginationError("contracts"), loadMoreContracts, loadAllContracts)
   );
@@ -845,10 +904,31 @@
     { label: "Shared / all payees", value: "" },
     ...payees.map((payee: PayeeSummary): SelectOption => ({ label: `${payee.displayName} · ${payee.defaultCurrency}`, value: payee.id }))
   ], 1));
+  const catalogLabelOptions = $derived<readonly SelectOption[]>([
+    { label: "All labels", value: allValue },
+    ...(catalogWorkbench?.facets.labels ?? []).map((option): SelectOption => ({
+      label: `${option.label} · ${option.count}`,
+      value: option.value
+    }))
+  ]);
+  const catalogRoleOptions = $derived<readonly SelectOption[]>([
+    { label: "All roles", value: allValue },
+    ...(catalogWorkbench?.facets.roles ?? []).map((option): SelectOption => ({
+      label: `${formatCatalogRole(option.label)} · ${option.count}`,
+      value: option.value
+    }))
+  ]);
   const trackReleaseSelectOptions = $derived<readonly SelectOption[]>(sortOptionsAlphabetically([
     { label: "No release", value: "" },
-    ...releases.map((release: ReleaseSummary): SelectOption => ({ label: `${release.title} · ${release.artistName}`, value: release.id }))
+    ...(catalogWorkbench?.facets.releases ?? []).map((release): SelectOption => ({
+      label: `${release.title} · ${release.artistName}`,
+      value: release.id
+    }))
   ], 1));
+  const selectedCatalogTrack = $derived(
+    catalogTracks.find((track: DistributionCatalogTrackRow): boolean => track.id === selectedCatalogTrackId) ?? null
+  );
+  const catalogKpis = $derived(createCatalogKpis(catalogWorkbench));
   const suspenseTrackSelectOptions = $derived<readonly SelectOption[]>(sortOptionsAlphabetically([
     { label: "Select a track", value: "" },
     ...(suspenseTrackOptions ?? []).map((track: TrackSummary): SelectOption => ({ label: `${track.title} · ${track.artistName}`, value: track.id }))
@@ -958,6 +1038,12 @@
     }
   });
 
+  $effect((): void => {
+    if (activePageId === "catalog" && catalogState.status === "idle") {
+      void loadCatalog();
+    }
+  });
+
   async function loadInitialData(): Promise<void> {
     try {
       const screen = await client.distribution.getScreen({
@@ -973,7 +1059,6 @@
         revenueGroupBy
       });
       applyScreenBundle(screen);
-      await loadCatalogPage("all");
     } catch {
       await Promise.all([
         loadWriteGate(),
@@ -981,7 +1066,7 @@
         loadImportBatches(),
         loadMappingRows(),
         loadPayees(),
-        loadCatalog(),
+        activePageId === "catalog" ? loadCatalog() : Promise.resolve(),
         loadContracts(),
         loadAllocationRuns(),
         loadSuspense(),
@@ -1059,24 +1144,6 @@
     });
   }
 
-  function createCatalogPagination(): TablePagination | null {
-    if (releasesState.status !== "success" || tracksState.status !== "success") {
-      return null;
-    }
-
-    const loadedCount = releasesState.data.items.length + tracksState.data.items.length;
-    const hasMore = releasesState.data.nextCursor !== null || tracksState.data.nextCursor !== null;
-
-    return {
-      loadedCount,
-      hasMore,
-      loading: tablePaginationLoading === "catalog",
-      error: tablePaginationError("catalog"),
-      onLoadMore: loadMoreCatalog,
-      onLoadAll: loadAllCatalog
-    };
-  }
-
   async function loadMoreImportBatches(): Promise<void> {
     await loadImportBatchesPage("one");
   }
@@ -1143,9 +1210,8 @@
   async function loadCatalogPage(mode: PageLoadMode): Promise<void> {
     if (
       tablePaginationLoading === "catalog" ||
-      releasesState.status !== "success" ||
-      tracksState.status !== "success" ||
-      (releasesState.data.nextCursor === null && tracksState.data.nextCursor === null)
+      catalogState.status !== "success" ||
+      catalogState.data.nextCursor === null
     ) {
       return;
     }
@@ -1154,43 +1220,17 @@
     setTablePaginationError("catalog", null);
 
     try {
-      let releaseCursor: string | null = releasesState.data.nextCursor;
-      let trackCursor: string | null = tracksState.data.nextCursor;
-      let loadedReleases: PageResult<ReleaseSummary> = releasesState.data;
-      let loadedTracks: PageResult<TrackSummary> = tracksState.data;
+      let loaded = catalogState.data;
+      let cursor = loaded.nextCursor;
 
-      while (releaseCursor !== null || trackCursor !== null) {
-        const [releasePage, trackPage] = await Promise.all([
-          releaseCursor === null
-            ? Promise.resolve(null)
-            : client.distribution.listReleases({
-                workspaceId: distributionWorkspaceId,
-                status: toNullableCatalogStatus(catalogStatusFilter),
-                cursor: releaseCursor,
-                limit: TABLE_PAGE_SIZE
-              }),
-          trackCursor === null
-            ? Promise.resolve(null)
-            : client.distribution.listTracks({
-                workspaceId: distributionWorkspaceId,
-                releaseId: null,
-                status: toNullableCatalogStatus(catalogStatusFilter),
-                cursor: trackCursor,
-                limit: TABLE_PAGE_SIZE
-              })
-        ]);
-
-        if (releasePage !== null) {
-          loadedReleases = appendPageResult(loadedReleases, releasePage);
-          releasesState = createSuccessState<PageResult<ReleaseSummary>>(loadedReleases);
-          releaseCursor = releasePage.nextCursor;
-        }
-
-        if (trackPage !== null) {
-          loadedTracks = appendPageResult(loadedTracks, trackPage);
-          tracksState = createSuccessState<PageResult<TrackSummary>>(loadedTracks);
-          trackCursor = trackPage.nextCursor;
-        }
+      while (cursor !== null) {
+        const nextPage = await client.distribution.getCatalogWorkbench(catalogQuery(cursor));
+        loaded = {
+          ...nextPage,
+          items: [...loaded.items, ...nextPage.items]
+        };
+        catalogState = createSuccessState<DistributionCatalogWorkbenchResponse>(loaded);
+        cursor = nextPage.nextCursor;
 
         if (mode === "one") {
           break;
@@ -1576,22 +1616,33 @@
   }
 
   async function loadCatalog(): Promise<void> {
-    releasesState = beginReload<PageResult<ReleaseSummary>>(releasesState);
-    tracksState = beginReload<PageResult<TrackSummary>>(tracksState);
+    catalogState = beginReload<DistributionCatalogWorkbenchResponse>(catalogState);
 
     try {
-      const [releasePage, trackPage] = await Promise.all([
-        client.distribution.listReleases({ workspaceId: distributionWorkspaceId, status: toNullableCatalogStatus(catalogStatusFilter), cursor: null, limit: TABLE_PAGE_SIZE }),
-        client.distribution.listTracks({ workspaceId: distributionWorkspaceId, releaseId: null, status: toNullableCatalogStatus(catalogStatusFilter), cursor: null, limit: TABLE_PAGE_SIZE })
-      ]);
-      releasesState = createSuccessState<PageResult<ReleaseSummary>>(releasePage);
-      tracksState = createSuccessState<PageResult<TrackSummary>>(trackPage);
+      catalogState = createSuccessState<DistributionCatalogWorkbenchResponse>(
+        await client.distribution.getCatalogWorkbench(catalogQuery(null))
+      );
       setTablePaginationError("catalog", null);
-      await loadCatalogPage("all");
     } catch (error: unknown) {
-      releasesState = createErrorState<PageResult<ReleaseSummary>>(error);
-      tracksState = createErrorState<PageResult<TrackSummary>>(error);
+      catalogState = createErrorState<DistributionCatalogWorkbenchResponse>(error);
     }
+  }
+
+  function catalogQuery(cursor: string | null) {
+    return {
+      workspaceId: distributionWorkspaceId,
+      search: catalogSearch.trim() === "" ? null : catalogSearch.trim(),
+      artistSource: catalogArtistSource,
+      isrc: catalogIsrc.trim() === "" ? null : catalogIsrc.trim(),
+      role: catalogRoleFilter === allValue ? null : catalogRoleFilter,
+      review: catalogReviewFilter === allValue ? null : catalogReviewFilter,
+      label: catalogLabelFilter === allValue ? null : catalogLabelFilter,
+      releaseFrom: catalogReleaseFrom === "" ? null : catalogReleaseFrom,
+      releaseTo: catalogReleaseTo === "" ? null : catalogReleaseTo,
+      status: toNullableCatalogStatus(catalogStatusFilter),
+      cursor,
+      limit: TABLE_PAGE_SIZE
+    } as const;
   }
 
   async function loadContracts(): Promise<void> {
@@ -2469,6 +2520,28 @@
     catalogStatusFilter = value as CatalogStatusFilter;
   }
 
+  function updateCatalogSearch(value: string): void { catalogSearch = value; }
+  function updateCatalogArtistSource(value: string): void { catalogArtistSource = value as DistributionCatalogArtistSource; }
+  function updateCatalogIsrc(value: string): void { catalogIsrc = value; }
+  function updateCatalogRole(value: string): void { catalogRoleFilter = value; }
+  function updateCatalogReview(value: string): void { catalogReviewFilter = value as CatalogReviewFilter; }
+  function updateCatalogLabel(value: string): void { catalogLabelFilter = value; }
+  function updateCatalogReleaseFrom(event: Event): void { catalogReleaseFrom = readInputValue(event); }
+  function updateCatalogReleaseTo(event: Event): void { catalogReleaseTo = readInputValue(event); }
+
+  async function clearCatalogFilters(): Promise<void> {
+    catalogSearch = "";
+    catalogArtistSource = "catalog_import";
+    catalogIsrc = "";
+    catalogRoleFilter = allValue;
+    catalogReviewFilter = allValue;
+    catalogLabelFilter = allValue;
+    catalogReleaseFrom = "";
+    catalogReleaseTo = "";
+    catalogStatusFilter = allValue;
+    await loadCatalog();
+  }
+
   function updateSuspenseStatus(value: string): void {
     suspenseStatusFilter = value as SuspenseStatusFilter;
   }
@@ -2555,6 +2628,10 @@
 
   function updateReleaseArtist(value: string): void {
     releaseArtistInput = value;
+  }
+
+  function updateReleaseLabel(value: string): void {
+    releaseLabelInput = value;
   }
 
   function updateReleaseUpc(value: string): void {
@@ -2889,6 +2966,7 @@
     catalogPanelMode = mode;
     releaseTitleInput = "";
     releaseArtistInput = "";
+    releaseLabelInput = "";
     releaseUpcInput = "";
     releaseStatusInput = "draft";
     releaseDateInput = "";
@@ -2920,6 +2998,7 @@
           id: null,
           title,
           artistName,
+          labelName: releaseLabelInput.trim() === "" ? null : releaseLabelInput.trim(),
           upc: releaseUpcInput.trim() === "" ? null : releaseUpcInput.trim(),
           status: releaseStatusInput,
           releaseDate: releaseDateInput === "" ? null : releaseDateInput
@@ -4122,13 +4201,68 @@
   }
 
   function reviewCatalogRow(rowId: string): void {
-    const track = tracks.find((candidate: TrackSummary): boolean => candidate.id === rowId);
+    const track = catalogTracks.find((candidate: DistributionCatalogTrackRow): boolean => candidate.id === rowId);
 
-    if (track === undefined || track.splitStatus !== "needs_review") {
+    if (track === undefined) {
       return;
     }
 
-    selectPage("mapping");
+    selectedCatalogTrackId = track.id;
+    catalogContributorDrafts = [...track.contributors];
+    catalogContributorNameInput = "";
+    catalogContributorRoleInput = "main_artist";
+    catalogContributorReasonInput = "";
+  }
+
+  function closeCatalogContributorPanel(): void {
+    selectedCatalogTrackId = null;
+    catalogContributorDrafts = [];
+    catalogContributorNameInput = "";
+    catalogContributorReasonInput = "";
+  }
+
+  function updateCatalogContributorName(value: string): void { catalogContributorNameInput = value; }
+  function updateCatalogContributorRole(value: string): void { catalogContributorRoleInput = value; }
+  function updateCatalogContributorReason(value: string): void { catalogContributorReasonInput = value; }
+
+  function addCatalogContributor(): void {
+    const name = catalogContributorNameInput.trim();
+    if (name === "" || catalogContributorDrafts.some((item) => item.name.toLocaleLowerCase() === name.toLocaleLowerCase() && item.role === catalogContributorRoleInput)) {
+      return;
+    }
+
+    catalogContributorDrafts = [...catalogContributorDrafts, { name, role: catalogContributorRoleInput }];
+    catalogContributorNameInput = "";
+  }
+
+  function removeCatalogContributor(index: number): void {
+    catalogContributorDrafts = catalogContributorDrafts.filter((_, candidateIndex): boolean => candidateIndex !== index);
+  }
+
+  async function saveCatalogContributors(): Promise<void> {
+    const track = selectedCatalogTrack;
+    const reason = catalogContributorReasonInput.trim();
+    if (!writesEnabled || track === null || catalogContributorDrafts.length === 0 || reason === "") {
+      return;
+    }
+
+    clearRunReceipt();
+    try {
+      mutationReceipt = await client.distribution.saveCatalogContributors(
+        track.id,
+        {
+          workspaceId: distributionWorkspaceId,
+          contributors: catalogContributorDrafts,
+          reason
+        },
+        { idempotencyKey: createIdempotencyKey("catalog-contributors") }
+      );
+      mutationReceiptPageId = activePageId;
+      closeCatalogContributorPanel();
+      await Promise.all([loadCatalog(), loadAuditLog()]);
+    } catch (error: unknown) {
+      reportActionError(error);
+    }
   }
 
   function createImportRows(items: readonly DistributionImportBatch[]): readonly TableRow[] {
@@ -4168,31 +4302,64 @@
     }));
   }
 
-  function createCatalogRows(releaseItems: readonly ReleaseSummary[], trackItems: readonly TrackSummary[]): readonly TableRow[] {
-    const releaseRows = releaseItems.map((release: ReleaseSummary): TableRow => ({
-      id: release.id,
-      cells: [
-        { kind: "text", value: release.title, strong: true },
-        { kind: "text", value: release.artistName, strong: false },
-        { kind: "text", value: release.upc ?? "no UPC", strong: false },
-        { kind: "badge", value: release.status, tone: catalogTone(release.status) },
-        { kind: "text", value: String(release.trackCount), strong: false },
-        { kind: "badge", value: "release", tone: "muted" }
-      ]
-    }));
-    const trackRows = trackItems.map((track: TrackSummary): TableRow => ({
+  function createCatalogRows(items: readonly DistributionCatalogTrackRow[]): readonly TableRow[] {
+    return items.map((track: DistributionCatalogTrackRow): TableRow => ({
       id: track.id,
       cells: [
-        { kind: "text", value: track.title, strong: true },
-        { kind: "text", value: track.artistName, strong: false },
-        { kind: "text", value: track.isrc ?? "no ISRC", strong: false },
-        { kind: "badge", value: track.status, tone: catalogTone(track.status) },
-        { kind: "text", value: String(track.contributorCount), strong: false },
-        { kind: "badge", value: track.splitStatus === "balanced" ? "balanced" : track.splitStatus, tone: track.splitStatus === "balanced" ? "success" : "warning" }
+        { kind: "badge", value: catalogReviewLabel(track.reviewReason), tone: track.reviewReason === null ? "success" : "warning" },
+        { kind: "text", value: track.artistImport ?? "—", strong: false },
+        { kind: "text", value: track.catalogArtist, strong: false },
+        { kind: "text", value: track.versionTitle === null ? track.title : `${track.title} · ${track.versionTitle}`, strong: true },
+        { kind: "text", value: track.isrc ?? "—", strong: false },
+        { kind: "text", value: track.upc ?? "—", strong: false },
+        { kind: "text", value: track.releaseTitle ?? "—", strong: false },
+        { kind: "text", value: track.label ?? "—", strong: false },
+        { kind: "text", value: formatCatalogContributors(track.contributors, track.contributorSource), strong: false },
+        { kind: "badge", value: track.status, tone: catalogTone(track.status) }
       ]
     }));
+  }
 
-    return [...releaseRows, ...trackRows];
+  function createCatalogReviewRows(items: readonly DistributionCatalogTrackRow[]): readonly TableRow[] {
+    return items
+      .filter((track): boolean => track.reviewReason !== null)
+      .slice(0, 12)
+      .map((track): TableRow => ({
+        id: track.id,
+        cells: [
+          { kind: "badge", value: catalogReviewLabel(track.reviewReason), tone: "warning" },
+          { kind: "text", value: track.artistImport ?? "—", strong: false },
+          { kind: "text", value: track.catalogArtist, strong: false },
+          { kind: "text", value: track.title, strong: true },
+          { kind: "text", value: track.isrc ?? "—", strong: false }
+        ]
+      }));
+  }
+
+  function createCatalogKpis(workbench: DistributionCatalogWorkbenchResponse | null): readonly DistributionKpi[] {
+    const summary = workbench?.summary;
+    return [
+      { label: "Tracks", value: String(summary?.trackCount ?? 0), detail: "workspace catalog", tone: "info", accent: true },
+      { label: "Needs review", value: String(summary?.needsReviewCount ?? 0), detail: "unconfirmed contributors", tone: summary?.needsReviewCount === 0 ? "success" : "warning", accent: false },
+      { label: "Artist mismatch", value: String(summary?.artistMismatchCount ?? 0), detail: "import vs catalog", tone: summary?.artistMismatchCount === 0 ? "success" : "warning", accent: false },
+      { label: "No contributors", value: String(summary?.noContributorCount ?? 0), detail: "missing credits", tone: summary?.noContributorCount === 0 ? "success" : "warning", accent: false }
+    ];
+  }
+
+  function catalogReviewLabel(reason: DistributionCatalogReviewFilter | null): string {
+    if (reason === null) return "confirmed";
+    if (reason === "artist_mismatch") return "artist mismatch";
+    if (reason === "no_contributors") return "no contributors";
+    return "needs review";
+  }
+
+  function formatCatalogContributors(contributors: readonly DistributionCatalogContributor[], source: "imported" | "override"): string {
+    if (contributors.length === 0) return "—";
+    return `${contributors.map((item) => `${item.name} (${formatCatalogRole(item.role)})`).join(", ")} · ${source}`;
+  }
+
+  function formatCatalogRole(role: string): string {
+    return role.replaceAll("_", " ");
   }
 
   function createContractRows(items: readonly DistributionContract[], payeeItems: readonly PayeeSummary[]): readonly TableRow[] {
@@ -5087,18 +5254,39 @@
         <Table title="Rows to review" columns={mappingColumns} rows={mappingTableRows} state={isLoadingStatus(mappingState.status) ? "loading" : mappingState.status === "error" ? "error" : filteredMappingRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={mappingRowActions} pagination={mappingPagination} />
       {:else if activePageId === "catalog"}
         <section class="filter-strip ehq-edge-surface" aria-label="Catalog filters">
+          <Input id="distribution-catalog-search" label="Search" value={catalogSearch} placeholder="Track, artist, ISRC, UPC or release" type="search" state="default" message="" oninput={updateCatalogSearch} />
+          <Select id="distribution-catalog-artist-source" label="Artist source" value={catalogArtistSource} options={catalogArtistSourceOptions} state="default" message="" onchange={updateCatalogArtistSource} />
+          <Input id="distribution-catalog-isrc" label="ISRC" value={catalogIsrc} placeholder="Exact or partial ISRC" type="search" state="default" message="" oninput={updateCatalogIsrc} />
+          <Select id="distribution-catalog-role" label="Role" value={catalogRoleFilter} options={catalogRoleOptions} state="default" message="" onchange={updateCatalogRole} />
+          <Select id="distribution-catalog-review" label="Review" value={catalogReviewFilter} options={catalogReviewOptions} state="default" message="" onchange={updateCatalogReview} />
+          <Select id="distribution-catalog-label" label="Label" value={catalogLabelFilter} options={catalogLabelOptions} state="default" message="" onchange={updateCatalogLabel} />
+          <label>
+            <span>Release from</span>
+            <input type="date" value={catalogReleaseFrom} onchange={updateCatalogReleaseFrom} />
+          </label>
+          <label>
+            <span>Release to</span>
+            <input type="date" value={catalogReleaseTo} onchange={updateCatalogReleaseTo} />
+          </label>
           <Select id="distribution-catalog-status" label="Status" value={catalogStatusFilter} options={catalogFilterOptions} state="default" message="" onchange={updateCatalogStatus} />
-          <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Apply catalog filters" onclick={loadCatalog} />
+          <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={isLoadingStatus(catalogState.status)} locked={false} focus={false} ariaLabel="Apply catalog filters" onclick={loadCatalog} />
+          <Button label="Clear" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Clear catalog filters" onclick={clearCatalogFilters} />
+        </section>
+        <section class="kpi-grid" aria-label="Catalog KPIs">
+          {#each catalogKpis as kpi (kpi.label)}
+            <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state={isLoadingStatus(catalogState.status) ? "loading" : "default"} accent={kpi.accent} />
+          {/each}
         </section>
         <section class="contracts-actions ehq-edge-surface">
           <Button label="New release" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="New release" onclick={() => openCatalogPanel("release")} />
           <Button label="New track" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="New track" onclick={() => openCatalogPanel("track")} />
-          <span>Releases and tracks remain source data; corrections become audited overrides.</span>
+          <span>Imported contributors remain source data; reviewed corrections are append-only audited overrides.</span>
         </section>
         {#if catalogPanelMode === "release"}
           <section class="form-panel ehq-edge-surface" aria-label="New release">
             <Input id="distribution-release-title" label="Title" value={releaseTitleInput} placeholder="" type="text" state="default" message="" oninput={updateReleaseTitle} />
             <Input id="distribution-release-artist" label="Artist" value={releaseArtistInput} placeholder="" type="text" state="default" message="" oninput={updateReleaseArtist} />
+            <Input id="distribution-release-label" label="Label (optional)" value={releaseLabelInput} placeholder="" type="text" state="default" message="" oninput={updateReleaseLabel} />
             <Input id="distribution-release-upc" label="UPC (optional)" value={releaseUpcInput} placeholder="" type="text" state="default" message="" oninput={updateReleaseUpc} />
             <Select id="distribution-release-status" label="Status" value={releaseStatusInput} options={catalogStatusOptions} state="default" message="" onchange={updateReleaseStatus} />
             <label>
@@ -5119,19 +5307,38 @@
             <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel track creation" onclick={closeCatalogPanel} />
           </section>
         {/if}
-        <section class="dashboard-grid">
-          <Table title="Canonical catalog + contributors" columns={catalogColumns} rows={catalogRows} state={tableStateFor(tracksState.status, catalogRows.length)} actionLabel="" rowActions={catalogRowActions} pagination={catalogPagination} />
-          <div class="command-card ehq-edge-surface">
-            <SectionTemplate
-              eyebrow="catalog"
-              title="Attention required"
-              detail="Imported artists and catalog contributors remain separate until an exact track match is validated."
-              state="ready"
-            >
-              <Button label="Fix contributor mapping" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Fix contributor mapping" onclick={() => selectPage("mapping")} />
-            </SectionTemplate>
-          </div>
-        </section>
+        {#if selectedCatalogTrack !== null}
+          <section class="catalog-contributor-panel ehq-edge-surface" aria-label="Contributor review">
+            <div class="catalog-contributor-heading">
+              <div>
+                <span class="ehq-type-label-mono">Contributor review</span>
+                <strong>{selectedCatalogTrack.title} · {selectedCatalogTrack.catalogArtist}</strong>
+              </div>
+              <span>{catalogReviewLabel(selectedCatalogTrack.reviewReason)} · current source: {selectedCatalogTrack.contributorSource}</span>
+            </div>
+            <div class="catalog-contributor-list">
+              {#each catalogContributorDrafts as contributor, index (`${contributor.name}-${contributor.role}-${index}`)}
+                <div class="catalog-contributor-row">
+                  <span>{contributor.name}</span>
+                  <span>{formatCatalogRole(contributor.role)}</span>
+                  <Button label="Remove" variant="secondary" size="small" type="button" disabled={catalogContributorDrafts.length === 1} loading={false} locked={false} focus={false} ariaLabel={`Remove ${contributor.name}`} onclick={() => removeCatalogContributor(index)} />
+                </div>
+              {/each}
+            </div>
+            <div class="form-panel">
+              <Input id="distribution-catalog-contributor-name" label="Contributor" value={catalogContributorNameInput} placeholder="Person or project name" type="text" state="default" message="" oninput={updateCatalogContributorName} />
+              <Select id="distribution-catalog-contributor-role" label="Role" value={catalogContributorRoleInput} options={catalogContributorRoleOptions} state="default" message="" onchange={updateCatalogContributorRole} />
+              <Button label="Add contributor" variant="secondary" size="medium" type="button" disabled={catalogContributorNameInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Add contributor" onclick={addCatalogContributor} />
+              <Input id="distribution-catalog-contributor-reason" label="Review reason" value={catalogContributorReasonInput} placeholder="Why this contributor snapshot is correct" type="text" state="default" message="Required for the audit trail." oninput={updateCatalogContributorReason} />
+              <Button label="Save reviewed contributors" variant="primary" size="medium" type="button" disabled={!writesEnabled || catalogContributorDrafts.length === 0 || catalogContributorReasonInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Save reviewed contributors" title={writeDisabledTitle()} onclick={saveCatalogContributors} />
+              <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel contributor review" onclick={closeCatalogContributorPanel} />
+            </div>
+          </section>
+        {/if}
+        {#if catalogReviewRows.length > 0}
+          <Table title="Contributor review queue" columns={catalogReviewColumns} rows={catalogReviewRows} state="default" actionLabel="" rowActions={catalogRowActions} />
+        {/if}
+        <Table title="Catalog tracks + contributors" columns={catalogColumns} rows={catalogRows} state={tableStateFor(catalogState.status, catalogRows.length)} actionLabel="" rowActions={catalogRowActions} pagination={catalogPagination} />
       {:else if activePageId === "contracts"}
         <section class="kpi-grid" aria-label="Contract KPIs">
           {#each contractKpis as kpi (kpi.label)}
@@ -5791,6 +5998,44 @@
     flex-wrap: wrap;
     align-items: end;
     gap: var(--ehq-space-3);
+  }
+
+  .catalog-contributor-panel {
+    display: grid;
+    gap: var(--ehq-space-3);
+    padding: var(--ehq-space-4);
+    border: 1px solid var(--ehq-border-strong);
+    border-radius: var(--ehq-radius-sm);
+  }
+
+  .catalog-contributor-heading,
+  .catalog-contributor-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ehq-space-3);
+  }
+
+  .catalog-contributor-heading > div {
+    display: grid;
+    gap: var(--ehq-space-1);
+  }
+
+  .catalog-contributor-heading > span,
+  .catalog-contributor-row > span:last-of-type {
+    color: var(--ehq-text-muted);
+    font-family: var(--ehq-mono);
+    font-size: var(--ehq-type-caption-size);
+  }
+
+  .catalog-contributor-list {
+    display: grid;
+    gap: var(--ehq-space-2);
+  }
+
+  .catalog-contributor-row {
+    padding: var(--ehq-space-2) var(--ehq-space-3);
+    border-bottom: 1px solid var(--ehq-border);
   }
 
   .period-control {

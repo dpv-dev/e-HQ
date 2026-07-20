@@ -162,6 +162,18 @@ export function createOpenApiDocument(): Readonly<Record<string, unknown>> {
           summary: "Read the live workspace-scoped Distribution mapping queue with opaque cursor pagination"
         }
       },
+      "/erh/v1/catalog/workbench": {
+        get: {
+          operationId: "readDistributionCatalogWorkbench",
+          summary: "Read the live track-centric Catalog workbench with contributor review filters and opaque cursor pagination"
+        }
+      },
+      "/erh/v1/catalog/tracks/{trackId}/contributor-overrides": {
+        post: {
+          operationId: "saveDistributionCatalogContributorOverride",
+          summary: "Append an audited contributor override without mutating imported catalog rows"
+        }
+      },
       "/erh/v1/contracts/{contractId}/expenses": {
         post: { operationId: "recordDistributionContractExpense", summary: "Record an audited Distribution expense or advance" }
       },

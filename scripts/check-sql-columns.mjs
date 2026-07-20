@@ -99,6 +99,15 @@ const REQUIRED_COLUMNS = {
     "payee_id",
     "amount_applied",
     "currency"
+  ],
+  catalog_contributor_overrides: [
+    "id",
+    "workspace_id",
+    "track_id",
+    "contributors_json",
+    "reason",
+    "created_by_user_id",
+    "idempotency_key"
   ]
 };
 

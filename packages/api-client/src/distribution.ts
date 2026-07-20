@@ -20,6 +20,9 @@ import type {
   DistributionContractExpenseRecordRequest,
   DistributionContractsQuery,
   DistributionContractUpsertRequest,
+  DistributionCatalogContributorOverrideRequest,
+  DistributionCatalogWorkbenchQuery,
+  DistributionCatalogWorkbenchResponse,
   DistributionDashboardQuery,
   DistributionDashboardResponse,
   DistributionFxRate,
@@ -100,6 +103,14 @@ export interface DistributionApiClient {
   readonly listMappingRows: (query: DistributionMappingRowsQuery) => Promise<PageResult<DistributionMappingRow>>;
   readonly applyMappingRules: (
     request: DistributionMappingApplyRulesRequest,
+    options: WriteRequestOptions
+  ) => Promise<ApiMutationReceipt>;
+  readonly getCatalogWorkbench: (
+    query: DistributionCatalogWorkbenchQuery
+  ) => Promise<DistributionCatalogWorkbenchResponse>;
+  readonly saveCatalogContributors: (
+    trackId: EntityId,
+    request: DistributionCatalogContributorOverrideRequest,
     options: WriteRequestOptions
   ) => Promise<ApiMutationReceipt>;
   readonly listContracts: (query: DistributionContractsQuery) => Promise<PageResult<DistributionContract>>;
@@ -297,6 +308,33 @@ export function createDistributionApiClient(config: ApiClientConfig): Distributi
       options: WriteRequestOptions
     ): Promise<ApiMutationReceipt> =>
       transport.post<ApiMutationReceipt>("mapping/apply-rules", request, options.idempotencyKey),
+    getCatalogWorkbench: (
+      query: DistributionCatalogWorkbenchQuery
+    ): Promise<DistributionCatalogWorkbenchResponse> =>
+      transport.get<DistributionCatalogWorkbenchResponse>("catalog/workbench", {
+        workspaceId: query.workspaceId,
+        search: query.search,
+        artistSource: query.artistSource,
+        isrc: query.isrc,
+        role: query.role,
+        review: query.review,
+        label: query.label,
+        releaseFrom: query.releaseFrom,
+        releaseTo: query.releaseTo,
+        status: query.status,
+        cursor: query.cursor,
+        limit: query.limit
+      }),
+    saveCatalogContributors: (
+      trackId: EntityId,
+      request: DistributionCatalogContributorOverrideRequest,
+      options: WriteRequestOptions
+    ): Promise<ApiMutationReceipt> =>
+      transport.post<ApiMutationReceipt>(
+        `catalog/tracks/${encodePathSegment(trackId)}/contributor-overrides`,
+        request,
+        options.idempotencyKey
+      ),
     listContracts: (query: DistributionContractsQuery): Promise<PageResult<DistributionContract>> =>
       transport.get<PageResult<DistributionContract>>("contracts", {
         workspaceId: query.workspaceId,

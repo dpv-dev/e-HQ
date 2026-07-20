@@ -146,6 +146,11 @@ import type {
   CurrencyCode,
   DistributionContract,
   DistributionContractExpense,
+  DistributionCatalogArtistSource,
+  DistributionCatalogContributor,
+  DistributionCatalogContributorOverrideRequest,
+  DistributionCatalogReviewFilter,
+  DistributionCatalogTrackRow,
   DistributionDashboardCurrencyTotal,
   DistributionDashboardDiagnostic,
   DistributionDashboardReadinessItem,
@@ -240,7 +245,11 @@ import {
   type SupabaseJwtVerifier
 } from "./auth.js";
 import { parseDistributionImportPreview } from "./distribution-import-parser.js";
-import { DistributionMappingCursorError, type DistributionReadRuntime } from "./distribution-repository.js";
+import {
+  DistributionCatalogCursorError,
+  DistributionMappingCursorError,
+  type DistributionReadRuntime
+} from "./distribution-repository.js";
 import { createSupabaseRouter } from "./supabase-server.js";
 import { createFixtureStore, type ApiDistributionRoyaltyRuleInput, type ApiFixtureStore } from "./fixtures.js";
 import type { ApiStartupReadiness } from "./startup.js";
@@ -828,6 +837,28 @@ const distributionMappingApplyRulesSchema = workspaceBodySchema.extend({
   batchId: z.string().min(1),
   rowIds: z.array(z.string().min(1)).min(1)
 });
+const distributionCatalogContributorSchema = z.object({
+  name: z.string().trim().min(1).max(240),
+  role: z.string().trim().regex(/^[a-z][a-z0-9_]{1,79}$/u)
+});
+const distributionCatalogContributorOverrideSchema = workspaceBodySchema.extend({
+  contributors: z.array(distributionCatalogContributorSchema).min(1).max(50),
+  reason: z.string().trim().min(1).max(500)
+}).superRefine((value, refinementContext) => {
+  const identities = new Set<string>();
+  for (const contributor of value.contributors) {
+    const identity = `${contributor.name.toLocaleLowerCase()}::${contributor.role}`;
+    if (identities.has(identity)) {
+      refinementContext.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["contributors"],
+        message: "Contributor name and role combinations must be unique."
+      });
+      return;
+    }
+    identities.add(identity);
+  }
+});
 const distributionContractUpsertSchema = workspaceBodySchema.extend({
   id: nullableStringSchema,
   payeeId: nullableStringSchema,
@@ -849,6 +880,7 @@ const distributionReleaseUpsertSchema = workspaceBodySchema.extend({
   id: nullableStringSchema,
   title: z.string().min(1),
   artistName: z.string().min(1),
+  labelName: nullableStringSchema,
   upc: nullableStringSchema,
   status: z.enum(["draft", "released", "archived"]),
   releaseDate: isoDateSchema.nullable()
@@ -907,6 +939,7 @@ type DistributionContractExpenseUpdateRequest = z.infer<typeof distributionContr
 type DistributionPayeeUpsertRequest = z.infer<typeof distributionPayeeUpsertSchema>;
 type DistributionReleaseUpsertRequest = z.infer<typeof distributionReleaseUpsertSchema>;
 type DistributionTrackUpsertRequest = z.infer<typeof distributionTrackUpsertSchema>;
+type DistributionCatalogContributorOverrideWriteRequest = z.infer<typeof distributionCatalogContributorOverrideSchema>;
 type CommandCenterSettingUpdateRequest = z.infer<typeof commandCenterSettingUpdateSchema>;
 type CommandCenterIntegrationToggleRequest = z.infer<typeof commandCenterIntegrationToggleSchema>;
 type CommandCenterUserPermissionUpdateRequest = z.infer<typeof commandCenterUserPermissionUpdateSchema>;
@@ -1914,6 +1947,39 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
 
   app.post("/erh/v1/mapping/apply-rules", async (context) => {
     return distributionMappingApplyRulesResponse(context, dependencies);
+  });
+
+  app.get("/erh/v1/catalog/workbench", async (context) => {
+    const workspaceId = requireQuery(context, "workspaceId");
+    if (dependencies.distributionReads === undefined) {
+      throw new ApiRouteError(503, "catalog_repository_unavailable", "The live Catalog repository is unavailable.", []);
+    }
+
+    try {
+      return context.json(await dependencies.distributionReads.listCatalogTracks({
+        workspaceId,
+        search: nullableQuery(context, "search"),
+        artistSource: toDistributionCatalogArtistSource(nullableQuery(context, "artistSource")),
+        isrc: nullableQuery(context, "isrc"),
+        role: nullableQuery(context, "role"),
+        review: toDistributionCatalogReviewFilter(nullableQuery(context, "review")),
+        label: nullableQuery(context, "label"),
+        releaseFrom: toOptionalIsoDateQuery(nullableQuery(context, "releaseFrom"), "releaseFrom"),
+        releaseTo: toOptionalIsoDateQuery(nullableQuery(context, "releaseTo"), "releaseTo"),
+        status: toDistributionCatalogStatusFilter(nullableQuery(context, "status")),
+        cursor: nullableQuery(context, "cursor"),
+        limit: pageLimit(context)
+      }));
+    } catch (error: unknown) {
+      if (error instanceof DistributionCatalogCursorError) {
+        throw new ApiRouteError(400, "catalog_cursor_invalid", error.message, []);
+      }
+      throw error;
+    }
+  });
+
+  app.post("/erh/v1/catalog/tracks/:trackId/contributor-overrides", async (context) => {
+    return distributionCatalogContributorOverrideResponse(context, dependencies);
   });
 
   app.get("/erh/v1/contracts", (context) => {
@@ -5527,6 +5593,73 @@ async function distributionTrackUpsertResponse(context: ApiContext, dependencies
   return context.json(result.body, result.status);
 }
 
+async function distributionCatalogContributorOverrideResponse(
+  context: ApiContext,
+  dependencies: ApiServiceDependencies
+): Promise<Response> {
+  const request = await readZodBody<DistributionCatalogContributorOverrideWriteRequest>(
+    context,
+    distributionCatalogContributorOverrideSchema
+  );
+  const trackId = requirePathParam(context, "trackId");
+  const repository = dependencies.distributionReads;
+  if (repository === undefined) {
+    throw new ApiRouteError(503, "catalog_repository_unavailable", "The live Catalog repository is unavailable.", []);
+  }
+
+  const before = await repository.getCatalogTrack(request.workspaceId, trackId);
+  if (before === null) {
+    throw new ApiRouteError(404, "distribution_catalog_track_not_found", "Distribution catalog track was not found.", [
+      `trackId=${trackId}`
+    ]);
+  }
+
+  const actor = context.get("authUser");
+  requirePermissionForWorkspace(actor, "distribution_catalog_contributors_override", request.workspaceId);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const contributors: readonly DistributionCatalogContributor[] = request.contributors.map((contributor) => ({
+    name: contributor.name.trim(),
+    role: contributor.role.trim()
+  }));
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "distribution_catalog_contributors_override",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `distribution:catalog:track:${trackId}`);
+      const overrideId = randomUUID();
+      await persistDistributionCatalogContributorOverride(tx, {
+        id: overrideId,
+        workspaceId: request.workspaceId,
+        trackId,
+        contributors,
+        reason: request.reason.trim(),
+        createdByUserId: actor.userId,
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_catalog_contributors_override",
+        targetType: "track",
+        targetId: trackId,
+        before: { track: before },
+        after: {
+          trackId,
+          contributorOverrideId: overrideId,
+          contributors,
+          reason: request.reason.trim()
+        },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      return mutationReceipt(trackId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
 async function distributionAliasUpsertResponse(
   context: ApiContext,
   dependencies: ApiServiceDependencies,
@@ -7297,7 +7430,7 @@ async function persistDistributionReleaseUpsert(
       ${request.artistName.trim()},
       ${request.status},
       ${request.upc},
-      ${request.artistName.trim()},
+      ${request.labelName},
       ${request.releaseDate}
     )
     on conflict (id) do update
@@ -7309,6 +7442,41 @@ async function persistDistributionReleaseUpsert(
       label_name = excluded.label_name,
       release_date = excluded.release_date,
       updated_at = now()
+  `);
+}
+
+async function persistDistributionCatalogContributorOverride(
+  tx: ApiWriteTransaction,
+  input: DistributionCatalogContributorOverrideRequest & Readonly<{
+    id: string;
+    trackId: string;
+    createdByUserId: string;
+    idempotencyKey: string;
+  }>
+): Promise<void> {
+  if (tx.kind === "memory") {
+    return;
+  }
+
+  await tx.executor.execute(sql`
+    insert into catalog_contributor_overrides (
+      id,
+      workspace_id,
+      track_id,
+      contributors_json,
+      reason,
+      created_by_user_id,
+      idempotency_key
+    )
+    values (
+      ${input.id},
+      ${input.workspaceId},
+      ${input.trackId},
+      ${JSON.stringify(input.contributors)}::jsonb,
+      ${input.reason},
+      ${input.createdByUserId},
+      ${input.idempotencyKey}
+    )
   `);
 }
 
@@ -11324,6 +11492,43 @@ function toDistributionMappingStatusFilter(value: string | null): DistributionMa
   }
 
   throw new ApiRouteError(400, "mapping_status_invalid", "Mapping status filter is invalid.", [`status=${value}`]);
+}
+
+function toDistributionCatalogArtistSource(value: string | null): DistributionCatalogArtistSource {
+  if (value === null || value === "catalog_import") {
+    return "catalog_import";
+  }
+  if (value === "catalog_contributors" || value === "import_only") {
+    return value;
+  }
+  throw new ApiRouteError(400, "catalog_artist_source_invalid", "Catalog artist source filter is invalid.", [
+    `artistSource=${value}`
+  ]);
+}
+
+function toDistributionCatalogReviewFilter(value: string | null): DistributionCatalogReviewFilter | null {
+  if (value === null || value === "needs_review" || value === "artist_mismatch" || value === "no_contributors") {
+    return value;
+  }
+  throw new ApiRouteError(400, "catalog_review_invalid", "Catalog review filter is invalid.", [`review=${value}`]);
+}
+
+function toDistributionCatalogStatusFilter(value: string | null): DistributionCatalogTrackRow["status"] | null {
+  if (value === null || value === "draft" || value === "released" || value === "archived") {
+    return value;
+  }
+  throw new ApiRouteError(400, "catalog_status_invalid", "Catalog status filter is invalid.", [`status=${value}`]);
+}
+
+function toOptionalIsoDateQuery(value: string | null, key: string): string | null {
+  if (value === null) {
+    return null;
+  }
+  const parsed = isoDateSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new ApiRouteError(400, "catalog_date_invalid", "Catalog date filter must use YYYY-MM-DD.", [`${key}=${value}`]);
+  }
+  return parsed.data;
 }
 
 function distributionMappingRowMatchesSearch(row: DistributionMappingRow, search: string): boolean {
