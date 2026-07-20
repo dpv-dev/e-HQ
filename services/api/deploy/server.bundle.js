@@ -49257,6 +49257,7 @@ async function distributionStatementVoidResponse(context, dependencies) {
     requestBody: body,
     write: async (tx, resolvedIdempotencyKey) => {
       const statement = requireStatementForVoid(dependencies, statementId);
+      assertStatementHasNoActivePayments(dependencies, statementId);
       const ledgerRow = requireStatementLedgerRow(dependencies, statementId);
       await acquireAdvisoryLock(tx, `distribution:payment:statement:${statementId}`);
       const voidPlan = buildVoidPlan({ id: statement.id, status: statement.status }, ledgerRow);
@@ -51989,6 +51990,17 @@ function requireStatementForVoid(dependencies, statementId) {
     throw new ApiRouteError(409, "distribution_statement_already_void", "Distribution statement is already void.", [`statementId=${statementId}`]);
   }
   return statement;
+}
+function assertStatementHasNoActivePayments(dependencies, statementId) {
+  const activePayment = dependencies.fixtures.distribution.statementPaymentLinks.filter((link) => link.statementId === statementId).map((link) => dependencies.fixtures.distribution.payments.find((payment) => payment.id === link.paymentId) ?? null).find((payment) => payment !== null && payment.status !== "void");
+  if (activePayment !== void 0 && activePayment !== null) {
+    throw new ApiRouteError(
+      409,
+      "statement_has_active_payment",
+      "Unlink or void the active payment before removing this statement.",
+      [`statementId=${statementId}`, `paymentId=${activePayment.id}`]
+    );
+  }
 }
 function requireStatementLedgerRow(dependencies, statementId) {
   const ledgerRow = [...dependencies.fixtures.distributionPayeeBalances].filter((row) => row.statementId === statementId && row.movementType === "statement").sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
