@@ -23,6 +23,9 @@ corepack pnpm --filter @ehq/api check
 corepack pnpm --filter @ehq/api test
 corepack pnpm test:api-client-cache
 
+echo "==> Shared UI: typecheck + token declarations"
+corepack pnpm --filter @ehq/ui check
+
 echo "==> Frontend (apps/hq): typecheck + build"
 corepack pnpm --filter @ehq/hq check
 corepack pnpm --filter @ehq/hq build
