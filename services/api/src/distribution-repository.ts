@@ -1874,6 +1874,7 @@ function toCatalogRowWithCursor(row: PgRow): CatalogRowWithCursor {
       status: catalogStatusCell(row, "catalog_status"),
       contributors,
       contributorSource: overrideId === null ? "imported" : "override",
+      suggestedCatalogArtist: overrideId === null ? catalogArtistSuggestion(contributors, catalogArtist) : null,
       reviewReason: catalogReviewReason(contributors, artistImport, catalogArtist, overrideId)
     },
     cursor: {
@@ -1881,6 +1882,16 @@ function toCatalogRowWithCursor(row: PgRow): CatalogRowWithCursor {
       id: stringCell(row, "id")
     }
   };
+}
+
+function catalogArtistSuggestion(
+  contributors: readonly DistributionCatalogContributor[],
+  catalogArtist: string
+): string | null {
+  const mainArtists = contributors.filter((contributor) => contributor.role === "main_artist");
+  if (mainArtists.length !== 1) return null;
+  const suggestion = mainArtists[0]?.name.trim() ?? "";
+  return suggestion === "" || suggestion.toLocaleLowerCase() === catalogArtist.trim().toLocaleLowerCase() ? null : suggestion;
 }
 
 function toContractRowWithCursor(row: PgRow): ContractRowWithCursor {

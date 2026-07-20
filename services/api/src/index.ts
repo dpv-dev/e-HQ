@@ -15093,10 +15093,11 @@ function toDistributionDuplicates(store: ApiFixtureStore): readonly Distribution
     .map(([isrc, group]) => ({
       id: isrc,
       label: group.title,
-      kind: "normalized_earning_isrc",
+      kind: "same_isrc_earnings",
       count: group.ids.length,
       sampleIds: group.ids.slice(0, distributionReconciliationSampleLimit),
-      sampleLabels: group.labels.slice(0, distributionReconciliationSampleLimit)
+      sampleLabels: [...new Set(group.labels)].slice(0, 3),
+      resolutionAllowed: false
     }));
 }
 
@@ -15203,6 +15204,11 @@ function requireDistributionAliasTarget(
 }
 
 function duplicateGroupEarningIds(fixtures: ApiFixtureStore, duplicateId: string): readonly string[] {
+  // An ISRC identifies one recording, not a duplicated earning. Normalized rows
+  // lack the immutable source reference/date needed to prove a financial duplicate.
+  if (!toDistributionDuplicates(fixtures).some((group) => group.id === duplicateId && group.resolutionAllowed)) {
+    return [];
+  }
   return fixtures.distribution.normalizedEarnings
     .filter((earning) => earning.isrc === duplicateId)
     .filter((earning) => earning.calculationStatus !== "excluded")

@@ -375,6 +375,7 @@
     { label: "Review", align: "left", sortable: true },
     { label: "Artist import", align: "left", sortable: true },
     { label: "Catalog artist", align: "left", sortable: true },
+    { label: "Suggestion", align: "left", sortable: true },
     { label: "Track", align: "left", sortable: true },
     { label: "ISRC", align: "left", sortable: true },
     { label: "UPC / EAN", align: "left", sortable: true },
@@ -387,6 +388,7 @@
     { label: "Reason", align: "left", sortable: true },
     { label: "Artist import", align: "left", sortable: true },
     { label: "Catalog artist", align: "left", sortable: true },
+    { label: "Suggestion", align: "left", sortable: true },
     { label: "Track", align: "left", sortable: true },
     { label: "ISRC", align: "left", sortable: true }
   ];
@@ -852,6 +854,7 @@
   const mappingTableRows = $derived(createMappingRows(filteredMappingRows, selectedMappingRowIds));
   const catalogRows = $derived(createCatalogRows(catalogTracks));
   const catalogReviewRows = $derived(createCatalogReviewRows(catalogTracks));
+  const suggestedCatalogArtistTracks = $derived(catalogTracks.filter((track) => track.suggestedCatalogArtist !== null));
   const contractRows = $derived(createContractRows(contractTracks, selectedContractRowIds));
   const expenseRows = $derived(createExpenseRows(expenses));
   const allocationRows = $derived(createAllocationRows(allocationRuns));
@@ -1215,7 +1218,7 @@
     { label: "Edit", onAction: openAliasEditor }
   ];
   const duplicateRowActions: readonly TableRowAction[] = [
-    { label: "Merge into master", onAction: openDuplicateMerge }
+    { label: "Merge into master", onAction: openDuplicateMerge, isEnabled: duplicateCanMerge, disabledReason: duplicateMergeDisabledReason }
   ];
 
   onMount((): (() => void) => {
@@ -4537,7 +4540,7 @@
   function openDuplicateMerge(duplicateId: string): void {
     const duplicate = duplicates.find((candidate: DistributionDuplicate): boolean => candidate.id === duplicateId);
 
-    if (duplicate === undefined) {
+    if (duplicate === undefined || !duplicate.resolutionAllowed) {
       return;
     }
 
@@ -4863,6 +4866,22 @@
     }
   }
 
+  async function promoteVisibleCatalogArtistSuggestions(): Promise<void> {
+    if (!writesEnabled || suggestedCatalogArtistTracks.length === 0) return;
+    try {
+      for (const track of suggestedCatalogArtistTracks) {
+        await client.distribution.promoteCatalogArtist(
+          track.id,
+          { workspaceId: distributionWorkspaceId, contributorName: track.suggestedCatalogArtist ?? "", reason: "Confirmed unique imported main artist." },
+          { idempotencyKey: createIdempotencyKey(`catalog-promote-suggestion-${track.id}`) }
+        );
+      }
+      await Promise.all([loadCatalog(), loadAuditLog()]);
+    } catch (error: unknown) {
+      reportActionError(error);
+    }
+  }
+
   async function ensureContributorPayee(contributorName: string): Promise<void> {
     const track = selectedCatalogTrack;
     if (track === null || !writesEnabled) return;
@@ -4928,6 +4947,7 @@
         { kind: "badge", value: catalogReviewLabel(track.reviewReason), tone: track.reviewReason === null ? "success" : "warning" },
         { kind: "text", value: track.artistImport ?? "—", strong: false },
         { kind: "text", value: track.catalogArtist, strong: false },
+        { kind: "text", value: track.suggestedCatalogArtist ?? "—", strong: track.suggestedCatalogArtist !== null },
         { kind: "text", value: track.versionTitle === null ? track.title : `${track.title} · ${track.versionTitle}`, strong: true },
         { kind: "text", value: track.isrc ?? "—", strong: false },
         { kind: "text", value: track.upc ?? "—", strong: false },
@@ -4949,6 +4969,7 @@
           { kind: "badge", value: catalogReviewLabel(track.reviewReason), tone: "warning" },
           { kind: "text", value: track.artistImport ?? "—", strong: false },
           { kind: "text", value: track.catalogArtist, strong: false },
+          { kind: "text", value: track.suggestedCatalogArtist ?? "—", strong: track.suggestedCatalogArtist !== null },
           { kind: "text", value: track.title, strong: true },
           { kind: "text", value: track.isrc ?? "—", strong: false }
         ]
@@ -5467,10 +5488,18 @@
         { kind: "text", value: duplicate.label, strong: true },
         { kind: "badge", value: duplicate.kind, tone: "muted" },
         { kind: "text", value: String(duplicate.count), strong: false },
-        { kind: "text", value: duplicate.sampleLabels.join(", "), strong: false },
-        { kind: "badge", value: "review required", tone: "warning" }
+        { kind: "text", value: duplicate.resolutionAllowed ? duplicate.sampleLabels.join(" · ") : `${duplicate.sampleLabels.join(" · ")} · same ISRC earnings`, strong: false },
+        { kind: "badge", value: duplicate.resolutionAllowed ? "review required" : "aggregation only", tone: duplicate.resolutionAllowed ? "warning" : "info" }
       ]
     }));
+  }
+
+  function duplicateCanMerge(duplicateId: string): boolean {
+    return duplicates.some((duplicate) => duplicate.id === duplicateId && duplicate.resolutionAllowed);
+  }
+
+  function duplicateMergeDisabledReason(duplicateId: string): string | null {
+    return duplicateCanMerge(duplicateId) ? null : "Same-ISRC earnings are valid revenue rows and cannot be merged.";
   }
 
   function createAliasTargetOptions(
@@ -6058,6 +6087,7 @@
         <section class="contracts-actions ehq-edge-surface">
           <Button label="New release" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="New release" onclick={() => openCatalogPanel("release")} />
           <Button label="New track" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="New track" onclick={() => openCatalogPanel("track")} />
+          <Button label={`Apply ${suggestedCatalogArtistTracks.length} visible artist suggestion${suggestedCatalogArtistTracks.length === 1 ? "" : "s"}`} variant="secondary" size="medium" type="button" disabled={!writesEnabled || suggestedCatalogArtistTracks.length === 0} loading={false} locked={false} focus={false} ariaLabel="Apply visible high-confidence Catalog Artist suggestions" title={writeDisabledTitle()} onclick={promoteVisibleCatalogArtistSuggestions} />
           <span>Imported contributors remain source data; reviewed corrections are append-only audited overrides.</span>
         </section>
         {#if catalogPanelMode === "release"}
@@ -6664,10 +6694,9 @@
       {:else if activePageId === "duplicates"}
         <section class="recon-actions ehq-edge-surface" aria-label="Duplicate note">
           <SectionTemplate
-            eyebrow="duplicates"
-            title="Duplicate detection"
-            detail="Potential duplicate records are listed with readable labels; use the resolution action to exclude duplicates.
-"
+            eyebrow="earnings integrity"
+            title="Same-ISRC earnings"
+            detail="Rows sharing an ISRC are valid revenue for the same recording, not duplicates. Financial merging stays disabled until immutable source references can prove an exact duplicate."
             state="ready"
           />
         </section>
@@ -6680,11 +6709,11 @@
         {/if}
         {#if duplicates.length === 0 && duplicatesState.status === "success"}
           <section class="empty-state ehq-edge-surface">
-            <strong>No duplicates detected</strong>
-            <span>No potentially duplicated records were found in the catalog.</span>
+            <strong>No repeated ISRC earnings</strong>
+            <span>No multi-row recording aggregates were found in the current workspace.</span>
           </section>
         {:else}
-          <Table title="Potential duplicates" columns={duplicateColumns} rows={duplicateRows} state={tableStateFor(duplicatesState.status, duplicates.length)} actionLabel="" rowActions={duplicateRowActions} pagination={duplicatesPagination} />
+          <Table title="Same-ISRC earnings (aggregation only)" columns={duplicateColumns} rows={duplicateRows} state={tableStateFor(duplicatesState.status, duplicates.length)} actionLabel="" rowActions={duplicateRowActions} pagination={duplicatesPagination} />
         {/if}
       {:else if activePageId === "audit-log"}
         {#if auditEntries.length === 0 && auditLogState.status === "success"}

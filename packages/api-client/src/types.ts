@@ -1493,6 +1493,8 @@ export interface DistributionCatalogTrackRow {
   readonly status: "draft" | "released" | "archived";
   readonly contributors: readonly DistributionCatalogContributor[];
   readonly contributorSource: "imported" | "override";
+  /** High-confidence candidate from one imported main artist; never auto-applied. */
+  readonly suggestedCatalogArtist: string | null;
   readonly reviewReason: DistributionCatalogReviewReason;
 }
 
@@ -2327,6 +2329,8 @@ export interface DistributionDuplicate {
   readonly count: number;
   readonly sampleIds: readonly EntityId[];
   readonly sampleLabels: readonly string[];
+  /** Same-ISRC rows are revenue aggregation, never merge candidates. */
+  readonly resolutionAllowed: boolean;
 }
 
 export interface DistributionDuplicateResolveRequest {

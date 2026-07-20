@@ -1490,7 +1490,7 @@ test("distribution aliases patch updates an existing alias target", async () => 
   assert.equal(updatedReceipt.alias.target, "Seggae light");
 });
 
-test("distribution duplicate resolve excludes duplicate earning rows", async () => {
+test("same-ISRC earnings remain aggregation-only and cannot be merged", async () => {
   const app = createWriteEnabledFixtureApiService();
 
   const before = await app.request("/erh/v1/duplicates?workspaceId=workspace_1&limit=100", {
@@ -1498,9 +1498,9 @@ test("distribution duplicate resolve excludes duplicate earning rows", async () 
   });
   assert.equal(before.status, 200);
   const beforePage = (await before.json()) as {
-    readonly items: readonly { readonly id: string }[];
+    readonly items: readonly { readonly id: string; readonly kind: string; readonly resolutionAllowed: boolean }[];
   };
-  assert.ok(beforePage.items.some((item) => item.id === "MUAAA2600001"));
+  assert.ok(beforePage.items.some((item) => item.id === "MUAAA2600001" && item.kind === "same_isrc_earnings" && !item.resolutionAllowed));
 
   const resolve = await app.request("/erh/v1/duplicates/MUAAA2600001/resolve", {
     method: "POST",
@@ -1511,17 +1511,7 @@ test("distribution duplicate resolve excludes duplicate earning rows", async () 
       reason: "manual_duplicate_review"
     })
   });
-  assert.equal(resolve.status, 200);
-  const receipt = (await resolve.json()) as {
-    readonly duplicateId: string;
-    readonly keepEarningId: string;
-    readonly resolvedEarningIds: readonly string[];
-    readonly auditEventId: string | null;
-  };
-  assert.equal(receipt.duplicateId, "MUAAA2600001");
-  assert.equal(receipt.keepEarningId, "earning_matched");
-  assert.ok(receipt.resolvedEarningIds.includes("earning_pending"));
-  assert.ok(receipt.auditEventId !== null);
+  assert.equal(resolve.status, 404);
 
   const after = await app.request("/erh/v1/duplicates?workspaceId=workspace_1&limit=100", {
     headers: authHeaders()
@@ -1530,7 +1520,7 @@ test("distribution duplicate resolve excludes duplicate earning rows", async () 
   const afterPage = (await after.json()) as {
     readonly items: readonly { readonly id: string }[];
   };
-  assert.equal(afterPage.items.some((item) => item.id === "MUAAA2600001"), false);
+  assert.equal(afterPage.items.some((item) => item.id === "MUAAA2600001"), true);
 });
 
 test("distribution reconciliation maintenance actions execute only through maintenance ids", async () => {
@@ -5793,6 +5783,7 @@ test("Distribution Suspense workbench delegates live filters and resolutions rem
     status: "released" as const,
     contributors: [],
     contributorSource: "imported" as const,
+    suggestedCatalogArtist: null,
     reviewReason: null
   };
   const app = createApiService({
@@ -5889,6 +5880,7 @@ test("Distribution Catalog workbench delegates parity filters to the live reposi
     status: "released" as const,
     contributors: [{ name: "Cømpass", role: "main_artist" }],
     contributorSource: "imported" as const,
+    suggestedCatalogArtist: null,
     reviewReason: "needs_review" as const
   };
   const app = createApiService({
