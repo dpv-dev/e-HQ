@@ -90,8 +90,17 @@ const REQUIRED_COLUMNS = {
   ],
   calculation_runs: [
     "id",
+    "workspace_id",
     "status",
+    "reconciliation_json",
     "started_at"
+  ],
+  suspense_items: [
+    "id",
+    "workspace_id",
+    "amount",
+    "currency",
+    "reason_code"
   ],
   expense_applications: [
     "id",

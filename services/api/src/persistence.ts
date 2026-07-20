@@ -200,6 +200,7 @@ export interface ExistingOfficeBankStatementLineForDedupe {
 
 export interface PersistDistributionAllocationRunInput {
   readonly runId: string;
+  readonly workspaceId: string;
   readonly batchId: string | null;
   readonly startedAtIso: string;
   readonly finishedAtIso: string;
@@ -375,6 +376,7 @@ const SENSITIVE_ACTIONS = new Set<string>([
   "distribution_alias_upsert",
   "distribution_catalog_contributors_override",
   "distribution_allocations_preview",
+  "distribution_allocations_retry_missing_contracts",
   "distribution_allocations_run",
   "distribution_allocations_unpost",
   "distribution_contract_expense_create",
@@ -1066,6 +1068,7 @@ export async function persistDistributionAllocationRun(tx: ApiWriteTransaction, 
   await tx.executor.execute(sql`
     insert into calculation_runs (
       id,
+      workspace_id,
       batch_id,
       status,
       reconciliation_json,
@@ -1074,6 +1077,7 @@ export async function persistDistributionAllocationRun(tx: ApiWriteTransaction, 
     )
     values (
       ${input.runId},
+      ${input.workspaceId},
       ${input.batchId},
       'calculated',
       ${JSON.stringify(input.metadata)}::jsonb,
@@ -1156,6 +1160,7 @@ export async function persistDistributionAllocationRun(tx: ApiWriteTransaction, 
     await tx.executor.execute(sql`
       insert into suspense_items (
         id,
+        workspace_id,
         earning_id,
         amount,
         currency,
@@ -1163,11 +1168,32 @@ export async function persistDistributionAllocationRun(tx: ApiWriteTransaction, 
       )
       values (
         ${randomUUID()},
+        ${input.workspaceId},
         ${suspense.earningId},
         ${suspense.amount},
         ${suspense.currency},
         ${suspense.reasonCode}
       )
+    `);
+  }
+
+  const allocatedEarningIds = [...new Set(input.allocations.map((allocation) => allocation.earningId))];
+  if (allocatedEarningIds.length > 0) {
+    await tx.executor.execute(sql`
+      update normalized_earnings
+      set calculation_status = 'calculated', updated_at = now()
+      where workspace_id = ${input.workspaceId}
+        and id in (${sql.join(allocatedEarningIds.map((earningId) => sql`${earningId}`), sql`, `)})
+    `);
+  }
+
+  const suspenseEarningIds = [...new Set(input.suspenseItems.map((item) => item.earningId))];
+  if (suspenseEarningIds.length > 0) {
+    await tx.executor.execute(sql`
+      update normalized_earnings
+      set calculation_status = 'suspense', updated_at = now()
+      where workspace_id = ${input.workspaceId}
+        and id in (${sql.join(suspenseEarningIds.map((earningId) => sql`${earningId}`), sql`, `)})
     `);
   }
 }

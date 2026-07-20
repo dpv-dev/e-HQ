@@ -181,7 +181,8 @@ export const importBatches = pgTable(
     index("import_batches_workspace_id_idx").on(table.workspaceId),
     index("import_batches_source_idx").on(table.source),
     index("import_batches_status_idx").on(table.status),
-    index("import_batches_imported_at_idx").on(table.importedAt)
+    index("import_batches_imported_at_idx").on(table.importedAt),
+    index("import_batches_allocation_workbench_idx").on(table.workspaceId, table.importedAt, table.createdAt, table.legacyId, table.id)
   ]
 );
 
@@ -238,7 +239,9 @@ export const normalizedEarnings = pgTable(
     index("normalized_earnings_upc_idx").on(table.upc),
     index("normalized_earnings_mapping_status_idx").on(table.mappingStatus),
     index("normalized_earnings_mapping_workbench_idx").on(table.workspaceId, table.mappingStatus, table.legacyId, table.id),
-    index("normalized_earnings_calculation_status_idx").on(table.calculationStatus)
+    index("normalized_earnings_calculation_status_idx").on(table.calculationStatus),
+    index("normalized_earnings_allocation_workbench_idx").on(table.workspaceId, table.batchId, table.mappingStatus, table.calculationStatus, table.id),
+    index("normalized_earnings_allocation_ready_idx").on(table.workspaceId, table.mappingStatus, table.calculationStatus, table.batchId, table.id)
   ]
 );
 
@@ -649,6 +652,7 @@ export const earningTrackMatches = pgTable(
     index("earning_track_matches_earning_id_idx").on(table.earningId),
     index("earning_track_matches_track_id_idx").on(table.trackId),
     index("earning_track_matches_workbench_idx").on(table.earningId, table.status, table.confidence, table.id),
+    index("earning_track_matches_allocation_workbench_idx").on(table.earningId, table.status, table.trackId, table.confidence, table.id),
     check("earning_track_matches_confidence_check", sql`${table.confidence} >= 0 and ${table.confidence} <= 100`)
   ]
 );
@@ -755,6 +759,8 @@ export const earningAllocations = pgTable(
     index("earning_allocations_contract_id_idx").on(table.contractId),
     index("earning_allocations_track_id_idx").on(table.trackId),
     index("earning_allocations_status_idx").on(table.status),
+    index("earning_allocations_earning_status_run_idx").on(table.earningId, table.status, table.calculationRunId),
+    index("earning_allocations_run_status_currency_idx").on(table.calculationRunId, table.status, table.currency),
     check("earning_allocations_split_percentage_check", sql`${table.splitPercentage} >= 0 and ${table.splitPercentage} <= 100`)
   ]
 );
@@ -777,7 +783,8 @@ export const suspenseItems = pgTable(
     uniqueIndex("suspense_items_legacy_id_unique").on(table.legacyId),
     index("suspense_items_earning_id_idx").on(table.earningId),
     index("suspense_items_reason_code_idx").on(table.reasonCode),
-    index("suspense_items_resolved_idx").on(table.resolved)
+    index("suspense_items_resolved_idx").on(table.resolved),
+    index("suspense_items_allocation_workbench_idx").on(table.workspaceId, table.resolved, table.reasonCode, table.earningId)
   ]
 );
 

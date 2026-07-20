@@ -14,6 +14,14 @@
     type CurrencyCode,
     type DistributionAlias,
     type DistributionAliasTargetType,
+    type DistributionAllocationBatchCurrencyTotal,
+    type DistributionAllocationBatchRow,
+    type DistributionAllocationRecentBatch,
+    type DistributionAllocationRunCurrencyTotal,
+    type DistributionAllocationSuspenseReason,
+    type DistributionAllocationUnallocatedCurrencyTotal,
+    type DistributionAllocationUnallocatedTrack,
+    type DistributionAllocationWorkbenchResponse,
     type DistributionCatalogArtistSource,
     type DistributionCatalogContributor,
     type DistributionCatalogReviewFilter,
@@ -110,6 +118,8 @@
     | "contracts"
     | "expenses"
     | "allocations"
+    | "allocationBatches"
+    | "allocationBank"
     | "suspense"
     | "statements"
     | "payments"
@@ -410,6 +420,40 @@
     { label: "Allocated", align: "right", sortable: true },
     { label: "Status", align: "left", sortable: true }
   ];
+  const allocationReasonColumns: readonly TableColumn[] = [
+    { label: "Suspense reason", align: "left", sortable: true },
+    { label: "Open rows", align: "right", sortable: true }
+  ];
+  const allocationRecentColumns: readonly TableColumn[] = [
+    { label: "Recent batch", align: "left", sortable: true },
+    { label: "Period", align: "left", sortable: true },
+    { label: "Rows", align: "right", sortable: true },
+    { label: "Gross", align: "right", sortable: true },
+    { label: "Recoup", align: "right", sortable: true },
+    { label: "Net", align: "right", sortable: true },
+    { label: "Link issues", align: "right", sortable: true },
+    { label: "Status", align: "left", sortable: true }
+  ];
+  const allocationBatchColumns: readonly TableColumn[] = [
+    { label: "Batch", align: "left", sortable: true },
+    { label: "File", align: "left", sortable: true },
+    { label: "Matched", align: "right", sortable: true },
+    { label: "Pending", align: "right", sortable: true },
+    { label: "Allocated", align: "right", sortable: true },
+    { label: "Suspense", align: "right", sortable: true },
+    { label: "Open amount", align: "right", sortable: true },
+    { label: "Allocated amount", align: "right", sortable: true },
+    { label: "Status", align: "left", sortable: true }
+  ];
+  const allocationBankColumns: readonly TableColumn[] = [
+    { label: "Release", align: "left", sortable: true },
+    { label: "Track", align: "left", sortable: true },
+    { label: "ISRC", align: "left", sortable: true },
+    { label: "Rows", align: "right", sortable: true },
+    { label: "Batches", align: "right", sortable: true },
+    { label: "Amount", align: "right", sortable: true },
+    { label: "Seen", align: "left", sortable: true }
+  ];
   const suspenseColumns: readonly TableColumn[] = [
     { label: "Reason", align: "left", sortable: true },
     { label: "Source", align: "left", sortable: true },
@@ -564,6 +608,9 @@
   let allocationsState = $state<ApiRequestState<PageResult<AllocationRunSummary>>>(
     createIdleState<PageResult<AllocationRunSummary>>()
   );
+  let allocationWorkbenchState = $state<ApiRequestState<DistributionAllocationWorkbenchResponse>>(
+    createIdleState<DistributionAllocationWorkbenchResponse>()
+  );
   let suspenseState = $state<ApiRequestState<PageResult<SuspenseItem>>>(createIdleState<PageResult<SuspenseItem>>());
   let statementsState = $state<ApiRequestState<PageResult<StatementSummary>>>(
     createIdleState<PageResult<StatementSummary>>()
@@ -607,6 +654,7 @@
   let contractSearch = $state("");
   let contractStatusFilter = $state<ContractStatusFilter>(allValue);
   let contractWorkflowFilter = $state<ContractWorkflowFilter>(allValue);
+  let allocationSearch = $state("");
   let suspenseStatusFilter = $state<SuspenseStatusFilter>("open");
   let paymentStatusFilter = $state<PaymentStatusFilter>(allValue);
   let statementPayeeFilter = $state<string>(allValue);
@@ -724,7 +772,6 @@
   const distributionPeriod = $derived(selectedPeriod);
   const activeRange = $derived(rangeForScope(periodScope, today, customRange));
   const periodControlVisible = $derived(pageUsesPeriodControl(activePageId));
-  const allocationLockKey = $derived(`distribution:allocations:${distributionPeriod}`);
   const importBatches = $derived(readPageItems(importBatchesState));
   const mappingRows = $derived(readPageItems(mappingState));
   const filteredMappingRows = $derived(filterMappingRows(mappingRows, mappingSearch));
@@ -737,6 +784,11 @@
   const contractTracks = $derived(contractWorkbench?.items ?? []);
   const expenses = $derived(readPageItems(expensesState));
   const allocationRuns = $derived(readPageItems(allocationsState));
+  const allocationWorkbench = $derived(allocationWorkbenchState.status === "success" ? allocationWorkbenchState.data : null);
+  const allocationBatches = $derived(allocationWorkbench?.batches.items ?? []);
+  const allocationWavePeriod = $derived(allocationBatches.find((batch) => batch.pendingRowCount > 0)?.period ?? distributionPeriod);
+  const allocationLockKey = $derived(`distribution:allocations:${allocationWavePeriod}`);
+  const allocationBankItems = $derived(allocationWorkbench?.unallocatedBank.items ?? []);
   const suspenseItems = $derived(readPageItems(suspenseState));
   const statements = $derived(readPageItems(statementsState));
   const filteredStatements = $derived(
@@ -758,6 +810,12 @@
   const contractRows = $derived(createContractRows(contractTracks, selectedContractRowIds));
   const expenseRows = $derived(createExpenseRows(expenses));
   const allocationRows = $derived(createAllocationRows(allocationRuns));
+  const allocationKpis = $derived(createAllocationKpis(allocationWorkbench));
+  const allocationHealthKpis = $derived(createAllocationHealthKpis(allocationWorkbench));
+  const allocationReasonRows = $derived(createAllocationReasonRows(allocationWorkbench?.suspenseReasons ?? []));
+  const allocationRecentRows = $derived(createAllocationRecentRows(allocationWorkbench?.recentBatches ?? []));
+  const allocationBatchRows = $derived(createAllocationBatchRows(allocationBatches));
+  const allocationBankRows = $derived(createAllocationBankRows(allocationBankItems));
   const suspenseTableRows = $derived(createSuspenseRows(suspenseItems));
   const statementRows = $derived(createStatementRows(filteredStatements));
   const paymentRows = $derived(createPaymentRows(payments));
@@ -814,6 +872,26 @@
   );
   const allocationsPagination = $derived<TablePagination | null>(
     createTablePagination(allocationsState, tablePaginationLoading === "allocations", tablePaginationError("allocations"), loadMoreAllocationRuns, loadAllAllocationRuns)
+  );
+  const allocationBatchesPagination = $derived<TablePagination | null>(
+    allocationWorkbench === null ? null : {
+      loadedCount: allocationWorkbench.batches.items.length,
+      hasMore: allocationWorkbench.batches.nextCursor !== null,
+      loading: tablePaginationLoading === "allocationBatches",
+      error: tablePaginationError("allocationBatches"),
+      onLoadMore: loadMoreAllocationBatches,
+      onLoadAll: loadAllAllocationBatches
+    }
+  );
+  const allocationBankPagination = $derived<TablePagination | null>(
+    allocationWorkbench === null ? null : {
+      loadedCount: allocationWorkbench.unallocatedBank.items.length,
+      hasMore: allocationWorkbench.unallocatedBank.nextCursor !== null,
+      loading: tablePaginationLoading === "allocationBank",
+      error: tablePaginationError("allocationBank"),
+      onLoadMore: loadMoreAllocationBank,
+      onLoadAll: loadAllAllocationBank
+    }
   );
   const suspensePagination = $derived<TablePagination | null>(
     createTablePagination(suspenseState, tablePaginationLoading === "suspense", tablePaginationError("suspense"), loadMoreSuspense, loadAllSuspense)
@@ -1040,6 +1118,17 @@
   const allocationRowActions: readonly TableRowAction[] = [
     { label: "Request reversal", onAction: selectRunForUnpost, danger: true }
   ];
+  const allocationReasonRowActions: readonly TableRowAction[] = [
+    { label: "Open exact queue", onAction: openAllocationSuspenseReason }
+  ];
+  const allocationBatchRowActions: readonly TableRowAction[] = [
+    { label: "Preview", onAction: previewAllocationBatch },
+    { label: "Run", onAction: runAllocationBatch, isEnabled: allocationBatchCanRun, disabledReason: allocationBatchRunDisabledReason }
+  ];
+  const allocationBankRowActions: readonly TableRowAction[] = [
+    { label: "Create contract", onAction: openAllocationContractSetup },
+    { label: "Retry release", onAction: retryAllocationTrack, isEnabled: allocationTrackCanRetry, disabledReason: allocationTrackRetryDisabledReason }
+  ];
   const aliasRowActions: readonly TableRowAction[] = [
     { label: "Edit", onAction: openAliasEditor }
   ];
@@ -1088,6 +1177,12 @@
     }
   });
 
+  $effect((): void => {
+    if (activePageId === "allocations" && allocationWorkbenchState.status === "idle") {
+      void loadAllocationWorkbench();
+    }
+  });
+
   async function loadInitialData(): Promise<void> {
     try {
       const screen = await client.distribution.getScreen({
@@ -1106,6 +1201,9 @@
       if (activePageId === "contracts") {
         await loadContractWorkbench();
       }
+      if (activePageId === "allocations") {
+        await loadAllocationWorkbench();
+      }
     } catch {
       await Promise.all([
         loadWriteGate(),
@@ -1115,6 +1213,7 @@
         loadPayees(),
         activePageId === "catalog" ? loadCatalog() : Promise.resolve(),
         activePageId === "contracts" ? loadContractWorkbench() : Promise.resolve(),
+        activePageId === "allocations" ? loadAllocationWorkbench() : Promise.resolve(),
         loadAllocationRuns(),
         loadSuspense(),
         loadStatements(),
@@ -1399,7 +1498,7 @@
       (cursor: string): Promise<PageResult<SuspenseItem>> =>
         client.distribution.listSuspense({
           workspaceId: distributionWorkspaceId,
-          period: distributionPeriod,
+          period: allocationWavePeriod,
           status: toNullableSuspenseStatus(suspenseStatusFilter),
           dateFrom: activeRange.from,
           dateTo: activeRange.to,
@@ -1428,7 +1527,7 @@
       (cursor: string): Promise<PageResult<StatementSummary>> =>
         client.distribution.listStatements({
           workspaceId: distributionWorkspaceId,
-          period: distributionPeriod,
+          period: allocationWavePeriod,
           payeeId: toNullablePayeeFilter(statementPayeeFilter),
           status: null,
           cursor,
@@ -1763,6 +1862,64 @@
       setTablePaginationError("allocations", null);
     } catch (error: unknown) {
       allocationsState = createErrorState<PageResult<AllocationRunSummary>>(error);
+    }
+  }
+
+  function allocationWorkbenchQuery(batchCursor: string | null, bankCursor: string | null) {
+    return {
+      workspaceId: distributionWorkspaceId,
+      search: allocationSearch.trim() === "" ? null : allocationSearch.trim(),
+      dateFrom: activeRange.from,
+      dateTo: activeRange.to,
+      batchCursor,
+      bankCursor,
+      limit: TABLE_PAGE_SIZE
+    } as const;
+  }
+
+  async function loadAllocationWorkbench(): Promise<void> {
+    if (allocationWorkbenchState.status === "loading") return;
+    allocationWorkbenchState = beginReload<DistributionAllocationWorkbenchResponse>(allocationWorkbenchState);
+    try {
+      allocationWorkbenchState = createSuccessState<DistributionAllocationWorkbenchResponse>(
+        await client.distribution.getAllocationWorkbench(allocationWorkbenchQuery(null, null))
+      );
+      setTablePaginationError("allocationBatches", null);
+      setTablePaginationError("allocationBank", null);
+    } catch (error: unknown) {
+      allocationWorkbenchState = createErrorState<DistributionAllocationWorkbenchResponse>(error);
+    }
+  }
+
+  async function loadMoreAllocationBatches(): Promise<void> { await loadAllocationWorkbenchPage("batches", "one"); }
+  async function loadAllAllocationBatches(): Promise<void> { await loadAllocationWorkbenchPage("batches", "all"); }
+  async function loadMoreAllocationBank(): Promise<void> { await loadAllocationWorkbenchPage("bank", "one"); }
+  async function loadAllAllocationBank(): Promise<void> { await loadAllocationWorkbenchPage("bank", "all"); }
+
+  async function loadAllocationWorkbenchPage(kind: "batches" | "bank", mode: PageLoadMode): Promise<void> {
+    if (allocationWorkbenchState.status !== "success" || tablePaginationLoading !== null) return;
+    const tableId: DistributionPagedTableId = kind === "batches" ? "allocationBatches" : "allocationBank";
+    let current = allocationWorkbenchState.data;
+    let cursor = kind === "batches" ? current.batches.nextCursor : current.unallocatedBank.nextCursor;
+    if (cursor === null) return;
+    tablePaginationLoading = tableId;
+    setTablePaginationError(tableId, null);
+    try {
+      while (cursor !== null) {
+        const next = await client.distribution.getAllocationWorkbench(
+          allocationWorkbenchQuery(kind === "batches" ? cursor : null, kind === "bank" ? cursor : null)
+        );
+        current = kind === "batches"
+          ? { ...next, batches: appendPageResult(current.batches, next.batches), unallocatedBank: current.unallocatedBank }
+          : { ...next, batches: current.batches, unallocatedBank: appendPageResult(current.unallocatedBank, next.unallocatedBank) };
+        allocationWorkbenchState = createSuccessState<DistributionAllocationWorkbenchResponse>(current);
+        cursor = kind === "batches" ? current.batches.nextCursor : current.unallocatedBank.nextCursor;
+        if (mode === "one") break;
+      }
+    } catch (error: unknown) {
+      setTablePaginationError(tableId, getErrorMessage(error));
+    } finally {
+      tablePaginationLoading = null;
     }
   }
 
@@ -2299,6 +2456,10 @@
 
   function updateImportStatusFilter(value: string): void {
     importStatusFilter = value as ImportBatchStatusFilter;
+  }
+
+  function updateAllocationSearch(value: string): void {
+    allocationSearch = value;
   }
 
   function updateImportSource(value: string): void {
@@ -3274,7 +3435,8 @@
         {
           workspaceId: distributionWorkspaceId,
           period: distributionPeriod,
-          lockKey: allocationLockKey
+          lockKey: allocationLockKey,
+          batchId: null
         },
         {
           idempotencyKey: createIdempotencyKey("allocation-preview")
@@ -3295,7 +3457,8 @@
           workspaceId: distributionWorkspaceId,
           period: distributionPeriod,
           lockKey: allocationLockKey,
-          cadence: "manual"
+          cadence: "manual",
+          batchId: null
         },
         {
           idempotencyKey: createIdempotencyKey("allocation-cadenced")
@@ -3303,7 +3466,93 @@
       );
       runReceiptPageId = activePageId;
       // The cadenced run persists a new calculation run; refresh the run list.
-      await Promise.all([loadAllocationRuns(), loadStatements(), loadPayments(), loadRevenue(), loadReconciliation(), loadAuditLog()]);
+      await Promise.all([loadAllocationWorkbench(), loadAllocationRuns(), loadStatements(), loadPayments(), loadRevenue(), loadReconciliation(), loadAuditLog()]);
+    } catch (error: unknown) {
+      reportActionError(error);
+    }
+  }
+
+  async function previewAllocationBatch(rowId: string): Promise<void> {
+    const batch = allocationBatches.find((candidate) => candidate.id === rowId);
+    if (batch === undefined) return;
+    clearMutationReceipt();
+    try {
+      runReceipt = await client.distribution.previewAllocationRun({
+        workspaceId: distributionWorkspaceId,
+        period: batch.period,
+        lockKey: `distribution:allocation:batch:${batch.id}`,
+        batchId: batch.id
+      }, { idempotencyKey: createIdempotencyKey(`allocation-preview-${batch.id}`) });
+      runReceiptPageId = activePageId;
+    } catch (error: unknown) {
+      reportActionError(error);
+    }
+  }
+
+  async function runAllocationBatch(rowId: string): Promise<void> {
+    const batch = allocationBatches.find((candidate) => candidate.id === rowId);
+    if (batch === undefined || !allocationBatchCanRun(rowId)) return;
+    clearMutationReceipt();
+    try {
+      runReceipt = await client.distribution.startCadencedAllocationRun({
+        workspaceId: distributionWorkspaceId,
+        period: batch.period,
+        lockKey: `distribution:allocation:batch:${batch.id}`,
+        cadence: "manual",
+        batchId: batch.id
+      }, { idempotencyKey: createIdempotencyKey(`allocation-run-${batch.id}`) });
+      runReceiptPageId = activePageId;
+      await Promise.all([loadAllocationWorkbench(), loadAllocationRuns(), loadAuditLog()]);
+    } catch (error: unknown) {
+      reportActionError(error);
+    }
+  }
+
+  function allocationBatchCanRun(rowId: string): boolean {
+    const batch = allocationBatches.find((candidate) => candidate.id === rowId);
+    return writesEnabled && batch !== undefined && batch.pendingRowCount > 0;
+  }
+
+  function allocationBatchRunDisabledReason(rowId: string): string | null {
+    if (!writesEnabled) return writeGateMessage;
+    const batch = allocationBatches.find((candidate) => candidate.id === rowId);
+    return batch === undefined || batch.pendingRowCount === 0 ? "No matched pending rows remain in this batch." : null;
+  }
+
+  function openAllocationSuspenseReason(): void {
+    suspenseStatusFilter = "open";
+    selectPage("suspense");
+    void loadSuspense();
+  }
+
+  function openAllocationContractSetup(rowId: string): void {
+    const row = allocationBankItems.find((candidate) => candidate.trackId === rowId);
+    if (row === undefined) return;
+    contractSearch = row.isrc ?? row.trackTitle;
+    contractStatusFilter = allValue;
+    contractWorkflowFilter = "needs_attention";
+    selectPage("contracts");
+    void loadContractWorkbench();
+  }
+
+  function allocationTrackCanRetry(rowId: string): boolean {
+    return writesEnabled && allocationBankItems.some((candidate) => candidate.trackId === rowId);
+  }
+
+  function allocationTrackRetryDisabledReason(): string | null {
+    return writesEnabled ? null : writeGateMessage;
+  }
+
+  async function retryAllocationTrack(rowId: string): Promise<void> {
+    if (!allocationTrackCanRetry(rowId)) return;
+    clearRunReceipt();
+    try {
+      mutationReceipt = await client.distribution.retryAllocationMissingContracts({
+        workspaceId: distributionWorkspaceId,
+        trackId: rowId
+      }, { idempotencyKey: createIdempotencyKey(`allocation-retry-${rowId}`) });
+      mutationReceiptPageId = activePageId;
+      await Promise.all([loadAllocationWorkbench(), loadSuspense(), loadAuditLog()]);
     } catch (error: unknown) {
       reportActionError(error);
     }
@@ -3352,7 +3601,7 @@
       );
       runReceiptPageId = activePageId;
       closeUnpostPanel();
-      await Promise.all([loadAllocationRuns(), loadStatements(), loadPayments(), loadRevenue(), loadReconciliation(), loadAuditLog()]);
+      await Promise.all([loadAllocationWorkbench(), loadAllocationRuns(), loadStatements(), loadPayments(), loadRevenue(), loadReconciliation(), loadAuditLog()]);
     } catch (error: unknown) {
       reportActionError(error);
     }
@@ -4526,11 +4775,109 @@
         { kind: "text", value: run.runReference, strong: true },
         { kind: "text", value: run.period, strong: false },
         { kind: "text", value: run.lockKey, strong: false },
-        { kind: "money", value: formatMicro(run.totalInputMicro), tone: "info" },
-        { kind: "money", value: formatMicro(run.totalAllocatedMicro), tone: "success" },
+        { kind: "text", value: formatAllocationRunTotals(run.currencyTotals, "grossMicro"), strong: false },
+        { kind: "text", value: formatAllocationRunTotals(run.currencyTotals, "netMicro"), strong: true },
         { kind: "badge", value: run.status, tone: run.status === "completed" ? "success" : "warning" }
       ]
     }));
+  }
+
+  function createAllocationKpis(workbench: DistributionAllocationWorkbenchResponse | null): readonly DistributionKpi[] {
+    const summary = workbench?.summary;
+    return [
+      { label: "Ready rows", value: String(summary?.readyRowCount ?? 0), detail: "matched and pending", tone: (summary?.readyRowCount ?? 0) === 0 ? "success" : "active", accent: true },
+      { label: "Open suspense", value: String(summary?.openSuspenseCount ?? 0), detail: "needs review", tone: (summary?.openSuspenseCount ?? 0) === 0 ? "success" : "warning", accent: false },
+      { label: "Missing contracts", value: String(summary?.missingContractCount ?? 0), detail: "contract fixes first", tone: (summary?.missingContractCount ?? 0) === 0 ? "success" : "warning", accent: false }
+    ];
+  }
+
+  function createAllocationHealthKpis(workbench: DistributionAllocationWorkbenchResponse | null): readonly DistributionKpi[] {
+    const summary = workbench?.summary;
+    return [
+      { label: "Pending matched", value: String(summary?.readyRowCount ?? 0), detail: "ready for safe wave", tone: (summary?.readyRowCount ?? 0) === 0 ? "success" : "active", accent: false },
+      { label: "Matched unallocated", value: String(summary?.matchedUnallocatedCount ?? 0), detail: "needs pending reset", tone: (summary?.matchedUnallocatedCount ?? 0) === 0 ? "success" : "warning", accent: false },
+      { label: "Open suspense", value: String(summary?.openSuspenseCount ?? 0), detail: "fix before statements", tone: (summary?.openSuspenseCount ?? 0) === 0 ? "success" : "warning", accent: false },
+      { label: "Allocation link issues", value: String(summary?.allocationLinkIssueCount ?? 0), detail: "payee / contract / track", tone: (summary?.allocationLinkIssueCount ?? 0) === 0 ? "success" : "error", accent: false }
+    ];
+  }
+
+  function createAllocationReasonRows(items: readonly DistributionAllocationSuspenseReason[]): readonly TableRow[] {
+    return items.map((item) => ({
+      id: item.reason,
+      cells: [
+        { kind: "badge", value: item.reason, tone: "warning" },
+        { kind: "text", value: String(item.openRowCount), strong: true }
+      ]
+    }));
+  }
+
+  function createAllocationRecentRows(items: readonly DistributionAllocationRecentBatch[]): readonly TableRow[] {
+    return items.map((item) => ({
+      id: item.runId,
+      cells: [
+        { kind: "text", value: item.batchReference, strong: true },
+        { kind: "text", value: item.period, strong: false },
+        { kind: "text", value: String(item.rowCount), strong: false },
+        { kind: "text", value: formatAllocationRunTotals(item.totals, "grossMicro"), strong: false },
+        { kind: "text", value: formatAllocationRunTotals(item.totals, "recoupmentMicro"), strong: false },
+        { kind: "text", value: formatAllocationRunTotals(item.totals, "netMicro"), strong: true },
+        { kind: "badge", value: item.linkIssueCount === 0 ? "OK" : String(item.linkIssueCount), tone: item.linkIssueCount === 0 ? "success" : "error" },
+        { kind: "badge", value: item.status, tone: item.status === "completed" ? "success" : item.status === "failed" ? "error" : "warning" }
+      ]
+    }));
+  }
+
+  function createAllocationBatchRows(items: readonly DistributionAllocationBatchRow[]): readonly TableRow[] {
+    return items.map((batch) => ({
+      id: batch.id,
+      cells: [
+        { kind: "text", value: batch.reference, strong: true },
+        { kind: "text", value: batch.fileName, strong: false },
+        { kind: "text", value: `${String(batch.matchedRowCount)} / ${String(batch.totalRowCount)}`, strong: false },
+        { kind: "text", value: String(batch.pendingRowCount), strong: true },
+        { kind: "text", value: String(batch.allocatedRowCount), strong: false },
+        { kind: "text", value: String(batch.suspenseRowCount), strong: false },
+        { kind: "text", value: formatAllocationBatchTotals(batch.currencyTotals, "openAmountMicro"), strong: true },
+        { kind: "text", value: formatAllocationBatchTotals(batch.currencyTotals, "allocatedAmountMicro"), strong: false },
+        { kind: "badge", value: batch.status, tone: batch.pendingRowCount > 0 ? "active" : "muted" }
+      ]
+    }));
+  }
+
+  function createAllocationBankRows(items: readonly DistributionAllocationUnallocatedTrack[]): readonly TableRow[] {
+    return items.map((item) => ({
+      id: item.trackId,
+      cells: [
+        { kind: "text", value: item.releaseTitle ?? "No release", strong: true },
+        { kind: "text", value: item.trackTitle, strong: true },
+        { kind: "text", value: item.isrc ?? "—", strong: false },
+        { kind: "text", value: String(item.rowCount), strong: false },
+        { kind: "text", value: String(item.batchCount), strong: false },
+        { kind: "text", value: formatAllocationUnallocatedTotals(item.currencyTotals), strong: true },
+        { kind: "text", value: `${formatDateOnly(item.firstSeenAt)} → ${formatDateOnly(item.lastSeenAt)}`, strong: false }
+      ]
+    }));
+  }
+
+  function formatAllocationBatchTotals(
+    totals: readonly DistributionAllocationBatchCurrencyTotal[],
+    key: "openAmountMicro" | "allocatedAmountMicro"
+  ): string {
+    if (totals.length === 0) return "—";
+    return totals.map((total) => formatMoney(total[key], total.currency)).join(" · ");
+  }
+
+  function formatAllocationRunTotals(
+    totals: readonly DistributionAllocationRunCurrencyTotal[],
+    key: "grossMicro" | "recoupmentMicro" | "netMicro"
+  ): string {
+    if (totals.length === 0) return "—";
+    return totals.map((total) => formatMoney(total[key], total.currency)).join(" · ");
+  }
+
+  function formatAllocationUnallocatedTotals(totals: readonly DistributionAllocationUnallocatedCurrencyTotal[]): string {
+    if (totals.length === 0) return "—";
+    return totals.map((total) => formatMoney(total.amountMicro, total.currency)).join(" · ");
   }
 
   function createSuspenseRows(items: readonly SuspenseItem[]): readonly TableRow[] {
@@ -4969,10 +5316,6 @@
     }
 
     return (hash >>> 0).toString(16).padStart(8, "0");
-  }
-
-  function formatMicro(amountMicro: string): string {
-    return formatMoney(amountMicro, "EUR");
   }
 
   function formatMoney(amountMicro: string, currency: CurrencyCode): string {
@@ -5513,6 +5856,55 @@
         {/if}
         <Table title="Payees" columns={payeeColumns} rows={payeeRows} state={tableStateFor(payeesState.status, payees.length)} actionLabel="" />
       {:else if activePageId === "allocations"}
+        <section class="filter-strip allocation-command-bar ehq-edge-surface" aria-label="Allocation commands">
+          <Input id="distribution-allocation-search" label="Search" value={allocationSearch} placeholder="Batch file, source, release, track, ISRC…" type="search" state="default" message="" oninput={updateAllocationSearch} />
+          <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={allocationWorkbenchState.status === "loading"} locked={false} focus={false} ariaLabel="Filter allocation workbench" onclick={loadAllocationWorkbench} />
+          <Button label="Preview" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Preview the safe pending allocation wave" onclick={previewAllocationRun} />
+          <Button label="Run safe pending wave" variant="primary" size="medium" type="button" disabled={!writesEnabled || (allocationWorkbench?.summary.readyRowCount ?? 0) === 0} loading={false} locked={false} focus={false} ariaLabel="Run safe pending allocation wave" title={writeDisabledTitle()} onclick={startCadencedAllocationRun} />
+        </section>
+        <section class="kpi-grid allocation-readiness" aria-label="Allocation readiness">
+          {#each allocationKpis as kpi (kpi.label)}
+            <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state={isLoadingStatus(allocationWorkbenchState.status) ? "loading" : "default"} accent={kpi.accent} />
+          {/each}
+        </section>
+        <section class="allocation-health ehq-edge-surface" aria-label="Allocation health">
+          <div class="allocation-section-heading">
+            <div>
+              <span>Pre-run control</span>
+              <h2>Allocation health</h2>
+            </div>
+            <p>Queue readiness, unresolved suspense, and allocation rows missing critical financial links.</p>
+          </div>
+          <section class="kpi-grid allocation-health-kpis" aria-label="Allocation health checks">
+            {#each allocationHealthKpis as kpi (kpi.label)}
+              <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state={isLoadingStatus(allocationWorkbenchState.status) ? "loading" : "default"} accent={kpi.accent} />
+            {/each}
+          </section>
+          <section class="allocation-health-grid">
+            <Table title="Suspense reasons" columns={allocationReasonColumns} rows={allocationReasonRows} state={tableStateFor(allocationWorkbenchState.status, allocationReasonRows.length)} actionLabel="" rowActions={allocationReasonRowActions} />
+            <Table title="Recent batches" columns={allocationRecentColumns} rows={allocationRecentRows} state={tableStateFor(allocationWorkbenchState.status, allocationRecentRows.length)} actionLabel="" />
+          </section>
+        </section>
+        <section class="allocation-table-intro">
+          <div class="allocation-section-heading">
+            <div>
+              <span>Accounting work</span>
+              <h2>Batch Allocation Queue</h2>
+            </div>
+            <p>Pending rows can be allocated; missing-contract rows stay in suspense until a complete split is recorded.</p>
+          </div>
+          <Table title="Import batches" columns={allocationBatchColumns} rows={allocationBatchRows} state={tableStateFor(allocationWorkbenchState.status, allocationBatchRows.length)} actionLabel="" rowActions={allocationBatchRowActions} pagination={allocationBatchesPagination} />
+        </section>
+        <section class="allocation-table-intro">
+          <div class="allocation-section-heading">
+            <div>
+              <span>Missing contracts</span>
+              <h2>Unallocated Royalty Bank</h2>
+            </div>
+            <p>Mapped earnings are preserved but are not payable until an active 100% contract split applies.</p>
+          </div>
+          <Table title="Missing contracts by track" columns={allocationBankColumns} rows={allocationBankRows} state={tableStateFor(allocationWorkbenchState.status, allocationBankRows.length)} actionLabel="" rowActions={allocationBankRowActions} pagination={allocationBankPagination} />
+        </section>
         <section class="lock-panel ehq-edge-surface">
           <SectionTemplate
             eyebrow="allocations"
@@ -6095,6 +6487,75 @@
     gap: var(--ehq-space-3);
   }
 
+  .allocation-command-bar :global(.ehq-input-field) {
+    flex: 1 1 360px;
+  }
+
+  .allocation-health,
+  .allocation-table-intro {
+    min-width: 0;
+    padding: var(--ehq-space-4);
+    display: grid;
+    gap: var(--ehq-space-3);
+    border: 1px solid var(--ehq-border);
+    border-radius: var(--ehq-radius-md);
+    background: var(--ehq-surface);
+  }
+
+  .allocation-section-heading {
+    min-width: 0;
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    gap: var(--ehq-space-4);
+  }
+
+  .allocation-section-heading > div {
+    display: grid;
+    gap: var(--ehq-space-1);
+  }
+
+  .allocation-section-heading span,
+  .allocation-section-heading h2,
+  .allocation-section-heading p {
+    margin: 0;
+  }
+
+  .allocation-section-heading span {
+    color: var(--ehq-workspace-distribution);
+    font-family: var(--ehq-mono);
+    font-size: var(--ehq-type-label-size);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .allocation-section-heading h2 {
+    font-size: var(--ehq-type-section-title-size);
+  }
+
+  .allocation-section-heading p {
+    max-width: 720px;
+    color: var(--ehq-text-muted);
+    font-size: var(--ehq-type-caption-size);
+    line-height: var(--ehq-type-ui-line);
+  }
+
+  .allocation-readiness,
+  .allocation-health-kpis {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .allocation-health-kpis {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .allocation-health-grid {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: minmax(280px, 0.65fr) minmax(0, 1.35fr);
+    gap: var(--ehq-space-3);
+  }
+
   .contract-workflow {
     align-items: center;
   }
@@ -6577,6 +7038,11 @@
       grid-template-columns: 1fr;
     }
 
+    .allocation-health-kpis,
+    .allocation-health-grid {
+      grid-template-columns: 1fr 1fr;
+    }
+
     .statement-summary dl {
       grid-template-columns: repeat(2, minmax(120px, 1fr));
     }
@@ -6596,6 +7062,17 @@
 
     .distribution-workflow-steps {
       grid-template-columns: 1fr;
+    }
+
+    .allocation-readiness,
+    .allocation-health-kpis,
+    .allocation-health-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .allocation-section-heading {
+      align-items: start;
+      flex-direction: column;
     }
 
     .distribution-workflow-steps article {

@@ -25885,6 +25885,12 @@ var DistributionContractCursorError = class extends Error {
     this.name = "DistributionContractCursorError";
   }
 };
+var DistributionAllocationCursorError = class extends Error {
+  constructor() {
+    super("Invalid Distribution allocation cursor.");
+    this.name = "DistributionAllocationCursorError";
+  }
+};
 function createPostgresDistributionReadRuntime(pool) {
   return {
     listMappingRows: async (query) => readDistributionMappingPage(pool, query),
@@ -25892,7 +25898,10 @@ function createPostgresDistributionReadRuntime(pool) {
     getCatalogTrack: async (workspaceId, trackId) => readDistributionCatalogTrack(pool, workspaceId, trackId),
     listContractTracks: async (query) => readDistributionContractPage(pool, query),
     getContractTrack: async (workspaceId, trackId) => readDistributionContractTrack(pool, workspaceId, trackId),
-    validateContractPayees: async (workspaceId, payeeIds) => validateDistributionContractPayees(pool, workspaceId, payeeIds)
+    validateContractPayees: async (workspaceId, payeeIds) => validateDistributionContractPayees(pool, workspaceId, payeeIds),
+    readAllocationWorkbench: async (query) => readDistributionAllocationWorkbench(pool, query),
+    listAllocationRuns: async (query) => readDistributionAllocationRuns(pool, query),
+    getAllocationBatch: async (workspaceId, batchId) => readDistributionAllocationBatchIdentity(pool, workspaceId, batchId)
   };
 }
 async function readDistributionMappingPage(pool, query) {
@@ -26176,6 +26185,409 @@ async function validateDistributionContractPayees(pool, workspaceId, payeeIds) {
     [workspaceId, payeeIds]
   );
   return integerCell(result.rows[0] ?? {}, "payee_count") === new Set(payeeIds).size;
+}
+async function readDistributionAllocationWorkbench(pool, query) {
+  const [summary, suspenseReasons, recentBatches, batches, unallocatedBank] = await Promise.all([
+    readAllocationSummary(pool, query),
+    readAllocationSuspenseReasons(pool, query),
+    readAllocationRecentBatches(pool, query),
+    readAllocationBatchPage(pool, query),
+    readAllocationBankPage(pool, query)
+  ]);
+  return { summary, suspenseReasons, recentBatches, batches, unallocatedBank };
+}
+async function readDistributionAllocationRuns(pool, query) {
+  const limit = normalizeLimit(query.limit);
+  const cursor = decodeAllocationRunCursor(query.cursor);
+  const parameters = [query.workspaceId];
+  const where = ["cr.workspace_id = $1"];
+  if (query.period !== null) {
+    parameters.push(query.period);
+    where.push(`coalesce(cr.reconciliation_json->>'period', to_char(coalesce(b.imported_at, b.created_at), 'YYYY-MM'), to_char(cr.started_at, 'YYYY-MM'), to_char(cr.created_at, 'YYYY-MM')) = $${String(parameters.length)}`);
+  }
+  if (query.status !== null) {
+    where.push(allocationRunStatusPredicate(query.status));
+  }
+  if (cursor !== null) {
+    parameters.push(cursor.createdAt, cursor.id);
+    where.push(`(cr.created_at < $${String(parameters.length - 1)}::timestamptz or (cr.created_at = $${String(parameters.length - 1)}::timestamptz and cr.id::text > $${String(parameters.length)}))`);
+  }
+  parameters.push(limit + 1);
+  const result = await pool.query(
+    `${allocationRunSelectSql()}
+     where ${where.join("\n       and ")}
+     order by cr.created_at desc, cr.id
+     limit $${String(parameters.length)}`,
+    parameters
+  );
+  const mapped = result.rows.map(toAllocationRunRowWithCursor);
+  const hasMore = mapped.length > limit;
+  const pageRows = mapped.slice(0, limit);
+  const last = pageRows[pageRows.length - 1];
+  return {
+    items: pageRows.map((row) => row.item),
+    nextCursor: hasMore && last !== void 0 ? encodeAllocationRunCursor(last.cursor) : null
+  };
+}
+async function readDistributionAllocationBatchIdentity(pool, workspaceId, batchId) {
+  const result = await pool.query(
+    `select id::text, to_char(coalesce(imported_at, created_at), 'YYYY-MM') as period
+     from import_batches
+     where workspace_id = $1 and id = $2::uuid
+     limit 1`,
+    [workspaceId, batchId]
+  );
+  const row = result.rows[0];
+  return row === void 0 ? null : { id: stringCell(row, "id"), period: stringCell(row, "period") };
+}
+async function readAllocationSummary(pool, query) {
+  const parameters = [query.workspaceId];
+  const dateWhere = allocationDateWhere(parameters, query, "coalesce(b.imported_at, b.created_at)");
+  const result = await pool.query(
+    `with scoped_earnings as (
+       select ne.*
+       from normalized_earnings ne
+       join import_batches b on b.id = ne.batch_id and b.workspace_id = ne.workspace_id
+       where ne.workspace_id = $1${dateWhere}
+     ), scoped_suspense as (
+       select si.*
+       from suspense_items si
+       join scoped_earnings ne on ne.id = si.earning_id
+       where si.workspace_id = $1 and si.resolved = false
+     )
+     select
+       (select count(*)::int from scoped_earnings where mapping_status = 'matched' and calculation_status = 'pending') as ready_row_count,
+       (select count(*)::int from scoped_suspense) as open_suspense_count,
+       (select count(*)::int from scoped_suspense where reason_code = 'missing_contract') as missing_contract_count,
+       (select count(*)::int
+        from scoped_earnings ne
+        where ne.mapping_status = 'matched'
+          and ne.calculation_status not in ('pending', 'suspense')
+          and not exists (
+            select 1 from earning_allocations ea
+            where ea.earning_id = ne.id and ea.status not in ('void', 'error')
+          )) as matched_unallocated_count,
+       (select count(*)::int
+        from earning_allocations ea
+        join scoped_earnings ne on ne.id = ea.earning_id
+        left join payees p on p.id = ea.payee_id and p.workspace_id = $1
+        where ea.status not in ('void', 'error')
+          and (p.id is null or ea.contract_id is null or ea.track_id is null)) as allocation_link_issue_count`,
+    parameters
+  );
+  const row = result.rows[0] ?? {};
+  return {
+    readyRowCount: integerCell(row, "ready_row_count"),
+    openSuspenseCount: integerCell(row, "open_suspense_count"),
+    missingContractCount: integerCell(row, "missing_contract_count"),
+    matchedUnallocatedCount: integerCell(row, "matched_unallocated_count"),
+    allocationLinkIssueCount: integerCell(row, "allocation_link_issue_count")
+  };
+}
+async function readAllocationSuspenseReasons(pool, query) {
+  const parameters = [query.workspaceId];
+  const dateWhere = allocationDateWhere(parameters, query, "coalesce(b.imported_at, b.created_at)");
+  const result = await pool.query(
+    `select si.reason_code, count(*)::int as open_row_count
+     from suspense_items si
+     join normalized_earnings ne on ne.id = si.earning_id and ne.workspace_id = si.workspace_id
+     join import_batches b on b.id = ne.batch_id and b.workspace_id = ne.workspace_id
+     where si.workspace_id = $1 and si.resolved = false${dateWhere}
+     group by si.reason_code
+     order by count(*) desc, si.reason_code`,
+    parameters
+  );
+  return result.rows.map((row) => ({
+    reason: stringCell(row, "reason_code"),
+    openRowCount: integerCell(row, "open_row_count")
+  }));
+}
+async function readAllocationRecentBatches(pool, query) {
+  const parameters = [query.workspaceId];
+  const dateWhere = allocationDateWhere(parameters, query, "coalesce(b.imported_at, b.created_at, cr.started_at, cr.created_at)");
+  const result = await pool.query(
+    `${allocationRunSelectSql()}
+     where cr.workspace_id = $1${dateWhere}
+     order by cr.created_at desc, cr.id
+     limit 10`,
+    parameters
+  );
+  return result.rows.map((row) => ({
+    runId: stringCell(row, "id"),
+    batchId: nullableStringCell(row, "batch_id"),
+    batchReference: allocationBatchReference(row),
+    period: stringCell(row, "period"),
+    status: allocationRunStatusCell(row, "status"),
+    rowCount: integerCell(row, "row_count"),
+    linkIssueCount: integerCell(row, "link_issue_count"),
+    totals: allocationRunCurrencyTotalArrayCell(row, "currency_totals"),
+    startedAt: nullableTimestampStringCell(row, "started_at"),
+    completedAt: nullableTimestampStringCell(row, "finished_at")
+  }));
+}
+async function readAllocationBatchPage(pool, query) {
+  const limit = normalizeLimit(query.limit);
+  const cursor = decodeAllocationBatchCursor(query.batchCursor);
+  const parameters = [query.workspaceId];
+  const where = ["b.workspace_id = $1"];
+  where.push(...allocationDatePredicates(parameters, query, "coalesce(b.imported_at, b.created_at)"));
+  const search = query.search?.trim() ?? "";
+  if (search !== "") {
+    parameters.push(search.toLocaleLowerCase());
+    where.push(`(strpos(lower(b.file_name), $${String(parameters.length)}) > 0 or strpos(lower(b.source), $${String(parameters.length)}) > 0 or b.legacy_id::text = $${String(parameters.length)})`);
+  }
+  if (cursor !== null) {
+    parameters.push(cursor.legacySort, cursor.id);
+    where.push(`(coalesce(b.legacy_id, 2147483647) > $${String(parameters.length - 1)} or (coalesce(b.legacy_id, 2147483647) = $${String(parameters.length - 1)} and b.id::text > $${String(parameters.length)}))`);
+  }
+  parameters.push(limit + 1);
+  const result = await pool.query(
+    `select
+       b.id::text,
+       b.legacy_id,
+       b.file_name,
+       b.source,
+       b.status,
+       coalesce(b.imported_at, b.created_at) as imported_at,
+       coalesce(to_char(b.imported_at, 'YYYY-MM'), to_char(b.created_at, 'YYYY-MM')) as period,
+       coalesce(stats.total_row_count, 0)::int as total_row_count,
+       coalesce(stats.matched_row_count, 0)::int as matched_row_count,
+       coalesce(stats.pending_row_count, 0)::int as pending_row_count,
+       coalesce(stats.allocated_row_count, 0)::int as allocated_row_count,
+       coalesce(stats.suspense_row_count, 0)::int as suspense_row_count,
+       coalesce(currency.currency_totals, '[]'::jsonb) as currency_totals,
+       coalesce(b.legacy_id, 2147483647) as legacy_sort
+     from import_batches b
+     left join lateral (
+       select
+         count(ne.id)::int as total_row_count,
+         count(ne.id) filter (where ne.mapping_status = 'matched')::int as matched_row_count,
+         count(ne.id) filter (where ne.mapping_status = 'matched' and ne.calculation_status = 'pending')::int as pending_row_count,
+         count(ne.id) filter (where exists (
+           select 1 from earning_allocations ea
+           where ea.earning_id = ne.id and ea.status not in ('void', 'error')
+         ))::int as allocated_row_count,
+         count(ne.id) filter (where exists (
+           select 1 from suspense_items si
+           where si.earning_id = ne.id and si.workspace_id = ne.workspace_id and si.resolved = false
+         ))::int as suspense_row_count
+       from normalized_earnings ne
+       where ne.batch_id = b.id and ne.workspace_id = b.workspace_id
+     ) stats on true
+     left join lateral (
+       select coalesce(jsonb_agg(jsonb_build_object(
+         'currency', totals.currency,
+         'openAmountMicro', totals.open_amount,
+         'allocatedAmountMicro', totals.allocated_amount
+       ) order by totals.currency), '[]'::jsonb) as currency_totals
+       from (
+         select amounts.currency,
+           sum(amounts.open_amount)::text as open_amount,
+           sum(amounts.allocated_amount)::text as allocated_amount
+         from (
+           select ne.currency, sum(ne.gross_amount) as open_amount, 0::numeric as allocated_amount
+           from normalized_earnings ne
+           where ne.batch_id = b.id and ne.workspace_id = b.workspace_id
+             and ne.mapping_status = 'matched' and ne.calculation_status = 'pending'
+           group by ne.currency
+           union all
+           select ea.currency, 0::numeric as open_amount, sum(ea.net_payable) as allocated_amount
+           from earning_allocations ea
+           join normalized_earnings ne on ne.id = ea.earning_id
+           where ne.batch_id = b.id and ne.workspace_id = b.workspace_id
+             and ea.status not in ('void', 'error')
+           group by ea.currency
+         ) amounts
+         group by amounts.currency
+       ) totals
+     ) currency on true
+     where ${where.join("\n       and ")}
+     order by coalesce(b.legacy_id, 2147483647), b.id
+     limit $${String(parameters.length)}`,
+    parameters
+  );
+  const mapped = result.rows.map(toAllocationBatchRowWithCursor);
+  const hasMore = mapped.length > limit;
+  const pageRows = mapped.slice(0, limit);
+  const last = pageRows[pageRows.length - 1];
+  return {
+    items: pageRows.map((row) => row.item),
+    nextCursor: hasMore && last !== void 0 ? encodeAllocationBatchCursor(last.cursor) : null
+  };
+}
+async function readAllocationBankPage(pool, query) {
+  const limit = normalizeLimit(query.limit);
+  const cursor = decodeAllocationBankCursor(query.bankCursor);
+  const parameters = [query.workspaceId];
+  const datePredicates = allocationDatePredicates(parameters, query, "coalesce(b.imported_at, b.created_at)");
+  const where = ["si.workspace_id = $1", "si.resolved = false", "si.reason_code = 'missing_contract'", ...datePredicates];
+  const search = query.search?.trim() ?? "";
+  const outerWhere = [];
+  if (search !== "") {
+    parameters.push(search.toLocaleLowerCase());
+    const parameter = `$${String(parameters.length)}`;
+    outerWhere.push(`(strpos(lower(track_title), ${parameter}) > 0 or strpos(lower(coalesce(release_title, '')), ${parameter}) > 0 or strpos(lower(coalesce(isrc, '')), ${parameter}) > 0)`);
+  }
+  if (cursor !== null) {
+    parameters.push(cursor.rowCount, cursor.id);
+    outerWhere.push(`(row_count < $${String(parameters.length - 1)} or (row_count = $${String(parameters.length - 1)} and track_id > $${String(parameters.length)}))`);
+  }
+  parameters.push(limit + 1);
+  const result = await pool.query(
+    `with preferred_matches as (
+       select distinct on (etm.earning_id)
+         etm.earning_id,
+         etm.track_id
+       from earning_track_matches etm
+       where etm.status not in ('ignored', 'suspense')
+       order by
+         etm.earning_id,
+         case when etm.status = 'matched' then 0 else 1 end,
+         etm.confidence desc,
+         etm.id
+     ), isrc_tracks as (
+       select distinct on (workspace_id, isrc)
+         id,
+         workspace_id,
+         release_id,
+         title,
+         isrc
+       from tracks
+       where isrc is not null
+       order by workspace_id, isrc, id
+     ), missing_rows as (
+       select
+         coalesce(matched_track.id, isrc_track.id)::text as track_id,
+         coalesce(matched_track.release_id, isrc_track.release_id)::text as release_id,
+         r.title as release_title,
+         coalesce(matched_track.title, isrc_track.title) as track_title,
+         coalesce(matched_track.isrc, isrc_track.isrc) as isrc,
+         ne.batch_id,
+         si.currency,
+         si.amount,
+         ne.created_at
+       from suspense_items si
+       join normalized_earnings ne on ne.id = si.earning_id and ne.workspace_id = si.workspace_id
+       join import_batches b on b.id = ne.batch_id and b.workspace_id = ne.workspace_id
+       left join preferred_matches preferred on preferred.earning_id = ne.id
+       left join tracks matched_track on matched_track.id = preferred.track_id and matched_track.workspace_id = ne.workspace_id
+       left join isrc_tracks isrc_track on preferred.track_id is null
+         and isrc_track.workspace_id = ne.workspace_id
+         and isrc_track.isrc = ne.isrc
+       left join releases r on r.id = coalesce(matched_track.release_id, isrc_track.release_id)
+         and r.workspace_id = ne.workspace_id
+       where coalesce(matched_track.id, isrc_track.id) is not null
+         and ${where.join("\n         and ")}
+     ), track_rows as (
+       select
+         track_id, release_id, release_title, track_title, isrc,
+         count(*)::int as row_count,
+         count(distinct batch_id)::int as batch_count,
+         min(created_at) as first_seen_at,
+         max(created_at) as last_seen_at
+       from missing_rows
+       group by track_id, release_id, release_title, track_title, isrc
+     ), currency_rows as (
+       select
+         track_id, currency,
+         sum(amount)::text as amount_micro,
+         count(*)::int as currency_row_count
+       from missing_rows
+       group by track_id, currency
+     ), bank_rows as (
+       select
+         track_rows.*,
+         jsonb_agg(jsonb_build_object(
+           'currency', currency_rows.currency,
+           'amountMicro', currency_rows.amount_micro
+         ) order by currency_rows.currency) as currency_totals
+       from track_rows
+       join currency_rows on currency_rows.track_id = track_rows.track_id
+       group by
+         track_rows.track_id,
+         track_rows.release_id,
+         track_rows.release_title,
+         track_rows.track_title,
+         track_rows.isrc,
+         track_rows.row_count,
+         track_rows.batch_count,
+         track_rows.first_seen_at,
+         track_rows.last_seen_at
+     )
+     select * from bank_rows
+     ${outerWhere.length === 0 ? "" : `where ${outerWhere.join("\n       and ")}`}
+     order by row_count desc, track_id
+     limit $${String(parameters.length)}`,
+    parameters
+  );
+  const mapped = result.rows.map(toAllocationBankRowWithCursor);
+  const hasMore = mapped.length > limit;
+  const pageRows = mapped.slice(0, limit);
+  const last = pageRows[pageRows.length - 1];
+  return {
+    items: pageRows.map((row) => row.item),
+    nextCursor: hasMore && last !== void 0 ? encodeAllocationBankCursor(last.cursor) : null
+  };
+}
+function allocationRunSelectSql() {
+  return `select
+       cr.id::text,
+       cr.batch_id::text,
+       b.legacy_id as batch_legacy_id,
+       b.file_name as batch_file_name,
+       coalesce(cr.reconciliation_json->>'period', to_char(coalesce(b.imported_at, b.created_at), 'YYYY-MM'), to_char(cr.started_at, 'YYYY-MM'), to_char(cr.created_at, 'YYYY-MM')) as period,
+       cr.status,
+       coalesce(cr.reconciliation_json->>'lockKey', 'distribution:allocation:' || cr.id::text) as lock_key,
+       cr.started_at,
+       cr.finished_at,
+       cr.created_at,
+       coalesce(run_stats.row_count, 0)::int as row_count,
+       coalesce(run_stats.link_issue_count, 0)::int as link_issue_count,
+       coalesce(run_stats.currency_totals, '[]'::jsonb) as currency_totals
+     from calculation_runs cr
+     left join import_batches b on b.id = cr.batch_id and b.workspace_id = cr.workspace_id
+     left join lateral (
+       select
+         (select count(distinct ea.earning_id)::int
+          from earning_allocations ea
+          where ea.calculation_run_id = cr.id and ea.status not in ('void', 'error')) as row_count,
+         (select count(*)::int
+          from earning_allocations ea
+          left join payees p on p.id = ea.payee_id and p.workspace_id = cr.workspace_id
+          where ea.calculation_run_id = cr.id and ea.status not in ('void', 'error')
+            and (p.id is null or ea.contract_id is null or ea.track_id is null)) as link_issue_count,
+         (select coalesce(jsonb_agg(jsonb_build_object(
+            'currency', totals.currency,
+            'grossMicro', totals.gross_micro,
+            'recoupmentMicro', totals.recoupment_micro,
+            'netMicro', totals.net_micro
+          ) order by totals.currency), '[]'::jsonb)
+          from (
+            select currency,
+              sum(gross_share)::text as gross_micro,
+              sum(recoupment_applied)::text as recoupment_micro,
+              sum(net_payable)::text as net_micro
+            from earning_allocations
+            where calculation_run_id = cr.id and status not in ('void', 'error')
+            group by currency
+          ) totals) as currency_totals
+     ) run_stats on true`;
+}
+function allocationDateWhere(parameters, query, expression) {
+  const predicates = allocationDatePredicates(parameters, query, expression);
+  return predicates.length === 0 ? "" : ` and ${predicates.join(" and ")}`;
+}
+function allocationDatePredicates(parameters, query, expression) {
+  const predicates = [];
+  if (query.dateFrom !== null) {
+    parameters.push(query.dateFrom);
+    predicates.push(`${expression}::date >= $${String(parameters.length)}::date`);
+  }
+  if (query.dateTo !== null) {
+    parameters.push(query.dateTo);
+    predicates.push(`${expression}::date <= $${String(parameters.length)}::date`);
+  }
+  return predicates;
 }
 function contractTrackSelectSql() {
   return `with import_artist_ranked as (
@@ -26759,6 +27171,96 @@ function toContractRowWithCursor(row) {
     }
   };
 }
+function toAllocationBatchRowWithCursor(row) {
+  const id = stringCell(row, "id");
+  const legacyId = nullableIntegerCell(row, "legacy_id");
+  return {
+    item: {
+      id,
+      reference: legacyId === null ? id.slice(0, 8) : `#${String(legacyId)}`,
+      fileName: stringCell(row, "file_name"),
+      source: stringCell(row, "source"),
+      status: stringCell(row, "status"),
+      period: stringCell(row, "period"),
+      importedAt: nullableTimestampStringCell(row, "imported_at"),
+      totalRowCount: integerCell(row, "total_row_count"),
+      matchedRowCount: integerCell(row, "matched_row_count"),
+      pendingRowCount: integerCell(row, "pending_row_count"),
+      allocatedRowCount: integerCell(row, "allocated_row_count"),
+      suspenseRowCount: integerCell(row, "suspense_row_count"),
+      currencyTotals: allocationBatchCurrencyTotalArrayCell(row, "currency_totals")
+    },
+    cursor: {
+      legacySort: integerCell(row, "legacy_sort"),
+      id
+    }
+  };
+}
+function toAllocationBankRowWithCursor(row) {
+  const id = stringCell(row, "track_id");
+  const rowCount = integerCell(row, "row_count");
+  return {
+    item: {
+      trackId: id,
+      releaseId: nullableStringCell(row, "release_id"),
+      releaseTitle: nullableStringCell(row, "release_title"),
+      trackTitle: stringCell(row, "track_title"),
+      isrc: nullableStringCell(row, "isrc"),
+      rowCount,
+      batchCount: integerCell(row, "batch_count"),
+      currencyTotals: allocationUnallocatedCurrencyTotalArrayCell(row, "currency_totals"),
+      firstSeenAt: timestampStringCell(row, "first_seen_at"),
+      lastSeenAt: timestampStringCell(row, "last_seen_at")
+    },
+    cursor: { rowCount, id }
+  };
+}
+function toAllocationRunRowWithCursor(row) {
+  const id = stringCell(row, "id");
+  const totals = allocationRunCurrencyTotalArrayCell(row, "currency_totals");
+  const firstTotal = totals[0];
+  const period = stringCell(row, "period");
+  const lockKey = stringCell(row, "lock_key");
+  return {
+    item: {
+      id,
+      runReference: `${period} \xB7 ${allocationBatchReference(row)}`,
+      period,
+      status: allocationRunStatusCell(row, "status"),
+      lockKey,
+      startedAt: nullableTimestampStringCell(row, "started_at"),
+      completedAt: nullableTimestampStringCell(row, "finished_at"),
+      totalInputMicro: firstTotal?.grossMicro ?? "0.0000000000",
+      totalAllocatedMicro: firstTotal?.netMicro ?? "0.0000000000",
+      currencyTotals: totals
+    },
+    cursor: {
+      createdAt: timestampStringCell(row, "created_at"),
+      id
+    }
+  };
+}
+function allocationBatchReference(row) {
+  const legacyId = nullableIntegerCell(row, "batch_legacy_id");
+  const fileName = nullableStringCell(row, "batch_file_name");
+  if (legacyId !== null) {
+    return `#${String(legacyId)}${fileName === null ? "" : ` \xB7 ${fileName}`}`;
+  }
+  return fileName ?? "Multi-batch run";
+}
+function allocationRunStatusCell(row, column) {
+  const value = stringCell(row, column);
+  if (value === "running") return "running";
+  if (value === "error" || value === "failed") return "failed";
+  if (value === "calculated" || value === "completed") return "completed";
+  return "queued";
+}
+function allocationRunStatusPredicate(status) {
+  if (status === "completed") return "cr.status in ('calculated', 'completed')";
+  if (status === "failed") return "cr.status in ('error', 'failed')";
+  if (status === "running") return "cr.status = 'running'";
+  return "cr.status = 'pending'";
+}
 function catalogReviewReason(contributors, artistImport, catalogArtist, overrideId) {
   if (contributors.length === 0) {
     return "no_contributors";
@@ -26804,6 +27306,50 @@ function decodeCatalogCursor(value) {
 }
 function encodeContractCursor(cursor) {
   return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+function encodeAllocationBatchCursor(cursor) {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+function decodeAllocationBatchCursor(value) {
+  const parsed = decodeAllocationCursor(value);
+  if (parsed === null) return null;
+  if ("legacySort" in parsed && Number.isSafeInteger(parsed.legacySort) && "id" in parsed && typeof parsed.id === "string" && parsed.id !== "") {
+    return { legacySort: parsed.legacySort, id: parsed.id };
+  }
+  throw new DistributionAllocationCursorError();
+}
+function encodeAllocationBankCursor(cursor) {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+function decodeAllocationBankCursor(value) {
+  const parsed = decodeAllocationCursor(value);
+  if (parsed === null) return null;
+  if ("rowCount" in parsed && Number.isSafeInteger(parsed.rowCount) && "id" in parsed && typeof parsed.id === "string" && parsed.id !== "") {
+    return { rowCount: parsed.rowCount, id: parsed.id };
+  }
+  throw new DistributionAllocationCursorError();
+}
+function encodeAllocationRunCursor(cursor) {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+function decodeAllocationRunCursor(value) {
+  const parsed = decodeAllocationCursor(value);
+  if (parsed === null) return null;
+  if ("createdAt" in parsed && typeof parsed.createdAt === "string" && parsed.createdAt !== "" && "id" in parsed && typeof parsed.id === "string" && parsed.id !== "") {
+    return { createdAt: parsed.createdAt, id: parsed.id };
+  }
+  throw new DistributionAllocationCursorError();
+}
+function decodeAllocationCursor(value) {
+  if (value === null) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      return parsed;
+    }
+  } catch {
+  }
+  throw new DistributionAllocationCursorError();
 }
 function decodeContractCursor(value) {
   if (value === null) {
@@ -26854,6 +27400,17 @@ function nullableDateStringCell(row, column) {
   }
   throw new Error(`Postgres column ${column} must be a nullable date.`);
 }
+function timestampStringCell(row, column) {
+  const value = row[column];
+  if (typeof value === "string") return value;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString();
+  throw new Error(`Postgres column ${column} must be a timestamp.`);
+}
+function nullableTimestampStringCell(row, column) {
+  const value = row[column];
+  if (value === null || value === void 0) return null;
+  return timestampStringCell(row, column);
+}
 function integerCell(row, column) {
   const value = row[column];
   const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
@@ -26861,6 +27418,11 @@ function integerCell(row, column) {
     throw new Error(`Postgres column ${column} must be an integer.`);
   }
   return parsed;
+}
+function nullableIntegerCell(row, column) {
+  const value = row[column];
+  if (value === null || value === void 0) return null;
+  return integerCell(row, column);
 }
 function catalogStatusCell(row, column) {
   const value = stringCell(row, column);
@@ -26915,6 +27477,35 @@ function contractCurrencyTotalArrayCell(row, column) {
   return jsonArrayCell(row, column).map((value) => {
     if (typeof value !== "object" || value === null || !("currency" in value) || typeof value.currency !== "string" || !("amountMicro" in value) || typeof value.amountMicro !== "string") {
       throw new Error(`Postgres column ${column} contains an invalid currency total.`);
+    }
+    return { currency: value.currency, amountMicro: value.amountMicro };
+  });
+}
+function allocationBatchCurrencyTotalArrayCell(row, column) {
+  return jsonArrayCell(row, column).map((value) => {
+    if (typeof value !== "object" || value === null || !("currency" in value) || typeof value.currency !== "string" || !("openAmountMicro" in value) || typeof value.openAmountMicro !== "string" || !("allocatedAmountMicro" in value) || typeof value.allocatedAmountMicro !== "string") {
+      throw new Error(`Postgres column ${column} contains an invalid allocation batch total.`);
+    }
+    return { currency: value.currency, openAmountMicro: value.openAmountMicro, allocatedAmountMicro: value.allocatedAmountMicro };
+  });
+}
+function allocationRunCurrencyTotalArrayCell(row, column) {
+  return jsonArrayCell(row, column).map((value) => {
+    if (typeof value !== "object" || value === null || !("currency" in value) || typeof value.currency !== "string" || !("grossMicro" in value) || typeof value.grossMicro !== "string" || !("recoupmentMicro" in value) || typeof value.recoupmentMicro !== "string" || !("netMicro" in value) || typeof value.netMicro !== "string") {
+      throw new Error(`Postgres column ${column} contains an invalid allocation run total.`);
+    }
+    return {
+      currency: value.currency,
+      grossMicro: value.grossMicro,
+      recoupmentMicro: value.recoupmentMicro,
+      netMicro: value.netMicro
+    };
+  });
+}
+function allocationUnallocatedCurrencyTotalArrayCell(row, column) {
+  return jsonArrayCell(row, column).map((value) => {
+    if (typeof value !== "object" || value === null || !("currency" in value) || typeof value.currency !== "string" || !("amountMicro" in value) || typeof value.amountMicro !== "string") {
+      throw new Error(`Postgres column ${column} contains an invalid unallocated total.`);
     }
     return { currency: value.currency, amountMicro: value.amountMicro };
   });
@@ -40149,6 +40740,7 @@ var SENSITIVE_ACTIONS = /* @__PURE__ */ new Set([
   "distribution_alias_upsert",
   "distribution_catalog_contributors_override",
   "distribution_allocations_preview",
+  "distribution_allocations_retry_missing_contracts",
   "distribution_allocations_run",
   "distribution_allocations_unpost",
   "distribution_contract_expense_create",
@@ -40714,6 +41306,7 @@ async function persistDistributionAllocationRun(tx, input) {
   await tx.executor.execute(sql`
     insert into calculation_runs (
       id,
+      workspace_id,
       batch_id,
       status,
       reconciliation_json,
@@ -40722,6 +41315,7 @@ async function persistDistributionAllocationRun(tx, input) {
     )
     values (
       ${input.runId},
+      ${input.workspaceId},
       ${input.batchId},
       'calculated',
       ${JSON.stringify(input.metadata)}::jsonb,
@@ -40800,6 +41394,7 @@ async function persistDistributionAllocationRun(tx, input) {
     await tx.executor.execute(sql`
       insert into suspense_items (
         id,
+        workspace_id,
         earning_id,
         amount,
         currency,
@@ -40807,11 +41402,30 @@ async function persistDistributionAllocationRun(tx, input) {
       )
       values (
         ${randomUUID()},
+        ${input.workspaceId},
         ${suspense.earningId},
         ${suspense.amount},
         ${suspense.currency},
         ${suspense.reasonCode}
       )
+    `);
+  }
+  const allocatedEarningIds = [...new Set(input.allocations.map((allocation) => allocation.earningId))];
+  if (allocatedEarningIds.length > 0) {
+    await tx.executor.execute(sql`
+      update normalized_earnings
+      set calculation_status = 'calculated', updated_at = now()
+      where workspace_id = ${input.workspaceId}
+        and id in (${sql.join(allocatedEarningIds.map((earningId) => sql`${earningId}`), sql`, `)})
+    `);
+  }
+  const suspenseEarningIds = [...new Set(input.suspenseItems.map((item) => item.earningId))];
+  if (suspenseEarningIds.length > 0) {
+    await tx.executor.execute(sql`
+      update normalized_earnings
+      set calculation_status = 'suspense', updated_at = now()
+      where workspace_id = ${input.workspaceId}
+        and id in (${sql.join(suspenseEarningIds.map((earningId) => sql`${earningId}`), sql`, `)})
     `);
   }
 }
@@ -41847,6 +42461,9 @@ var allocationRunUnpostSchema = workspaceBodySchema.extend({
   reason: external_exports.string().min(1),
   lockToken: external_exports.string().min(1)
 });
+var allocationRetryMissingContractsSchema = workspaceBodySchema.extend({
+  trackId: external_exports.string().uuid()
+});
 var suspenseResolveSchema = workspaceBodySchema.extend({
   suspenseId: external_exports.string().min(1),
   resolution: external_exports.enum(["map_to_release", "map_to_track", "hold"]),
@@ -42804,6 +43421,32 @@ function registerDistributionRoutes(app, dependencies) {
   app.get("/erh/v1/ping", (_context) => {
     return _context.json({ ok: true });
   });
+  app.get("/erh/v1/allocations/workbench", async (context) => {
+    const workspaceId = requireQuery(context, "workspaceId");
+    if (dependencies.distributionReads === void 0) {
+      throw new ApiRouteError(503, "allocations_repository_unavailable", "The live Allocations repository is unavailable.", []);
+    }
+    try {
+      const response = await dependencies.distributionReads.readAllocationWorkbench({
+        workspaceId,
+        search: nullableQuery(context, "search"),
+        dateFrom: toAllocationIsoDateQuery(nullableQuery(context, "dateFrom"), "dateFrom"),
+        dateTo: toAllocationIsoDateQuery(nullableQuery(context, "dateTo"), "dateTo"),
+        batchCursor: nullableQuery(context, "batchCursor"),
+        bankCursor: nullableQuery(context, "bankCursor"),
+        limit: pageLimit(context)
+      });
+      return context.json(response);
+    } catch (error) {
+      if (error instanceof DistributionAllocationCursorError) {
+        throw new ApiRouteError(400, "allocations_cursor_invalid", error.message, []);
+      }
+      throw error;
+    }
+  });
+  app.post("/erh/v1/allocations/retry-missing-contracts", async (context) => {
+    return distributionAllocationRetryMissingContractsResponse(context, dependencies);
+  });
   app.get("/erh/v1/allocations", (context) => {
     resolveWorkspaceId(context);
     const calculationRunId = nullableQuery(context, "runId");
@@ -42827,11 +43470,25 @@ function registerDistributionRoutes(app, dependencies) {
     });
     return context.json(pageItems(context, allocations.totals));
   });
-  app.get("/erh/v1/allocations/runs", (context) => {
-    requireQuery(context, "workspaceId");
-    const status = nullableQuery(context, "status");
-    const runs = dependencies.fixtures.distribution.calculationRuns.map((run) => toAllocationRunSummary(dependencies.fixtures.distribution, run)).filter((run) => status === null || run.status === status);
-    return context.json(pageItems(context, runs));
+  app.get("/erh/v1/allocations/runs", async (context) => {
+    const workspaceId = requireQuery(context, "workspaceId");
+    if (dependencies.distributionReads === void 0) {
+      throw new ApiRouteError(503, "allocations_repository_unavailable", "The live Allocations repository is unavailable.", []);
+    }
+    try {
+      return context.json(await dependencies.distributionReads.listAllocationRuns({
+        workspaceId,
+        period: toAllocationPeriodQuery(nullableQuery(context, "period")),
+        status: toAllocationRunStatusFilter(nullableQuery(context, "status")),
+        cursor: nullableQuery(context, "cursor"),
+        limit: pageLimit(context)
+      }));
+    } catch (error) {
+      if (error instanceof DistributionAllocationCursorError) {
+        throw new ApiRouteError(400, "allocations_cursor_invalid", error.message, []);
+      }
+      throw error;
+    }
   });
   app.post("/erh/v1/allocations/runs/preview", async (context) => {
     return distributionAllocationPreviewResponse(context, dependencies);
@@ -47867,13 +48524,149 @@ async function distributionAllocationPreviewResponse(context, dependencies) {
   const request = await readJsonBody(context);
   assertAllocationRunPreviewRequest(context, request);
   requirePermissionForWorkspace(context.get("authUser"), "distribution_allocations_preview", request.workspaceId);
-  const runId = previewIdFor("allocation-run", `${request.period}:${request.lockKey}`);
-  const plan = buildAllocationExecutionPlan(dependencies, request.period, request.lockKey, runId);
+  const batchId = request.batchId ?? null;
+  await validateAllocationBatchRequest(dependencies, request.workspaceId, request.period, batchId);
+  const runId = previewIdFor("allocation-run", `${request.period}:${request.lockKey}:${batchId ?? "all"}`);
+  const plan = buildAllocationExecutionPlan(dependencies, request.period, request.lockKey, runId, batchId);
   return context.json(toAllocationRunPlanResponse(plan, null));
+}
+async function distributionAllocationRetryMissingContractsResponse(context, dependencies) {
+  const request = await readZodBody(context, allocationRetryMissingContractsSchema);
+  const repository = dependencies.distributionReads;
+  if (repository === void 0) {
+    throw new ApiRouteError(503, "allocations_repository_unavailable", "The live Allocations repository is unavailable.", []);
+  }
+  const track = await repository.getContractTrack(request.workspaceId, request.trackId);
+  if (track === null) {
+    throw new ApiRouteError(404, "allocation_track_not_found", "The allocation track was not found in this workspace.", [`trackId=${request.trackId}`]);
+  }
+  if (track.status !== "active" || track.splits.length === 0 || track.splitTotalPercentage !== "100.000000") {
+    throw new ApiRouteError(409, "allocation_contract_incomplete", "A complete active 100% split is required before missing-contract rows can be retried.", [
+      `trackId=${request.trackId}`,
+      `status=${track.status}`,
+      `splitTotal=${track.splitTotalPercentage}`
+    ]);
+  }
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "distribution_allocations_retry_missing_contracts",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `distribution:allocation:retry:${request.trackId}`);
+      const resetRowCount = tx.kind === "memory" ? countDistributionMissingContractsFixture(dependencies.fixtures, request.trackId) : await persistDistributionAllocationRetryMissingContracts(tx, request.workspaceId, request.trackId);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_allocations_retry_missing_contracts",
+        targetType: "track",
+        targetId: request.trackId,
+        before: { openMissingContractRows: resetRowCount },
+        after: { resetToPendingRows: resetRowCount, resolvedSuspenseRows: resetRowCount },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      retryDistributionMissingContractsFixture(dependencies.fixtures, request.trackId, dependencies.nowIso());
+      return { id: request.trackId, status: "completed", auditEventId, resetRowCount };
+    }
+  });
+  return context.json(result.body, result.status);
+}
+async function validateAllocationBatchRequest(dependencies, workspaceId, period, batchId) {
+  if (batchId === null) return;
+  const repository = dependencies.distributionReads;
+  if (repository === void 0) {
+    throw new ApiRouteError(503, "allocations_repository_unavailable", "The live Allocations repository is unavailable.", []);
+  }
+  const batch = await repository.getAllocationBatch(workspaceId, batchId);
+  if (batch === null) {
+    throw new ApiRouteError(404, "allocation_batch_not_found", "The allocation batch was not found in this workspace.", [`batchId=${batchId}`]);
+  }
+  if (batch.period !== period) {
+    throw new ApiRouteError(409, "allocation_batch_period_mismatch", "The requested allocation period does not match the selected batch.", [
+      `batchId=${batchId}`,
+      `batchPeriod=${batch.period}`,
+      `requestPeriod=${period}`
+    ]);
+  }
+}
+async function persistDistributionAllocationRetryMissingContracts(tx, workspaceId, trackId) {
+  if (tx.kind === "memory") {
+    return 0;
+  }
+  const rows = queryRowsFromResult(await tx.executor.execute(sql`
+    with target_earnings as (
+      select distinct ne.id
+      from normalized_earnings ne
+      join tracks target on target.id = ${trackId} and target.workspace_id = ${workspaceId}
+      where ne.workspace_id = ${workspaceId}
+        and ne.mapping_status = 'matched'
+        and ne.calculation_status = 'suspense'
+        and (
+          (ne.isrc is not null and target.isrc = ne.isrc)
+          or exists (
+            select 1 from earning_track_matches etm
+            where etm.earning_id = ne.id
+              and etm.track_id = target.id
+              and etm.status not in ('ignored', 'suspense')
+          )
+        )
+        and exists (
+          select 1 from suspense_items si
+          where si.earning_id = ne.id
+            and si.workspace_id = ${workspaceId}
+            and si.reason_code = 'missing_contract'
+            and si.resolved = false
+        )
+    ), reset_earnings as (
+      update normalized_earnings ne
+      set calculation_status = 'pending', updated_at = now()
+      where ne.id in (select id from target_earnings)
+      returning ne.id
+    ), resolved_suspense as (
+      update suspense_items si
+      set resolved = true, resolved_at = now()
+      where si.workspace_id = ${workspaceId}
+        and si.reason_code = 'missing_contract'
+        and si.resolved = false
+        and si.earning_id in (select id from target_earnings)
+      returning si.id
+    )
+    select count(*)::int as reset_row_count from reset_earnings
+  `));
+  return integerQueryField(rows[0], "reset_row_count");
+}
+function retryDistributionMissingContractsFixture(fixtures, trackId, resolvedAt) {
+  const mutableDistribution = fixtures.distribution;
+  const track = fixtures.distribution.tracks.find((candidate) => candidate.id === trackId);
+  if (track === void 0) return;
+  const targetEarningIds = new Set(
+    fixtures.distribution.normalizedEarnings.filter((earning) => earning.calculationStatus === "suspense" && earning.mappingStatus === "matched" && earning.isrc !== null && earning.isrc === track.isrc).map((earning) => earning.id)
+  );
+  mutableDistribution.normalizedEarnings = fixtures.distribution.normalizedEarnings.map(
+    (earning) => targetEarningIds.has(earning.id) ? { ...earning, calculationStatus: "pending" } : earning
+  );
+  mutableDistribution.suspenseItems = fixtures.distribution.suspenseItems.map(
+    (item) => item.earningId !== null && targetEarningIds.has(item.earningId) && item.reasonCode === "missing_contract" && !item.resolved ? { ...item, resolved: true, resolvedAt } : item
+  );
+}
+function countDistributionMissingContractsFixture(fixtures, trackId) {
+  const track = fixtures.distribution.tracks.find((candidate) => candidate.id === trackId);
+  if (track === void 0 || track.isrc === null) return 0;
+  const openMissingEarningIds = new Set(
+    fixtures.distribution.suspenseItems.filter((item) => !item.resolved && item.reasonCode === "missing_contract" && item.earningId !== null).map((item) => item.earningId)
+  );
+  return fixtures.distribution.normalizedEarnings.filter(
+    (earning) => earning.calculationStatus === "suspense" && earning.mappingStatus === "matched" && earning.isrc === track.isrc && openMissingEarningIds.has(earning.id)
+  ).length;
 }
 async function distributionAllocationRunResponse(context, dependencies) {
   const request = await readJsonBody(context);
   assertAllocationRunStartRequest(context, request);
+  const batchId = request.batchId ?? null;
+  await validateAllocationBatchRequest(dependencies, request.workspaceId, request.period, batchId);
   const idempotencyKey = requireIdempotencyKey(context);
   const actor = context.get("authUser");
   const result = await runIdempotentMutation({
@@ -47886,7 +48679,7 @@ async function distributionAllocationRunResponse(context, dependencies) {
     write: async (tx, resolvedIdempotencyKey) => {
       await acquireAdvisoryLock(tx, request.lockKey);
       const runId = randomUUID2();
-      const plan = buildAllocationExecutionPlan(dependencies, request.period, request.lockKey, runId);
+      const plan = buildAllocationExecutionPlan(dependencies, request.period, request.lockKey, runId, batchId);
       const persistedAllocations = plan.allocations.map((allocation) => ({
         id: randomUUID2(),
         ...allocation
@@ -47895,6 +48688,7 @@ async function distributionAllocationRunResponse(context, dependencies) {
       const finishedAtIso = dependencies.nowIso();
       const persistInput = {
         runId,
+        workspaceId: request.workspaceId,
         batchId: plan.batchId,
         startedAtIso,
         finishedAtIso,
@@ -47907,6 +48701,7 @@ async function distributionAllocationRunResponse(context, dependencies) {
           period: request.period,
           lockKey: request.lockKey,
           cadence: request.cadence,
+          batchId,
           earningCount: plan.pendingEarnings.length,
           allocationCount: plan.allocations.length,
           suspenseCount: plan.suspenseItems.length
@@ -49227,11 +50022,13 @@ function assertAllocationRunPreviewRequest(context, request) {
   assertStringField(context, request.workspaceId, "workspaceId");
   assertPeriodField(context, request.period, "period");
   assertStringField(context, request.lockKey, "lockKey");
+  if (request.batchId !== void 0) assertNullableStringField(context, request.batchId, "batchId");
 }
 function assertAllocationRunStartRequest(context, request) {
   assertStringField(context, request.workspaceId, "workspaceId");
   assertPeriodField(context, request.period, "period");
   assertStringField(context, request.lockKey, "lockKey");
+  if (request.batchId !== void 0) assertNullableStringField(context, request.batchId, "batchId");
   if (request.cadence !== "manual" && request.cadence !== "scheduled") {
     throw new ApiRouteError(400, "body_field_invalid", "Allocation cadence is invalid.", [`path=${context.req.path}`, `cadence=${String(request.cadence)}`]);
   }
@@ -49477,8 +50274,8 @@ function previewRowsFromRecords(rows) {
     rawData: row
   }));
 }
-function buildAllocationExecutionPlan(dependencies, period, lockKey, runId) {
-  const pendingEarnings = dependencies.fixtures.distribution.normalizedEarnings.filter((earning) => earning.mappingStatus === "matched").filter((earning) => earning.calculationStatus === "pending").filter((earning) => earningMatchesPeriod(dependencies.fixtures.distribution, earning, period));
+function buildAllocationExecutionPlan(dependencies, period, lockKey, runId, batchId) {
+  const pendingEarnings = dependencies.fixtures.distribution.normalizedEarnings.filter((earning) => earning.mappingStatus === "matched").filter((earning) => earning.calculationStatus === "pending").filter((earning) => batchId === null || earning.batchId === batchId).filter((earning) => earningMatchesPeriod(dependencies.fixtures.distribution, earning, period));
   const allocations = [];
   const expenseApplications = [];
   const costTermUpdates = /* @__PURE__ */ new Map();
@@ -49508,7 +50305,7 @@ function buildAllocationExecutionPlan(dependencies, period, lockKey, runId) {
     expenseApplications,
     costTermStatusUpdates: [...costTermUpdates.values()],
     suspenseItems,
-    batchId: singleBatchId(pendingEarnings)
+    batchId: batchId ?? singleBatchId(pendingEarnings)
   };
 }
 function toAllocationRunPlanResponse(plan, auditEventId) {
@@ -50966,6 +51763,27 @@ function toOptionalIsoDateQuery(value, key) {
     throw new ApiRouteError(400, "catalog_date_invalid", "Catalog date filter must use YYYY-MM-DD.", [`${key}=${value}`]);
   }
   return parsed.data;
+}
+function toAllocationIsoDateQuery(value, key) {
+  if (value === null) return null;
+  const parsed = isoDateSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new ApiRouteError(400, "allocations_date_invalid", "Allocation date filter must use YYYY-MM-DD.", [`${key}=${value}`]);
+  }
+  return parsed.data;
+}
+function toAllocationPeriodQuery(value) {
+  if (value === null) return null;
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/u.test(value)) {
+    throw new ApiRouteError(400, "allocations_period_invalid", "Allocation period must use YYYY-MM.", [`period=${value}`]);
+  }
+  return value;
+}
+function toAllocationRunStatusFilter(value) {
+  if (value === null || value === "queued" || value === "running" || value === "completed" || value === "failed") {
+    return value;
+  }
+  throw new ApiRouteError(400, "allocations_status_invalid", "Allocation run status filter is invalid.", [`status=${value}`]);
 }
 function distributionMappingRowMatchesSearch(row, search) {
   const query = search.trim().toLocaleLowerCase();
@@ -52635,7 +53453,7 @@ function toDistributionImportBatch(dataset, batchId) {
     id: batch.id,
     source: batch.source === "routenote" ? "routenote" : "kontor",
     fileName: batch.fileName,
-    period: "2026-04",
+    period: (batch.importedAt ?? "1970-01").slice(0, 7),
     statementReference: batch.id,
     accountReference: batch.source,
     rowCount: rows.length,
@@ -52687,7 +53505,8 @@ function toApiCatalogStatus(status) {
 function toAllocationRunSummary(dataset, run) {
   const allocations = readAllocationList(dataset, { calculationRunId: run.id, payeeId: null, status: null });
   const total = allocations.totals[0];
-  const period = "2026-04";
+  const batch = run.batchId === null ? null : dataset.importBatches.find((candidate) => candidate.id === run.batchId) ?? null;
+  const period = (batch?.importedAt ?? run.startedAt ?? run.createdAt).slice(0, 7);
   return {
     id: run.id,
     runReference: `${period} \xB7 distribution:allocation:${run.id}`,
@@ -52697,7 +53516,13 @@ function toAllocationRunSummary(dataset, run) {
     startedAt: run.startedAt,
     completedAt: run.finishedAt,
     totalInputMicro: total?.grossShare ?? "0.0000000000",
-    totalAllocatedMicro: total?.netPayable ?? "0.0000000000"
+    totalAllocatedMicro: total?.netPayable ?? "0.0000000000",
+    currencyTotals: allocations.totals.map((currencyTotal) => ({
+      currency: currencyTotal.currency,
+      grossMicro: currencyTotal.grossShare,
+      recoupmentMicro: currencyTotal.recoupmentApplied,
+      netMicro: currencyTotal.netPayable
+    }))
   };
 }
 function toApiRunStatus(status) {
@@ -53985,7 +54810,7 @@ async function readDistributionDataset(pool) {
     releases,
     tracks
   ] = await Promise.all([
-    queryRows(pool, "select id::text, source, file_name, status, imported_at from import_batches order by legacy_id nulls last, id", []),
+    queryRows(pool, "select id::text, source, file_name, status, coalesce(imported_at, created_at) as imported_at from import_batches order by legacy_id nulls last, id", []),
     queryRows(
       pool,
       "select id::text, batch_id::text, dsp, gross_amount::text, quantity::text, currency, isrc, upc, raw_title, raw_artist, raw_label, mapping_status, calculation_status from normalized_earnings order by legacy_id nulls last, id",
@@ -54390,7 +55215,7 @@ function toOfficeTransaction2(row) {
     originalCurrency: nullableStringCell2(row, "original_currency"),
     exchangeRateE10: nullableBigintCell(row, "exchange_rate_e10"),
     vatApplicable: booleanCell(row, "vat_applicable"),
-    vatRateBp: nullableIntegerCell(row, "vat_rate_bp"),
+    vatRateBp: nullableIntegerCell2(row, "vat_rate_bp"),
     vatAmountMinor: bigintCell(row, "vat_amount_minor")
   };
 }
@@ -54787,7 +55612,7 @@ function nullableBigintCell(row, columnName) {
   const value = nullableStringCell2(row, columnName);
   return value === null ? null : BigInt(value);
 }
-function nullableIntegerCell(row, columnName) {
+function nullableIntegerCell2(row, columnName) {
   const value = nullableStringCell2(row, columnName);
   return value === null ? null : numberFromText(value, columnName);
 }

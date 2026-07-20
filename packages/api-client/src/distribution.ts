@@ -8,6 +8,10 @@ import type {
   AllocationRunStartRequest,
   AllocationRunSummary,
   AllocationRunUnpostRequest,
+  DistributionAllocationRetryMissingContractsRequest,
+  DistributionAllocationRetryReceipt,
+  DistributionAllocationWorkbenchQuery,
+  DistributionAllocationWorkbenchResponse,
   ApiClientConfig,
   AuditLogEntry,
   AuditLogQuery,
@@ -166,6 +170,9 @@ export interface DistributionApiClient {
     options: WriteRequestOptions
   ) => Promise<ApiMutationReceipt>;
   readonly listAllocationRuns: (query: AllocationRunQuery) => Promise<PageResult<AllocationRunSummary>>;
+  readonly getAllocationWorkbench: (
+    query: DistributionAllocationWorkbenchQuery
+  ) => Promise<DistributionAllocationWorkbenchResponse>;
   readonly previewAllocationRun: (
     request: AllocationRunPreviewRequest,
     options: WriteRequestOptions
@@ -179,6 +186,10 @@ export interface DistributionApiClient {
     request: AllocationRunUnpostRequest,
     options: WriteRequestOptions
   ) => Promise<ApiRunReceipt>;
+  readonly retryAllocationMissingContracts: (
+    request: DistributionAllocationRetryMissingContractsRequest,
+    options: WriteRequestOptions
+  ) => Promise<DistributionAllocationRetryReceipt>;
   readonly listAllocations: (query: DistributionAllocationQuery) => Promise<PageResult<DistributionAllocationRow>>;
   readonly listAllocationsByCurrency: (
     query: DistributionAllocationQuery
@@ -471,6 +482,18 @@ export function createDistributionApiClient(config: ApiClientConfig): Distributi
         cursor: query.cursor,
         limit: query.limit
       }),
+    getAllocationWorkbench: (
+      query: DistributionAllocationWorkbenchQuery
+    ): Promise<DistributionAllocationWorkbenchResponse> =>
+      transport.get<DistributionAllocationWorkbenchResponse>("allocations/workbench", {
+        workspaceId: query.workspaceId,
+        search: query.search,
+        dateFrom: query.dateFrom,
+        dateTo: query.dateTo,
+        batchCursor: query.batchCursor,
+        bankCursor: query.bankCursor,
+        limit: query.limit
+      }),
     previewAllocationRun: (
       request: AllocationRunPreviewRequest,
       options: WriteRequestOptions
@@ -488,6 +511,15 @@ export function createDistributionApiClient(config: ApiClientConfig): Distributi
     ): Promise<ApiRunReceipt> =>
       transport.post<ApiRunReceipt>(
         `allocations/runs/${encodePathSegment(runId)}/unpost`,
+        request,
+        options.idempotencyKey
+      ),
+    retryAllocationMissingContracts: (
+      request: DistributionAllocationRetryMissingContractsRequest,
+      options: WriteRequestOptions
+    ): Promise<DistributionAllocationRetryReceipt> =>
+      transport.post<DistributionAllocationRetryReceipt>(
+        "allocations/retry-missing-contracts",
         request,
         options.idempotencyKey
       ),

@@ -162,6 +162,13 @@
       "when": 1784568600000,
       "tag": "0022_distribution_contract_workbench",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1784572200000,
+      "tag": "0023_distribution_allocation_workbench",
+      "breakpoints": true
     }
   ]
 }

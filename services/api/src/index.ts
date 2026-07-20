@@ -119,6 +119,9 @@ import type {
   AllocationRunStartRequest,
   AllocationRunSummary,
   AllocationRunUnpostRequest,
+  DistributionAllocationRetryMissingContractsRequest,
+  DistributionAllocationRetryReceipt,
+  DistributionAllocationWorkbenchResponse,
   ApiMutationReceipt,
   ApiRunReceipt,
   AuditLogEntry,
@@ -250,6 +253,7 @@ import {
 } from "./auth.js";
 import { parseDistributionImportPreview } from "./distribution-import-parser.js";
 import {
+  DistributionAllocationCursorError,
   DistributionCatalogCursorError,
   DistributionContractCursorError,
   DistributionMappingCursorError,
@@ -943,6 +947,9 @@ const distributionTrackUpsertSchema = workspaceBodySchema.extend({
 const allocationRunUnpostSchema = workspaceBodySchema.extend({
   reason: z.string().min(1),
   lockToken: z.string().min(1)
+});
+const allocationRetryMissingContractsSchema = workspaceBodySchema.extend({
+  trackId: z.string().uuid()
 });
 const suspenseResolveSchema = workspaceBodySchema.extend({
   suspenseId: z.string().min(1),
@@ -2182,6 +2189,34 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
     return _context.json({ ok: true });
   });
 
+  app.get("/erh/v1/allocations/workbench", async (context) => {
+    const workspaceId = requireQuery(context, "workspaceId");
+    if (dependencies.distributionReads === undefined) {
+      throw new ApiRouteError(503, "allocations_repository_unavailable", "The live Allocations repository is unavailable.", []);
+    }
+    try {
+      const response: DistributionAllocationWorkbenchResponse = await dependencies.distributionReads.readAllocationWorkbench({
+        workspaceId,
+        search: nullableQuery(context, "search"),
+        dateFrom: toAllocationIsoDateQuery(nullableQuery(context, "dateFrom"), "dateFrom"),
+        dateTo: toAllocationIsoDateQuery(nullableQuery(context, "dateTo"), "dateTo"),
+        batchCursor: nullableQuery(context, "batchCursor"),
+        bankCursor: nullableQuery(context, "bankCursor"),
+        limit: pageLimit(context)
+      });
+      return context.json(response);
+    } catch (error: unknown) {
+      if (error instanceof DistributionAllocationCursorError) {
+        throw new ApiRouteError(400, "allocations_cursor_invalid", error.message, []);
+      }
+      throw error;
+    }
+  });
+
+  app.post("/erh/v1/allocations/retry-missing-contracts", async (context) => {
+    return distributionAllocationRetryMissingContractsResponse(context, dependencies);
+  });
+
   app.get("/erh/v1/allocations", (context) => {
     resolveWorkspaceId(context);
     const calculationRunId = nullableQuery(context, "runId");
@@ -2207,13 +2242,25 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
     return context.json(pageItems(context, allocations.totals));
   });
 
-  app.get("/erh/v1/allocations/runs", (context) => {
-    requireQuery(context, "workspaceId");
-    const status = nullableQuery(context, "status");
-    const runs = dependencies.fixtures.distribution.calculationRuns
-      .map((run) => toAllocationRunSummary(dependencies.fixtures.distribution, run))
-      .filter((run) => status === null || run.status === status);
-    return context.json(pageItems(context, runs));
+  app.get("/erh/v1/allocations/runs", async (context) => {
+    const workspaceId = requireQuery(context, "workspaceId");
+    if (dependencies.distributionReads === undefined) {
+      throw new ApiRouteError(503, "allocations_repository_unavailable", "The live Allocations repository is unavailable.", []);
+    }
+    try {
+      return context.json(await dependencies.distributionReads.listAllocationRuns({
+        workspaceId,
+        period: toAllocationPeriodQuery(nullableQuery(context, "period")),
+        status: toAllocationRunStatusFilter(nullableQuery(context, "status")),
+        cursor: nullableQuery(context, "cursor"),
+        limit: pageLimit(context)
+      }));
+    } catch (error: unknown) {
+      if (error instanceof DistributionAllocationCursorError) {
+        throw new ApiRouteError(400, "allocations_cursor_invalid", error.message, []);
+      }
+      throw error;
+    }
   });
 
   app.post("/erh/v1/allocations/runs/preview", async (context) => {
@@ -8014,14 +8061,176 @@ async function distributionAllocationPreviewResponse(context: ApiContext, depend
   const request = await readJsonBody<AllocationRunPreviewRequest>(context);
   assertAllocationRunPreviewRequest(context, request);
   requirePermissionForWorkspace(context.get("authUser"), "distribution_allocations_preview", request.workspaceId);
-  const runId = previewIdFor("allocation-run", `${request.period}:${request.lockKey}`);
-  const plan = buildAllocationExecutionPlan(dependencies, request.period, request.lockKey, runId);
+  const batchId = request.batchId ?? null;
+  await validateAllocationBatchRequest(dependencies, request.workspaceId, request.period, batchId);
+  const runId = previewIdFor("allocation-run", `${request.period}:${request.lockKey}:${batchId ?? "all"}`);
+  const plan = buildAllocationExecutionPlan(dependencies, request.period, request.lockKey, runId, batchId);
   return context.json(toAllocationRunPlanResponse(plan, null));
+}
+
+async function distributionAllocationRetryMissingContractsResponse(
+  context: ApiContext,
+  dependencies: ApiServiceDependencies
+): Promise<Response> {
+  const request = await readZodBody<DistributionAllocationRetryMissingContractsRequest>(context, allocationRetryMissingContractsSchema);
+  const repository = dependencies.distributionReads;
+  if (repository === undefined) {
+    throw new ApiRouteError(503, "allocations_repository_unavailable", "The live Allocations repository is unavailable.", []);
+  }
+  const track = await repository.getContractTrack(request.workspaceId, request.trackId);
+  if (track === null) {
+    throw new ApiRouteError(404, "allocation_track_not_found", "The allocation track was not found in this workspace.", [`trackId=${request.trackId}`]);
+  }
+  if (track.status !== "active" || track.splits.length === 0 || track.splitTotalPercentage !== "100.000000") {
+    throw new ApiRouteError(409, "allocation_contract_incomplete", "A complete active 100% split is required before missing-contract rows can be retried.", [
+      `trackId=${request.trackId}`,
+      `status=${track.status}`,
+      `splitTotal=${track.splitTotalPercentage}`
+    ]);
+  }
+
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation<DistributionAllocationRetryReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "distribution_allocations_retry_missing_contracts",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey): Promise<DistributionAllocationRetryReceipt & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `distribution:allocation:retry:${request.trackId}`);
+      const resetRowCount = tx.kind === "memory"
+        ? countDistributionMissingContractsFixture(dependencies.fixtures, request.trackId)
+        : await persistDistributionAllocationRetryMissingContracts(tx, request.workspaceId, request.trackId);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_allocations_retry_missing_contracts",
+        targetType: "track",
+        targetId: request.trackId,
+        before: { openMissingContractRows: resetRowCount },
+        after: { resetToPendingRows: resetRowCount, resolvedSuspenseRows: resetRowCount },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      retryDistributionMissingContractsFixture(dependencies.fixtures, request.trackId, dependencies.nowIso());
+      return { id: request.trackId, status: "completed", auditEventId, resetRowCount };
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+async function validateAllocationBatchRequest(
+  dependencies: ApiServiceDependencies,
+  workspaceId: string,
+  period: string,
+  batchId: string | null
+): Promise<void> {
+  if (batchId === null) return;
+  const repository = dependencies.distributionReads;
+  if (repository === undefined) {
+    throw new ApiRouteError(503, "allocations_repository_unavailable", "The live Allocations repository is unavailable.", []);
+  }
+  const batch = await repository.getAllocationBatch(workspaceId, batchId);
+  if (batch === null) {
+    throw new ApiRouteError(404, "allocation_batch_not_found", "The allocation batch was not found in this workspace.", [`batchId=${batchId}`]);
+  }
+  if (batch.period !== period) {
+    throw new ApiRouteError(409, "allocation_batch_period_mismatch", "The requested allocation period does not match the selected batch.", [
+      `batchId=${batchId}`,
+      `batchPeriod=${batch.period}`,
+      `requestPeriod=${period}`
+    ]);
+  }
+}
+
+async function persistDistributionAllocationRetryMissingContracts(
+  tx: ApiWriteTransaction,
+  workspaceId: string,
+  trackId: string
+): Promise<number> {
+  if (tx.kind === "memory") {
+    return 0;
+  }
+  const rows = queryRowsFromResult(await tx.executor.execute(sql`
+    with target_earnings as (
+      select distinct ne.id
+      from normalized_earnings ne
+      join tracks target on target.id = ${trackId} and target.workspace_id = ${workspaceId}
+      where ne.workspace_id = ${workspaceId}
+        and ne.mapping_status = 'matched'
+        and ne.calculation_status = 'suspense'
+        and (
+          (ne.isrc is not null and target.isrc = ne.isrc)
+          or exists (
+            select 1 from earning_track_matches etm
+            where etm.earning_id = ne.id
+              and etm.track_id = target.id
+              and etm.status not in ('ignored', 'suspense')
+          )
+        )
+        and exists (
+          select 1 from suspense_items si
+          where si.earning_id = ne.id
+            and si.workspace_id = ${workspaceId}
+            and si.reason_code = 'missing_contract'
+            and si.resolved = false
+        )
+    ), reset_earnings as (
+      update normalized_earnings ne
+      set calculation_status = 'pending', updated_at = now()
+      where ne.id in (select id from target_earnings)
+      returning ne.id
+    ), resolved_suspense as (
+      update suspense_items si
+      set resolved = true, resolved_at = now()
+      where si.workspace_id = ${workspaceId}
+        and si.reason_code = 'missing_contract'
+        and si.resolved = false
+        and si.earning_id in (select id from target_earnings)
+      returning si.id
+    )
+    select count(*)::int as reset_row_count from reset_earnings
+  `));
+  return integerQueryField(rows[0], "reset_row_count");
+}
+
+function retryDistributionMissingContractsFixture(fixtures: ApiFixtureStore, trackId: string, resolvedAt: string): void {
+  const mutableDistribution = fixtures.distribution as Mutable<DistributionReadDataset>;
+  const track = fixtures.distribution.tracks.find((candidate) => candidate.id === trackId);
+  if (track === undefined) return;
+  const targetEarningIds = new Set(
+    fixtures.distribution.normalizedEarnings
+      .filter((earning) => earning.calculationStatus === "suspense" && earning.mappingStatus === "matched" && earning.isrc !== null && earning.isrc === track.isrc)
+      .map((earning) => earning.id)
+  );
+  mutableDistribution.normalizedEarnings = fixtures.distribution.normalizedEarnings.map((earning) =>
+    targetEarningIds.has(earning.id) ? { ...earning, calculationStatus: "pending" } : earning
+  );
+  mutableDistribution.suspenseItems = fixtures.distribution.suspenseItems.map((item) =>
+    item.earningId !== null && targetEarningIds.has(item.earningId) && item.reasonCode === "missing_contract" && !item.resolved
+      ? { ...item, resolved: true, resolvedAt }
+      : item
+  );
+}
+
+function countDistributionMissingContractsFixture(fixtures: ApiFixtureStore, trackId: string): number {
+  const track = fixtures.distribution.tracks.find((candidate) => candidate.id === trackId);
+  if (track === undefined || track.isrc === null) return 0;
+  const openMissingEarningIds = new Set(
+    fixtures.distribution.suspenseItems
+      .filter((item) => !item.resolved && item.reasonCode === "missing_contract" && item.earningId !== null)
+      .map((item) => item.earningId as string)
+  );
+  return fixtures.distribution.normalizedEarnings.filter((earning) =>
+    earning.calculationStatus === "suspense" && earning.mappingStatus === "matched" && earning.isrc === track.isrc && openMissingEarningIds.has(earning.id)
+  ).length;
 }
 
 async function distributionAllocationRunResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
   const request = await readJsonBody<AllocationRunStartRequest>(context);
   assertAllocationRunStartRequest(context, request);
+  const batchId = request.batchId ?? null;
+  await validateAllocationBatchRequest(dependencies, request.workspaceId, request.period, batchId);
   const idempotencyKey = requireIdempotencyKey(context);
   const actor = context.get("authUser");
   const result = await runIdempotentMutation<AllocationRunMutationResponse>({
@@ -8034,7 +8243,7 @@ async function distributionAllocationRunResponse(context: ApiContext, dependenci
     write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<AllocationRunMutationResponse> => {
       await acquireAdvisoryLock(tx, request.lockKey);
       const runId = randomUUID();
-      const plan = buildAllocationExecutionPlan(dependencies, request.period, request.lockKey, runId);
+      const plan = buildAllocationExecutionPlan(dependencies, request.period, request.lockKey, runId, batchId);
       const persistedAllocations = plan.allocations.map((allocation): PersistedEarningAllocationInsert => ({
         id: randomUUID(),
         ...allocation
@@ -8043,6 +8252,7 @@ async function distributionAllocationRunResponse(context: ApiContext, dependenci
       const finishedAtIso = dependencies.nowIso();
       const persistInput: PersistDistributionAllocationRunInput = {
         runId,
+        workspaceId: request.workspaceId,
         batchId: plan.batchId,
         startedAtIso,
         finishedAtIso,
@@ -8055,6 +8265,7 @@ async function distributionAllocationRunResponse(context: ApiContext, dependenci
           period: request.period,
           lockKey: request.lockKey,
           cadence: request.cadence,
+          batchId,
           earningCount: plan.pendingEarnings.length,
           allocationCount: plan.allocations.length,
           suspenseCount: plan.suspenseItems.length
@@ -9501,12 +9712,14 @@ function assertAllocationRunPreviewRequest(context: ApiContext, request: Allocat
   assertStringField(context, request.workspaceId, "workspaceId");
   assertPeriodField(context, request.period, "period");
   assertStringField(context, request.lockKey, "lockKey");
+  if (request.batchId !== undefined) assertNullableStringField(context, request.batchId, "batchId");
 }
 
 function assertAllocationRunStartRequest(context: ApiContext, request: AllocationRunStartRequest): void {
   assertStringField(context, request.workspaceId, "workspaceId");
   assertPeriodField(context, request.period, "period");
   assertStringField(context, request.lockKey, "lockKey");
+  if (request.batchId !== undefined) assertNullableStringField(context, request.batchId, "batchId");
   if (request.cadence !== "manual" && request.cadence !== "scheduled") {
     throw new ApiRouteError(400, "body_field_invalid", "Allocation cadence is invalid.", [`path=${context.req.path}`, `cadence=${String(request.cadence)}`]);
   }
@@ -9819,11 +10032,13 @@ function buildAllocationExecutionPlan(
   dependencies: ApiServiceDependencies,
   period: string,
   lockKey: string,
-  runId: string
+  runId: string,
+  batchId: string | null
 ): AllocationExecutionPlan {
   const pendingEarnings = dependencies.fixtures.distribution.normalizedEarnings
     .filter((earning) => earning.mappingStatus === "matched")
     .filter((earning) => earning.calculationStatus === "pending")
+    .filter((earning) => batchId === null || earning.batchId === batchId)
     .filter((earning) => earningMatchesPeriod(dependencies.fixtures.distribution, earning, period));
   const allocations: EarningAllocationInsert[] = [];
   const expenseApplications: ExpenseApplicationInsert[] = [];
@@ -9857,7 +10072,7 @@ function buildAllocationExecutionPlan(
     expenseApplications,
     costTermStatusUpdates: [...costTermUpdates.values()],
     suspenseItems,
-    batchId: singleBatchId(pendingEarnings)
+    batchId: batchId ?? singleBatchId(pendingEarnings)
   };
 }
 
@@ -11833,6 +12048,30 @@ function toOptionalIsoDateQuery(value: string | null, key: string): string | nul
     throw new ApiRouteError(400, "catalog_date_invalid", "Catalog date filter must use YYYY-MM-DD.", [`${key}=${value}`]);
   }
   return parsed.data;
+}
+
+function toAllocationIsoDateQuery(value: string | null, key: string): string | null {
+  if (value === null) return null;
+  const parsed = isoDateSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new ApiRouteError(400, "allocations_date_invalid", "Allocation date filter must use YYYY-MM-DD.", [`${key}=${value}`]);
+  }
+  return parsed.data;
+}
+
+function toAllocationPeriodQuery(value: string | null): string | null {
+  if (value === null) return null;
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/u.test(value)) {
+    throw new ApiRouteError(400, "allocations_period_invalid", "Allocation period must use YYYY-MM.", [`period=${value}`]);
+  }
+  return value;
+}
+
+function toAllocationRunStatusFilter(value: string | null): AllocationRunSummary["status"] | null {
+  if (value === null || value === "queued" || value === "running" || value === "completed" || value === "failed") {
+    return value;
+  }
+  throw new ApiRouteError(400, "allocations_status_invalid", "Allocation run status filter is invalid.", [`status=${value}`]);
 }
 
 function distributionMappingRowMatchesSearch(row: DistributionMappingRow, search: string): boolean {
@@ -14020,7 +14259,7 @@ function toDistributionImportBatch(dataset: DistributionReadDataset, batchId: st
     id: batch.id,
     source: batch.source === "routenote" ? "routenote" : "kontor",
     fileName: batch.fileName,
-    period: "2026-04",
+    period: (batch.importedAt ?? "1970-01").slice(0, 7),
     statementReference: batch.id,
     accountReference: batch.source,
     rowCount: rows.length,
@@ -14081,7 +14320,8 @@ function toApiCatalogStatus(status: string): ReleaseSummary["status"] {
 function toAllocationRunSummary(dataset: DistributionReadDataset, run: DistributionCalculationRunRow): AllocationRunSummary {
   const allocations = readAllocationList(dataset, { calculationRunId: run.id, payeeId: null, status: null });
   const total = allocations.totals[0];
-  const period = "2026-04";
+  const batch = run.batchId === null ? null : dataset.importBatches.find((candidate) => candidate.id === run.batchId) ?? null;
+  const period = (batch?.importedAt ?? run.startedAt ?? run.createdAt).slice(0, 7);
   return {
     id: run.id,
     runReference: `${period} · distribution:allocation:${run.id}`,
@@ -14091,7 +14331,13 @@ function toAllocationRunSummary(dataset: DistributionReadDataset, run: Distribut
     startedAt: run.startedAt,
     completedAt: run.finishedAt,
     totalInputMicro: total?.grossShare ?? "0.0000000000",
-    totalAllocatedMicro: total?.netPayable ?? "0.0000000000"
+    totalAllocatedMicro: total?.netPayable ?? "0.0000000000",
+    currencyTotals: allocations.totals.map((currencyTotal) => ({
+      currency: currencyTotal.currency,
+      grossMicro: currencyTotal.grossShare,
+      recoupmentMicro: currencyTotal.recoupmentApplied,
+      netMicro: currencyTotal.netPayable
+    }))
   };
 }
 

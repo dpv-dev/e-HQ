@@ -1778,6 +1778,97 @@ export interface AllocationRunQuery extends PageQuery {
   readonly status: "queued" | "running" | "completed" | "failed" | null;
 }
 
+export interface DistributionAllocationWorkbenchQuery {
+  readonly workspaceId: EntityId;
+  readonly search: string | null;
+  readonly dateFrom: IsoDateString | null;
+  readonly dateTo: IsoDateString | null;
+  readonly batchCursor: CursorString | null;
+  readonly bankCursor: CursorString | null;
+  readonly limit: number;
+}
+
+export interface DistributionAllocationWorkbenchSummary {
+  readonly readyRowCount: number;
+  readonly openSuspenseCount: number;
+  readonly missingContractCount: number;
+  readonly matchedUnallocatedCount: number;
+  readonly allocationLinkIssueCount: number;
+}
+
+export interface DistributionAllocationSuspenseReason {
+  readonly reason: string;
+  readonly openRowCount: number;
+}
+
+export interface DistributionAllocationBatchCurrencyTotal {
+  readonly currency: CurrencyCode;
+  readonly openAmountMicro: MoneyMicroString;
+  readonly allocatedAmountMicro: MoneyMicroString;
+}
+
+export interface DistributionAllocationBatchRow {
+  readonly id: EntityId;
+  readonly reference: string;
+  readonly fileName: string;
+  readonly source: string;
+  readonly status: string;
+  readonly period: IsoMonthString;
+  readonly importedAt: IsoDateTimeString | null;
+  readonly totalRowCount: number;
+  readonly matchedRowCount: number;
+  readonly pendingRowCount: number;
+  readonly allocatedRowCount: number;
+  readonly suspenseRowCount: number;
+  readonly currencyTotals: readonly DistributionAllocationBatchCurrencyTotal[];
+}
+
+export interface DistributionAllocationRunCurrencyTotal {
+  readonly currency: CurrencyCode;
+  readonly grossMicro: MoneyMicroString;
+  readonly recoupmentMicro: MoneyMicroString;
+  readonly netMicro: MoneyMicroString;
+}
+
+export interface DistributionAllocationRecentBatch {
+  readonly runId: EntityId;
+  readonly batchId: EntityId | null;
+  readonly batchReference: string;
+  readonly period: IsoMonthString;
+  readonly status: "queued" | "running" | "completed" | "failed";
+  readonly rowCount: number;
+  readonly linkIssueCount: number;
+  readonly totals: readonly DistributionAllocationRunCurrencyTotal[];
+  readonly startedAt: IsoDateTimeString | null;
+  readonly completedAt: IsoDateTimeString | null;
+}
+
+export interface DistributionAllocationUnallocatedCurrencyTotal {
+  readonly currency: CurrencyCode;
+  readonly amountMicro: MoneyMicroString;
+}
+
+export interface DistributionAllocationUnallocatedTrack {
+  readonly trackId: EntityId;
+  readonly releaseId: EntityId | null;
+  readonly releaseTitle: string | null;
+  readonly trackTitle: string;
+  readonly isrc: string | null;
+  readonly rowCount: number;
+  readonly batchCount: number;
+  readonly currencyTotals: readonly DistributionAllocationUnallocatedCurrencyTotal[];
+  readonly firstSeenAt: IsoDateTimeString;
+  readonly lastSeenAt: IsoDateTimeString;
+}
+
+export interface DistributionAllocationWorkbenchResponse {
+  readonly summary: DistributionAllocationWorkbenchSummary;
+  readonly suspenseReasons: readonly DistributionAllocationSuspenseReason[];
+  readonly recentBatches: readonly DistributionAllocationRecentBatch[];
+  readonly batches: PageResult<DistributionAllocationBatchRow>;
+  readonly unallocatedBank: PageResult<DistributionAllocationUnallocatedTrack>;
+}
+
 export type DistributionAllocationStatus = "preview" | "calculated" | "statemented" | "posted" | "void" | "error";
 
 export interface DistributionAllocationQuery extends PageQuery {
@@ -1822,12 +1913,14 @@ export interface AllocationRunSummary {
   readonly completedAt: IsoDateTimeString | null;
   readonly totalInputMicro: MoneyMicroString;
   readonly totalAllocatedMicro: MoneyMicroString;
+  readonly currencyTotals: readonly DistributionAllocationRunCurrencyTotal[];
 }
 
 export interface AllocationRunPreviewRequest {
   readonly workspaceId: EntityId;
   readonly period: IsoMonthString;
   readonly lockKey: string;
+  readonly batchId: EntityId | null;
 }
 
 export interface AllocationRunStartRequest {
@@ -1835,6 +1928,16 @@ export interface AllocationRunStartRequest {
   readonly period: IsoMonthString;
   readonly lockKey: string;
   readonly cadence: "manual" | "scheduled";
+  readonly batchId: EntityId | null;
+}
+
+export interface DistributionAllocationRetryMissingContractsRequest {
+  readonly workspaceId: EntityId;
+  readonly trackId: EntityId;
+}
+
+export interface DistributionAllocationRetryReceipt extends ApiMutationReceipt {
+  readonly resetRowCount: number;
 }
 
 export interface AllocationRunUnpostRequest {

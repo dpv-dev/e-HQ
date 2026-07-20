@@ -433,7 +433,7 @@ async function readDistributionDataset(pool: Pool): Promise<DistributionReadData
     releases,
     tracks
   ] = await Promise.all([
-    queryRows(pool, "select id::text, source, file_name, status, imported_at from import_batches order by legacy_id nulls last, id", []),
+    queryRows(pool, "select id::text, source, file_name, status, coalesce(imported_at, created_at) as imported_at from import_batches order by legacy_id nulls last, id", []),
     queryRows(
       pool,
       "select id::text, batch_id::text, dsp, gross_amount::text, quantity::text, currency, isrc, upc, raw_title, raw_artist, raw_label, mapping_status, calculation_status from normalized_earnings order by legacy_id nulls last, id",

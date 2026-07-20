@@ -5622,6 +5622,7 @@ function createTestAuthVerifier(): SupabaseJwtVerifier {
 
 test("Distribution mapping route delegates filters and opaque cursors to the live repository", async () => {
   let receivedQuery: Readonly<Record<string, unknown>> | null = null;
+  let receivedAllocationQuery: Readonly<Record<string, unknown>> | null = null;
   const app = createApiService({
     fixtures: createFixtureStore(),
     persistence: createMemoryPersistenceRuntime({ WRITES_ENABLED: "false" }),
@@ -5672,7 +5673,13 @@ test("Distribution mapping route delegates filters and opaque cursors to the liv
         }
       }),
       getContractTrack: async () => null,
-      validateContractPayees: async () => false
+      validateContractPayees: async () => false,
+      readAllocationWorkbench: async (query) => {
+        receivedAllocationQuery = query;
+        return emptyAllocationWorkbench();
+      },
+      listAllocationRuns: async () => ({ items: [], nextCursor: null }),
+      getAllocationBatch: async () => null
     },
     health: null,
     nowIso: (): string => "2026-07-20T00:00:00.000Z",
@@ -5702,6 +5709,28 @@ test("Distribution mapping route delegates filters and opaque cursors to the liv
   );
   assert.equal(invalidStatus.status, 400);
   assert.equal((await invalidStatus.json()).error.code, "mapping_status_invalid");
+
+  const allocationWorkbench = await app.request(
+    "/erh/v1/allocations/workbench?workspaceId=eeee-mu&search=Night&dateFrom=2026-01-01&dateTo=2026-12-31&batchCursor=batch-opaque&bankCursor=bank-opaque&limit=25",
+    { headers: authHeaders() }
+  );
+  assert.equal(allocationWorkbench.status, 200);
+  assert.deepEqual(receivedAllocationQuery, {
+    workspaceId: "eeee-mu",
+    search: "Night",
+    dateFrom: "2026-01-01",
+    dateTo: "2026-12-31",
+    batchCursor: "batch-opaque",
+    bankCursor: "bank-opaque",
+    limit: 25
+  });
+
+  const invalidAllocationDate = await app.request(
+    "/erh/v1/allocations/workbench?workspaceId=eeee-mu&dateFrom=20-07-2026",
+    { headers: authHeaders() }
+  );
+  assert.equal(invalidAllocationDate.status, 400);
+  assert.equal((await invalidAllocationDate.json()).error.code, "allocations_date_invalid");
 });
 
 test("Distribution Catalog workbench delegates parity filters to the live repository", async () => {
@@ -5758,7 +5787,10 @@ test("Distribution Catalog workbench delegates parity filters to the live reposi
         }
       }),
       getContractTrack: async () => null,
-      validateContractPayees: async () => false
+      validateContractPayees: async () => false,
+      readAllocationWorkbench: async () => emptyAllocationWorkbench(),
+      listAllocationRuns: async () => ({ items: [], nextCursor: null }),
+      getAllocationBatch: async () => null
     },
     health: null,
     nowIso: (): string => "2026-07-20T00:00:00.000Z",
@@ -5824,6 +5856,112 @@ test("Distribution Catalog workbench delegates parity filters to the live reposi
   ));
 });
 
+test("Distribution Allocations retries missing-contract earnings only after a complete split and audits idempotently", async () => {
+  const fixtures = createFixtureStore();
+  const allocationTrackId = "20000000-0000-0000-0000-000000000001";
+  Object.assign(fixtures.distribution, {
+    normalizedEarnings: fixtures.distribution.normalizedEarnings.map((earning) =>
+      earning.id === "earning_pending" ? { ...earning, calculationStatus: "suspense" as const } : earning
+    ),
+    suspenseItems: [
+      ...fixtures.distribution.suspenseItems,
+      {
+        id: "suspense_missing_contract",
+        earningId: "earning_pending",
+        amount: "100.0000000000",
+        currency: "USD",
+        reasonCode: "missing_contract",
+        resolved: false,
+        resolvedAt: null,
+        createdAt: "2026-07-20T00:00:00.000Z"
+      }
+    ],
+    tracks: fixtures.distribution.tracks.map((track) => track.id === "track_1" ? { ...track, id: allocationTrackId } : track)
+  });
+  const completeTrack = {
+    trackId: allocationTrackId,
+    title: "Seggae light",
+    versionTitle: null,
+    releaseTitle: "Seggae light",
+    artistImport: "Kaya",
+    catalogArtist: "Kaya",
+    isrc: "MUAAA2600001",
+    label: "Babani",
+    status: "active" as const,
+    contractId: "contract_1",
+    contractIds: ["contract_1"],
+    contractTitle: "Kaya artist agreement",
+    splitSource: "track" as const,
+    splits: [{ payeeId: "payee_alma", payeeName: "Alma", percentage: "100.000000", role: "artist" }],
+    splitTotalPercentage: "100.000000",
+    expenseCount: 0,
+    openExpenseTotals: []
+  };
+  const app = createApiService({
+    fixtures,
+    persistence: createMemoryPersistenceRuntime({ WRITES_ENABLED: "true" }),
+    distributionReads: {
+      listMappingRows: async () => ({ items: [], nextCursor: null }),
+      listCatalogTracks: async () => ({
+        items: [],
+        nextCursor: null,
+        facets: { labels: [], roles: [], releases: [] },
+        summary: { trackCount: 0, needsReviewCount: 0, artistMismatchCount: 0, noContributorCount: 0 }
+      }),
+      getCatalogTrack: async () => null,
+      listContractTracks: async () => ({
+        items: [completeTrack],
+        nextCursor: null,
+        summary: {
+          activeTrackOnlyCount: 1,
+          activeEffectiveCount: 1,
+          expiredContractCount: 0,
+          draftContractCount: 0,
+          directTrackRuleCount: 1,
+          noEffectiveSplitCount: 0,
+          ambiguousCount: 0,
+          unallocatedRowCount: 1,
+          openRecoupmentTotals: []
+        }
+      }),
+      getContractTrack: async (_workspaceId, trackId) => trackId === completeTrack.trackId ? completeTrack : null,
+      validateContractPayees: async () => true,
+      readAllocationWorkbench: async () => emptyAllocationWorkbench(),
+      listAllocationRuns: async () => ({ items: [], nextCursor: null }),
+      getAllocationBatch: async () => null
+    },
+    health: null,
+    nowIso: (): string => "2026-07-20T00:00:00.000Z",
+    auth: createTestAuthVerifier()
+  });
+
+  const request = (): Promise<Response> => app.request("/erh/v1/allocations/retry-missing-contracts", {
+    method: "POST",
+    headers: {
+      ...authHeaders(),
+      "Content-Type": "application/json",
+      "Idempotency-Key": "allocation-retry-missing-contract-1"
+    },
+    body: JSON.stringify({ workspaceId: "eeee-mu", trackId: completeTrack.trackId })
+  });
+  const response = await request();
+  assert.equal(response.status, 200);
+  const receipt = (await response.json()) as { readonly resetRowCount: number; readonly auditEventId: string | null };
+  assert.equal(receipt.resetRowCount, 1);
+  assert.ok(receipt.auditEventId !== null);
+  assert.equal(fixtures.distribution.normalizedEarnings.find((earning) => earning.id === "earning_pending")?.calculationStatus, "pending");
+  assert.equal(fixtures.distribution.suspenseItems.find((item) => item.id === "suspense_missing_contract")?.resolved, true);
+
+  const replay = await request();
+  assert.equal(replay.status, 200);
+  assert.deepEqual(await replay.json(), receipt);
+  const audit = await app.request("/erh/v1/audit-log?workspaceId=eeee-mu&limit=100", { headers: authHeaders() });
+  const auditPage = (await audit.json()) as { readonly items: readonly { readonly action: string; readonly idempotencyKey: string | null }[] };
+  assert.equal(auditPage.items.filter((entry) =>
+    entry.action === "distribution_allocations_retry_missing_contracts" && entry.idempotencyKey === "allocation-retry-missing-contract-1"
+  ).length, 1);
+});
+
 test("Distribution Contracts workbench delegates filters and appends audited complete track split overrides", async () => {
   let receivedQuery: Readonly<Record<string, unknown>> | null = null;
   const fixtures = createFixtureStore();
@@ -5878,7 +6016,10 @@ test("Distribution Contracts workbench delegates filters and appends audited com
         };
       },
       getContractTrack: async (_workspaceId, trackId) => trackId === contractTrack.trackId ? contractTrack : null,
-      validateContractPayees: async (_workspaceId, payeeIds) => payeeIds.length === 1 && payeeIds[0] === payeeId
+      validateContractPayees: async (_workspaceId, payeeIds) => payeeIds.length === 1 && payeeIds[0] === payeeId,
+      readAllocationWorkbench: async () => emptyAllocationWorkbench(),
+      listAllocationRuns: async () => ({ items: [], nextCursor: null }),
+      getAllocationBatch: async () => null
     },
     health: null,
     nowIso: (): string => "2026-07-20T00:00:00.000Z",
@@ -6151,6 +6292,7 @@ async function createPgliteAllocationTables(pglite: PGlite): Promise<void> {
   await pglite.exec(`
     create table calculation_runs (
       id text primary key,
+      workspace_id text not null,
       batch_id text,
       status text not null default 'pending',
       reconciliation_json jsonb not null default '{}'::jsonb,
@@ -6201,6 +6343,7 @@ async function createPgliteAllocationTables(pglite: PGlite): Promise<void> {
 
     create table suspense_items (
       id text primary key,
+      workspace_id text not null,
       earning_id text,
       amount numeric(28, 10) not null,
       currency char(3) not null,
@@ -6208,6 +6351,13 @@ async function createPgliteAllocationTables(pglite: PGlite): Promise<void> {
       resolved boolean not null default false,
       resolved_at timestamp with time zone,
       created_at timestamp with time zone default now() not null
+    );
+
+    create table normalized_earnings (
+      id text primary key,
+      workspace_id text not null,
+      calculation_status text not null default 'pending',
+      updated_at timestamp with time zone default now() not null
     );
   `);
 }
@@ -6385,4 +6535,20 @@ async function nextTurn(): Promise<void> {
   await new Promise<void>((resolve) => {
     setImmediate(resolve);
   });
+}
+
+function emptyAllocationWorkbench() {
+  return {
+    summary: {
+      readyRowCount: 0,
+      openSuspenseCount: 0,
+      missingContractCount: 0,
+      matchedUnallocatedCount: 0,
+      allocationLinkIssueCount: 0
+    },
+    suspenseReasons: [],
+    recentBatches: [],
+    batches: { items: [], nextCursor: null },
+    unallocatedBank: { items: [], nextCursor: null }
+  } as const;
 }

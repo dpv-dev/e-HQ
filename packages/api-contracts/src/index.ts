@@ -189,6 +189,18 @@ export function createOpenApiDocument(): Readonly<Record<string, unknown>> {
       "/erh/v1/contracts/{contractId}/expenses": {
         post: { operationId: "recordDistributionContractExpense", summary: "Record an audited Distribution expense or advance" }
       },
+      "/erh/v1/allocations/workbench": {
+        get: {
+          operationId: "readDistributionAllocationWorkbench",
+          summary: "Read allocation readiness, batch queue, recent runs, suspense reasons, and the missing-contract royalty bank"
+        }
+      },
+      "/erh/v1/allocations/retry-missing-contracts": {
+        post: {
+          operationId: "retryDistributionMissingContractAllocations",
+          summary: "Reset missing-contract earnings with idempotency and an audit event after a complete track split exists"
+        }
+      },
       "/erh/v1/payments": {
         post: { operationId: "recordDistributionPayment", summary: "Record a standalone or statement-linked Distribution payment" }
       },
