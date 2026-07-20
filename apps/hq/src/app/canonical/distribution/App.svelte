@@ -19,9 +19,12 @@
     type DistributionCatalogReviewFilter,
     type DistributionCatalogTrackRow,
     type DistributionCatalogWorkbenchResponse,
-    type DistributionContract,
     type DistributionContractExpense,
     type DistributionContractExpenseCategory,
+    type DistributionContractTrackRow,
+    type DistributionContractTrackStatus,
+    type DistributionContractWorkbenchResponse,
+    type DistributionContractWorkflowFilter,
     type DistributionDashboardResponse,
     type DistributionDashboardReadinessItem,
     type DistributionDashboardTopRoyalty,
@@ -149,7 +152,13 @@
   type CatalogEntryStatus = "draft" | "released" | "archived";
   type CatalogStatusFilter = "all" | CatalogEntryStatus;
   type CatalogReviewFilter = "all" | DistributionCatalogReviewFilter;
-  type ContractStatus = "draft" | "active" | "paused" | "ended";
+  type ContractStatusFilter = "all" | DistributionContractTrackStatus;
+  type ContractWorkflowFilter = "all" | DistributionContractWorkflowFilter;
+
+  interface ContractSplitDraft {
+    readonly payeeId: string;
+    readonly percentage: string;
+  }
 
   interface DistributionKpi {
     readonly label: string;
@@ -291,11 +300,11 @@
     { label: "Lyricist", value: "lyricist" },
     { label: "Other", value: "other" }
   ];
-  const contractStatusOptions: readonly SelectOption[] = [
-    { label: "Draft", value: "draft" },
+  const contractTrackStatusOptions: readonly SelectOption[] = [
+    { label: "All statuses", value: allValue },
     { label: "Active", value: "active" },
-    { label: "Paused", value: "paused" },
-    { label: "Ended", value: "ended" }
+    { label: "No split", value: "no_split" },
+    { label: "Ambiguous", value: "ambiguous" }
   ];
   const revenueGroupOptions: readonly SelectOption[] = [
     { label: "Store", value: "store" },
@@ -368,11 +377,14 @@
     { label: "ISRC", align: "left", sortable: true }
   ];
   const contractColumns: readonly TableColumn[] = [
-    { label: "Contract", align: "left", sortable: true },
-    { label: "Payee", align: "left", sortable: true },
-    { label: "Split", align: "right", sortable: true },
-    { label: "Open expenses", align: "right", sortable: true },
-    { label: "Status", align: "left", sortable: true }
+    { label: "Track / release", align: "left", sortable: true },
+    { label: "Artist", align: "left", sortable: true },
+    { label: "ISRC", align: "left", sortable: true },
+    { label: "Label", align: "left", sortable: true },
+    { label: "Splits", align: "left", sortable: true },
+    { label: "Expenses", align: "left", sortable: true },
+    { label: "Status", align: "left", sortable: true },
+    { label: "Selection", align: "left", sortable: true }
   ];
   const payeeColumns: readonly TableColumn[] = [
     { label: "Payee", align: "left", sortable: true },
@@ -543,8 +555,8 @@
   let catalogState = $state<ApiRequestState<DistributionCatalogWorkbenchResponse>>(
     createIdleState<DistributionCatalogWorkbenchResponse>()
   );
-  let contractsState = $state<ApiRequestState<PageResult<DistributionContract>>>(
-    createIdleState<PageResult<DistributionContract>>()
+  let contractWorkbenchState = $state<ApiRequestState<DistributionContractWorkbenchResponse>>(
+    createIdleState<DistributionContractWorkbenchResponse>()
   );
   let expensesState = $state<ApiRequestState<PageResult<DistributionContractExpense>>>(
     createIdleState<PageResult<DistributionContractExpense>>()
@@ -592,6 +604,9 @@
   let catalogLabelFilter = $state(allValue);
   let catalogReleaseFrom = $state("");
   let catalogReleaseTo = $state("");
+  let contractSearch = $state("");
+  let contractStatusFilter = $state<ContractStatusFilter>(allValue);
+  let contractWorkflowFilter = $state<ContractWorkflowFilter>(allValue);
   let suspenseStatusFilter = $state<SuspenseStatusFilter>("open");
   let paymentStatusFilter = $state<PaymentStatusFilter>(allValue);
   let statementPayeeFilter = $state<string>(allValue);
@@ -663,21 +678,19 @@
   let catalogContributorNameInput = $state("");
   let catalogContributorRoleInput = $state("main_artist");
   let catalogContributorReasonInput = $state("");
-  let contractPanelOpen = $state(false);
+  let contractPickerOpen = $state(false);
+  let contractPickerTrackId = $state("");
+  let selectedContractRowIds = $state<readonly string[]>([]);
+  let contractEditorTrackIds = $state<readonly string[]>([]);
+  let contractSplitDrafts = $state<readonly ContractSplitDraft[]>([]);
+  let contractRuleReasonInput = $state("");
+  let contractRuleEffectiveFromInput = $state(today);
+  let contractRuleEffectiveToInput = $state("");
+  let contractRuleCurrencyInput = $state("MUR");
   let payeePanelOpen = $state(false);
   let payeeNameInput = $state("");
   let payeeEmailInput = $state("");
   let payeeCurrencyInput = $state("MUR");
-  let contractTitleInput = $state("");
-  let contractPayeeIdInput = $state("");
-  let contractStatusInput = $state<ContractStatus>("draft");
-  let contractEffectiveFromInput = $state("");
-  let contractEffectiveToInput = $state("");
-  let contractSplitPercentInput = $state("");
-  let contractCurrencyInput = $state("");
-  let ruleContractId = $state<string | null>(null);
-  let rulePayeeIdInput = $state("");
-  let rulePercentageInput = $state("");
   let expenseContractFilterId = $state("");
   let expensePanelOpen = $state(false);
   let expenseContractIdInput = $state("");
@@ -687,6 +700,7 @@
   let expenseRecoverableInput = $state("yes");
   let expenseAmountInput = $state("");
   let expenseDateInput = $state("");
+  let expenseCurrencyInput = $state("MUR");
   let printingStatementId = $state<string | null>(null);
   let statementPrintError = $state<string | null>(null);
   let fxFromCurrencyInput = $state("EUR");
@@ -719,7 +733,8 @@
   const tracks = $derived(readPageItems(tracksState));
   const catalogWorkbench = $derived(catalogState.status === "success" ? catalogState.data : null);
   const catalogTracks = $derived(catalogWorkbench?.items ?? []);
-  const contracts = $derived(readPageItems(contractsState));
+  const contractWorkbench = $derived(contractWorkbenchState.status === "success" ? contractWorkbenchState.data : null);
+  const contractTracks = $derived(contractWorkbench?.items ?? []);
   const expenses = $derived(readPageItems(expensesState));
   const allocationRuns = $derived(readPageItems(allocationsState));
   const suspenseItems = $derived(readPageItems(suspenseState));
@@ -740,7 +755,7 @@
   const mappingTableRows = $derived(createMappingRows(filteredMappingRows, selectedMappingRowIds));
   const catalogRows = $derived(createCatalogRows(catalogTracks));
   const catalogReviewRows = $derived(createCatalogReviewRows(catalogTracks));
-  const contractRows = $derived(createContractRows(contracts, payees));
+  const contractRows = $derived(createContractRows(contractTracks, selectedContractRowIds));
   const expenseRows = $derived(createExpenseRows(expenses));
   const allocationRows = $derived(createAllocationRows(allocationRuns));
   const suspenseTableRows = $derived(createSuspenseRows(suspenseItems));
@@ -779,7 +794,7 @@
       : [])
   ], 1));
   const dashboardKpis = $derived(createDashboardKpis(dashboardState));
-  const contractKpis = $derived(createContractKpis(contracts, tracks));
+  const contractKpis = $derived(createContractKpis(contractWorkbench));
   const payeeRows = $derived(createPayeeRows(payees));
   const revenueKpis = $derived(createRevenueKpis(revenueRows, payments, suspenseItems));
   const importPagination = $derived<TablePagination | null>(
@@ -792,7 +807,7 @@
     createTablePagination(catalogState, tablePaginationLoading === "catalog", tablePaginationError("catalog"), loadMoreCatalog, loadAllCatalog)
   );
   const contractsPagination = $derived<TablePagination | null>(
-    createTablePagination(contractsState, tablePaginationLoading === "contracts", tablePaginationError("contracts"), loadMoreContracts, loadAllContracts)
+    createTablePagination(contractWorkbenchState, tablePaginationLoading === "contracts", tablePaginationError("contracts"), loadMoreContracts, loadAllContracts)
   );
   const expensesPagination = $derived<TablePagination | null>(
     createTablePagination(expensesState, tablePaginationLoading === "expenses", tablePaginationError("expenses"), loadMoreExpenses, loadAllExpenses)
@@ -877,19 +892,41 @@
   );
   const suspenseResolveTarget = $derived(resolveSuspenseTargetFor(selectedSuspenseResolution, selectedSuspenseTrack));
   const selectedRun = $derived(allocationRuns.find((run: AllocationRunSummary): boolean => run.id === selectedRunId) ?? null);
-  const selectedRuleContract = $derived(contracts.find((contract: DistributionContract): boolean => contract.id === ruleContractId) ?? null);
-  const selectedExpenseFilterContract = $derived(
-    contracts.find((contract: DistributionContract): boolean => contract.id === expenseContractFilterId) ?? null
+  const contractEditorTracks = $derived(
+    contractEditorTrackIds.map((trackId) => contractTracks.find((track) => track.trackId === trackId)).filter((track): track is DistributionContractTrackRow => track !== undefined)
   );
-  const contractSplitBp = $derived(parseSplitBasisPoints(contractSplitPercentInput));
-  const ruleReplacementPercentage = $derived(normalizeSingleRuleReplacementPercentage(rulePercentageInput));
+  const primaryContractEditorTrack = $derived(contractEditorTracks[0] ?? null);
+  const selectedExpenseFilterContract = $derived(
+    contractTracks.find((track) => track.contractId === expenseContractFilterId) ?? null
+  );
   const selectedExpenseContract = $derived(
-    contracts.find((contract: DistributionContract): boolean => contract.id === expenseContractIdInput) ?? null
+    contractTracks.find((track) => track.contractId === expenseContractIdInput) ?? null
+  );
+  const contractSplitTotal = $derived(contractSplitTotalPercentage(contractSplitDrafts));
+  const contractSplitDraftValid = $derived(
+    contractEditorTrackIds.length > 0 &&
+    contractSplitDrafts.length > 0 &&
+    contractSplitDrafts.every((split) => split.payeeId !== "" && parseContractPercentageUnits(split.percentage) !== null) &&
+    new Set(contractSplitDrafts.map((split) => split.payeeId)).size === contractSplitDrafts.length &&
+    contractSplitTotal === "100.000000" &&
+    contractRuleReasonInput.trim() !== "" &&
+    contractRuleEffectiveFromInput !== "" &&
+    normalizeCurrencyCode(contractRuleCurrencyInput) !== null
   );
   const expenseAmountMicro = $derived(parseExpenseAmountMicro(expenseAmountInput));
   const expenseContractSelectOptions = $derived<readonly SelectOption[]>(sortOptionsAlphabetically([
     { label: "Select a contract", value: "" },
-    ...contracts.map((contract: DistributionContract): SelectOption => ({ label: `${contract.title} · ${contract.currency}`, value: contract.id }))
+    ...uniqueContractTracks(contractTracks).map((track): SelectOption => ({
+      label: `${track.title} · ${track.releaseTitle ?? "No release"}`,
+      value: track.contractId ?? ""
+    }))
+  ], 1));
+  const contractPickerOptions = $derived<readonly SelectOption[]>(sortOptionsAlphabetically([
+    { label: "Select a track", value: "" },
+    ...contractTracks.map((track): SelectOption => ({
+      label: `${track.title} · ${track.catalogArtist} · ${contractTrackStatusLabel(track.status)}`,
+      value: track.trackId
+    }))
   ], 1));
   const expenseTableTitle = $derived(
     selectedExpenseFilterContract === null
@@ -970,7 +1007,8 @@
     { label: "Open", onAction: openDashboardReadiness }
   ];
   const contractRowActions: readonly TableRowAction[] = [
-    { label: "Replace rule set", onAction: openContractRulePanel }
+    { label: "Toggle selection", onAction: toggleContractRowSelection },
+    { label: "Edit split group", onAction: openContractEditor }
   ];
   const statementRowActions: readonly TableRowAction[] = [
     { label: "Print PDF", onAction: printStatementPdf }
@@ -1044,6 +1082,12 @@
     }
   });
 
+  $effect((): void => {
+    if (activePageId === "contracts" && contractWorkbenchState.status === "idle") {
+      void loadContractWorkbench();
+    }
+  });
+
   async function loadInitialData(): Promise<void> {
     try {
       const screen = await client.distribution.getScreen({
@@ -1059,6 +1103,9 @@
         revenueGroupBy
       });
       applyScreenBundle(screen);
+      if (activePageId === "contracts") {
+        await loadContractWorkbench();
+      }
     } catch {
       await Promise.all([
         loadWriteGate(),
@@ -1067,7 +1114,7 @@
         loadMappingRows(),
         loadPayees(),
         activePageId === "catalog" ? loadCatalog() : Promise.resolve(),
-        loadContracts(),
+        activePageId === "contracts" ? loadContractWorkbench() : Promise.resolve(),
         loadAllocationRuns(),
         loadSuspense(),
         loadStatements(),
@@ -1092,12 +1139,7 @@
     payeesState = createSuccessState<PageResult<PayeeSummary>>(screen.payees);
     releasesState = createSuccessState<PageResult<ReleaseSummary>>(screen.releases);
     tracksState = createSuccessState<PageResult<TrackSummary>>(screen.tracks);
-    contractsState = createSuccessState<PageResult<DistributionContract>>(screen.contracts);
-    const resolvedExpenseContractFilterId = resolveExpenseContractFilterId(screen.contracts.items, expenseContractFilterId);
-    expenseContractFilterId = resolvedExpenseContractFilterId;
-    expensesState = createSuccessState<PageResult<DistributionContractExpense>>(
-      resolvedExpenseContractFilterId === "" ? emptyPageResult<DistributionContractExpense>() : screen.expenses
-    );
+    expensesState = createSuccessState<PageResult<DistributionContractExpense>>(emptyPageResult<DistributionContractExpense>());
     allocationsState = createSuccessState<PageResult<AllocationRunSummary>>(screen.allocations);
     suspenseState = createSuccessState<PageResult<SuspenseItem>>(screen.suspense);
     statementsState = createSuccessState<PageResult<StatementSummary>>(screen.statements);
@@ -1252,22 +1294,31 @@
   }
 
   async function loadContractsPage(mode: PageLoadMode): Promise<void> {
-    await loadDistributionPageResult(
-      "contracts",
-      contractsState,
-      (state: ApiRequestState<PageResult<DistributionContract>>): void => {
-        contractsState = state;
-      },
-      (cursor: string): Promise<PageResult<DistributionContract>> =>
-        client.distribution.listContracts({
-          workspaceId: distributionWorkspaceId,
-          payeeId: null,
-          status: null,
-          cursor,
-          limit: TABLE_PAGE_SIZE
-        }),
-      mode
-    );
+    if (
+      tablePaginationLoading === "contracts" ||
+      contractWorkbenchState.status !== "success" ||
+      contractWorkbenchState.data.nextCursor === null
+    ) {
+      return;
+    }
+
+    tablePaginationLoading = "contracts";
+    setTablePaginationError("contracts", null);
+    try {
+      let loaded = contractWorkbenchState.data;
+      let cursor = loaded.nextCursor;
+      while (cursor !== null) {
+        const nextPage = await client.distribution.getContractWorkbench(contractQuery(cursor));
+        loaded = { ...nextPage, items: [...loaded.items, ...nextPage.items] };
+        contractWorkbenchState = createSuccessState<DistributionContractWorkbenchResponse>(loaded);
+        cursor = nextPage.nextCursor;
+        if (mode === "one") break;
+      }
+    } catch (error: unknown) {
+      setTablePaginationError("contracts", getErrorMessage(error));
+    } finally {
+      tablePaginationLoading = null;
+    }
   }
 
   async function loadMoreExpenses(): Promise<void> {
@@ -1645,37 +1696,30 @@
     } as const;
   }
 
-  async function loadContracts(): Promise<void> {
-    contractsState = beginReload<PageResult<DistributionContract>>(contractsState);
-    expensesState = beginReload<PageResult<DistributionContractExpense>>(expensesState);
-
-    try {
-      const contractPage = await client.distribution.listContracts({
-        workspaceId: distributionWorkspaceId,
-        payeeId: null,
-        status: null,
-        cursor: null,
-        limit: TABLE_PAGE_SIZE
-      });
-      const resolvedExpenseContractFilterId = resolveExpenseContractFilterId(contractPage.items, expenseContractFilterId);
-      expenseContractFilterId = resolvedExpenseContractFilterId;
-      const expensePage = resolvedExpenseContractFilterId === ""
-        ? emptyPageResult<DistributionContractExpense>()
-        : await client.distribution.listContractExpenses({
-            workspaceId: distributionWorkspaceId,
-            contractId: resolvedExpenseContractFilterId,
-            status: null,
-            cursor: null,
-            limit: TABLE_PAGE_SIZE
-          });
-      contractsState = createSuccessState<PageResult<DistributionContract>>(contractPage);
-      expensesState = createSuccessState<PageResult<DistributionContractExpense>>(expensePage);
-      setTablePaginationError("contracts", null);
-      setTablePaginationError("expenses", null);
-    } catch (error: unknown) {
-      contractsState = createErrorState<PageResult<DistributionContract>>(error);
-      expensesState = createErrorState<PageResult<DistributionContractExpense>>(error);
+  async function loadContractWorkbench(): Promise<void> {
+    if (contractWorkbenchState.status === "loading") {
+      return;
     }
+    contractWorkbenchState = beginReload<DistributionContractWorkbenchResponse>(contractWorkbenchState);
+    try {
+      contractWorkbenchState = createSuccessState<DistributionContractWorkbenchResponse>(
+        await client.distribution.getContractWorkbench(contractQuery(null))
+      );
+      setTablePaginationError("contracts", null);
+    } catch (error: unknown) {
+      contractWorkbenchState = createErrorState<DistributionContractWorkbenchResponse>(error);
+    }
+  }
+
+  function contractQuery(cursor: string | null) {
+    return {
+      workspaceId: distributionWorkspaceId,
+      search: contractSearch.trim() === "" ? null : contractSearch.trim(),
+      status: contractStatusFilter === allValue ? null : contractStatusFilter,
+      workflow: contractWorkflowFilter === allValue ? null : contractWorkflowFilter,
+      cursor,
+      limit: TABLE_PAGE_SIZE
+    } as const;
   }
 
   async function loadExpenses(): Promise<void> {
@@ -2542,6 +2586,23 @@
     await loadCatalog();
   }
 
+  function updateContractSearch(value: string): void { contractSearch = value; }
+  function updateContractStatus(value: string): void { contractStatusFilter = value as ContractStatusFilter; }
+
+  async function applyContractWorkflow(value: ContractWorkflowFilter): Promise<void> {
+    contractWorkflowFilter = value;
+    selectedContractRowIds = [];
+    await loadContractWorkbench();
+  }
+
+  async function clearContractFilters(): Promise<void> {
+    contractSearch = "";
+    contractStatusFilter = allValue;
+    contractWorkflowFilter = allValue;
+    selectedContractRowIds = [];
+    await loadContractWorkbench();
+  }
+
   function updateSuspenseStatus(value: string): void {
     suspenseStatusFilter = value as SuspenseStatusFilter;
   }
@@ -2664,42 +2725,6 @@
 
   function updateTrackStatus(value: string): void {
     trackStatusInput = value as CatalogEntryStatus;
-  }
-
-  function updateContractTitle(value: string): void {
-    contractTitleInput = value;
-  }
-
-  function updateContractPayee(value: string): void {
-    contractPayeeIdInput = value;
-  }
-
-  function updateContractStatus(value: string): void {
-    contractStatusInput = value as ContractStatus;
-  }
-
-  function updateContractEffectiveFrom(event: Event): void {
-    contractEffectiveFromInput = readInputValue(event);
-  }
-
-  function updateContractEffectiveTo(event: Event): void {
-    contractEffectiveToInput = readInputValue(event);
-  }
-
-  function updateContractSplitPercent(value: string): void {
-    contractSplitPercentInput = value;
-  }
-
-  function updateContractCurrency(value: string): void {
-    contractCurrencyInput = value;
-  }
-
-  function updateRulePayee(value: string): void {
-    rulePayeeIdInput = value;
-  }
-
-  function updateRulePercentage(value: string): void {
-    rulePercentageInput = value;
   }
 
   function updatePeriodScope(value: string): void {
@@ -2869,9 +2894,14 @@
   }
 
   function openExpensePanel(): void {
+    if (selectedExpenseFilterContract === null || selectedExpenseFilterContract.contractId === null) {
+      reportActionError(new Error("Save a complete split set for one track before recording its expense or advance."));
+      return;
+    }
     expensePanelOpen = true;
     expenseContractIdInput = expenseContractFilterId;
-    expensePayeeIdInput = selectedExpenseFilterContract?.payeeId ?? "";
+    expensePayeeIdInput = selectedExpenseFilterContract.splits[0]?.payeeId ?? "";
+    expenseCurrencyInput = contractRuleCurrencyInput;
     expenseCategoryInput = "advance";
     expenseLabelInput = "";
     expenseAmountInput = "";
@@ -2885,7 +2915,9 @@
 
   function updateExpenseContract(value: string): void {
     expenseContractIdInput = value;
-    expensePayeeIdInput = contracts.find((contract) => contract.id === value)?.payeeId ?? "";
+    const track = contractTracks.find((candidate) => candidate.contractId === value);
+    expensePayeeIdInput = track?.splits[0]?.payeeId ?? "";
+    expenseCurrencyInput = payees.find((payee) => payee.id === expensePayeeIdInput)?.defaultCurrency ?? "MUR";
   }
 
   function updateExpensePayee(value: string): void { expensePayeeIdInput = value; }
@@ -2908,6 +2940,7 @@
   function updateExpenseDate(event: Event): void {
     expenseDateInput = readInputValue(event);
   }
+  function updateExpenseCurrency(value: string): void { expenseCurrencyInput = value.toUpperCase(); }
 
   // Keep money textual across the UI/API boundary at the Distribution scale (10 decimals).
   function parseExpenseAmountMicro(input: string): string | null {
@@ -2931,7 +2964,8 @@
     const label = expenseLabelInput.trim();
     const amountMicro = expenseAmountMicro;
 
-    if (contract === null || label === "" || amountMicro === null || expenseDateInput === "") {
+    const currency = normalizeCurrencyCode(expenseCurrencyInput);
+    if (contract === null || contract.contractId === null || label === "" || amountMicro === null || expenseDateInput === "" || currency === null) {
       return;
     }
 
@@ -2941,13 +2975,13 @@
       mutationReceipt = await client.distribution.recordContractExpense(
         {
           workspaceId: distributionWorkspaceId,
-          contractId: contract.id,
+          contractId: contract.contractId,
           payeeId: expensePayeeIdInput === "" ? null : expensePayeeIdInput,
           incurredOn: expenseDateInput,
           category: expenseCategoryInput,
           label,
           amountMicro,
-          currency: contract.currency,
+          currency,
           recoverable: expenseRecoverableInput === "yes"
         },
         {
@@ -2956,7 +2990,7 @@
       );
       mutationReceiptPageId = activePageId;
       closeExpensePanel();
-      await Promise.all([loadContracts(), loadReconciliation(), loadAuditLog()]);
+      await Promise.all([loadContractWorkbench(), loadExpenses(), loadReconciliation(), loadAuditLog()]);
     } catch (error: unknown) {
       reportActionError(error);
     }
@@ -3081,69 +3115,121 @@
       );
       mutationReceiptPageId = activePageId;
       closePayeePanel();
-      await Promise.all([loadPayees(), loadContracts(), loadAuditLog()]);
+      await Promise.all([loadPayees(), loadContractWorkbench(), loadAuditLog()]);
     } catch (error: unknown) {
       reportActionError(error);
     }
   }
 
   function openContractPanel(): void {
-    contractPanelOpen = true;
-    contractTitleInput = "";
-    contractPayeeIdInput = "";
-    contractStatusInput = "draft";
-    contractEffectiveFromInput = today;
-    contractEffectiveToInput = "";
-    contractSplitPercentInput = "";
-    contractCurrencyInput = "";
+    contractPickerOpen = true;
+    contractPickerTrackId = contractTracks.find((track) => track.status === "no_split")?.trackId ?? contractTracks[0]?.trackId ?? "";
   }
 
   function closeContractPanel(): void {
-    contractPanelOpen = false;
+    contractPickerOpen = false;
+    contractPickerTrackId = "";
   }
 
-  // Split percent is typed as a human percentage (e.g. "80" or "12.5") and
-  // stored as basis points; null means the input is not a valid percentage yet.
-  function parseSplitBasisPoints(value: string): number | null {
-    const trimmed = value.trim();
+  function updateContractPickerTrack(value: string): void { contractPickerTrackId = value; }
 
-    if (!/^\d+(\.\d{1,2})?$/u.test(trimmed)) {
-      return null;
-    }
-
-    const basisPoints = Math.round(Number(trimmed) * 100);
-
-    if (basisPoints <= 0 || basisPoints > 10000) {
-      return null;
-    }
-
-    return basisPoints;
+  function openPickedContractTrack(): void {
+    if (contractPickerTrackId === "") return;
+    closeContractPanel();
+    openContractEditor(contractPickerTrackId);
   }
 
-  // Guardrail: this UI path currently submits a one-line ruleset, so only
-  // allow an explicit 100% replacement for one payee.
-  function normalizeSingleRuleReplacementPercentage(value: string): string | null {
-    const match = /^(\d+)(?:[.,](\d{1,6}))?$/u.exec(value.trim());
+  function toggleContractRowSelection(rowId: string): void {
+    selectedContractRowIds = selectedContractRowIds.includes(rowId)
+      ? selectedContractRowIds.filter((id) => id !== rowId)
+      : [...selectedContractRowIds, rowId];
+  }
 
-    if (match === null || match[1] === undefined) {
-      return null;
-    }
+  function selectAllVisibleContractRows(): void {
+    selectedContractRowIds = contractTracks.map((track) => track.trackId);
+  }
 
+  function clearContractSelection(): void { selectedContractRowIds = []; }
+
+  function openSelectedContractEditor(): void {
+    openContractEditorForTracks(selectedContractRowIds);
+  }
+
+  function openContractEditor(rowId: string): void {
+    openContractEditorForTracks([rowId]);
+  }
+
+  function openContractEditorForTracks(trackIds: readonly string[]): void {
+    const editorTracks = trackIds
+      .map((trackId) => contractTracks.find((track) => track.trackId === trackId))
+      .filter((track): track is DistributionContractTrackRow => track !== undefined);
+    if (editorTracks.length === 0) return;
+
+    const sourceSplits = editorTracks[0]?.splits ?? [];
+    contractEditorTrackIds = editorTracks.map((track) => track.trackId);
+    contractSplitDrafts = sourceSplits.length > 0
+      ? sourceSplits.map((split) => ({ payeeId: split.payeeId, percentage: normalizeContractPercentage(split.percentage) ?? split.percentage }))
+      : [{ payeeId: "", percentage: "100" }];
+    contractRuleReasonInput = "";
+    contractRuleEffectiveFromInput = today;
+    contractRuleEffectiveToInput = "";
+    const primaryPayee = payees.find((payee) => payee.id === contractSplitDrafts[0]?.payeeId);
+    contractRuleCurrencyInput = primaryPayee?.defaultCurrency ?? "MUR";
+    expenseContractFilterId = editorTracks.length === 1 ? editorTracks[0]?.contractId ?? "" : "";
+    if (expenseContractFilterId !== "") void loadExpenses();
+  }
+
+  function closeContractEditor(): void {
+    contractEditorTrackIds = [];
+    contractSplitDrafts = [];
+    contractRuleReasonInput = "";
+  }
+
+  function updateContractSplitPayee(index: number, value: string): void {
+    contractSplitDrafts = contractSplitDrafts.map((split, splitIndex) => splitIndex === index ? { ...split, payeeId: value } : split);
+  }
+
+  function updateContractSplitPercentage(index: number, value: string): void {
+    contractSplitDrafts = contractSplitDrafts.map((split, splitIndex) => splitIndex === index ? { ...split, percentage: value } : split);
+  }
+
+  function addContractSplit(): void {
+    const used = new Set(contractSplitDrafts.map((split) => split.payeeId));
+    const nextPayeeId = payees.find((payee) => !used.has(payee.id))?.id ?? "";
+    contractSplitDrafts = [...contractSplitDrafts, { payeeId: nextPayeeId, percentage: "" }];
+  }
+
+  function removeContractSplit(index: number): void {
+    if (contractSplitDrafts.length <= 1) return;
+    contractSplitDrafts = contractSplitDrafts.filter((_, splitIndex) => splitIndex !== index);
+  }
+
+  function updateContractRuleReason(value: string): void { contractRuleReasonInput = value; }
+  function updateContractRuleCurrency(value: string): void { contractRuleCurrencyInput = value.toUpperCase(); }
+  function updateContractRuleEffectiveFrom(event: Event): void { contractRuleEffectiveFromInput = readInputValue(event); }
+  function updateContractRuleEffectiveTo(event: Event): void { contractRuleEffectiveToInput = readInputValue(event); }
+
+  function parseContractPercentageUnits(value: string): bigint | null {
+    const match = /^(\d{1,3})(?:[.,](\d{1,6}))?$/u.exec(value.trim());
+    if (match === null || match[1] === undefined) return null;
     const units = BigInt(match[1]) * 1_000_000n + BigInt((match[2] ?? "").padEnd(6, "0"));
-
-    if (units !== 100_000_000n) {
-      return null;
-    }
-
-    return "100.000000";
+    return units > 0n && units <= 100_000_000n ? units : null;
   }
 
-  function resolveExpenseContractFilterId(contractItems: readonly DistributionContract[], currentContractId: string): string {
-    if (currentContractId !== "" && contractItems.some((contract: DistributionContract): boolean => contract.id === currentContractId)) {
-      return currentContractId;
-    }
+  function normalizeContractPercentage(value: string): string | null {
+    const units = parseContractPercentageUnits(value);
+    if (units === null) return null;
+    return `${String(units / 1_000_000n)}.${String(units % 1_000_000n).padStart(6, "0")}`;
+  }
 
-    return contractItems[0]?.id ?? "";
+  function contractSplitTotalPercentage(splits: readonly ContractSplitDraft[]): string {
+    let total = 0n;
+    for (const split of splits) {
+      const value = parseContractPercentageUnits(split.percentage);
+      if (value === null) return "Invalid";
+      total += value;
+    }
+    return `${String(total / 1_000_000n)}.${String(total % 1_000_000n).padStart(6, "0")}`;
   }
 
   function emptyPageResult<TItem>(): PageResult<TItem> {
@@ -3153,100 +3239,28 @@
     };
   }
 
-  async function createContract(): Promise<void> {
-    const title = contractTitleInput.trim();
-    const currency = contractCurrencyInput.trim().toUpperCase();
-    const splitBp = contractSplitBp;
-
-    if (title === "" || contractPayeeIdInput === "" || contractEffectiveFromInput === "" || splitBp === null || currency === "") {
-      return;
-    }
-
+  async function saveContractTrackRules(): Promise<void> {
+    const currency = normalizeCurrencyCode(contractRuleCurrencyInput);
+    if (!contractSplitDraftValid || currency === null) return;
+    const rules = contractSplitDrafts.map((split) => ({
+      payeeId: split.payeeId,
+      percentage: normalizeContractPercentage(split.percentage) ?? split.percentage
+    }));
     clearRunReceipt();
-
     try {
-      mutationReceipt = await client.distribution.createContract(
-        {
-          workspaceId: distributionWorkspaceId,
-          id: null,
-          payeeId: contractPayeeIdInput,
-          title,
-          status: contractStatusInput,
-          effectiveFrom: contractEffectiveFromInput,
-          effectiveTo: contractEffectiveToInput === "" ? null : contractEffectiveToInput,
-          splitBp,
-          currency
-        },
-        {
-          idempotencyKey: createIdempotencyKey("contract-create")
-        }
-      );
+      mutationReceipt = await client.distribution.saveContractTrackRules({
+        workspaceId: distributionWorkspaceId,
+        trackIds: contractEditorTrackIds,
+        rules,
+        reason: contractRuleReasonInput.trim(),
+        effectiveFrom: contractRuleEffectiveFromInput,
+        effectiveTo: contractRuleEffectiveToInput === "" ? null : contractRuleEffectiveToInput,
+        currency
+      }, { idempotencyKey: createIdempotencyKey("contract-track-rules") });
       mutationReceiptPageId = activePageId;
-      closeContractPanel();
-      await Promise.all([loadContracts(), loadRevenue(), loadReconciliation()]);
-    } catch (error: unknown) {
-      reportActionError(error);
-    }
-  }
-
-  function openContractRulePanel(rowId: string): void {
-    const contract = contracts.find((candidate: DistributionContract): boolean => candidate.id === rowId);
-
-    if (contract === undefined) {
-      return;
-    }
-
-    ruleContractId = rowId;
-    rulePayeeIdInput = contract.payeeId;
-    rulePercentageInput = "";
-    expenseContractFilterId = rowId;
-    void loadExpenses();
-  }
-
-  function closeContractRulePanel(): void {
-    ruleContractId = null;
-    rulePayeeIdInput = "";
-    rulePercentageInput = "";
-  }
-
-  async function addContractRule(): Promise<void> {
-    const contract = selectedRuleContract;
-    const percentage = ruleReplacementPercentage;
-
-    if (contract === null || rulePayeeIdInput === "" || percentage === null) {
-      if (rulePercentageInput.trim() !== "" && percentage === null) {
-        reportActionError(new Error("This action replaces the full rule set and currently accepts only 100.000000."));
-      }
-      return;
-    }
-
-    clearRunReceipt();
-
-    try {
-      // The rules route replaces the full royalty rule set and the server
-      // rejects any set that does not total exactly 100 percent.
-      mutationReceipt = await client.distribution.updateContractRules(
-        contract.id,
-        {
-          workspaceId: distributionWorkspaceId,
-          rules: [
-            {
-              payeeId: rulePayeeIdInput,
-              percentage,
-              scopeType: null,
-              scopeId: null,
-              effectiveFrom: null,
-              effectiveTo: null
-            }
-          ]
-        },
-        {
-          idempotencyKey: createIdempotencyKey("contract-rules")
-        }
-      );
-      mutationReceiptPageId = activePageId;
-      closeContractRulePanel();
-      await Promise.all([loadContracts(), loadRevenue(), loadReconciliation()]);
+      closeContractEditor();
+      clearContractSelection();
+      await Promise.all([loadContractWorkbench(), loadRevenue(), loadReconciliation(), loadAuditLog()]);
     } catch (error: unknown) {
       reportActionError(error);
     }
@@ -4362,31 +4376,72 @@
     return role.replaceAll("_", " ");
   }
 
-  function createContractRows(items: readonly DistributionContract[], payeeItems: readonly PayeeSummary[]): readonly TableRow[] {
-    return items.map((contract: DistributionContract): TableRow => ({
-      id: contract.id,
+  function createContractRows(items: readonly DistributionContractTrackRow[], selectedIds: readonly string[]): readonly TableRow[] {
+    return items.map((track): TableRow => ({
+      id: track.trackId,
       cells: [
-        { kind: "text", value: contract.title, strong: true },
-        { kind: "text", value: payeeName(contract.payeeId, payeeItems), strong: false },
-        { kind: "text", value: formatBasisPoints(contract.splitBp), strong: false },
-        { kind: "money", value: formatMoney(contract.openExpenseMicro, contract.currency), tone: moneyTone(contract.openExpenseMicro) },
-        { kind: "badge", value: contract.status, tone: contract.status === "active" ? "success" : "warning" }
+        { kind: "text", value: `${track.title} · ${track.releaseTitle ?? "No release"}`, strong: true },
+        { kind: "text", value: `${track.artistImport ?? "No import artist"} · catalog: ${track.catalogArtist}`, strong: false },
+        { kind: "text", value: track.isrc ?? "—", strong: false },
+        { kind: "text", value: track.label ?? "—", strong: false },
+        { kind: "text", value: formatContractSplits(track), strong: track.splits.length > 0 },
+        { kind: "text", value: formatContractExpenses(track), strong: track.expenseCount > 0 },
+        { kind: "badge", value: contractTrackStatusLabel(track.status), tone: contractTrackStatusTone(track.status) },
+        { kind: "badge", value: selectedIds.includes(track.trackId) ? "selected" : "not selected", tone: selectedIds.includes(track.trackId) ? "active" : "muted" }
       ]
     }));
   }
 
-  function createContractKpis(
-    items: readonly DistributionContract[],
-    trackItems: readonly TrackSummary[]
-  ): readonly DistributionKpi[] {
-    const openRecoupments = items.filter((contract: DistributionContract): boolean => contract.openExpenseMicro !== "0.0000000000");
-    const unbalancedTrackCount = trackItems.filter((track: TrackSummary): boolean => track.splitStatus !== "balanced").length;
-
+  function createContractKpis(workbench: DistributionContractWorkbenchResponse | null): readonly DistributionKpi[] {
+    const summary = workbench?.summary;
     return [
-      { label: "Active contracts", value: String(items.filter((contract: DistributionContract): boolean => contract.status === "active").length), detail: "contracts", tone: "success", accent: true },
-      { label: "Open recoupments", value: String(openRecoupments.length), detail: "contract balances", tone: "warning", accent: false },
-      { label: "Unbalanced splits", value: String(unbalancedTrackCount), detail: "catalog review", tone: unbalancedTrackCount === 0 ? "success" : "warning", accent: false }
+      { label: "Active contracts (track only)", value: String(summary?.activeTrackOnlyCount ?? 0), detail: "direct track rules", tone: "success", accent: true },
+      { label: "Active contracts (effective)", value: String(summary?.activeEffectiveCount ?? 0), detail: "track + inherited", tone: "success", accent: false },
+      { label: "Expired contracts", value: String(summary?.expiredContractCount ?? 0), detail: "inactive agreements", tone: summary?.expiredContractCount === 0 ? "success" : "warning", accent: false },
+      { label: "Draft contracts", value: String(summary?.draftContractCount ?? 0), detail: "not active", tone: summary?.draftContractCount === 0 ? "success" : "warning", accent: false },
+      { label: "Direct track split rules", value: String(summary?.directTrackRuleCount ?? 0), detail: "active rule rows", tone: "info", accent: false },
+      { label: "Tracks without effective split", value: String(summary?.noEffectiveSplitCount ?? 0), detail: "needs attention", tone: summary?.noEffectiveSplitCount === 0 ? "success" : "warning", accent: false },
+      { label: "Unallocated rows", value: String(summary?.unallocatedRowCount ?? 0), detail: "not allocated in Postgres", tone: summary?.unallocatedRowCount === 0 ? "success" : "warning", accent: false },
+      { label: "Open recoupments", value: formatContractCurrencyTotals(summary?.openRecoupmentTotals ?? []), detail: "recoverable balances", tone: (summary?.openRecoupmentTotals.length ?? 0) === 0 ? "success" : "warning", accent: false }
     ];
+  }
+
+  function contractTrackStatusLabel(status: DistributionContractTrackStatus): string {
+    return status === "no_split" ? "No split" : status === "ambiguous" ? "Ambiguous" : "Active";
+  }
+
+  function contractTrackStatusTone(status: DistributionContractTrackStatus): Tone {
+    return status === "active" ? "success" : status === "ambiguous" ? "error" : "warning";
+  }
+
+  function formatContractSplits(track: DistributionContractTrackRow): string {
+    if (track.splits.length === 0) return "—";
+    const source = track.splitSource === "release" ? "inherited" : track.splitSource ?? "track";
+    return `${track.splits.map((split) => `${split.payeeName} ${trimPercentage(split.percentage)}%`).join(" · ")} · ${source}`;
+  }
+
+  function trimPercentage(value: string): string {
+    return value.includes(".") ? value.replace(/0+$/u, "").replace(/\.$/u, "") : value;
+  }
+
+  function formatContractExpenses(track: DistributionContractTrackRow): string {
+    if (track.expenseCount === 0) return "—";
+    const totals = formatContractCurrencyTotals(track.openExpenseTotals);
+    return totals === "—" ? `${track.expenseCount} recorded` : `${track.expenseCount} · ${totals} open`;
+  }
+
+  function formatContractCurrencyTotals(totals: readonly { readonly currency: CurrencyCode; readonly amountMicro: string }[]): string {
+    if (totals.length === 0) return "—";
+    return totals.map((total) => formatMoney(total.amountMicro, total.currency)).join(" · ");
+  }
+
+  function uniqueContractTracks(items: readonly DistributionContractTrackRow[]): readonly DistributionContractTrackRow[] {
+    const seen = new Set<string>();
+    return items.filter((track) => {
+      if (track.contractId === null || seen.has(track.contractId)) return false;
+      seen.add(track.contractId);
+      return true;
+    });
   }
 
   function createPayeeRows(items: readonly PayeeSummary[]): readonly TableRow[] {
@@ -5342,15 +5397,44 @@
       {:else if activePageId === "contracts"}
         <section class="kpi-grid" aria-label="Contract KPIs">
           {#each contractKpis as kpi (kpi.label)}
-            <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state={isLoadingStatus(contractsState.status) ? "loading" : "default"} accent={kpi.accent} />
+            <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state={isLoadingStatus(contractWorkbenchState.status) ? "loading" : "default"} accent={kpi.accent} />
           {/each}
         </section>
         <section class="contracts-actions ehq-edge-surface">
           <Button label="New payee" variant="secondary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="New Distribution payee" title={writeDisabledTitle()} onclick={openPayeePanel} />
           <Button label="New contract" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="New contract" onclick={openContractPanel} />
-          <Button label="Record recoupable expense" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Record recoupable expense" title={writeDisabledTitle()} onclick={openExpensePanel} />
-          <span>Expenses remain source data; corrections become audited overrides.</span>
+          <span>Imported agreements remain immutable; split corrections are complete, audited override snapshots.</span>
         </section>
+        <section class="filter-strip ehq-edge-surface" aria-label="Contract filters">
+          <Input id="distribution-contract-search" label="Search" value={contractSearch} placeholder="Track, release, artist, ISRC, label or payee" type="search" state="default" message="" oninput={updateContractSearch} />
+          <Select id="distribution-contract-status-filter" label="Status" value={contractStatusFilter} options={contractTrackStatusOptions} state="default" message="" onchange={updateContractStatus} />
+          <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={isLoadingStatus(contractWorkbenchState.status)} locked={false} focus={false} ariaLabel="Apply contract filters" onclick={loadContractWorkbench} />
+          <Button label="Clear" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Clear contract filters" onclick={clearContractFilters} />
+        </section>
+        <nav class="contract-workflow ehq-edge-surface" aria-label="Contracts workflow filters">
+          <Button label="All" variant={contractWorkflowFilter === allValue ? "primary" : "secondary"} size="small" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Show all contract tracks" onclick={() => applyContractWorkflow(allValue)} />
+          <Button label="All splits" variant={contractWorkflowFilter === "all_splits" ? "primary" : "secondary"} size="small" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Show all tracks with splits" onclick={() => applyContractWorkflow("all_splits")} />
+          <Button label="Needs attention" variant={contractWorkflowFilter === "needs_attention" ? "primary" : "secondary"} size="small" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Show contract tracks needing attention" onclick={() => applyContractWorkflow("needs_attention")} />
+          <Button label="Ready" variant={contractWorkflowFilter === "ready" ? "primary" : "secondary"} size="small" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Show ready contract tracks" onclick={() => applyContractWorkflow("ready")} />
+          <Button label="With expenses" variant={contractWorkflowFilter === "with_expenses" ? "primary" : "secondary"} size="small" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Show contract tracks with expenses" onclick={() => applyContractWorkflow("with_expenses")} />
+        </nav>
+        <section class="contracts-actions ehq-edge-surface" aria-label="Contract selection">
+          <span>{selectedContractRowIds.length} tracks selected · {contractTracks.length} loaded</span>
+          <Button label="Select all page" variant="secondary" size="medium" type="button" disabled={contractTracks.length === 0} loading={false} locked={false} focus={false} ariaLabel="Select all loaded contract tracks" onclick={selectAllVisibleContractRows} />
+          <Button label="Apply splits to selected" variant="primary" size="medium" type="button" disabled={selectedContractRowIds.length === 0} loading={false} locked={false} focus={false} ariaLabel="Apply split group to selected tracks" onclick={openSelectedContractEditor} />
+          <Button label="Clear selection" variant="secondary" size="medium" type="button" disabled={selectedContractRowIds.length === 0} loading={false} locked={false} focus={false} ariaLabel="Clear contract track selection" onclick={clearContractSelection} />
+        </section>
+        {#if contractPickerOpen}
+          <section class="form-panel ehq-edge-surface" aria-label="New contract">
+            <div class="panel-context">
+              <strong>New track contract</strong>
+              <span>Select a loaded track. Saving creates an audited contract anchor only when the track has no current agreement.</span>
+            </div>
+            <Select id="distribution-contract-track-picker" label="Track" value={contractPickerTrackId} options={contractPickerOptions} state="default" message="Use search and filters first if the track is not loaded." onchange={updateContractPickerTrack} />
+            <Button label="Open split editor" variant="primary" size="medium" type="button" disabled={contractPickerTrackId === ""} loading={false} locked={false} focus={false} ariaLabel="Open selected track split editor" onclick={openPickedContractTrack} />
+            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel new contract" onclick={closeContractPanel} />
+          </section>
+        {/if}
         {#if payeePanelOpen}
           <section class="form-panel ehq-edge-surface" aria-label="New Distribution payee">
             <Input id="distribution-payee-name" label="Name" value={payeeNameInput} placeholder="Artist, staff member, supplier or freelancer" type="text" state="default" message="Any royalty or expense counterparty can be a payee." oninput={updatePayeeName} />
@@ -5360,6 +5444,48 @@
             <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel payee creation" onclick={closePayeePanel} />
           </section>
         {/if}
+        {#if primaryContractEditorTrack !== null}
+          <section class="contract-editor ehq-edge-surface" aria-label="Track split editor">
+            <div class="contract-editor-heading">
+              <div>
+                <span class="ehq-type-label-mono">{contractEditorTracks.length === 1 ? "Track contract" : "Bulk split snapshot"}</span>
+                <strong>{primaryContractEditorTrack.title}{contractEditorTracks.length > 1 ? ` + ${contractEditorTracks.length - 1} tracks` : ""}</strong>
+              </div>
+              <span>Track rules override release and catalog defaults. Ambiguous sets remain blocked until this total is exactly 100%.</span>
+            </div>
+            <div class="contract-split-list">
+              {#each contractSplitDrafts as split, index (`${index}-${split.payeeId}`)}
+                <div class="contract-split-row">
+                  <Select id={`distribution-contract-split-payee-${index}`} label="Payee" value={split.payeeId} options={payeeSelectOptions} state="default" message="" onchange={(value) => updateContractSplitPayee(index, value)} />
+                  <Input id={`distribution-contract-split-percentage-${index}`} label="Split (%)" value={split.percentage} placeholder="50" type="text" state={parseContractPercentageUnits(split.percentage) === null ? "error" : "default"} message="Up to 6 decimals" oninput={(value) => updateContractSplitPercentage(index, value)} />
+                  <Button label="Remove" variant="secondary" size="small" type="button" disabled={contractSplitDrafts.length === 1} loading={false} locked={false} focus={false} ariaLabel={`Remove split ${index + 1}`} onclick={() => removeContractSplit(index)} />
+                </div>
+              {/each}
+            </div>
+            <div class="contract-split-total" class:error={contractSplitTotal !== "100.000000"}>
+              <span>Total split</span>
+              <strong>{contractSplitTotal}%</strong>
+            </div>
+            <div class="form-panel contract-editor-fields">
+              <label>
+                <span>Effective from</span>
+                <input type="date" value={contractRuleEffectiveFromInput} onchange={updateContractRuleEffectiveFrom} />
+              </label>
+              <label>
+                <span>Effective to (optional)</span>
+                <input type="date" value={contractRuleEffectiveToInput} min={contractRuleEffectiveFromInput} onchange={updateContractRuleEffectiveTo} />
+              </label>
+              <Input id="distribution-contract-rule-currency" label="Expense currency" value={contractRuleCurrencyInput} placeholder="MUR" type="text" state={normalizeCurrencyCode(contractRuleCurrencyInput) === null ? "error" : "default"} message="ISO 3-letter code" oninput={updateContractRuleCurrency} />
+              <Input id="distribution-contract-rule-reason" label="Audit reason" value={contractRuleReasonInput} placeholder="Agreement, amendment or verified instruction" type="text" state="default" message="Required. Imported rules are never mutated." oninput={updateContractRuleReason} />
+            </div>
+            <div class="contract-editor-actions">
+              <Button label="Add split payee" variant="secondary" size="medium" type="button" disabled={contractSplitDrafts.length >= payees.length} loading={false} locked={false} focus={false} ariaLabel="Add split payee" onclick={addContractSplit} />
+              <Button label="Save complete split set" variant="primary" size="medium" type="button" disabled={!writesEnabled || !contractSplitDraftValid} loading={false} locked={false} focus={false} ariaLabel="Save complete track split set" title={writeDisabledTitle()} onclick={saveContractTrackRules} />
+              <Button label="Record expense / advance" variant="secondary" size="medium" type="button" disabled={!writesEnabled || contractEditorTracks.length !== 1 || primaryContractEditorTrack.contractId === null} loading={false} locked={false} focus={false} ariaLabel="Record an expense or advance for this contract" title={primaryContractEditorTrack.contractId === null ? "Save the split set first to create the contract anchor." : writeDisabledTitle()} onclick={openExpensePanel} />
+              <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel split editing" onclick={closeContractEditor} />
+            </div>
+          </section>
+        {/if}
         {#if expensePanelOpen}
           <section class="form-panel ehq-edge-surface" aria-label="Record recoupable expense">
             <Select id="distribution-expense-contract" label="Contract" value={expenseContractIdInput} options={expenseContractSelectOptions} state="default" message="" onchange={updateExpenseContract} />
@@ -5367,58 +5493,24 @@
             <Select id="distribution-expense-payee" label="Payee charged" value={expensePayeeIdInput} options={expensePayeeOptions} state="default" message="" onchange={updateExpensePayee} />
             <Input id="distribution-expense-label" label="Description" value={expenseLabelInput} placeholder="Advance, studio session, campaign…" type="text" state="default" message="" oninput={updateExpenseLabel} />
             <Input id="distribution-expense-amount" label="Amount" value={expenseAmountInput} placeholder="2500.00" type="text" state="default" message="" oninput={updateExpenseAmount} />
-            <label>
-              <span>Currency</span>
-              <input value={selectedExpenseContract?.currency ?? ""} readonly />
-            </label>
+            <Input id="distribution-expense-currency" label="Currency" value={expenseCurrencyInput} placeholder="MUR" type="text" state={normalizeCurrencyCode(expenseCurrencyInput) === null ? "error" : "default"} message="ISO 3-letter code" oninput={updateExpenseCurrency} />
             <Select id="distribution-expense-recoverable" label="Recoverable from payee share" value={expenseRecoverableInput} options={[{ label: "Yes", value: "yes" }, { label: "No", value: "no" }]} state="default" message="" onchange={updateExpenseRecoverable} />
             <label>
               <span>Expense date</span>
               <input type="date" value={expenseDateInput} onchange={updateExpenseDate} />
             </label>
-            <Button label="Record expense" variant="primary" size="medium" type="button" disabled={!writesEnabled || selectedExpenseContract === null || expenseLabelInput.trim() === "" || expenseAmountMicro === null || expenseDateInput === ""} loading={false} locked={false} focus={false} ariaLabel="Record expense" title={writesEnabled ? (selectedExpenseContract === null ? "Select a contract first" : expenseLabelInput.trim() === "" ? "Enter a label first" : expenseAmountMicro === null ? "Enter a positive amount, e.g. 2500.00" : expenseDateInput === "" ? "Choose the expense date first" : "") : writeGateMessage} onclick={recordExpense} />
+            <Button label="Record expense" variant="primary" size="medium" type="button" disabled={!writesEnabled || selectedExpenseContract === null || selectedExpenseContract.contractId === null || expenseLabelInput.trim() === "" || expenseAmountMicro === null || expenseDateInput === "" || normalizeCurrencyCode(expenseCurrencyInput) === null} loading={false} locked={false} focus={false} ariaLabel="Record expense" title={writesEnabled ? (selectedExpenseContract === null ? "Select a contract first" : expenseLabelInput.trim() === "" ? "Enter a label first" : expenseAmountMicro === null ? "Enter a positive amount, e.g. 2500.00" : expenseDateInput === "" ? "Choose the expense date first" : "") : writeGateMessage} onclick={recordExpense} />
             <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel expense entry" onclick={closeExpensePanel} />
           </section>
         {/if}
-        {#if contractPanelOpen}
-          <section class="form-panel ehq-edge-surface" aria-label="New contract">
-            <Input id="distribution-contract-title" label="Title" value={contractTitleInput} placeholder="" type="text" state="default" message="" oninput={updateContractTitle} />
-            <Select id="distribution-contract-payee" label="Payee" value={contractPayeeIdInput} options={payeeSelectOptions} state="default" message="" onchange={updateContractPayee} />
-            <Select id="distribution-contract-status" label="Status" value={contractStatusInput} options={contractStatusOptions} state="default" message="" onchange={updateContractStatus} />
-            <label>
-              <span>Effective from</span>
-              <input type="date" value={contractEffectiveFromInput} onchange={updateContractEffectiveFrom} />
-            </label>
-            <label>
-              <span>Effective to (optional)</span>
-              <input type="date" value={contractEffectiveToInput} min={contractEffectiveFromInput} onchange={updateContractEffectiveTo} />
-            </label>
-            <Input id="distribution-contract-split" label="Split (%)" value={contractSplitPercentInput} placeholder="80" type="text" state="default" message="" oninput={updateContractSplitPercent} />
-            <Input id="distribution-contract-currency" label="Currency" value={contractCurrencyInput} placeholder="MUR" type="text" state="default" message="" oninput={updateContractCurrency} />
-            <Button label="Create contract" variant="primary" size="medium" type="button" disabled={!writesEnabled || contractTitleInput.trim() === "" || contractPayeeIdInput === "" || contractEffectiveFromInput === "" || contractSplitBp === null || contractCurrencyInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Create contract" title={writesEnabled ? (contractTitleInput.trim() === "" ? "Enter a contract title first" : contractPayeeIdInput === "" ? "Select a payee first" : contractEffectiveFromInput === "" ? "Choose the start date first" : contractSplitBp === null ? "Enter a split between 0.01 and 100" : contractCurrencyInput.trim() === "" ? "Enter a currency code first" : "") : writeGateMessage} onclick={createContract} />
-            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel contract creation" onclick={closeContractPanel} />
+        <Table title="Contracts & splits by track" columns={contractColumns} rows={contractRows} state={tableStateFor(contractWorkbenchState.status, contractRows.length)} actionLabel="" rowActions={contractRowActions} pagination={contractsPagination} />
+        {#if expenseContractFilterId !== ""}
+          <section class="filter-strip ehq-edge-surface" aria-label="Expense contract filter">
+            <Select id="distribution-expense-contract-filter" label="Expense contract" value={expenseContractFilterId} options={expenseContractSelectOptions} state="default" message="" onchange={updateExpenseContractFilter} />
+            <Button label="Reload expenses" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Reload expenses for the selected contract" onclick={loadExpenses} />
           </section>
-        {/if}
-        {#if selectedRuleContract !== null}
-          <section class="form-panel ehq-edge-surface" aria-label="Replace royalty rule set">
-            <div class="panel-context">
-              <strong>{selectedRuleContract.title}</strong>
-              <span>This action replaces the previous rule set; only a single-payee 100% replacement is allowed here.</span>
-            </div>
-            <Select id="distribution-rule-payee" label="Payee" value={rulePayeeIdInput} options={payeeSelectOptions} state="default" message="" onchange={updateRulePayee} />
-            <Input id="distribution-rule-percentage" label="Percentage" value={rulePercentageInput} placeholder="100" type="text" state="default" message="" oninput={updateRulePercentage} />
-            <Button label="Replace rule set" variant="primary" size="medium" type="button" disabled={!writesEnabled || rulePayeeIdInput === "" || ruleReplacementPercentage === null} loading={false} locked={false} focus={false} ariaLabel="Replace rule set" title={writesEnabled ? (rulePayeeIdInput === "" ? "Select a payee first" : ruleReplacementPercentage === null ? "This secure path only accepts 100.000000" : "") : writeGateMessage} onclick={addContractRule} />
-            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel rule editing" onclick={closeContractRulePanel} />
-          </section>
-        {/if}
-        <section class="filter-strip ehq-edge-surface" aria-label="Expense contract filter">
-          <Select id="distribution-expense-contract-filter" label="Expense contract" value={expenseContractFilterId} options={expenseContractSelectOptions} state="default" message="" onchange={updateExpenseContractFilter} />
-          <Button label="Reload expenses" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Reload expenses for the selected contract" onclick={loadExpenses} />
-        </section>
-        <section class="dashboard-grid">
-          <Table title="Splits / contracts" columns={contractColumns} rows={contractRows} state={tableStateFor(contractsState.status, contracts.length)} actionLabel="" rowActions={contractRowActions} pagination={contractsPagination} />
           <Table title={expenseTableTitle} columns={expenseColumns} rows={expenseRows} state={tableStateFor(expensesState.status, expenses.length)} actionLabel="" pagination={expensesPagination} />
-        </section>
+        {/if}
         <Table title="Payees" columns={payeeColumns} rows={payeeRows} state={tableStateFor(payeesState.status, payees.length)} actionLabel="" />
       {:else if activePageId === "allocations"}
         <section class="lock-panel ehq-edge-surface">
@@ -5872,6 +5964,8 @@
   label span,
   .import-result,
   .contracts-actions,
+  .contract-workflow,
+  .contract-split-total,
   .lock-panel,
   .statement-summary,
   .statement-pdf span,
@@ -5987,6 +6081,7 @@
   .form-panel,
   .filter-strip,
   .contracts-actions,
+  .contract-workflow,
   .lock-panel,
   .period-control,
   .statement-summary {
@@ -5998,6 +6093,75 @@
     flex-wrap: wrap;
     align-items: end;
     gap: var(--ehq-space-3);
+  }
+
+  .contract-workflow {
+    align-items: center;
+  }
+
+  .contract-editor {
+    min-width: 0;
+    padding: var(--ehq-space-4);
+    display: grid;
+    gap: var(--ehq-space-3);
+  }
+
+  .contract-editor-heading,
+  .contract-editor-actions,
+  .contract-split-row,
+  .contract-split-total {
+    display: flex;
+    align-items: center;
+    gap: var(--ehq-space-3);
+  }
+
+  .contract-editor-heading,
+  .contract-split-total {
+    justify-content: space-between;
+  }
+
+  .contract-editor-heading > div,
+  .contract-split-list {
+    display: grid;
+    gap: var(--ehq-space-2);
+  }
+
+  .contract-editor-heading > span {
+    max-width: 620px;
+    color: var(--ehq-text-muted);
+    font-size: var(--ehq-type-caption-size);
+    line-height: var(--ehq-type-ui-line);
+  }
+
+  .contract-split-row {
+    padding: var(--ehq-space-3) 0;
+    border-bottom: 1px solid var(--ehq-border);
+    align-items: end;
+  }
+
+  .contract-split-row :global(.ehq-select-field),
+  .contract-split-row :global(.ehq-input-field) {
+    flex: 1 1 260px;
+  }
+
+  .contract-split-total {
+    padding: var(--ehq-space-3);
+    border-radius: var(--ehq-radius-sm);
+    background: var(--ehq-success-bg);
+    color: var(--ehq-success);
+  }
+
+  .contract-split-total.error {
+    background: var(--ehq-error-bg);
+    color: var(--ehq-error);
+  }
+
+  .contract-editor-fields {
+    padding: 0;
+  }
+
+  .contract-editor-actions {
+    flex-wrap: wrap;
   }
 
   .catalog-contributor-panel {
@@ -6437,6 +6601,19 @@
     .distribution-workflow-steps article {
       border-left: 0;
       border-top: 1px solid var(--ehq-border);
+    }
+
+    .contract-workflow,
+    .contract-editor-heading,
+    .contract-editor-actions,
+    .contract-split-row {
+      align-items: stretch;
+      flex-direction: column;
+    }
+
+    .contract-split-row :global(.ehq-select-field),
+    .contract-split-row :global(.ehq-input-field) {
+      flex-basis: auto;
     }
   }
 </style>

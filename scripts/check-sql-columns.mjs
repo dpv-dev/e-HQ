@@ -108,6 +108,18 @@ const REQUIRED_COLUMNS = {
     "reason",
     "created_by_user_id",
     "idempotency_key"
+  ],
+  contract_rule_set_overrides: [
+    "id",
+    "workspace_id",
+    "track_id",
+    "base_contract_id",
+    "rules_json",
+    "effective_from",
+    "currency",
+    "reason",
+    "created_by_user_id",
+    "idempotency_key"
   ]
 };
 

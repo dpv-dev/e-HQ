@@ -379,6 +379,7 @@ const SENSITIVE_ACTIONS = new Set<string>([
   "distribution_allocations_unpost",
   "distribution_contract_expense_create",
   "distribution_contract_expense_update",
+  "distribution_contract_track_rules_override",
   "distribution_contract_rules_update",
   "distribution_contract_upsert",
   "distribution_duplicate_resolve",

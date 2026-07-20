@@ -146,6 +146,10 @@ import type {
   CurrencyCode,
   DistributionContract,
   DistributionContractExpense,
+  DistributionContractTrackRuleOverrideRequest,
+  DistributionContractTrackRow,
+  DistributionContractTrackStatus,
+  DistributionContractWorkflowFilter,
   DistributionCatalogArtistSource,
   DistributionCatalogContributor,
   DistributionCatalogContributorOverrideRequest,
@@ -247,6 +251,7 @@ import {
 import { parseDistributionImportPreview } from "./distribution-import-parser.js";
 import {
   DistributionCatalogCursorError,
+  DistributionContractCursorError,
   DistributionMappingCursorError,
   type DistributionReadRuntime
 } from "./distribution-repository.js";
@@ -859,6 +864,48 @@ const distributionCatalogContributorOverrideSchema = workspaceBodySchema.extend(
     identities.add(identity);
   }
 });
+const distributionContractTrackRuleSchema = z.object({
+  payeeId: z.string().uuid(),
+  percentage: z.string().trim().regex(/^\d{1,3}(?:\.\d{1,6})?$/u)
+});
+const distributionContractTrackRuleOverrideSchema = workspaceBodySchema.extend({
+  trackIds: z.array(z.string().uuid()).min(1).max(100),
+  rules: z.array(distributionContractTrackRuleSchema).min(1).max(50),
+  reason: z.string().trim().min(1).max(500),
+  effectiveFrom: isoDateSchema,
+  effectiveTo: isoDateSchema.nullable(),
+  currency: currencyCodeInputSchema
+}).superRefine((value, refinementContext) => {
+  if (new Set(value.trackIds).size !== value.trackIds.length) {
+    refinementContext.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["trackIds"],
+      message: "Track ids must be unique."
+    });
+  }
+  if (new Set(value.rules.map((rule) => rule.payeeId)).size !== value.rules.length) {
+    refinementContext.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["rules"],
+      message: "A payee can appear only once in a split set."
+    });
+  }
+  const total = value.rules.reduce((sum, rule) => sum + parseScaledUnits(rule.percentage, 6, "TRUNCATE"), 0n);
+  if (total !== 100_000000n) {
+    refinementContext.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["rules"],
+      message: "Royalty split must equal exactly 100.000000."
+    });
+  }
+  if (value.effectiveTo !== null && value.effectiveTo < value.effectiveFrom) {
+    refinementContext.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["effectiveTo"],
+      message: "Effective end date cannot precede the start date."
+    });
+  }
+});
 const distributionContractUpsertSchema = workspaceBodySchema.extend({
   id: nullableStringSchema,
   payeeId: nullableStringSchema,
@@ -940,6 +987,7 @@ type DistributionPayeeUpsertRequest = z.infer<typeof distributionPayeeUpsertSche
 type DistributionReleaseUpsertRequest = z.infer<typeof distributionReleaseUpsertSchema>;
 type DistributionTrackUpsertRequest = z.infer<typeof distributionTrackUpsertSchema>;
 type DistributionCatalogContributorOverrideWriteRequest = z.infer<typeof distributionCatalogContributorOverrideSchema>;
+type DistributionContractTrackRuleOverrideWriteRequest = z.infer<typeof distributionContractTrackRuleOverrideSchema>;
 type CommandCenterSettingUpdateRequest = z.infer<typeof commandCenterSettingUpdateSchema>;
 type CommandCenterIntegrationToggleRequest = z.infer<typeof commandCenterIntegrationToggleSchema>;
 type CommandCenterUserPermissionUpdateRequest = z.infer<typeof commandCenterUserPermissionUpdateSchema>;
@@ -1980,6 +2028,33 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
 
   app.post("/erh/v1/catalog/tracks/:trackId/contributor-overrides", async (context) => {
     return distributionCatalogContributorOverrideResponse(context, dependencies);
+  });
+
+  app.get("/erh/v1/contracts/workbench", async (context) => {
+    const workspaceId = requireQuery(context, "workspaceId");
+    if (dependencies.distributionReads === undefined) {
+      throw new ApiRouteError(503, "contracts_repository_unavailable", "The live Contracts repository is unavailable.", []);
+    }
+
+    try {
+      return context.json(await dependencies.distributionReads.listContractTracks({
+        workspaceId,
+        search: nullableQuery(context, "search"),
+        status: toDistributionContractTrackStatus(nullableQuery(context, "status")),
+        workflow: toDistributionContractWorkflow(nullableQuery(context, "workflow")),
+        cursor: nullableQuery(context, "cursor"),
+        limit: pageLimit(context)
+      }));
+    } catch (error: unknown) {
+      if (error instanceof DistributionContractCursorError) {
+        throw new ApiRouteError(400, "contracts_cursor_invalid", error.message, []);
+      }
+      throw error;
+    }
+  });
+
+  app.post("/erh/v1/contracts/track-rule-overrides", async (context) => {
+    return distributionContractTrackRuleOverrideResponse(context, dependencies);
   });
 
   app.get("/erh/v1/contracts", (context) => {
@@ -5660,6 +5735,93 @@ async function distributionCatalogContributorOverrideResponse(
   return context.json(result.body, result.status);
 }
 
+async function distributionContractTrackRuleOverrideResponse(
+  context: ApiContext,
+  dependencies: ApiServiceDependencies
+): Promise<Response> {
+  const request = await readZodBody<DistributionContractTrackRuleOverrideWriteRequest>(
+    context,
+    distributionContractTrackRuleOverrideSchema
+  );
+  const repository = dependencies.distributionReads;
+  if (repository === undefined) {
+    throw new ApiRouteError(503, "contracts_repository_unavailable", "The live Contracts repository is unavailable.", []);
+  }
+
+  const tracks = await Promise.all(request.trackIds.map((trackId) => repository.getContractTrack(request.workspaceId, trackId)));
+  const missingTrackIndex = tracks.findIndex((track) => track === null);
+  if (missingTrackIndex >= 0) {
+    throw new ApiRouteError(404, "distribution_contract_track_not_found", "Distribution contract track was not found.", [
+      `trackId=${request.trackIds[missingTrackIndex] ?? "unknown"}`
+    ]);
+  }
+  const normalizedTracks = tracks.filter((track): track is DistributionContractTrackRow => track !== null);
+  const payeeIds = request.rules.map((rule) => rule.payeeId);
+  if (!(await repository.validateContractPayees(request.workspaceId, payeeIds))) {
+    throw new ApiRouteError(422, "distribution_contract_payee_invalid", "Every split payee must be active in this workspace.", []);
+  }
+
+  const actor = context.get("authUser");
+  requirePermissionForWorkspace(actor, "distribution_contract_track_rules_override", request.workspaceId);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const normalizedRules = request.rules.map((rule) => ({
+    payeeId: rule.payeeId,
+    percentage: normalizeScaleDecimal(rule.percentage, 6)
+  }));
+  const targets = normalizedTracks.map((track) => ({
+    track,
+    overrideId: randomUUID(),
+    baseContractId: track.contractId ?? randomUUID(),
+    createsContract: track.contractId === null
+  }));
+
+  const result = await runIdempotentMutation<ApiMutationReceipt & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "distribution_contract_track_rules_override",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<ApiMutationReceipt & ApiMutationResponse> => {
+      for (const trackId of [...request.trackIds].sort()) {
+        await acquireAdvisoryLock(tx, `distribution:contracts:track:${trackId}`);
+      }
+      for (const target of targets) {
+        await persistDistributionContractTrackRuleOverride(tx, {
+          ...request,
+          rules: normalizedRules,
+          track: target.track,
+          overrideId: target.overrideId,
+          baseContractId: target.baseContractId,
+          createsContract: target.createsContract,
+          createdByUserId: actor.userId,
+          idempotencyKey: resolvedIdempotencyKey
+        });
+      }
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_contract_track_rules_override",
+        targetType: "track_rule_set",
+        targetId: request.trackIds.join(","),
+        before: { tracks: normalizedTracks },
+        after: {
+          trackIds: request.trackIds,
+          rules: normalizedRules,
+          reason: request.reason.trim(),
+          effectiveFrom: request.effectiveFrom,
+          effectiveTo: request.effectiveTo,
+          currency: request.currency,
+          overrideIds: targets.map((target) => target.overrideId)
+        },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      applyDistributionContractTrackRulesFixture(dependencies.fixtures, targets, normalizedRules, request);
+      return mutationReceipt(request.trackIds.length === 1 ? request.trackIds[0] ?? "track-rule-set" : `track-rule-set:${request.trackIds.length}`, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
 async function distributionAliasUpsertResponse(
   context: ApiContext,
   dependencies: ApiServiceDependencies,
@@ -7478,6 +7640,134 @@ async function persistDistributionCatalogContributorOverride(
       ${input.idempotencyKey}
     )
   `);
+}
+
+interface DistributionContractTrackRuleTarget {
+  readonly track: DistributionContractTrackRow;
+  readonly overrideId: string;
+  readonly baseContractId: string;
+  readonly createsContract: boolean;
+}
+
+interface NormalizedDistributionContractTrackRule {
+  readonly payeeId: string;
+  readonly percentage: string;
+}
+
+async function persistDistributionContractTrackRuleOverride(
+  tx: ApiWriteTransaction,
+  input: DistributionContractTrackRuleOverrideRequest & Readonly<{
+    rules: readonly NormalizedDistributionContractTrackRule[];
+    track: DistributionContractTrackRow;
+    overrideId: string;
+    baseContractId: string;
+    createsContract: boolean;
+    createdByUserId: string;
+    idempotencyKey: string;
+  }>
+): Promise<void> {
+  if (tx.kind === "memory") {
+    return;
+  }
+
+  if (input.createsContract) {
+    await tx.executor.execute(sql`
+      insert into contracts (
+        id,
+        workspace_id,
+        title,
+        status,
+        effective_from,
+        effective_to,
+        metadata
+      )
+      values (
+        ${input.baseContractId},
+        ${input.workspaceId},
+        ${`Track split — ${input.track.title}`},
+        'active',
+        ${input.effectiveFrom},
+        ${input.effectiveTo},
+        ${JSON.stringify({
+          source: "contract_rule_set_override",
+          trackId: input.track.trackId,
+          currency: input.currency
+        })}::jsonb
+      )
+    `);
+  }
+
+  await tx.executor.execute(sql`
+    insert into contract_rule_set_overrides (
+      id,
+      workspace_id,
+      track_id,
+      base_contract_id,
+      rules_json,
+      effective_from,
+      effective_to,
+      currency,
+      reason,
+      created_by_user_id,
+      idempotency_key
+    )
+    values (
+      ${input.overrideId},
+      ${input.workspaceId},
+      ${input.track.trackId},
+      ${input.baseContractId},
+      ${JSON.stringify(input.rules)}::jsonb,
+      ${input.effectiveFrom},
+      ${input.effectiveTo},
+      ${input.currency},
+      ${input.reason.trim()},
+      ${input.createdByUserId},
+      ${input.idempotencyKey}
+    )
+  `);
+}
+
+function applyDistributionContractTrackRulesFixture(
+  fixtures: ApiFixtureStore,
+  targets: readonly DistributionContractTrackRuleTarget[],
+  rules: readonly NormalizedDistributionContractTrackRule[],
+  request: DistributionContractTrackRuleOverrideRequest
+): void {
+  const targetIds = new Set(targets.map((target) => target.track.trackId));
+  const replacementRules = targets.flatMap((target) => rules.map((rule, index): ApiDistributionRoyaltyRuleInput => ({
+    contractId: target.baseContractId,
+    royaltyRuleId: `${target.overrideId}:${String(index + 1)}`,
+    payeeId: rule.payeeId,
+    artistId: rule.payeeId,
+    role: "track",
+    percentage: rule.percentage,
+    scopeType: "track",
+    scopeId: target.track.trackId,
+    effectiveFrom: request.effectiveFrom,
+    effectiveTo: request.effectiveTo,
+    status: "active"
+  })));
+  const mutableFixtures = fixtures as Mutable<ApiFixtureStore>;
+  mutableFixtures.distributionRoyaltyRules = [
+    ...fixtures.distributionRoyaltyRules.filter((rule) => rule.scopeType !== "track" || rule.scopeId === null || !targetIds.has(rule.scopeId)),
+    ...replacementRules
+  ];
+
+  const anchorContracts = targets.filter((target) => target.createsContract).map((target): DistributionContract => ({
+    id: target.baseContractId,
+    payeeId: rules[0]?.payeeId ?? "unassigned",
+    title: `Track split — ${target.track.title}`,
+    status: "active",
+    effectiveFrom: request.effectiveFrom,
+    effectiveTo: request.effectiveTo,
+    splitBp: Number(parseScaledUnits(rules[0]?.percentage ?? "0", 6, "TRUNCATE") / 10_000n),
+    openExpenseMicro: "0.0000000000",
+    currency: request.currency
+  }));
+  mutableFixtures.distributionContracts = anchorContracts.reduce(
+    (current, contract) => upsertById(current, contract),
+    fixtures.distributionContracts
+  );
 }
 
 function distributionReleaseFromUpsertRequest(
@@ -11518,6 +11808,20 @@ function toDistributionCatalogStatusFilter(value: string | null): DistributionCa
     return value;
   }
   throw new ApiRouteError(400, "catalog_status_invalid", "Catalog status filter is invalid.", [`status=${value}`]);
+}
+
+function toDistributionContractTrackStatus(value: string | null): DistributionContractTrackStatus | null {
+  if (value === null || value === "active" || value === "no_split" || value === "ambiguous") {
+    return value;
+  }
+  throw new ApiRouteError(400, "contracts_status_invalid", "Contract track status filter is invalid.", [`status=${value}`]);
+}
+
+function toDistributionContractWorkflow(value: string | null): DistributionContractWorkflowFilter | null {
+  if (value === null || value === "all_splits" || value === "needs_attention" || value === "ready" || value === "with_expenses") {
+    return value;
+  }
+  throw new ApiRouteError(400, "contracts_workflow_invalid", "Contract workflow filter is invalid.", [`workflow=${value}`]);
 }
 
 function toOptionalIsoDateQuery(value: string | null, key: string): string | null {

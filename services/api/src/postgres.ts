@@ -583,9 +583,67 @@ async function readDistributionMappingRows(pool: Pool): Promise<readonly Distrib
 async function readDistributionRoyaltyRules(pool: Pool): Promise<readonly ApiDistributionRoyaltyRuleInput[]> {
   const rows = await queryRows(
     pool,
-    `select id::text, contract_id::text, payee_id::text, percentage::text, scope_type, scope_id,
-      effective_from, effective_to, status
-     from royalty_rules
+    `with latest_overrides as (
+       select distinct on (workspace_id, track_id)
+         id, workspace_id, track_id, base_contract_id, rules_json, effective_from, effective_to, created_at
+       from contract_rule_set_overrides
+       order by workspace_id, track_id, created_at desc, id desc
+     ), canonical_rules as (
+       select
+         rr.id::text as id,
+         rr.contract_id::text as contract_id,
+         rr.payee_id::text as payee_id,
+         rr.percentage::text as percentage,
+         rr.scope_type,
+         case
+           when rr.scope_type = 'track' then coalesce(track.id::text, rr.scope_id)
+           when rr.scope_type = 'release' then coalesce(release.id::text, rr.scope_id)
+           else rr.scope_id
+         end as scope_id,
+         rr.effective_from,
+         rr.effective_to,
+         rr.status::text as status,
+         rr.priority,
+         rr.legacy_id,
+         c.workspace_id
+       from royalty_rules rr
+       join contracts c on c.id = rr.contract_id
+       left join tracks track on rr.scope_type = 'track'
+         and track.workspace_id = c.workspace_id
+         and (rr.scope_id = track.id::text or rr.scope_id = track.legacy_id::text)
+       left join releases release on rr.scope_type = 'release'
+         and release.workspace_id = c.workspace_id
+         and (rr.scope_id = release.id::text or rr.scope_id = release.legacy_id::text)
+     ), effective_rules as (
+       select
+         rr.id, rr.contract_id, rr.payee_id, rr.percentage, rr.scope_type, rr.scope_id,
+         rr.effective_from, rr.effective_to, rr.status, rr.priority, rr.legacy_id
+       from canonical_rules rr
+       where not (
+         rr.scope_type = 'track'
+         and exists (
+           select 1 from latest_overrides override
+           where override.workspace_id = rr.workspace_id and override.track_id::text = rr.scope_id
+         )
+       )
+       union all
+       select
+         override.id::text || ':' || split.ordinality::text as id,
+         override.base_contract_id::text as contract_id,
+         split.value->>'payeeId' as payee_id,
+         split.value->>'percentage' as percentage,
+         'track'::text as scope_type,
+         override.track_id::text as scope_id,
+         override.effective_from,
+         override.effective_to,
+         'active'::text as status,
+         (1000 - split.ordinality)::int as priority,
+         null::integer as legacy_id
+       from latest_overrides override
+       cross join lateral jsonb_array_elements(override.rules_json) with ordinality split(value, ordinality)
+     )
+     select id, contract_id, payee_id, percentage, scope_type, scope_id, effective_from, effective_to, status
+     from effective_rules
      order by priority desc, legacy_id nulls last, id`,
     []
   );

@@ -469,6 +469,40 @@ export const catalogContributorOverrides = pgTable(
   ]
 );
 
+export const contractRuleSetOverrides = pgTable(
+  "contract_rule_set_overrides",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: text("workspace_id").notNull(),
+    trackId: uuid("track_id")
+      .notNull()
+      .references(() => tracks.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    baseContractId: uuid("base_contract_id")
+      .notNull()
+      .references(() => contracts.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    rulesJson: jsonb("rules_json")
+      .$type<readonly Readonly<{ payeeId: string; percentage: string }>[]>()
+      .notNull(),
+    effectiveFrom: date("effective_from", { mode: "string" }).notNull(),
+    effectiveTo: date("effective_to", { mode: "string" }),
+    currency: char("currency", { length: 3 }).notNull(),
+    reason: text("reason").notNull(),
+    createdByUserId: text("created_by_user_id").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("contract_rule_set_overrides_workspace_track_idempotency_unique").on(
+      table.workspaceId,
+      table.trackId,
+      table.idempotencyKey
+    ),
+    index("contract_rule_set_overrides_latest_idx").on(table.workspaceId, table.trackId, table.createdAt, table.id),
+    check("contract_rule_set_overrides_json_array_check", sql`jsonb_typeof(${table.rulesJson}) = 'array' and jsonb_array_length(${table.rulesJson}) > 0`),
+    check("contract_rule_set_overrides_dates_check", sql`${table.effectiveTo} is null or ${table.effectiveTo} >= ${table.effectiveFrom}`)
+  ]
+);
+
 export const identityLink = pgTable(
   "identity_link",
   {

@@ -23,6 +23,9 @@ import type {
   DistributionCatalogContributorOverrideRequest,
   DistributionCatalogWorkbenchQuery,
   DistributionCatalogWorkbenchResponse,
+  DistributionContractTrackRuleOverrideRequest,
+  DistributionContractWorkbenchQuery,
+  DistributionContractWorkbenchResponse,
   DistributionDashboardQuery,
   DistributionDashboardResponse,
   DistributionFxRate,
@@ -111,6 +114,13 @@ export interface DistributionApiClient {
   readonly saveCatalogContributors: (
     trackId: EntityId,
     request: DistributionCatalogContributorOverrideRequest,
+    options: WriteRequestOptions
+  ) => Promise<ApiMutationReceipt>;
+  readonly getContractWorkbench: (
+    query: DistributionContractWorkbenchQuery
+  ) => Promise<DistributionContractWorkbenchResponse>;
+  readonly saveContractTrackRules: (
+    request: DistributionContractTrackRuleOverrideRequest,
     options: WriteRequestOptions
   ) => Promise<ApiMutationReceipt>;
   readonly listContracts: (query: DistributionContractsQuery) => Promise<PageResult<DistributionContract>>;
@@ -335,6 +345,22 @@ export function createDistributionApiClient(config: ApiClientConfig): Distributi
         request,
         options.idempotencyKey
       ),
+    getContractWorkbench: (
+      query: DistributionContractWorkbenchQuery
+    ): Promise<DistributionContractWorkbenchResponse> =>
+      transport.get<DistributionContractWorkbenchResponse>("contracts/workbench", {
+        workspaceId: query.workspaceId,
+        search: query.search,
+        status: query.status,
+        workflow: query.workflow,
+        cursor: query.cursor,
+        limit: query.limit
+      }),
+    saveContractTrackRules: (
+      request: DistributionContractTrackRuleOverrideRequest,
+      options: WriteRequestOptions
+    ): Promise<ApiMutationReceipt> =>
+      transport.post<ApiMutationReceipt>("contracts/track-rule-overrides", request, options.idempotencyKey),
     listContracts: (query: DistributionContractsQuery): Promise<PageResult<DistributionContract>> =>
       transport.get<PageResult<DistributionContract>>("contracts", {
         workspaceId: query.workspaceId,

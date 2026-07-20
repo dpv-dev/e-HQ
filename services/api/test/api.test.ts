@@ -5655,7 +5655,24 @@ test("Distribution mapping route delegates filters and opaque cursors to the liv
         facets: { labels: [], roles: [], releases: [] },
         summary: { trackCount: 0, needsReviewCount: 0, artistMismatchCount: 0, noContributorCount: 0 }
       }),
-      getCatalogTrack: async () => null
+      getCatalogTrack: async () => null,
+      listContractTracks: async () => ({
+        items: [],
+        nextCursor: null,
+        summary: {
+          activeTrackOnlyCount: 0,
+          activeEffectiveCount: 0,
+          expiredContractCount: 0,
+          draftContractCount: 0,
+          directTrackRuleCount: 0,
+          noEffectiveSplitCount: 0,
+          ambiguousCount: 0,
+          unallocatedRowCount: 0,
+          openRecoupmentTotals: []
+        }
+      }),
+      getContractTrack: async () => null,
+      validateContractPayees: async () => false
     },
     health: null,
     nowIso: (): string => "2026-07-20T00:00:00.000Z",
@@ -5724,7 +5741,24 @@ test("Distribution Catalog workbench delegates parity filters to the live reposi
           summary: { trackCount: 1, needsReviewCount: 1, artistMismatchCount: 0, noContributorCount: 0 }
         };
       },
-      getCatalogTrack: async (_workspaceId, trackId) => trackId === catalogTrack.id ? catalogTrack : null
+      getCatalogTrack: async (_workspaceId, trackId) => trackId === catalogTrack.id ? catalogTrack : null,
+      listContractTracks: async () => ({
+        items: [],
+        nextCursor: null,
+        summary: {
+          activeTrackOnlyCount: 0,
+          activeEffectiveCount: 0,
+          expiredContractCount: 0,
+          draftContractCount: 0,
+          directTrackRuleCount: 0,
+          noEffectiveSplitCount: 0,
+          ambiguousCount: 0,
+          unallocatedRowCount: 0,
+          openRecoupmentTotals: []
+        }
+      }),
+      getContractTrack: async () => null,
+      validateContractPayees: async () => false
     },
     health: null,
     nowIso: (): string => "2026-07-20T00:00:00.000Z",
@@ -5787,6 +5821,119 @@ test("Distribution Catalog workbench delegates parity filters to the live reposi
     entry.id === receipt.auditEventId &&
     entry.action === "distribution_catalog_contributors_override" &&
     entry.idempotencyKey === "catalog-contributor-override-1"
+  ));
+});
+
+test("Distribution Contracts workbench delegates filters and appends audited complete track split overrides", async () => {
+  let receivedQuery: Readonly<Record<string, unknown>> | null = null;
+  const fixtures = createFixtureStore();
+  const contractTrack = {
+    trackId: "20000000-0000-0000-0000-000000000001",
+    title: "Spica",
+    versionTitle: null,
+    releaseTitle: "Spica EP",
+    artistImport: "Cømpass",
+    catalogArtist: "Cømpass",
+    isrc: "ITH641491109",
+    label: "mutewax",
+    status: "no_split" as const,
+    contractId: null,
+    contractIds: [],
+    contractTitle: null,
+    splitSource: null,
+    splits: [],
+    splitTotalPercentage: "0",
+    expenseCount: 0,
+    openExpenseTotals: []
+  };
+  const payeeId = "30000000-0000-0000-0000-000000000001";
+  const app = createApiService({
+    fixtures,
+    persistence: createMemoryPersistenceRuntime({ WRITES_ENABLED: "true" }),
+    distributionReads: {
+      listMappingRows: async () => ({ items: [], nextCursor: null }),
+      listCatalogTracks: async () => ({
+        items: [],
+        nextCursor: null,
+        facets: { labels: [], roles: [], releases: [] },
+        summary: { trackCount: 0, needsReviewCount: 0, artistMismatchCount: 0, noContributorCount: 0 }
+      }),
+      getCatalogTrack: async () => null,
+      listContractTracks: async (query) => {
+        receivedQuery = query;
+        return {
+          items: [contractTrack],
+          nextCursor: "contracts-next-opaque",
+          summary: {
+            activeTrackOnlyCount: 463,
+            activeEffectiveCount: 463,
+            expiredContractCount: 0,
+            draftContractCount: 0,
+            directTrackRuleCount: 1121,
+            noEffectiveSplitCount: 162,
+            ambiguousCount: 1,
+            unallocatedRowCount: 16,
+            openRecoupmentTotals: [{ currency: "EUR", amountMicro: "2533.3400000000" }]
+          }
+        };
+      },
+      getContractTrack: async (_workspaceId, trackId) => trackId === contractTrack.trackId ? contractTrack : null,
+      validateContractPayees: async (_workspaceId, payeeIds) => payeeIds.length === 1 && payeeIds[0] === payeeId
+    },
+    health: null,
+    nowIso: (): string => "2026-07-20T00:00:00.000Z",
+    auth: createTestAuthVerifier()
+  });
+
+  const response = await app.request(
+    "/erh/v1/contracts/workbench?workspaceId=eeee-mu&search=Spica&status=no_split&workflow=needs_attention&cursor=current-opaque&limit=25",
+    { headers: authHeaders() }
+  );
+  assert.equal(response.status, 200);
+  const page = (await response.json()) as { readonly items: readonly { readonly trackId: string }[]; readonly nextCursor: string | null };
+  assert.deepEqual(page.items.map((row) => row.trackId), [contractTrack.trackId]);
+  assert.equal(page.nextCursor, "contracts-next-opaque");
+  assert.deepEqual(receivedQuery, {
+    workspaceId: "eeee-mu",
+    search: "Spica",
+    status: "no_split",
+    workflow: "needs_attention",
+    cursor: "current-opaque",
+    limit: 25
+  });
+
+  const write = await app.request("/erh/v1/contracts/track-rule-overrides", {
+    method: "POST",
+    headers: {
+      ...authHeaders(),
+      "Content-Type": "application/json",
+      "Idempotency-Key": "contract-track-rules-override-1"
+    },
+    body: JSON.stringify({
+      workspaceId: "eeee-mu",
+      trackIds: [contractTrack.trackId],
+      rules: [{ payeeId, percentage: "100.000000" }],
+      reason: "Confirmed against the signed artist agreement",
+      effectiveFrom: "2026-07-20",
+      effectiveTo: null,
+      currency: "EUR"
+    })
+  });
+  assert.equal(write.status, 200);
+  const receipt = (await write.json()) as { readonly id: string; readonly auditEventId: string | null };
+  assert.equal(receipt.id, contractTrack.trackId);
+  assert.ok(receipt.auditEventId !== null);
+  assert.ok(fixtures.distributionRoyaltyRules.some((rule) =>
+    rule.scopeType === "track" && rule.scopeId === contractTrack.trackId && rule.payeeId === payeeId && rule.percentage === "100.000000"
+  ));
+  assert.ok(fixtures.distributionContracts.some((contract) => contract.id === fixtures.distributionRoyaltyRules.find((rule) => rule.scopeId === contractTrack.trackId)?.contractId));
+
+  const audit = await app.request("/erh/v1/audit-log?workspaceId=eeee-mu&limit=100", { headers: authHeaders() });
+  const auditPage = (await audit.json()) as {
+    readonly items: readonly { readonly action: string; readonly idempotencyKey: string | null }[];
+  };
+  assert.ok(auditPage.items.some((entry) =>
+    entry.action === "distribution_contract_track_rules_override" && entry.idempotencyKey === "contract-track-rules-override-1"
   ));
 });
 

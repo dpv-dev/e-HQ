@@ -1519,6 +1519,79 @@ export interface DistributionCatalogContributorOverrideRequest {
   readonly reason: string;
 }
 
+export type DistributionContractTrackStatus = "active" | "no_split" | "ambiguous";
+export type DistributionContractWorkflowFilter = "all_splits" | "needs_attention" | "ready" | "with_expenses";
+
+export interface DistributionContractWorkbenchQuery extends PageQuery {
+  readonly workspaceId: EntityId;
+  readonly search: string | null;
+  readonly status: DistributionContractTrackStatus | null;
+  readonly workflow: DistributionContractWorkflowFilter | null;
+}
+
+export interface DistributionContractSplit {
+  readonly payeeId: EntityId;
+  readonly payeeName: string;
+  readonly percentage: DecimalString;
+  readonly role: string;
+}
+
+export interface DistributionContractCurrencyTotal {
+  readonly currency: CurrencyCode;
+  readonly amountMicro: MoneyMicroString;
+}
+
+export interface DistributionContractTrackRow {
+  readonly trackId: EntityId;
+  readonly title: string;
+  readonly versionTitle: string | null;
+  readonly releaseTitle: string | null;
+  readonly artistImport: string | null;
+  readonly catalogArtist: string;
+  readonly isrc: string | null;
+  readonly label: string | null;
+  readonly status: DistributionContractTrackStatus;
+  readonly contractId: EntityId | null;
+  readonly contractIds: readonly EntityId[];
+  readonly contractTitle: string | null;
+  readonly splitSource: "override" | "track" | "release" | null;
+  readonly splits: readonly DistributionContractSplit[];
+  readonly splitTotalPercentage: DecimalString;
+  readonly expenseCount: number;
+  readonly openExpenseTotals: readonly DistributionContractCurrencyTotal[];
+}
+
+export interface DistributionContractWorkbenchSummary {
+  readonly activeTrackOnlyCount: number;
+  readonly activeEffectiveCount: number;
+  readonly expiredContractCount: number;
+  readonly draftContractCount: number;
+  readonly directTrackRuleCount: number;
+  readonly noEffectiveSplitCount: number;
+  readonly ambiguousCount: number;
+  readonly unallocatedRowCount: number;
+  readonly openRecoupmentTotals: readonly DistributionContractCurrencyTotal[];
+}
+
+export interface DistributionContractWorkbenchResponse extends PageResult<DistributionContractTrackRow> {
+  readonly summary: DistributionContractWorkbenchSummary;
+}
+
+export interface DistributionContractTrackRuleInput {
+  readonly payeeId: EntityId;
+  readonly percentage: DecimalString;
+}
+
+export interface DistributionContractTrackRuleOverrideRequest {
+  readonly workspaceId: EntityId;
+  readonly trackIds: readonly EntityId[];
+  readonly rules: readonly DistributionContractTrackRuleInput[];
+  readonly reason: string;
+  readonly effectiveFrom: IsoDateString;
+  readonly effectiveTo: IsoDateString | null;
+  readonly currency: CurrencyCode;
+}
+
 export interface DistributionContractsQuery extends PageQuery {
   readonly workspaceId: EntityId;
   readonly payeeId: EntityId | null;

@@ -174,6 +174,18 @@ export function createOpenApiDocument(): Readonly<Record<string, unknown>> {
           summary: "Append an audited contributor override without mutating imported catalog rows"
         }
       },
+      "/erh/v1/contracts/workbench": {
+        get: {
+          operationId: "readDistributionContractWorkbench",
+          summary: "Read the track-centric contract, split, expense, and recoupment workbench"
+        }
+      },
+      "/erh/v1/contracts/track-rule-overrides": {
+        post: {
+          operationId: "saveDistributionContractTrackRuleOverride",
+          summary: "Append an audited complete track split override without mutating imported contract rules"
+        }
+      },
       "/erh/v1/contracts/{contractId}/expenses": {
         post: { operationId: "recordDistributionContractExpense", summary: "Record an audited Distribution expense or advance" }
       },
