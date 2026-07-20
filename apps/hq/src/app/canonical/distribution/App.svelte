@@ -726,9 +726,11 @@
   let paymentExchangeRateInput = $state("");
   let paymentReconcileStatementId = $state("");
   let paymentReconcileAmountInput = $state("");
+  let paymentReconcileAmountEdited = $state(false);
   let recordStatementId = $state("");
   let recordPaymentPayeeId = $state("");
   let recordPaymentAmount = $state("");
+  let recordPaymentAmountEdited = $state(false);
   let recordPaymentCurrency = $state("MUR");
   let recordPaymentExchangeRate = $state("");
   let recordPaymentMethod = $state<DistributionPaymentMethod>("bank_transfer");
@@ -2928,7 +2930,11 @@
     const statement = openStatements.find((candidate) => candidate.id === value);
     if (statement !== undefined) {
       recordPaymentPayeeId = statement.payeeId;
-      recordPaymentAmount = statement.netPayableMicro;
+      // Never overwrite an operator-typed amount; prefill only untouched or empty fields.
+      if (!recordPaymentAmountEdited || recordPaymentAmount === "") {
+        recordPaymentAmount = statement.netPayableMicro;
+        recordPaymentAmountEdited = false;
+      }
       recordPaymentCurrency = statement.currency;
     }
   }
@@ -2938,7 +2944,7 @@
   }
 
   function updateRecordPaymentPayee(value: string): void { recordPaymentPayeeId = value; }
-  function updateRecordPaymentAmount(value: string): void { recordPaymentAmount = value; }
+  function updateRecordPaymentAmount(value: string): void { recordPaymentAmount = value; recordPaymentAmountEdited = true; }
   function updateRecordPaymentCurrency(value: string): void { recordPaymentCurrency = value.toUpperCase(); }
   function updateRecordPaymentExchangeRate(value: string): void { recordPaymentExchangeRate = value; }
   function updateRecordPaymentMethod(value: string): void { recordPaymentMethod = value as DistributionPaymentMethod; }
@@ -2958,10 +2964,14 @@
     paymentReconcileStatementId = value;
     const statement = openStatements.find((candidate) => candidate.id === value);
     if (statement !== undefined) {
-      paymentReconcileAmountInput = statement.netPayableMicro;
+      // Never overwrite an operator-typed amount; prefill only untouched or empty fields.
+      if (!paymentReconcileAmountEdited || paymentReconcileAmountInput === "") {
+        paymentReconcileAmountInput = statement.netPayableMicro;
+        paymentReconcileAmountEdited = false;
+      }
     }
   }
-  function updatePaymentReconcileAmount(value: string): void { paymentReconcileAmountInput = value; }
+  function updatePaymentReconcileAmount(value: string): void { paymentReconcileAmountInput = value; paymentReconcileAmountEdited = true; }
 
   function updateSuspenseTargetTrack(value: string): void {
     suspenseTargetTrackId = value;
@@ -4207,6 +4217,7 @@
     paymentExchangeRateInput = payment.exchangeRate ?? "";
     paymentReconcileStatementId = "";
     paymentReconcileAmountInput = payment.amountMicro;
+    paymentReconcileAmountEdited = false;
   }
 
   function closePaymentPanel(): void {
@@ -4216,10 +4227,12 @@
     paymentNotesInput = "";
     paymentReconcileStatementId = "";
     paymentReconcileAmountInput = "";
+    paymentReconcileAmountEdited = false;
   }
 
   function openPaymentCreatePanel(): void {
     paymentCreatePanelOpen = true;
+    recordPaymentAmountEdited = recordPaymentAmount !== "";
   }
 
   function closePaymentCreatePanel(): void {
@@ -4265,6 +4278,7 @@
       recordStatementId = "";
       recordPaymentPayeeId = "";
       recordPaymentAmount = "";
+      recordPaymentAmountEdited = false;
       recordPaymentCurrency = "MUR";
       recordPaymentExchangeRate = "";
       recordPaymentMethod = "bank_transfer";
