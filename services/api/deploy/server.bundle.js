@@ -13302,9 +13302,7 @@ var require_main3 = __commonJS({
 
 // src/server.ts
 import { createServer } from "node:http";
-import { existsSync, readFileSync } from "node:fs";
 import { Readable } from "node:stream";
-import { dirname, resolve } from "node:path";
 
 // ../../packages/auth/src/index.ts
 function getAuthRoleFromMetadata(appMetadata, userMetadata) {
@@ -53298,11 +53296,18 @@ function quoteIdentifier(identifier) {
   return `"${identifier}"`;
 }
 
-// src/server.ts
-var envFilePath = resolveRootEnvPath(process.cwd());
-if (existsSync(envFilePath)) {
-  const envFile = readFileSync(envFilePath, "utf8");
-  for (const line of envFile.split(/\r?\n/)) {
+// src/runtime-env.ts
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+function loadRuntimeEnvironment(environment, startPath) {
+  const envFilePath = resolveRuntimeEnvPath(startPath);
+  if (!existsSync(envFilePath)) {
+    return;
+  }
+  applyRuntimeEnvText(environment, readFileSync(envFilePath, "utf8"));
+}
+function applyRuntimeEnvText(environment, envFile) {
+  for (const line of envFile.split(/\r?\n/u)) {
     const trimmedLine = line.trim();
     if (trimmedLine.length === 0 || trimmedLine.startsWith("#")) {
       continue;
@@ -53312,22 +53317,57 @@ if (existsSync(envFilePath)) {
       continue;
     }
     const key = trimmedLine.slice(0, equalsIndex).trim();
-    let value = trimmedLine.slice(equalsIndex + 1).trim();
-    if (value.length === 0) {
-      if (process.env[key] === void 0) {
-        process.env[key] = "";
-      }
-      continue;
-    }
-    const quote = value[0];
-    if (quote === '"' && value.endsWith('"') || quote === "'" && value.endsWith("'")) {
-      value = value.slice(1, -1);
-    }
-    if (process.env[key] === void 0) {
-      process.env[key] = value;
+    const value = unquoteEnvValue(trimmedLine.slice(equalsIndex + 1).trim());
+    const currentValue = environment[key];
+    if (currentValue === void 0 || shouldRepairHostingerBoolean(key, currentValue, value)) {
+      environment[key] = value;
     }
   }
 }
+function resolveRuntimeEnvPath(startPath) {
+  const hostingerCandidate = resolve(startPath, "../public_html/.builds/config/.env");
+  if (existsSync(hostingerCandidate)) {
+    return hostingerCandidate;
+  }
+  let currentDirectory = startPath;
+  for (let attempts = 0; attempts < 8; attempts += 1) {
+    const candidate = resolve(currentDirectory, ".env");
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+    if (existsSync(resolve(currentDirectory, ".git"))) {
+      break;
+    }
+    const parentDirectory = dirname(currentDirectory);
+    if (parentDirectory === currentDirectory) {
+      break;
+    }
+    currentDirectory = parentDirectory;
+  }
+  return resolve(startPath, ".env");
+}
+function unquoteEnvValue(rawValue) {
+  if (rawValue.length < 2) {
+    return rawValue;
+  }
+  const quote = rawValue[0];
+  if (quote === '"' && rawValue.endsWith('"') || quote === "'" && rawValue.endsWith("'")) {
+    return rawValue.slice(1, -1);
+  }
+  return rawValue;
+}
+function shouldRepairHostingerBoolean(key, currentValue, fileValue) {
+  if (key !== "WRITES_ENABLED") {
+    return false;
+  }
+  return isBooleanEnvValue(fileValue) && !isBooleanEnvValue(currentValue);
+}
+function isBooleanEnvValue(value) {
+  return value === "true" || value === "false" || value === "1" || value === "0";
+}
+
+// src/server.ts
+loadRuntimeEnvironment(process.env, process.cwd());
 void bootServer();
 async function bootServer() {
   const host = process.env.HOST ?? "0.0.0.0";
@@ -53486,22 +53526,4 @@ function writeRequestError(error, response) {
       context: []
     }
   }));
-}
-function resolveRootEnvPath(startPath) {
-  let currentDirectory = startPath;
-  for (let attempts = 0; attempts < 8; attempts += 1) {
-    const candidate = resolve(currentDirectory, ".env");
-    if (existsSync(candidate)) {
-      return candidate;
-    }
-    if (existsSync(resolve(currentDirectory, ".git"))) {
-      break;
-    }
-    const parentDirectory = dirname(currentDirectory);
-    if (parentDirectory === currentDirectory) {
-      break;
-    }
-    currentDirectory = parentDirectory;
-  }
-  return resolve(startPath, ".env");
 }

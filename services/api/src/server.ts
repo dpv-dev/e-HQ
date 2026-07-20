@@ -1,46 +1,12 @@
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { existsSync, readFileSync } from "node:fs";
 import { Readable } from "node:stream";
-import { dirname, resolve } from "node:path";
 import { createSupabaseJwtAuthConfig, createSupabaseJwtVerifier } from "./auth.js";
 import { createApiService } from "./index.js";
 import { startPostgresApiRuntime } from "./postgres.js";
+import { loadRuntimeEnvironment } from "./runtime-env.js";
 
-const envFilePath = resolveRootEnvPath(process.cwd());
-if (existsSync(envFilePath)) {
-  const envFile = readFileSync(envFilePath, "utf8");
-  for (const line of envFile.split(/\r?\n/)) {
-    const trimmedLine = line.trim();
-    if (trimmedLine.length === 0 || trimmedLine.startsWith("#")) {
-      continue;
-    }
-
-    const equalsIndex = trimmedLine.indexOf("=");
-    if (equalsIndex < 1) {
-      continue;
-    }
-
-    const key = trimmedLine.slice(0, equalsIndex).trim();
-    let value = trimmedLine.slice(equalsIndex + 1).trim();
-    if (value.length === 0) {
-      if (process.env[key] === undefined) {
-        process.env[key] = "";
-      }
-
-      continue;
-    }
-
-    const quote = value[0];
-    if ((quote === "\"" && value.endsWith("\"")) || (quote === "'" && value.endsWith("'"))) {
-      value = value.slice(1, -1);
-    }
-
-    if (process.env[key] === undefined) {
-      process.env[key] = value;
-    }
-  }
-}
+loadRuntimeEnvironment(process.env, process.cwd());
 
 void bootServer();
 
@@ -232,27 +198,4 @@ function writeRequestError(error: unknown, response: ServerResponse): void {
       context: []
     }
   }));
-}
-
-function resolveRootEnvPath(startPath: string): string {
-  let currentDirectory = startPath;
-  for (let attempts = 0; attempts < 8; attempts += 1) {
-    const candidate = resolve(currentDirectory, ".env");
-    if (existsSync(candidate)) {
-      return candidate;
-    }
-
-    if (existsSync(resolve(currentDirectory, ".git"))) {
-      break;
-    }
-
-    const parentDirectory = dirname(currentDirectory);
-    if (parentDirectory === currentDirectory) {
-      break;
-    }
-
-    currentDirectory = parentDirectory;
-  }
-
-  return resolve(startPath, ".env");
 }
