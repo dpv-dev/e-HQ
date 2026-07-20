@@ -651,5 +651,9 @@
     .shell-topbar {
       min-height: var(--ehq-shell-topbar-height);
     }
+
+    .shell-main > main > :global(.content) {
+      padding-inline: var(--ehq-space-3);
+    }
   }
 </style>

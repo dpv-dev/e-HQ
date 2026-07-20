@@ -184,7 +184,7 @@
       <span>You can request access without leaving this workspace.</span>
     </div>
   {:else}
-    <div class="table-frame">
+    <div class="table-frame" role="region" aria-label={`${props.title}. Scroll horizontally to view all columns and actions.`}>
       <table>
         <thead>
           <tr>
@@ -245,6 +245,7 @@
         </tbody>
       </table>
     </div>
+    <p class="mobile-scroll-hint">Scroll horizontally to view all columns and actions.</p>
     {#if showFooter}
       <footer class="table-pagination" aria-label="List pagination">
         <div class="pagination-info">
@@ -344,6 +345,12 @@
   .table-frame {
     width: 100%;
     overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-gutter: stable;
+  }
+
+  .mobile-scroll-hint {
+    display: none;
   }
 
   .table-pagination {
@@ -584,14 +591,65 @@
     color: var(--ehq-error);
   }
 
+  @media (max-width: 1100px) {
+    .row-actions {
+      width: 216px;
+      min-width: 216px;
+      flex-wrap: wrap;
+      white-space: normal;
+    }
+
+    .actions-column {
+      min-width: 216px;
+      white-space: normal;
+    }
+  }
+
   @media (max-width: 760px) {
+    header {
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }
+
+    .table-frame {
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .mobile-scroll-hint {
+      margin: 0;
+      padding: 0 var(--ehq-space-3) var(--ehq-space-3);
+      color: var(--ehq-text-muted);
+      display: block;
+      font-family: var(--ehq-mono);
+      font-size: var(--ehq-type-caption-size);
+    }
+
+    th,
+    td {
+      padding: var(--ehq-space-2);
+    }
+
+    td {
+      font-size: var(--ehq-type-ui-size);
+    }
+
+    .row-actions {
+      width: 164px;
+      min-width: 164px;
+      gap: var(--ehq-space-1);
+    }
+
+    .actions-column {
+      min-width: 164px;
+    }
+
     .table-pagination {
       align-items: stretch;
       flex-direction: column;
     }
 
     .pagination-actions {
-      justify-content: stretch;
+      justify-content: flex-start;
     }
   }
 </style>

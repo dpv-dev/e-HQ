@@ -105,4 +105,19 @@
   .action {
     margin-left: auto;
   }
+
+  @media (max-width: 640px) {
+    .ehq-toolbar-filter {
+      flex: 1 1 144px;
+    }
+
+    .action {
+      width: 100%;
+      margin-left: 0;
+    }
+
+    .action :global(.ehq-button) {
+      width: 100%;
+    }
+  }
 </style>
