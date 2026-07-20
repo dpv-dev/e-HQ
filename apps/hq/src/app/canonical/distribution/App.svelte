@@ -63,7 +63,7 @@
     type StatementSummary,
     type TrackSummary
   } from "@ehq/api-client";
-  import { Alert, BarsChart, Button, Input, KPI, Loader, PageHeader, SectionTemplate, Select, Table, Toolbar, WorkspaceShell } from "@ehq/ui";
+  import { Alert, BarsChart, Button, Drawer, Input, KPI, Loader, PageHeader, SectionTemplate, Select, Table, Toolbar, WorkspaceShell } from "@ehq/ui";
   import type { ChartPoint, IconName, SelectOption, TableColumn, TablePagination, TableRow, TableRowAction, Tone, ToolbarFilter, WorkspaceNavGroup, WorkspaceNavItem } from "@ehq/ui";
   import { createShellApiClient } from "../../app-shell-data.js";
   import { parseCsvRecords } from "../../csv-records.js";
@@ -705,6 +705,7 @@
     message: "Select a Kontor or RouteNote export (CSV/TSV) to start the preview."
   });
   let importFileInput = $state<HTMLInputElement | null>(null);
+  let importPanelOpen = $state(false);
   let runReceipt = $state<ApiRunReceipt | null>(null);
   let mutationReceipt = $state<ApiMutationReceipt | null>(null);
   let runReceiptPageId = $state<DistributionPageId | null>(null);
@@ -716,6 +717,7 @@
   let selectedMappingRowIds = $state<readonly string[]>([]);
   let selectedPaymentId = $state<string | null>(null);
   let paymentPanelMode = $state<PaymentPanelMode | null>(null);
+  let paymentCreatePanelOpen = $state(false);
   let paymentReferenceInput = $state("");
   let paymentNotesInput = $state("");
   let paymentMethodInput = $state<DistributionPaymentMethod>("bank_transfer");
@@ -791,6 +793,7 @@
   let fxEffectiveDateInput = $state(today);
   let fxRateInput = $state("");
   let aliasEditorId = $state<string | null>(null);
+  let aliasEditorOpen = $state(false);
   let aliasTextInput = $state("");
   let aliasTargetTypeInput = $state<DistributionAliasTargetType>("unassigned");
   let aliasTargetIdInput = $state("");
@@ -2701,6 +2704,14 @@
     importFileInput?.click();
   }
 
+  function openImportPanel(): void {
+    importPanelOpen = true;
+  }
+
+  function closeImportPanel(): void {
+    importPanelOpen = false;
+  }
+
   async function openImportAssistant(): Promise<void> {
     if (importState.preview === null) {
       await previewImport();
@@ -3121,6 +3132,7 @@
         confirm,
         message: "Import confirmed."
       };
+      closeImportPanel();
       await Promise.all([loadImportBatches(), loadMappingRows(), loadDashboard(), loadSuspense(), loadRevenue(), loadReconciliation(), loadAuditLog()]);
     } catch (error: unknown) {
       importState = {
@@ -4206,6 +4218,14 @@
     paymentReconcileAmountInput = "";
   }
 
+  function openPaymentCreatePanel(): void {
+    paymentCreatePanelOpen = true;
+  }
+
+  function closePaymentCreatePanel(): void {
+    paymentCreatePanelOpen = false;
+  }
+
   async function recordPayment(): Promise<void> {
     const amountMicro = recordPaymentAmountMicro;
     const currency = normalizeCurrencyCode(recordPaymentCurrency);
@@ -4252,6 +4272,7 @@
       recordPaymentPaidDate = today;
       recordPaymentReference = "";
       recordPaymentNotes = "";
+      closePaymentCreatePanel();
       await Promise.all([loadPayments(), loadStatements(), loadRevenue(), loadReconciliation(), loadAuditLog()]);
     } catch (error: unknown) {
       reportActionError(error);
@@ -4453,6 +4474,7 @@
   }
 
   function openAliasCreatePanel(): void {
+    aliasEditorOpen = true;
     aliasEditorId = null;
     aliasTextInput = "";
     aliasTargetTypeInput = "unassigned";
@@ -4467,12 +4489,14 @@
     }
 
     aliasEditorId = alias.id;
+    aliasEditorOpen = true;
     aliasTextInput = alias.aliasText;
     aliasTargetTypeInput = alias.targetType;
     aliasTargetIdInput = alias.targetId ?? "";
   }
 
   function closeAliasEditor(): void {
+    aliasEditorOpen = false;
     aliasEditorId = null;
     aliasTextInput = "";
     aliasTargetTypeInput = "unassigned";
@@ -6019,7 +6043,14 @@
             </SectionTemplate>
           </section>
         </section>
-        <section class="form-panel ehq-edge-surface" aria-label="Import Kontor RouteNote">
+        <section class="contracts-actions ehq-edge-surface">
+          <Button label="Import files" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Open import files" onclick={openImportPanel} />
+          <span>Choose a CSV or TSV export, review it, then confirm the audited batch.</span>
+        </section>
+        {#if importPanelOpen}
+          <Drawer open={true} presentation="overlay" showFooter={false} title="Import Kontor or RouteNote" badgeLabel="audited batch" badgeTone="info" body="" primaryAction="" secondaryAction="Close" state="default" onSecondary={closeImportPanel}>
+            {#snippet content()}
+        <section class="form-panel" aria-label="Import Kontor RouteNote">
           <Select id="distribution-import-source" label="Source" value={importState.source} options={importSourceOptions} state="default" message="" onchange={updateImportSource} />
           <label>
             <span>Export file</span>
@@ -6029,7 +6060,11 @@
           <Button label="Preflight assistant" variant="secondary" size="medium" type="button" disabled={!canPreviewImport} loading={false} locked={false} focus={false} ariaLabel="Preflight assistant" title={canPreviewImport ? "" : "Select a CSV/TSV export file first"} onclick={previewImport} />
           <Button label="Open assistant" variant="secondary" size="medium" type="button" disabled={!canOpenImportAssistant} loading={false} locked={false} focus={false} ariaLabel="Open assistant" title={canOpenImportAssistant ? "" : "Run the preflight assistant first"} onclick={openImportAssistant} />
           <Button label="Confirm import" variant="primary" size="medium" type="button" disabled={!canConfirmImport || !writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Confirm import" title={writeDisabledTitle()} onclick={confirmImport} />
+          <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel import" onclick={closeImportPanel} />
         </section>
+            {/snippet}
+          </Drawer>
+        {/if}
         <section class="filter-strip ehq-edge-surface" aria-label="Import filters">
           <Select id="distribution-import-filter" label="Source filter" value={importSourceFilter} options={importFilterOptions} state="default" message="" onchange={updateImportFilter} />
           <Select id="distribution-import-status" label="Status filter" value={importStatusFilter} options={importStatusFilterOptions} state="default" message="" onchange={updateImportStatusFilter} />
@@ -6091,32 +6126,42 @@
           <span>Imported contributors remain source data; reviewed corrections are append-only audited overrides.</span>
         </section>
         {#if catalogPanelMode === "release"}
-          <section class="form-panel ehq-edge-surface" aria-label="New release">
-            <Input id="distribution-release-title" label="Title" value={releaseTitleInput} placeholder="" type="text" state="default" message="" oninput={updateReleaseTitle} />
-            <Input id="distribution-release-artist" label="Artist" value={releaseArtistInput} placeholder="" type="text" state="default" message="" oninput={updateReleaseArtist} />
-            <Input id="distribution-release-label" label="Label (optional)" value={releaseLabelInput} placeholder="" type="text" state="default" message="" oninput={updateReleaseLabel} />
-            <Input id="distribution-release-upc" label="UPC (optional)" value={releaseUpcInput} placeholder="" type="text" state="default" message="" oninput={updateReleaseUpc} />
-            <Select id="distribution-release-status" label="Status" value={releaseStatusInput} options={catalogStatusOptions} state="default" message="" onchange={updateReleaseStatus} />
-            <label>
-              <span>Release date (optional)</span>
-              <input type="date" value={releaseDateInput} onchange={updateReleaseDate} />
-            </label>
-            <Button label="Create release" variant="primary" size="medium" type="button" disabled={!writesEnabled || releaseTitleInput.trim() === "" || releaseArtistInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Create release" title={writesEnabled ? (releaseTitleInput.trim() === "" ? "Enter a release title first" : releaseArtistInput.trim() === "" ? "Enter an artist name first" : "") : writeGateMessage} onclick={createRelease} />
-            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel release creation" onclick={closeCatalogPanel} />
-          </section>
+          <Drawer open={true} presentation="overlay" showFooter={false} title="New release" badgeLabel="catalog" badgeTone="info" body="" primaryAction="" secondaryAction="Close" state="default" onSecondary={closeCatalogPanel}>
+            {#snippet content()}
+              <section class="form-panel" aria-label="New release">
+                <Input id="distribution-release-title" label="Title" value={releaseTitleInput} placeholder="" type="text" state="default" message="" oninput={updateReleaseTitle} />
+                <Input id="distribution-release-artist" label="Artist" value={releaseArtistInput} placeholder="" type="text" state="default" message="" oninput={updateReleaseArtist} />
+                <Input id="distribution-release-label" label="Label (optional)" value={releaseLabelInput} placeholder="" type="text" state="default" message="" oninput={updateReleaseLabel} />
+                <Input id="distribution-release-upc" label="UPC (optional)" value={releaseUpcInput} placeholder="" type="text" state="default" message="" oninput={updateReleaseUpc} />
+                <Select id="distribution-release-status" label="Status" value={releaseStatusInput} options={catalogStatusOptions} state="default" message="" onchange={updateReleaseStatus} />
+                <label>
+                  <span>Release date (optional)</span>
+                  <input type="date" value={releaseDateInput} onchange={updateReleaseDate} />
+                </label>
+                <Button label="Create release" variant="primary" size="medium" type="button" disabled={!writesEnabled || releaseTitleInput.trim() === "" || releaseArtistInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Create release" title={writesEnabled ? (releaseTitleInput.trim() === "" ? "Enter a release title first" : releaseArtistInput.trim() === "" ? "Enter an artist name first" : "") : writeGateMessage} onclick={createRelease} />
+                <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel release creation" onclick={closeCatalogPanel} />
+              </section>
+            {/snippet}
+          </Drawer>
         {:else if catalogPanelMode === "track"}
-          <section class="form-panel ehq-edge-surface" aria-label="New track">
-            <Input id="distribution-track-title" label="Title" value={trackTitleInput} placeholder="" type="text" state="default" message="" oninput={updateTrackTitle} />
-            <Input id="distribution-track-artist" label="Artist" value={trackArtistInput} placeholder="" type="text" state="default" message="" oninput={updateTrackArtist} />
-            <Input id="distribution-track-isrc" label="ISRC (optional)" value={trackIsrcInput} placeholder="" type="text" state="default" message="" oninput={updateTrackIsrc} />
-            <Select id="distribution-track-release" label="Release" value={trackReleaseIdInput} options={trackReleaseSelectOptions} state="default" message="" onchange={updateTrackRelease} />
-            <Select id="distribution-track-status" label="Status" value={trackStatusInput} options={catalogStatusOptions} state="default" message="" onchange={updateTrackStatus} />
-            <Button label="Create track" variant="primary" size="medium" type="button" disabled={!writesEnabled || trackTitleInput.trim() === "" || trackArtistInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Create track" title={writesEnabled ? (trackTitleInput.trim() === "" ? "Enter a track title first" : trackArtistInput.trim() === "" ? "Enter an artist name first" : "") : writeGateMessage} onclick={createTrack} />
-            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel track creation" onclick={closeCatalogPanel} />
-          </section>
+          <Drawer open={true} presentation="overlay" showFooter={false} title="New track" badgeLabel="catalog" badgeTone="info" body="" primaryAction="" secondaryAction="Close" state="default" onSecondary={closeCatalogPanel}>
+            {#snippet content()}
+              <section class="form-panel" aria-label="New track">
+                <Input id="distribution-track-title" label="Title" value={trackTitleInput} placeholder="" type="text" state="default" message="" oninput={updateTrackTitle} />
+                <Input id="distribution-track-artist" label="Artist" value={trackArtistInput} placeholder="" type="text" state="default" message="" oninput={updateTrackArtist} />
+                <Input id="distribution-track-isrc" label="ISRC (optional)" value={trackIsrcInput} placeholder="" type="text" state="default" message="" oninput={updateTrackIsrc} />
+                <Select id="distribution-track-release" label="Release" value={trackReleaseIdInput} options={trackReleaseSelectOptions} state="default" message="" onchange={updateTrackRelease} />
+                <Select id="distribution-track-status" label="Status" value={trackStatusInput} options={catalogStatusOptions} state="default" message="" onchange={updateTrackStatus} />
+                <Button label="Create track" variant="primary" size="medium" type="button" disabled={!writesEnabled || trackTitleInput.trim() === "" || trackArtistInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Create track" title={writesEnabled ? (trackTitleInput.trim() === "" ? "Enter a track title first" : trackArtistInput.trim() === "" ? "Enter an artist name first" : "") : writeGateMessage} onclick={createTrack} />
+                <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel track creation" onclick={closeCatalogPanel} />
+              </section>
+            {/snippet}
+          </Drawer>
         {/if}
         {#if selectedCatalogTrack !== null}
-          <section class="catalog-contributor-panel ehq-edge-surface" aria-label="Contributor review">
+          <Drawer open={true} presentation="overlay" showFooter={false} title="Contributor review" badgeLabel={catalogReviewLabel(selectedCatalogTrack.reviewReason)} badgeTone="warning" body="" primaryAction="" secondaryAction="Close" state="default" onSecondary={closeCatalogContributorPanel}>
+            {#snippet content()}
+          <section class="catalog-contributor-panel" aria-label="Contributor review">
             <div class="catalog-contributor-heading">
               <div>
                 <span class="ehq-type-label-mono">Contributor review</span>
@@ -6146,9 +6191,8 @@
               <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel contributor review" onclick={closeCatalogContributorPanel} />
             </div>
           </section>
-        {/if}
-        {#if catalogReviewRows.length > 0}
-          <Table title="Contributor review queue" columns={catalogReviewColumns} rows={catalogReviewRows} state="default" actionLabel="" rowActions={catalogRowActions} />
+            {/snippet}
+          </Drawer>
         {/if}
         <Table title="Catalog tracks + contributors" columns={catalogColumns} rows={catalogRows} state={tableStateFor(catalogState.status, catalogRows.length)} actionLabel="" rowActions={catalogRowActions} pagination={catalogPagination} />
       {:else if activePageId === "contracts"}
@@ -6182,7 +6226,9 @@
           <Button label="Clear selection" variant="secondary" size="medium" type="button" disabled={selectedContractRowIds.length === 0} loading={false} locked={false} focus={false} ariaLabel="Clear contract track selection" onclick={clearContractSelection} />
         </section>
         {#if contractPickerOpen}
-          <section class="form-panel ehq-edge-surface" aria-label="New contract">
+          <Drawer open={true} presentation="overlay" showFooter={false} title="New contract" badgeLabel="split setup" badgeTone="info" body="" primaryAction="" secondaryAction="Close" state="default" onSecondary={closeContractPanel}>
+            {#snippet content()}
+          <section class="form-panel" aria-label="New contract">
             <div class="panel-context">
               <strong>New track contract</strong>
               <span>Select a loaded track. Saving creates an audited contract anchor only when the track has no current agreement.</span>
@@ -6191,18 +6237,26 @@
             <Button label="Open split editor" variant="primary" size="medium" type="button" disabled={contractPickerTrackId === ""} loading={false} locked={false} focus={false} ariaLabel="Open selected track split editor" onclick={openPickedContractTrack} />
             <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel new contract" onclick={closeContractPanel} />
           </section>
+            {/snippet}
+          </Drawer>
         {/if}
         {#if payeePanelOpen}
-          <section class="form-panel ehq-edge-surface" aria-label="New Distribution payee">
+          <Drawer open={true} presentation="overlay" showFooter={false} title="New payee" badgeLabel="counterparty" badgeTone="info" body="" primaryAction="" secondaryAction="Close" state="default" onSecondary={closePayeePanel}>
+            {#snippet content()}
+          <section class="form-panel" aria-label="New Distribution payee">
             <Input id="distribution-payee-name" label="Name" value={payeeNameInput} placeholder="Artist, staff member, supplier or freelancer" type="text" state="default" message="Any royalty or expense counterparty can be a payee." oninput={updatePayeeName} />
             <Input id="distribution-payee-email" label="Email (optional)" value={payeeEmailInput} placeholder="" type="text" state="default" message="" oninput={updatePayeeEmail} />
             <Input id="distribution-payee-currency" label="Preferred currency" value={payeeCurrencyInput} placeholder="MUR" type="text" state={normalizeCurrencyCode(payeeCurrencyInput) === null ? "error" : "default"} message="ISO 3-letter code" oninput={updatePayeeCurrency} />
             <Button label="Create payee" variant="primary" size="medium" type="button" disabled={!writesEnabled || payeeNameInput.trim() === "" || normalizeCurrencyCode(payeeCurrencyInput) === null} loading={false} locked={false} focus={false} ariaLabel="Create Distribution payee" title={writeDisabledTitle()} onclick={createPayee} />
             <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel payee creation" onclick={closePayeePanel} />
           </section>
+            {/snippet}
+          </Drawer>
         {/if}
         {#if primaryContractEditorTrack !== null}
-          <section class="contract-editor ehq-edge-surface" aria-label="Track split editor">
+          <Drawer open={true} presentation="overlay" showFooter={false} title="Track split editor" badgeLabel={contractEditorTracks.length === 1 ? "track contract" : "bulk split"} badgeTone="info" body="" primaryAction="" secondaryAction="Close" state="default" onSecondary={closeContractEditor}>
+            {#snippet content()}
+          <section class="contract-editor" aria-label="Track split editor">
             <div class="contract-editor-heading">
               <div>
                 <span class="ehq-type-label-mono">{contractEditorTracks.length === 1 ? "Track contract" : "Bulk split snapshot"}</span>
@@ -6242,9 +6296,13 @@
               <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel split editing" onclick={closeContractEditor} />
             </div>
           </section>
+            {/snippet}
+          </Drawer>
         {/if}
         {#if expensePanelOpen}
-          <section class="form-panel ehq-edge-surface" aria-label="Record recoupable expense">
+          <Drawer open={true} presentation="overlay" showFooter={false} title="Record expense or advance" badgeLabel="recoupment" badgeTone="warning" body="" primaryAction="" secondaryAction="Close" state="default" onSecondary={closeExpensePanel}>
+            {#snippet content()}
+          <section class="form-panel" aria-label="Record recoupable expense">
             <Select id="distribution-expense-contract" label="Contract" value={expenseContractIdInput} options={expenseContractSelectOptions} state="default" message="" onchange={updateExpenseContract} />
             <Select id="distribution-expense-category" label="Category" value={expenseCategoryInput} options={expenseCategoryOptions} state="default" message="" onchange={updateExpenseCategory} />
             <Select id="distribution-expense-payee" label="Payee charged" value={expensePayeeIdInput} options={expensePayeeOptions} state="default" message="" onchange={updateExpensePayee} />
@@ -6259,6 +6317,8 @@
             <Button label="Record expense" variant="primary" size="medium" type="button" disabled={!writesEnabled || selectedExpenseContract === null || selectedExpenseContract.contractId === null || expenseLabelInput.trim() === "" || expenseAmountMicro === null || expenseDateInput === "" || normalizeCurrencyCode(expenseCurrencyInput) === null} loading={false} locked={false} focus={false} ariaLabel="Record expense" title={writesEnabled ? (selectedExpenseContract === null ? "Select a contract first" : expenseLabelInput.trim() === "" ? "Enter a label first" : expenseAmountMicro === null ? "Enter a positive amount, e.g. 2500.00" : expenseDateInput === "" ? "Choose the expense date first" : "") : writeGateMessage} onclick={recordExpense} />
             <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel expense entry" onclick={closeExpensePanel} />
           </section>
+            {/snippet}
+          </Drawer>
         {/if}
         <Table title="Contracts & splits by track" columns={contractColumns} rows={contractRows} state={tableStateFor(contractWorkbenchState.status, contractRows.length)} actionLabel="" rowActions={contractRowActions} pagination={contractsPagination} />
         {#if expenseContractFilterId !== ""}
@@ -6334,15 +6394,19 @@
           </SectionTemplate>
         </section>
         {#if selectedRun !== null}
-          <section class="form-panel ehq-edge-surface" aria-label="Request run reversal">
-            <div class="panel-context">
-              <strong>{selectedRun.runReference}</strong>
-              <span>{selectedRun.period} · {selectedRun.status} · lock {selectedRun.lockKey}</span>
-            </div>
-            <Input id="distribution-unpost-reason" label="Reversal reason" value={unpostReasonInput} placeholder="" type="text" state="default" message="" oninput={updateUnpostReason} />
-            <Button label="Reverse run" variant="danger" size="medium" type="button" disabled={!writesEnabled || unpostReasonInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Reverse run" title={writesEnabled ? (unpostReasonInput.trim() === "" ? "Enter a reversal reason first" : "") : writeGateMessage} onclick={unpostAllocationRun} />
-            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel reversal request" onclick={closeUnpostPanel} />
-          </section>
+          <Drawer open={true} presentation="overlay" showFooter={false} title="Reverse allocation run" badgeLabel={selectedRun.status} badgeTone="warning" body="" primaryAction="" secondaryAction="Close" state="default" onSecondary={closeUnpostPanel}>
+            {#snippet content()}
+              <section class="form-panel" aria-label="Request run reversal">
+                <div class="panel-context">
+                  <strong>{selectedRun.runReference}</strong>
+                  <span>{selectedRun.period} · {selectedRun.status} · lock {selectedRun.lockKey}</span>
+                </div>
+                <Input id="distribution-unpost-reason" label="Reversal reason" value={unpostReasonInput} placeholder="" type="text" state="default" message="" oninput={updateUnpostReason} />
+                <Button label="Reverse run" variant="danger" size="medium" type="button" disabled={!writesEnabled || unpostReasonInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Reverse run" title={writesEnabled ? (unpostReasonInput.trim() === "" ? "Enter a reversal reason first" : "") : writeGateMessage} onclick={unpostAllocationRun} />
+                <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel reversal request" onclick={closeUnpostPanel} />
+              </section>
+            {/snippet}
+          </Drawer>
         {/if}
         <Table title="Allocation runs" columns={allocationColumns} rows={allocationRows} state={tableStateFor(allocationsState.status, allocationRuns.length)} actionLabel="" rowActions={allocationRowActions} pagination={allocationsPagination} />
       {:else if activePageId === "suspense"}
@@ -6372,7 +6436,9 @@
           <Table title="Open exposure by reason" columns={suspensePlaybookColumns} rows={suspensePlaybookRows} state={tableStateFor(suspenseState.status, suspensePlaybookRows.length)} actionLabel="" rowActions={suspensePlaybookRowActions} />
         </section>
         {#if selectedSuspenseItem !== null}
-          <section class="form-panel ehq-edge-surface" aria-label="Resolve suspense item">
+          <Drawer open={true} presentation="overlay" showFooter={false} title="Resolve suspense item" badgeLabel={selectedSuspenseItem.reasonTitle} badgeTone="warning" body="" primaryAction="" secondaryAction="Close" state="default" onSecondary={closeSuspensePanel}>
+            {#snippet content()}
+          <section class="form-panel" aria-label="Resolve suspense item">
             <div class="panel-context">
               <strong>{selectedSuspenseItem.trackTitle ?? "Unmatched ledger line"}</strong>
               <span>{selectedSuspenseItem.reasonTitle} · {selectedSuspenseItem.artistName ?? "Unknown artist"} · {formatMoney(selectedSuspenseItem.amountMicro, selectedSuspenseItem.currency)} · split {selectedSuspenseItem.splitPercentage ?? "—"}%</span>
@@ -6395,6 +6461,8 @@
             {/if}
             <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel suspense resolution" onclick={closeSuspensePanel} />
           </section>
+            {/snippet}
+          </Drawer>
         {/if}
         <Table title="Suspense queue" columns={suspenseColumns} rows={suspenseTableRows} state={isLoadingStatus(suspenseState.status) ? "loading" : suspenseState.status === "error" ? "error" : suspenseItems.length === 0 ? "empty" : "default"} actionLabel="" rowActions={suspenseRowActions} pagination={suspensePagination} />
       {:else if activePageId === "statements"}
@@ -6426,20 +6494,25 @@
             <Button label="Generate statements" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Generate statements" title={writeDisabledTitle()} onclick={generateStatements} />
           </div>
         </section>
-        <Table title="Statement payment reconciliation" columns={reconStatementColumns} rows={reconStatementRows} state={isLoadingStatus(reconciliationState.status) ? "loading" : reconciliationState.status === "error" ? "error" : reconStatementRows.length === 0 ? "empty" : "default"} actionLabel="" />
         {#if selectedStatement !== null && statementDetailState.status === "idle"}
-          <section class="form-panel ehq-edge-surface" aria-label="Remove statement from active list">
-            <div class="panel-context">
-              <strong>Remove statement for {selectedStatement.payeeName}</strong>
-              <span>{formatMoney(selectedStatement.netPayableMicro, selectedStatement.currency)} · {formatDateRange(selectedStatement.period_start, selectedStatement.period_end)}</span>
-            </div>
-            <p>This removes the statement from the active list without changing source calculations. It remains in the audit trail with its reversal.</p>
-            <Input id="distribution-statement-void-reason" label="Removal reason" value={statementVoidReason} placeholder="Explain why this statement is not needed" type="text" state={statementVoidReason.trim() === "" ? "error" : "default"} message="Required and recorded in the audit trail." oninput={(value: string): void => { statementVoidReason = value; }} />
-            <Button label="Remove statement" variant="danger" size="medium" type="button" disabled={!writesEnabled || statementVoidReason.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Remove statement from active list" title={writeDisabledTitle()} onclick={voidSelectedStatement} />
-            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel statement removal" onclick={closeStatementDetail} />
-          </section>
+          <Drawer open={true} presentation="overlay" showFooter={false} title="Remove statement" badgeLabel="controlled removal" badgeTone="warning" body="" primaryAction="" secondaryAction="Close" state="default" onSecondary={closeStatementDetail}>
+            {#snippet content()}
+              <section class="form-panel" aria-label="Remove statement from active list">
+                <div class="panel-context">
+                  <strong>Remove statement for {selectedStatement.payeeName}</strong>
+                  <span>{formatMoney(selectedStatement.netPayableMicro, selectedStatement.currency)} · {formatDateRange(selectedStatement.period_start, selectedStatement.period_end)}</span>
+                </div>
+                <p>This removes the statement from the active list without changing source calculations. It remains in the audit trail with its reversal.</p>
+                <Input id="distribution-statement-void-reason" label="Removal reason" value={statementVoidReason} placeholder="Explain why this statement is not needed" type="text" state={statementVoidReason.trim() === "" ? "error" : "default"} message="Required and recorded in the audit trail." oninput={(value: string): void => { statementVoidReason = value; }} />
+                <Button label="Remove statement" variant="danger" size="medium" type="button" disabled={!writesEnabled || statementVoidReason.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Remove statement from active list" title={writeDisabledTitle()} onclick={voidSelectedStatement} />
+                <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel statement removal" onclick={closeStatementDetail} />
+              </section>
+            {/snippet}
+          </Drawer>
         {:else if selectedStatement !== null}
-          <section class="statement-pdf ehq-edge-surface" aria-label="Statement lines">
+          <Drawer open={true} presentation="overlay" showFooter={false} title={`Statement ${selectedStatement.payeeName}`} badgeLabel={selectedStatement.status} badgeTone="info" body="" primaryAction="" secondaryAction="Close" state="default" onSecondary={closeStatementDetail}>
+            {#snippet content()}
+          <section class="statement-pdf" aria-label="Statement lines">
             <header>
               <strong>{selectedStatement.payeeName}</strong>
               <span>{formatDateRange(selectedStatement.period_start, selectedStatement.period_end)} · {selectedStatement.currency}</span>
@@ -6454,32 +6527,28 @@
             {/if}
             <Button label="Close detail" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Close statement detail" onclick={closeStatementDetail} />
           </section>
+            {/snippet}
+          </Drawer>
         {/if}
-        <section class="statement-pdf ehq-edge-surface" aria-label="A4 statement PDF preview">
-          <header>
-            <strong>ë • Distribution</strong>
-            <span>A4 PDF · print-ready</span>
-          </header>
-          <h2>Statement {statementPreview?.payeeName ?? "Payee"}</h2>
-          <p>Period {statementPreview === null ? periodLabel(distributionPeriod) : formatDateRange(statementPreview.period_start, statementPreview.period_end)} · currency {statementPreview?.currency ?? "MUR"}</p>
-          {#if printingStatementId !== null}
-            <div class="print-hidden">
-              <Alert tone="info" title="Printing" message="Preparing print view…" dismissible={false} />
-            </div>
-          {/if}
-          {#if statementPrintError !== null}
-            <span class="panel-error" role="alert">{statementPrintError}</span>
-          {/if}
-          <Table title="Statements" columns={statementColumns} rows={statementRows} state={tableStateFor(statementsState.status, statements.length)} actionLabel="" rowActions={statementRowActions} pagination={statementsPagination} />
-        </section>
+        {#if printingStatementId !== null}
+          <Alert tone="info" title="Printing" message="Preparing print view…" dismissible={false} />
+        {/if}
+        {#if statementPrintError !== null}
+          <span class="panel-error" role="alert">{statementPrintError}</span>
+        {/if}
+        <Table title="Statements" columns={statementColumns} rows={statementRows} state={tableStateFor(statementsState.status, statements.length)} actionLabel="" rowActions={statementRowActions} pagination={statementsPagination} />
       {:else if activePageId === "payments"}
         <Alert tone="info" title="Distribution subledger" message="Payments are recorded and linked to Distribution statements here. Office bank and accounting integration is intentionally out of scope." dismissible={false} />
         <section class="filter-strip ehq-edge-surface" aria-label="Payment filters">
           <Select id="distribution-payment-status" label="Status" value={paymentStatusFilter} options={paymentStatusOptions} state="default" message="" onchange={updatePaymentStatus} />
           <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Apply payment filters" onclick={loadPayments} />
           <Button label="Export CSV" variant="secondary" size="medium" type="button" disabled={payments.length === 0} loading={false} locked={false} focus={false} ariaLabel="Export payments as CSV" onclick={exportPaymentsCsv} />
+          <Button label="Record payment" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Open payment recording" title={writeDisabledTitle()} onclick={openPaymentCreatePanel} />
         </section>
-        <section class="form-panel ehq-edge-surface" aria-label="Record a payment">
+        {#if paymentCreatePanelOpen}
+          <Drawer open={true} presentation="overlay" showFooter={false} title="Record payment" badgeLabel="new payment" badgeTone="info" body="" primaryAction="" secondaryAction="Close" state="default" onSecondary={closePaymentCreatePanel}>
+            {#snippet content()}
+        <section class="form-panel" aria-label="Record a payment">
           <Select id="distribution-record-payee" label="Payee" value={recordPaymentPayeeId} options={payeeSelectOptions} state="default" message="" onchange={updateRecordPaymentPayee} />
           <Input id="distribution-record-amount" label="Amount" value={recordPaymentAmount} placeholder="2500.00" type="text" state={recordPaymentAmount !== "" && recordPaymentAmountMicro === null ? "error" : "default"} message={recordPaymentAmount !== "" && recordPaymentAmountMicro === null ? "Enter a positive amount with up to 10 decimals." : ""} oninput={updateRecordPaymentAmount} />
           <Input id="distribution-record-currency" label="Currency" value={recordPaymentCurrency} placeholder="MUR" type="text" state={normalizeCurrencyCode(recordPaymentCurrency) === null ? "error" : "default"} message="ISO 3-letter code" oninput={updateRecordPaymentCurrency} />
@@ -6493,9 +6562,15 @@
           <Input id="distribution-record-notes" label="Notes (optional)" value={recordPaymentNotes} placeholder="" type="text" state="default" message="" oninput={updateRecordPaymentNotes} />
           <Select id="distribution-record-statement" label="Link statement now (optional)" value={recordStatementId} options={openStatementSelectOptions} state="default" message="Can be linked later from the reconciliation queue." onchange={updateRecordStatement} />
           <Button label="Record payment" variant="primary" size="medium" type="button" disabled={!writesEnabled || recordPaymentPayeeId === "" || recordPaymentAmountMicro === null || normalizeCurrencyCode(recordPaymentCurrency) === null || (recordPaymentStatus === "paid" && recordPaymentPaidDate === "")} loading={false} locked={false} focus={false} ariaLabel="Record payment" title={writeDisabledTitle()} onclick={recordPayment} />
+          <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel payment recording" onclick={closePaymentCreatePanel} />
         </section>
+            {/snippet}
+          </Drawer>
+        {/if}
         {#if selectedPayment !== null && paymentPanelMode !== null}
-          <section class="form-panel ehq-edge-surface" aria-label="Payment action">
+          <Drawer open={true} presentation="overlay" showFooter={false} title={`${paymentPanelMode === "reconcile" ? "Link statement" : paymentPanelMode === "void" ? "Void payment" : "Edit payment"}: ${selectedPayment.payeeName}`} badgeLabel={selectedPayment.status} badgeTone={paymentPanelMode === "void" ? "warning" : "info"} body="" primaryAction="" secondaryAction="Close" state="default" onSecondary={closePaymentPanel}>
+            {#snippet content()}
+          <section class="form-panel" aria-label="Payment action">
             <div class="panel-context">
               <strong>{selectedPayment.payeeName}</strong>
               <span>{formatMoney(selectedPayment.amountMicro, selectedPayment.currency)} · {selectedPayment.status} · {selectedPayment.reference ?? "no reference"}</span>
@@ -6520,8 +6595,9 @@
             {/if}
             <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Close payment panel" onclick={closePaymentPanel} />
           </section>
+            {/snippet}
+          </Drawer>
         {/if}
-        <Table title="Payment reconciliation queue" columns={paymentColumns} rows={unlinkedPaymentRows} state={isLoadingStatus(paymentsState.status) ? "loading" : paymentsState.status === "error" ? "error" : unlinkedPaymentRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={paymentRowActions} />
         <Table title="Payments ledger" columns={paymentColumns} rows={paymentRows} state={isLoadingStatus(paymentsState.status) ? "loading" : paymentsState.status === "error" ? "error" : payments.length === 0 ? "empty" : "default"} actionLabel="" rowActions={paymentRowActions} pagination={paymentsPagination} />
       {:else if activePageId === "revenue"}
         <section class="kpi-grid" aria-label="Revenue totals">
@@ -6595,7 +6671,14 @@
           </section>
         {/if}
       {:else if activePageId === "aliases"}
-        <section class="form-panel ehq-edge-surface" aria-label="Alias editor">
+        <section class="contracts-actions ehq-edge-surface">
+          <Button label="New alias" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Create catalog alias" title={writeDisabledTitle()} onclick={openAliasCreatePanel} />
+          <span>Aliases route imported names to canonical entities without changing imported source data.</span>
+        </section>
+        {#if aliasEditorOpen}
+          <Drawer open={true} presentation="overlay" showFooter={false} title={aliasEditorId === null ? "New alias" : "Edit alias"} badgeLabel="catalog mapping" badgeTone="info" body="" primaryAction="" secondaryAction="Close" state="default" onSecondary={closeAliasEditor}>
+            {#snippet content()}
+        <section class="form-panel" aria-label="Alias editor">
           <header class="settings-editor-head">
             <strong>{aliasEditorId === null ? "Create an alias" : "Edit an alias"}</strong>
             <span>Route imported names to canonical entities.</span>
@@ -6658,19 +6741,7 @@
               onclick={saveAlias}
             />
             <Button
-              label="New"
-              variant="secondary"
-              size="medium"
-              type="button"
-              disabled={false}
-              loading={false}
-              locked={false}
-              focus={false}
-              ariaLabel="Prepare a new alias"
-              onclick={openAliasCreatePanel}
-            />
-            <Button
-              label="Reset"
+              label="Cancel"
               variant="secondary"
               size="medium"
               type="button"
@@ -6683,6 +6754,9 @@
             />
           </div>
         </section>
+            {/snippet}
+          </Drawer>
+        {/if}
         {#if aliases.length === 0 && aliasesState.status === "success"}
           <section class="empty-state ehq-edge-surface">
             <strong>No catalog aliases</strong>
@@ -6701,11 +6775,15 @@
           />
         </section>
         {#if duplicateEditorId !== null}
-          <section class="form-panel ehq-edge-surface" aria-label="Merge duplicate into master">
-            <Select id="distribution-duplicate-master" label="Master record" value={duplicateMasterId} options={duplicateMasterOptions} state="default" message="" onchange={updateDuplicateMaster} />
-            <Button label="Merge into master" variant="primary" size="medium" type="button" disabled={!writesEnabled || duplicateMasterId === ""} loading={false} locked={false} focus={false} ariaLabel="Merge duplicate into selected master" title={writeDisabledTitle()} onclick={mergeDuplicate} />
-            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel duplicate merge" onclick={closeDuplicateMerge} />
-          </section>
+          <Drawer open={true} presentation="overlay" showFooter={false} title="Merge exact duplicate" badgeLabel="verification required" badgeTone="warning" body="" primaryAction="" secondaryAction="Close" state="default" onSecondary={closeDuplicateMerge}>
+            {#snippet content()}
+              <section class="form-panel" aria-label="Merge duplicate into master">
+                <Select id="distribution-duplicate-master" label="Master record" value={duplicateMasterId} options={duplicateMasterOptions} state="default" message="" onchange={updateDuplicateMaster} />
+                <Button label="Merge into master" variant="primary" size="medium" type="button" disabled={!writesEnabled || duplicateMasterId === ""} loading={false} locked={false} focus={false} ariaLabel="Merge duplicate into selected master" title={writeDisabledTitle()} onclick={mergeDuplicate} />
+                <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel duplicate merge" onclick={closeDuplicateMerge} />
+              </section>
+            {/snippet}
+          </Drawer>
         {/if}
         {#if duplicates.length === 0 && duplicatesState.status === "success"}
           <section class="empty-state ehq-edge-surface">
