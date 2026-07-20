@@ -14576,6 +14576,10 @@ function toApiStatementStatus(status: string): StatementSummary["status"] {
     return "paid";
   }
 
+  if (status === "void") {
+    return "void";
+  }
+
   if (status === "draft") {
     return "draft";
   }

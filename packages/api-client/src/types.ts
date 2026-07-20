@@ -2042,7 +2042,7 @@ export interface StatementsQuery extends PageQuery {
   readonly workspaceId: EntityId;
   readonly period: IsoMonthString | null;
   readonly payeeId: EntityId | null;
-  readonly status: "draft" | "posted" | "paid" | null;
+  readonly status: "draft" | "posted" | "paid" | "void" | null;
 }
 
 export interface StatementSummary {
@@ -2052,7 +2052,7 @@ export interface StatementSummary {
   readonly period_end: IsoDateString;
   readonly payeeId: EntityId;
   readonly payeeName: string;
-  readonly status: "draft" | "posted" | "paid";
+  readonly status: "draft" | "posted" | "paid" | "void";
   readonly grossMicro: MoneyMicroString;
   readonly recoupedMicro: MoneyMicroString;
   readonly paidMicro: MoneyMicroString;

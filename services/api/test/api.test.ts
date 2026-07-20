@@ -2516,6 +2516,13 @@ test("statement void appends a reversal and never deletes the original balance",
   assert.equal(receipt.reversal.movementType, "void_reversal");
   assert.equal(receipt.reversal.statementId, statementId);
 
+  const listed = await app.request("/erh/v1/statements?workspaceId=workspace_1&period=2026-07&limit=10", {
+    headers: authHeaders()
+  });
+  assert.equal(listed.status, 200);
+  const statementPage = (await listed.json()) as { readonly items: readonly { readonly id: string; readonly status: string }[] };
+  assert.equal(statementPage.items.find((item) => item.id === statementId)?.status, "void");
+
   const secondVoid = await app.request(`/erh/v1/statements/${statementId}/void`, {
     method: "POST",
     headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "statement-void-2" },

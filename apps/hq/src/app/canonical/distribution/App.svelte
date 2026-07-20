@@ -486,6 +486,13 @@
     { label: "Period", align: "left", sortable: true },
     { label: "Status", align: "left", sortable: true }
   ];
+  const statementLineColumns: readonly TableColumn[] = [
+    { label: "Track", align: "left", sortable: true },
+    { label: "Units", align: "right", sortable: true },
+    { label: "Gross", align: "right", sortable: true },
+    { label: "Recoupment", align: "right", sortable: true },
+    { label: "Net payable", align: "right", sortable: true }
+  ];
   const paymentColumns: readonly TableColumn[] = [
     { label: "ID", align: "left", sortable: true },
     { label: "Payee", align: "left", sortable: true },
@@ -773,6 +780,9 @@
   let expenseCurrencyInput = $state("MUR");
   let printingStatementId = $state<string | null>(null);
   let statementPrintError = $state<string | null>(null);
+  let selectedStatementId = $state<string | null>(null);
+  let statementDetailState = $state<ApiRequestState<StatementPrintResponse>>(createIdleState<StatementPrintResponse>());
+  let statementVoidReason = $state("");
   let fxFromCurrencyInput = $state("EUR");
   let fxToCurrencyInput = $state("MUR");
   let fxEffectiveDateInput = $state(today);
@@ -817,6 +827,13 @@
   const filteredStatements = $derived(
     statements.filter((statement: StatementSummary): boolean => statementCurrencyFilter === allValue || statement.currency === statementCurrencyFilter)
   );
+  const selectedStatement = $derived(
+    selectedStatementId === null ? null : filteredStatements.find((statement: StatementSummary): boolean => statement.id === selectedStatementId) ?? null
+  );
+  const statementDraftCount = $derived(filteredStatements.filter((statement: StatementSummary): boolean => statement.status === "draft").length);
+  const statementLockedDueCount = $derived(filteredStatements.filter((statement: StatementSummary): boolean => statement.status === "posted").length);
+  const statementPaidCount = $derived(filteredStatements.filter((statement: StatementSummary): boolean => statement.status === "paid").length);
+  const statementVoidCount = $derived(filteredStatements.filter((statement: StatementSummary): boolean => statement.status === "void").length);
   // Deploys update API and static assets independently. Normalize the previous
   // payment shape so an in-flight rollout never crashes the Payments page.
   const payments = $derived(readPageItems(paymentsState).map(normalizePaymentSummary));
@@ -843,6 +860,9 @@
   const suspensePlaybookRows = $derived(createSuspensePlaybookRows(suspenseWorkbench?.reasonGroups ?? []));
   const suspenseKpis = $derived(createSuspenseKpis(suspenseWorkbench));
   const statementRows = $derived(createStatementRows(filteredStatements));
+  const statementDetailRows = $derived(
+    statementDetailState.status === "success" ? createStatementLineRows(statementDetailState.data.lines, tracks) : []
+  );
   const paymentRows = $derived(createPaymentRows(payments));
   const unlinkedPaymentRows = $derived(createPaymentRows(payments.filter((payment) => payment.linkedStatementIds.length === 0 && payment.status !== "voided")));
   const revenueTableRows = $derived(createRevenueRows(revenueRows));
@@ -1128,7 +1148,10 @@
     { label: "Edit split group", onAction: openContractEditor }
   ];
   const statementRowActions: readonly TableRowAction[] = [
-    { label: "Print PDF", onAction: printStatementPdf }
+    { label: "Open lines", onAction: openStatementDetail },
+    { label: "Export CSV", onAction: exportStatementCsv },
+    { label: "Print PDF", onAction: printStatementPdf },
+    { label: "Void", onAction: openStatementVoidPanel, danger: true, isEnabled: statementCanVoid, disabledReason: statementVoidDisabledReason }
   ];
   const importRowActions: readonly TableRowAction[] = [
     {
@@ -3869,6 +3892,88 @@
     }
   }
 
+  function openStatementDetail(statementId: string): void {
+    selectedStatementId = statementId;
+    statementVoidReason = "";
+    void loadStatementDetail(statementId);
+  }
+
+  async function loadStatementDetail(statementId: string): Promise<void> {
+    statementDetailState = beginReload<StatementPrintResponse>(statementDetailState);
+    try {
+      statementDetailState = createSuccessState<StatementPrintResponse>(
+        await client.distribution.printStatement({ workspaceId: distributionWorkspaceId, statementId })
+      );
+    } catch (error: unknown) {
+      statementDetailState = createErrorState<StatementPrintResponse>(error);
+    }
+  }
+
+  function closeStatementDetail(): void {
+    selectedStatementId = null;
+    statementVoidReason = "";
+    statementDetailState = createIdleState<StatementPrintResponse>();
+  }
+
+  async function exportStatementCsv(statementId: string): Promise<void> {
+    try {
+      const payload = await client.distribution.printStatement({ workspaceId: distributionWorkspaceId, statementId });
+      downloadCsv(
+        `distribution-statement-${statementId}.csv`,
+        ["statement_id", "payee", "period_start", "period_end", "currency", "track", "units", "gross", "recoupment", "net_payable"],
+        payload.lines.map((line: StatementPrintLine): readonly string[] => [
+          payload.statement.id,
+          payload.statement.payeeName,
+          payload.statement.periodStart,
+          payload.statement.periodEnd,
+          line.currency,
+          printTrackLabel(line.trackId, tracks),
+          line.quantity,
+          line.grossShare,
+          line.recoupmentApplied,
+          line.netPayable
+        ])
+      );
+    } catch (error: unknown) {
+      statementPrintError = getErrorMessage(error);
+    }
+  }
+
+  function openStatementVoidPanel(statementId: string): void {
+    selectedStatementId = statementId;
+    statementVoidReason = "";
+    statementDetailState = createIdleState<StatementPrintResponse>();
+  }
+
+  async function voidSelectedStatement(): Promise<void> {
+    if (selectedStatement === null || statementVoidReason.trim() === "") {
+      return;
+    }
+
+    try {
+      mutationReceipt = await client.distribution.voidStatement(
+        selectedStatement.id,
+        { workspaceId: distributionWorkspaceId, reason: statementVoidReason.trim() },
+        { idempotencyKey: createIdempotencyKey(`statement-void-${selectedStatement.id}`) }
+      );
+      mutationReceiptPageId = activePageId;
+      await Promise.all([loadStatements(), loadPayments(), loadRevenue(), loadReconciliation(), loadAuditLog()]);
+      closeStatementDetail();
+    } catch (error: unknown) {
+      reportActionError(error);
+    }
+  }
+
+  function statementCanVoid(statementId: string): boolean {
+    return writesEnabled && statements.some((statement: StatementSummary): boolean => statement.id === statementId && statement.status !== "void");
+  }
+
+  function statementVoidDisabledReason(statementId: string): string | null {
+    if (!writesEnabled) return writeGateMessage;
+    const statement = statements.find((candidate: StatementSummary): boolean => candidate.id === statementId);
+    return statement?.status === "void" ? "This statement is already void." : null;
+  }
+
   async function printStatementPdf(statementId: string): Promise<void> {
     if (printingStatementId !== null) {
       return;
@@ -5070,7 +5175,20 @@
         { kind: "money", value: formatMoney(statement.paidMicro, statement.currency), tone: "success" },
         { kind: "money", value: formatMoney(statement.netPayableMicro, statement.currency), tone: "active" },
         { kind: "text", value: formatDateRange(statement.period_start, statement.period_end), strong: false },
-        { kind: "badge", value: statement.status, tone: statement.status === "paid" ? "success" : "warning" }
+        { kind: "badge", value: statement.status, tone: statement.status === "paid" ? "success" : statement.status === "void" ? "error" : statement.status === "draft" ? "info" : "warning" }
+      ]
+    }));
+  }
+
+  function createStatementLineRows(items: readonly StatementPrintLine[], trackItems: readonly TrackSummary[]): readonly TableRow[] {
+    return items.map((line: StatementPrintLine, index: number): TableRow => ({
+      id: `${line.trackId}:${index}`,
+      cells: [
+        { kind: "text", value: printTrackLabel(line.trackId, trackItems), strong: true },
+        { kind: "text", value: line.quantity, strong: false },
+        { kind: "money", value: formatMoney(line.grossShare, line.currency), tone: "info" },
+        { kind: "money", value: formatMoney(line.recoupmentApplied, line.currency), tone: "warning" },
+        { kind: "money", value: formatMoney(line.netPayable, line.currency), tone: "active" }
       ]
     }));
   }
@@ -6134,6 +6252,12 @@
           <Select id="distribution-statement-currency" label="Currency" value={statementCurrencyFilter} options={statementCurrencyOptions} state="default" message="" onchange={updateStatementCurrency} />
           <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Apply statement filters" onclick={loadStatements} />
         </section>
+        <section class="kpi-grid" aria-label="Statement lifecycle summary">
+          <KPI label="Draft" value={String(statementDraftCount)} detail="can still change" tone="warning" state={isLoadingStatus(statementsState.status) ? "loading" : "default"} accent={true} />
+          <KPI label="Locked due" value={String(statementLockedDueCount)} detail="ready for payment" tone="info" state={isLoadingStatus(statementsState.status) ? "loading" : "default"} accent={true} />
+          <KPI label="Paid" value={String(statementPaidCount)} detail="settled in Distribution" tone="success" state={isLoadingStatus(statementsState.status) ? "loading" : "default"} accent={true} />
+          <KPI label="Voided" value={String(statementVoidCount)} detail="reversed, never deleted" tone="error" state={isLoadingStatus(statementsState.status) ? "loading" : "default"} accent={true} />
+        </section>
         <section class="statement-summary ehq-edge-surface">
           {#if statementPreview !== null}
             <div>
@@ -6152,6 +6276,33 @@
           </div>
         </section>
         <Table title="Statement payment reconciliation" columns={reconStatementColumns} rows={reconStatementRows} state={isLoadingStatus(reconciliationState.status) ? "loading" : reconciliationState.status === "error" ? "error" : reconStatementRows.length === 0 ? "empty" : "default"} actionLabel="" />
+        {#if selectedStatement !== null && statementDetailState.status === "idle"}
+          <section class="form-panel ehq-edge-surface" aria-label="Void statement">
+            <div class="panel-context">
+              <strong>Void statement for {selectedStatement.payeeName}</strong>
+              <span>{formatMoney(selectedStatement.netPayableMicro, selectedStatement.currency)} · {formatDateRange(selectedStatement.period_start, selectedStatement.period_end)}</span>
+            </div>
+            <p>This creates an audited reversal. The statement and its imported source data remain visible.</p>
+            <Input id="distribution-statement-void-reason" label="Void reason" value={statementVoidReason} placeholder="Explain the reversal" type="text" state={statementVoidReason.trim() === "" ? "error" : "default"} message="Required and recorded in the audit trail." oninput={(value: string): void => { statementVoidReason = value; }} />
+            <Button label="Void statement" variant="danger" size="medium" type="button" disabled={!writesEnabled || statementVoidReason.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Void statement" title={writeDisabledTitle()} onclick={voidSelectedStatement} />
+            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel statement void" onclick={closeStatementDetail} />
+          </section>
+        {:else if selectedStatement !== null}
+          <section class="statement-pdf ehq-edge-surface" aria-label="Statement lines">
+            <header>
+              <strong>{selectedStatement.payeeName}</strong>
+              <span>{formatDateRange(selectedStatement.period_start, selectedStatement.period_end)} · {selectedStatement.currency}</span>
+            </header>
+            {#if isLoadingStatus(statementDetailState.status)}
+              <Loader label="Loading statement lines" detail="Retrieving the immutable statement breakdown." size="medium" />
+            {:else if statementDetailState.status === "error"}
+              <Alert tone="error" title="Statement detail unavailable" message="The line detail could not be loaded. Retry from the statement row." dismissible={false} />
+            {:else}
+              <Table title="Statement lines" columns={statementLineColumns} rows={statementDetailRows} state={statementDetailRows.length === 0 ? "empty" : "default"} actionLabel="" />
+            {/if}
+            <Button label="Close detail" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Close statement detail" onclick={closeStatementDetail} />
+          </section>
+        {/if}
         <section class="statement-pdf ehq-edge-surface" aria-label="A4 statement PDF preview">
           <header>
             <strong>ë • Distribution</strong>

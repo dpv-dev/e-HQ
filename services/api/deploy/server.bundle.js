@@ -54058,6 +54058,9 @@ function toApiStatementStatus(status) {
   if (status === "paid") {
     return "paid";
   }
+  if (status === "void") {
+    return "void";
+  }
   if (status === "draft") {
     return "draft";
   }
