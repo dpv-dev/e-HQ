@@ -28,7 +28,8 @@ import {
   isoDateSchema,
   isoDateTimeSchema,
   ledgerTransactionSchema,
-  moneyAmountSchema
+  moneyAmountSchema,
+  positiveDecimalMoneyStringSchema
 } from "../src/schemas.ts";
 import type { BasisPointShare, CurrencyCode, LedgerTransaction, MoneyAmount } from "../src/types.ts";
 import { calculateVat } from "../src/vat.ts";
@@ -391,10 +392,13 @@ test("finance schemas validate branded domain values", () => {
 test("finance boundary schemas are reusable by API write validation", () => {
   assert.equal(isoDateSchema.parse("2026-07-16"), "2026-07-16");
   assert.equal(isoDateTimeSchema.parse("2026-07-16T10:00:00.000Z"), "2026-07-16T10:00:00.000Z");
+  assert.equal(isoDateTimeSchema.safeParse("2026-07-16T10:00:00").success, false);
   assert.equal(currencyCodeInputSchema.parse("MUR"), "MUR");
   assert.equal(decimalMoneyStringSchema.parse("-125.50"), "-125.50");
+  assert.equal(positiveDecimalMoneyStringSchema.parse("125.50"), "125.50");
   assert.equal(basisPointsInputSchema.parse(10_000), 10_000);
   assert.throws(() => decimalMoneyStringSchema.parse("125,50"), /Invalid/);
+  assert.throws(() => positiveDecimalMoneyStringSchema.parse("0"), /Invalid/);
 });
 
 test("legacy Office DECIMAL(15,2) conversion is lossless and string-only", () => {

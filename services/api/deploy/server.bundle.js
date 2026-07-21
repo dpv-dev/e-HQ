@@ -23473,149 +23473,6 @@ var coerce = {
 };
 var NEVER = INVALID;
 
-// ../../packages/api-contracts/src/index.ts
-var isoDatePattern = /^\d{4}-\d{2}-\d{2}$/u;
-var isoDateTimePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/u;
-var currencyCodePattern = /^[A-Z]{3}$/u;
-var moneyStringPattern = /^-?\d+(?:\.\d+)?$/u;
-var positiveDecimalPattern = /^(?:0\.\d*[1-9]\d*|[1-9]\d*(?:\.\d+)?)$/u;
-var workspaceIdSchema = external_exports.string().min(1);
-var nullableIdSchema = external_exports.string().min(1).nullable();
-var nullableTextSchema = external_exports.string().min(1).nullable();
-var officeCashflowManualEntryWriteSchema = external_exports.object({
-  workspaceId: workspaceIdSchema,
-  accountId: nullableIdSchema,
-  partnerId: nullableIdSchema,
-  projectId: nullableIdSchema,
-  entryDate: external_exports.string().regex(isoDatePattern),
-  direction: external_exports.enum(["inflow", "outflow"]),
-  amountMicro: external_exports.string().regex(moneyStringPattern),
-  currency: external_exports.string().regex(currencyCodePattern),
-  label: external_exports.string().trim().min(1),
-  notes: nullableTextSchema,
-  status: external_exports.enum(["planned", "confirmed"])
-});
-var officeCashflowManualEntryCancelSchema = external_exports.object({
-  workspaceId: workspaceIdSchema,
-  reason: nullableTextSchema
-});
-var officeAdvanceWriteSchema = external_exports.object({
-  workspaceId: workspaceIdSchema,
-  beneficiaryType: external_exports.enum(["staff", "freelancer", "artist", "supplier", "contractor", "other"]),
-  beneficiaryName: external_exports.string().trim().min(1).max(160),
-  partnerId: nullableIdSchema,
-  projectId: nullableIdSchema,
-  transactionId: nullableIdSchema,
-  label: external_exports.string().trim().min(1),
-  plannedPaymentOn: external_exports.string().regex(isoDatePattern),
-  paidOn: external_exports.string().regex(isoDatePattern).nullable(),
-  originalAmountMicro: external_exports.string().regex(moneyStringPattern),
-  currency: external_exports.string().regex(currencyCodePattern),
-  status: external_exports.enum(["planned", "paid"]),
-  notes: nullableTextSchema
-});
-var officeAdvanceApplicationSchema = external_exports.object({
-  workspaceId: workspaceIdSchema,
-  appliedOn: external_exports.string().regex(isoDatePattern),
-  amountMicro: external_exports.string().regex(moneyStringPattern),
-  kind: external_exports.enum(["invoice", "expense", "refund", "write_off"]),
-  reference: nullableTextSchema,
-  notes: nullableTextSchema
-});
-var officeAdvanceMarkPaidSchema = external_exports.object({
-  workspaceId: workspaceIdSchema,
-  paidOn: external_exports.string().regex(isoDatePattern),
-  transactionId: nullableIdSchema
-});
-var distributionContractExpenseCategorySchema = external_exports.enum([
-  "advance",
-  "recoupment",
-  "studio",
-  "marketing",
-  "distribution",
-  "other"
-]);
-var distributionContractExpenseWriteSchema = external_exports.object({
-  workspaceId: workspaceIdSchema,
-  contractId: external_exports.string().min(1),
-  payeeId: nullableIdSchema,
-  incurredOn: external_exports.string().regex(isoDatePattern),
-  category: distributionContractExpenseCategorySchema,
-  label: external_exports.string().trim().min(1).max(500),
-  amountMicro: external_exports.string().regex(positiveDecimalPattern),
-  currency: external_exports.string().regex(currencyCodePattern),
-  recoverable: external_exports.boolean()
-}).strict();
-var distributionContractExpenseUpdateSchema = distributionContractExpenseWriteSchema.extend({
-  status: external_exports.enum(["open", "recouped", "waived"])
-});
-var distributionPaymentMethodSchema = external_exports.enum([
-  "bank_transfer",
-  "paypal",
-  "cash",
-  "cheque",
-  "crypto",
-  "other"
-]);
-var distributionPaymentMutableSchema = external_exports.object({
-  workspaceId: workspaceIdSchema,
-  amountMicro: external_exports.string().regex(positiveDecimalPattern),
-  currency: external_exports.string().regex(currencyCodePattern),
-  exchangeRate: external_exports.string().regex(positiveDecimalPattern).nullable(),
-  method: distributionPaymentMethodSchema,
-  status: external_exports.enum(["draft", "paid"]),
-  paidAt: external_exports.string().regex(isoDateTimePattern).nullable(),
-  reference: external_exports.string().trim().min(1).max(500).nullable(),
-  notes: external_exports.string().trim().min(1).max(4e3).nullable()
-}).strict();
-function validatePaidAt(value, refinementContext) {
-  if (value.status === "paid" && value.paidAt === null) {
-    refinementContext.addIssue({
-      code: external_exports.ZodIssueCode.custom,
-      path: ["paidAt"],
-      message: "paidAt is required when status is paid."
-    });
-  }
-  if (value.status === "draft" && value.paidAt !== null) {
-    refinementContext.addIssue({
-      code: external_exports.ZodIssueCode.custom,
-      path: ["paidAt"],
-      message: "paidAt must be null while status is draft."
-    });
-  }
-}
-var distributionPaymentRecordSchema = distributionPaymentMutableSchema.extend({
-  statementId: nullableIdSchema,
-  payeeId: external_exports.string().min(1)
-}).superRefine(validatePaidAt);
-var distributionPaymentUpdateSchema = distributionPaymentMutableSchema.superRefine(validatePaidAt);
-var distributionPaymentReconcileSchema = external_exports.object({
-  workspaceId: workspaceIdSchema,
-  statementId: external_exports.string().min(1),
-  amountAppliedMicro: external_exports.string().regex(positiveDecimalPattern),
-  reconciledAt: external_exports.string().regex(isoDateTimePattern)
-}).strict();
-var distributionSuspenseResolveSchema = external_exports.object({
-  workspaceId: workspaceIdSchema,
-  suspenseId: external_exports.string().min(1),
-  resolution: external_exports.enum(["map_to_release", "map_to_track", "retry_row", "mark_resolved", "hold"]),
-  targetId: nullableIdSchema,
-  note: external_exports.string().trim().min(1).max(4e3)
-}).superRefine((value, refinementContext) => {
-  if ((value.resolution === "map_to_release" || value.resolution === "map_to_track") && value.targetId === null) {
-    refinementContext.addIssue({
-      code: external_exports.ZodIssueCode.custom,
-      path: ["targetId"],
-      message: "targetId is required for a mapping resolution."
-    });
-  }
-});
-var apiErrorEnvelopeSchema = external_exports.object({
-  code: external_exports.string().min(1),
-  message: external_exports.string().min(1),
-  context: external_exports.array(external_exports.string())
-});
-
 // ../../packages/domain-finance/src/errors.ts
 function createFinanceDomainError(code, message2, context) {
   const error = new Error(message2);
@@ -24046,9 +23903,10 @@ function calculateVat(grossAmount, vatRateBasisPoints) {
 
 // ../../packages/domain-finance/src/schemas.ts
 var isoDateSchema = external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/u);
-var isoDateTimeSchema = external_exports.string().regex(/^\d{4}-\d{2}-\d{2}T/u);
+var isoDateTimeSchema = external_exports.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/u);
 var currencyCodeInputSchema = external_exports.string().regex(/^[A-Z]{3}$/u);
 var decimalMoneyStringSchema = external_exports.string().regex(/^-?\d+(?:\.\d+)?$/u);
+var positiveDecimalMoneyStringSchema = external_exports.string().regex(/^(?:0\.\d*[1-9]\d*|[1-9]\d*(?:\.\d+)?)$/u);
 var basisPointsInputSchema = external_exports.number().int().min(0).max(1e4);
 var currencyCodeSchema = currencyCodeInputSchema.transform(createCurrencyCode);
 var moneyMicroUnitsSchema = external_exports.bigint().transform(createMoneyMicroUnits);
@@ -24089,6 +23947,144 @@ var reconciliationResultSchema = external_exports.object({
   transactionId: external_exports.string().min(1),
   linkedBankTransactionIds: external_exports.array(external_exports.string().min(1)),
   reconciledAmount: moneyAmountSchema
+});
+
+// ../../packages/api-contracts/src/index.ts
+var workspaceIdSchema = external_exports.string().min(1);
+var nullableIdSchema = external_exports.string().min(1).nullable();
+var nullableTextSchema = external_exports.string().min(1).nullable();
+var officeCashflowManualEntryWriteSchema = external_exports.object({
+  workspaceId: workspaceIdSchema,
+  accountId: nullableIdSchema,
+  partnerId: nullableIdSchema,
+  projectId: nullableIdSchema,
+  entryDate: isoDateSchema,
+  direction: external_exports.enum(["inflow", "outflow"]),
+  amountMicro: decimalMoneyStringSchema,
+  currency: currencyCodeInputSchema,
+  label: external_exports.string().trim().min(1),
+  notes: nullableTextSchema,
+  status: external_exports.enum(["planned", "confirmed"])
+});
+var officeCashflowManualEntryCancelSchema = external_exports.object({
+  workspaceId: workspaceIdSchema,
+  reason: nullableTextSchema
+});
+var officeAdvanceWriteSchema = external_exports.object({
+  workspaceId: workspaceIdSchema,
+  beneficiaryType: external_exports.enum(["staff", "freelancer", "artist", "supplier", "contractor", "other"]),
+  beneficiaryName: external_exports.string().trim().min(1).max(160),
+  partnerId: nullableIdSchema,
+  projectId: nullableIdSchema,
+  transactionId: nullableIdSchema,
+  label: external_exports.string().trim().min(1),
+  plannedPaymentOn: isoDateSchema,
+  paidOn: isoDateSchema.nullable(),
+  originalAmountMicro: decimalMoneyStringSchema,
+  currency: currencyCodeInputSchema,
+  status: external_exports.enum(["planned", "paid"]),
+  notes: nullableTextSchema
+});
+var officeAdvanceApplicationSchema = external_exports.object({
+  workspaceId: workspaceIdSchema,
+  appliedOn: isoDateSchema,
+  amountMicro: decimalMoneyStringSchema,
+  kind: external_exports.enum(["invoice", "expense", "refund", "write_off"]),
+  reference: nullableTextSchema,
+  notes: nullableTextSchema
+});
+var officeAdvanceMarkPaidSchema = external_exports.object({
+  workspaceId: workspaceIdSchema,
+  paidOn: isoDateSchema,
+  transactionId: nullableIdSchema
+});
+var distributionContractExpenseCategorySchema = external_exports.enum([
+  "advance",
+  "recoupment",
+  "studio",
+  "marketing",
+  "distribution",
+  "other"
+]);
+var distributionContractExpenseWriteSchema = external_exports.object({
+  workspaceId: workspaceIdSchema,
+  contractId: external_exports.string().min(1),
+  payeeId: nullableIdSchema,
+  incurredOn: isoDateSchema,
+  category: distributionContractExpenseCategorySchema,
+  label: external_exports.string().trim().min(1).max(500),
+  amountMicro: positiveDecimalMoneyStringSchema,
+  currency: currencyCodeInputSchema,
+  recoverable: external_exports.boolean()
+}).strict();
+var distributionContractExpenseUpdateSchema = distributionContractExpenseWriteSchema.extend({
+  status: external_exports.enum(["open", "recouped", "waived"])
+});
+var distributionPaymentMethodSchema = external_exports.enum([
+  "bank_transfer",
+  "paypal",
+  "cash",
+  "cheque",
+  "crypto",
+  "other"
+]);
+var distributionPaymentMutableSchema = external_exports.object({
+  workspaceId: workspaceIdSchema,
+  amountMicro: positiveDecimalMoneyStringSchema,
+  currency: currencyCodeInputSchema,
+  exchangeRate: positiveDecimalMoneyStringSchema.nullable(),
+  method: distributionPaymentMethodSchema,
+  status: external_exports.enum(["draft", "paid"]),
+  paidAt: isoDateTimeSchema.nullable(),
+  reference: external_exports.string().trim().min(1).max(500).nullable(),
+  notes: external_exports.string().trim().min(1).max(4e3).nullable()
+}).strict();
+function validatePaidAt(value, refinementContext) {
+  if (value.status === "paid" && value.paidAt === null) {
+    refinementContext.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["paidAt"],
+      message: "paidAt is required when status is paid."
+    });
+  }
+  if (value.status === "draft" && value.paidAt !== null) {
+    refinementContext.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["paidAt"],
+      message: "paidAt must be null while status is draft."
+    });
+  }
+}
+var distributionPaymentRecordSchema = distributionPaymentMutableSchema.extend({
+  statementId: nullableIdSchema,
+  payeeId: external_exports.string().min(1)
+}).superRefine(validatePaidAt);
+var distributionPaymentUpdateSchema = distributionPaymentMutableSchema.superRefine(validatePaidAt);
+var distributionPaymentReconcileSchema = external_exports.object({
+  workspaceId: workspaceIdSchema,
+  statementId: external_exports.string().min(1),
+  amountAppliedMicro: positiveDecimalMoneyStringSchema,
+  reconciledAt: isoDateTimeSchema
+}).strict();
+var distributionSuspenseResolveSchema = external_exports.object({
+  workspaceId: workspaceIdSchema,
+  suspenseId: external_exports.string().min(1),
+  resolution: external_exports.enum(["map_to_release", "map_to_track", "retry_row", "mark_resolved", "hold"]),
+  targetId: nullableIdSchema,
+  note: external_exports.string().trim().min(1).max(4e3)
+}).superRefine((value, refinementContext) => {
+  if ((value.resolution === "map_to_release" || value.resolution === "map_to_track") && value.targetId === null) {
+    refinementContext.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["targetId"],
+      message: "targetId is required for a mapping resolution."
+    });
+  }
+});
+var apiErrorEnvelopeSchema = external_exports.object({
+  code: external_exports.string().min(1),
+  message: external_exports.string().min(1),
+  context: external_exports.array(external_exports.string())
 });
 
 // ../../packages/domain-distribution/src/allocation.ts

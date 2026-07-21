@@ -10,6 +10,7 @@
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
+    "@ehq/domain-finance": "workspace:*",
     "zod": "^3.25.76"
   }
 }

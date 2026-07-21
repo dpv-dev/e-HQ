@@ -1,10 +1,12 @@
 import { z } from "zod";
+import {
+  currencyCodeInputSchema,
+  isoDateSchema,
+  isoDateTimeSchema,
+  decimalMoneyStringSchema,
+  positiveDecimalMoneyStringSchema
+} from "@ehq/domain-finance";
 
-const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/u;
-const isoDateTimePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/u;
-const currencyCodePattern = /^[A-Z]{3}$/u;
-const moneyStringPattern = /^-?\d+(?:\.\d+)?$/u;
-const positiveDecimalPattern = /^(?:0\.\d*[1-9]\d*|[1-9]\d*(?:\.\d+)?)$/u;
 const workspaceIdSchema = z.string().min(1);
 const nullableIdSchema = z.string().min(1).nullable();
 const nullableTextSchema = z.string().min(1).nullable();
@@ -14,10 +16,10 @@ export const officeCashflowManualEntryWriteSchema = z.object({
   accountId: nullableIdSchema,
   partnerId: nullableIdSchema,
   projectId: nullableIdSchema,
-  entryDate: z.string().regex(isoDatePattern),
+  entryDate: isoDateSchema,
   direction: z.enum(["inflow", "outflow"]),
-  amountMicro: z.string().regex(moneyStringPattern),
-  currency: z.string().regex(currencyCodePattern),
+  amountMicro: decimalMoneyStringSchema,
+  currency: currencyCodeInputSchema,
   label: z.string().trim().min(1),
   notes: nullableTextSchema,
   status: z.enum(["planned", "confirmed"])
@@ -36,18 +38,18 @@ export const officeAdvanceWriteSchema = z.object({
   projectId: nullableIdSchema,
   transactionId: nullableIdSchema,
   label: z.string().trim().min(1),
-  plannedPaymentOn: z.string().regex(isoDatePattern),
-  paidOn: z.string().regex(isoDatePattern).nullable(),
-  originalAmountMicro: z.string().regex(moneyStringPattern),
-  currency: z.string().regex(currencyCodePattern),
+  plannedPaymentOn: isoDateSchema,
+  paidOn: isoDateSchema.nullable(),
+  originalAmountMicro: decimalMoneyStringSchema,
+  currency: currencyCodeInputSchema,
   status: z.enum(["planned", "paid"]),
   notes: nullableTextSchema
 });
 
 export const officeAdvanceApplicationSchema = z.object({
   workspaceId: workspaceIdSchema,
-  appliedOn: z.string().regex(isoDatePattern),
-  amountMicro: z.string().regex(moneyStringPattern),
+  appliedOn: isoDateSchema,
+  amountMicro: decimalMoneyStringSchema,
   kind: z.enum(["invoice", "expense", "refund", "write_off"]),
   reference: nullableTextSchema,
   notes: nullableTextSchema
@@ -55,7 +57,7 @@ export const officeAdvanceApplicationSchema = z.object({
 
 export const officeAdvanceMarkPaidSchema = z.object({
   workspaceId: workspaceIdSchema,
-  paidOn: z.string().regex(isoDatePattern),
+  paidOn: isoDateSchema,
   transactionId: nullableIdSchema
 });
 
@@ -72,11 +74,11 @@ export const distributionContractExpenseWriteSchema = z.object({
   workspaceId: workspaceIdSchema,
   contractId: z.string().min(1),
   payeeId: nullableIdSchema,
-  incurredOn: z.string().regex(isoDatePattern),
+  incurredOn: isoDateSchema,
   category: distributionContractExpenseCategorySchema,
   label: z.string().trim().min(1).max(500),
-  amountMicro: z.string().regex(positiveDecimalPattern),
-  currency: z.string().regex(currencyCodePattern),
+  amountMicro: positiveDecimalMoneyStringSchema,
+  currency: currencyCodeInputSchema,
   recoverable: z.boolean()
 }).strict();
 
@@ -95,12 +97,12 @@ export const distributionPaymentMethodSchema = z.enum([
 
 const distributionPaymentMutableSchema = z.object({
   workspaceId: workspaceIdSchema,
-  amountMicro: z.string().regex(positiveDecimalPattern),
-  currency: z.string().regex(currencyCodePattern),
-  exchangeRate: z.string().regex(positiveDecimalPattern).nullable(),
+  amountMicro: positiveDecimalMoneyStringSchema,
+  currency: currencyCodeInputSchema,
+  exchangeRate: positiveDecimalMoneyStringSchema.nullable(),
   method: distributionPaymentMethodSchema,
   status: z.enum(["draft", "paid"]),
-  paidAt: z.string().regex(isoDateTimePattern).nullable(),
+  paidAt: isoDateTimeSchema.nullable(),
   reference: z.string().trim().min(1).max(500).nullable(),
   notes: z.string().trim().min(1).max(4000).nullable()
 }).strict();
@@ -135,8 +137,8 @@ export const distributionPaymentUpdateSchema = distributionPaymentMutableSchema.
 export const distributionPaymentReconcileSchema = z.object({
   workspaceId: workspaceIdSchema,
   statementId: z.string().min(1),
-  amountAppliedMicro: z.string().regex(positiveDecimalPattern),
-  reconciledAt: z.string().regex(isoDateTimePattern)
+  amountAppliedMicro: positiveDecimalMoneyStringSchema,
+  reconciledAt: isoDateTimeSchema
 }).strict();
 
 export const distributionSuspenseResolveSchema = z.object({

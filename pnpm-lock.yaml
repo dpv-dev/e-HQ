@@ -53,6 +53,9 @@ importers:
 
   packages/api-contracts:
     dependencies:
+      '@ehq/domain-finance':
+        specifier: workspace:*
+        version: link:../domain-finance
       zod:
         specifier: ^3.25.76
         version: 3.25.76

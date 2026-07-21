@@ -15,9 +15,10 @@ import {
 } from "./money.js";
 
 export const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/u);
-export const isoDateTimeSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}T/u);
+export const isoDateTimeSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/u);
 export const currencyCodeInputSchema = z.string().regex(/^[A-Z]{3}$/u);
 export const decimalMoneyStringSchema = z.string().regex(/^-?\d+(?:\.\d+)?$/u);
+export const positiveDecimalMoneyStringSchema = z.string().regex(/^(?:0\.\d*[1-9]\d*|[1-9]\d*(?:\.\d+)?)$/u);
 export const basisPointsInputSchema = z.number().int().min(0).max(10_000);
 
 const currencyCodeSchema = currencyCodeInputSchema.transform(createCurrencyCode);
