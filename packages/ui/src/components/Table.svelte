@@ -224,7 +224,7 @@
               {#if hasRowActions}
                 <td class="actions-column right">
                   <div class="row-actions">
-                    {#each props.rowActions ?? [] as action, actionIndex (`${action.label}-${String(actionIndex)}`)}
+                    {#each props.rowActions ?? [] as action, actionIndex (`${tableRowActionTitle(action, row.id)}-${String(actionIndex)}`)}
                       <button
                         type="button"
                         class="ehq-row-action"
@@ -234,7 +234,7 @@
                         aria-label={tableRowActionTitle(action, row.id)}
                         onclick={() => action.onAction(row.id)}
                       >
-                        {action.label}
+                        {tableRowActionTitle(action, row.id)}
                       </button>
                     {/each}
                   </div>

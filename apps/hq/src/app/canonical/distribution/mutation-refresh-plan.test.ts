@@ -26,6 +26,17 @@ function expectRefreshCalls(name: string, calls: readonly string[]): void {
 }
 
 describe("distribution mutation refresh plans", () => {
+  it("routes issue actions to pinpoint queues with preserved entity context", () => {
+    expect(source).toContain('label: dashboardFixLabel');
+    expect(source).toContain('label: suspenseFixLabel');
+    expect(source).toContain('label: (rowId: string): string => `Fix ${humanizeIssueCode(rowId)} queue`');
+    expect(source).toContain('showAllImportedDataForIssue();');
+    expect(source).toContain('suspenseReasonFilter = reasonCode;');
+    expect(source).toContain('contractWorkflowFilter = "needs_attention";');
+    expect(source).toContain('mappingStatusFilter = "unmapped";');
+    expect(source).toContain('catalogReviewFilter = "needs_review";');
+  });
+
   it("import mutations refresh mapping, suspense, revenue, reconciliation, and audit surfaces", () => {
     expectRefreshCalls("reverseImportBatch", [
       "loadImportBatches",

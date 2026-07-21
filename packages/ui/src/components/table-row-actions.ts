@@ -6,7 +6,7 @@ export function isTableRowActionEnabled(action: TableRowAction, rowId: string): 
 
 export function tableRowActionTitle(action: TableRowAction, rowId: string): string {
   if (isTableRowActionEnabled(action, rowId)) {
-    return action.label;
+    return typeof action.label === "function" ? action.label(rowId) : action.label;
   }
 
   return action.disabledReason?.(rowId) ?? `${action.label} unavailable`;

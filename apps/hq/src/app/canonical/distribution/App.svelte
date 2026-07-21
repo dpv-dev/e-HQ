@@ -1211,7 +1211,7 @@
     { label: "Void", onAction: (rowId: string): void => openPaymentPanel(rowId, "void"), danger: true }
   ];
   const dashboardReadinessRowActions: readonly TableRowAction[] = [
-    { label: "Open", onAction: openDashboardReadiness }
+    { label: dashboardFixLabel, onAction: openDashboardReadiness }
   ];
   const contractRowActions: readonly TableRowAction[] = [
     { label: "Toggle selection", onAction: toggleContractRowSelection },
@@ -1245,7 +1245,7 @@
     { label: "Review contributors", onAction: reviewCatalogRow }
   ];
   const suspenseRowActions: readonly TableRowAction[] = [
-    { label: "Open fix path", onAction: openSuspenseFixPath },
+    { label: suspenseFixLabel, onAction: openSuspenseFixPath },
     {
       label: "Resolve",
       onAction: openSuspenseResolution,
@@ -1254,21 +1254,21 @@
     }
   ];
   const suspensePlaybookRowActions: readonly TableRowAction[] = [
-    { label: "Open exact queue", onAction: openSuspenseReasonQueue }
+    { label: (rowId: string): string => `Fix ${humanizeIssueCode(rowId)} queue`, onAction: openSuspenseReasonQueue }
   ];
   const allocationRowActions: readonly TableRowAction[] = [
     { label: "Request reversal", onAction: selectRunForUnpost, danger: true }
   ];
   const allocationReasonRowActions: readonly TableRowAction[] = [
-    { label: "Open exact queue", onAction: openAllocationSuspenseReason }
+    { label: (rowId: string): string => `Fix ${humanizeIssueCode(rowId)} queue`, onAction: openAllocationSuspenseReason }
   ];
   const allocationBatchRowActions: readonly TableRowAction[] = [
     { label: "Preview", onAction: previewAllocationBatch },
     { label: "Run", onAction: runAllocationBatch, isEnabled: allocationBatchCanRun, disabledReason: allocationBatchRunDisabledReason }
   ];
   const allocationBankRowActions: readonly TableRowAction[] = [
-    { label: "Create contract", onAction: openAllocationContractSetup },
-    { label: "Retry release", onAction: retryAllocationTrack, isEnabled: allocationTrackCanRetry, disabledReason: allocationTrackRetryDisabledReason }
+    { label: (rowId: string): string => `Create split for ${allocationTrackLabel(rowId)}`, onAction: openAllocationContractSetup },
+    { label: (rowId: string): string => `Retry ${allocationTrackLabel(rowId)}`, onAction: retryAllocationTrack, isEnabled: allocationTrackCanRetry, disabledReason: allocationTrackRetryDisabledReason }
   ];
   const aliasRowActions: readonly TableRowAction[] = [
     { label: "Edit", onAction: openAliasEditor }
@@ -3729,7 +3729,43 @@
     return batch === undefined || batch.pendingRowCount === 0 ? "No matched pending rows remain in this batch." : null;
   }
 
-  function openAllocationSuspenseReason(): void {
+  function humanizeIssueCode(value: string): string {
+    return value.replaceAll("_", " ");
+  }
+
+  function dashboardFixLabel(rowId: string): string {
+    const labels: Readonly<Record<string, string>> = {
+      mapping: "Fix mapping queue",
+      catalog: "Review catalog queue",
+      contracts: "Fix missing splits",
+      expenses: "Assign expense payees",
+      allocations: "Run pending allocations",
+      suspense: "Resolve suspense queue",
+      payments: "Reconcile payments"
+    };
+    return labels[rowId] ?? "Open exact issue queue";
+  }
+
+  function suspenseFixLabel(rowId: string): string {
+    const item = suspenseItems.find((candidate) => candidate.id === rowId);
+    return item === undefined ? "Fix exact issue" : `Fix ${item.reasonTitle.toLocaleLowerCase()}`;
+  }
+
+  function allocationTrackLabel(rowId: string): string {
+    const row = allocationBankItems.find((candidate) => candidate.trackId === rowId);
+    return row === undefined ? "this track" : row.isrc ?? row.trackTitle;
+  }
+
+  function showAllImportedDataForIssue(): void {
+    periodScope = "all";
+    customRange = null;
+  }
+
+  function openAllocationSuspenseReason(reasonCode: string): void {
+    showAllImportedDataForIssue();
+    suspenseSearch = "";
+    suspenseBatchReference = "";
+    suspenseReasonFilter = reasonCode;
     suspenseStatusFilter = "open";
     selectPage("suspense");
     void loadSuspense();
@@ -3944,8 +3980,12 @@
   }
 
   async function openSuspenseReasonQueue(reasonCode: string): Promise<void> {
+    showAllImportedDataForIssue();
+    suspenseSearch = "";
+    suspenseBatchReference = "";
     suspenseReasonFilter = reasonCode;
     suspenseStatusFilter = "open";
+    selectPage("suspense");
     await loadSuspense();
   }
 
@@ -3953,15 +3993,17 @@
     const item = suspenseItems.find((candidate) => candidate.id === rowId);
     if (item === undefined) return;
     const reference = item.isrc ?? item.trackTitle ?? item.artistName ?? "";
+    showAllImportedDataForIssue();
     if (item.fixPath === "mapping") {
       mappingSearch = reference;
-      mappingStatusFilter = "suggested";
+      mappingStatusFilter = "all";
       selectPage("mapping");
       void loadMappingRows();
       return;
     }
     if (item.fixPath === "contracts") {
       contractSearch = reference;
+      contractStatusFilter = allValue;
       contractWorkflowFilter = "needs_attention";
       selectPage("contracts");
       void loadContractWorkbench();
@@ -3969,16 +4011,23 @@
     }
     if (item.fixPath === "catalog") {
       catalogSearch = reference;
+      catalogReviewFilter = allValue;
       selectPage("catalog");
       void loadCatalog();
       return;
     }
     if (item.fixPath === "settings") {
+      fxFromCurrencyInput = item.currency;
+      fxToCurrencyInput = "MUR";
+      fxEffectiveDateInput = item.createdAt.slice(0, 10);
       selectPage("settings");
       return;
     }
     if (item.fixPath === "imports") {
+      importSourceFilter = allValue;
+      importStatusFilter = allValue;
       selectPage("imports");
+      void loadImportBatches();
     }
   }
 
@@ -4915,12 +4964,56 @@
   }
 
   function openDashboardReadiness(rowId: string): void {
-    const item = dashboardState.status === "success"
-      ? dashboardState.data.readiness.find((candidate: DistributionDashboardReadinessItem): boolean => candidate.id === rowId)
-      : undefined;
-
-    if (item !== undefined) {
-      selectPage(item.actionPage);
+    showAllImportedDataForIssue();
+    if (rowId === "mapping") {
+      mappingSearch = "";
+      mappingStatusFilter = "unmapped";
+      selectPage("mapping");
+      void loadMappingRows();
+      return;
+    }
+    if (rowId === "catalog") {
+      catalogSearch = "";
+      catalogReviewFilter = "needs_review";
+      selectPage("catalog");
+      void loadCatalog();
+      return;
+    }
+    if (rowId === "contracts") {
+      contractSearch = "";
+      contractStatusFilter = allValue;
+      contractWorkflowFilter = "needs_attention";
+      selectPage("contracts");
+      void loadContractWorkbench();
+      return;
+    }
+    if (rowId === "expenses") {
+      contractSearch = "";
+      contractStatusFilter = allValue;
+      contractWorkflowFilter = "with_expenses";
+      selectPage("contracts");
+      void loadContractWorkbench();
+      return;
+    }
+    if (rowId === "allocations") {
+      allocationSearch = "";
+      selectPage("allocations");
+      void loadAllocationWorkbench();
+      return;
+    }
+    if (rowId === "suspense") {
+      suspenseSearch = "";
+      suspenseBatchReference = "";
+      suspenseReasonFilter = allValue;
+      suspenseStatusFilter = "open";
+      selectPage("suspense");
+      void loadSuspense();
+      return;
+    }
+    if (rowId === "payments") {
+      paymentStatusFilter = allValue;
+      selectPage("payments");
+      void loadPayments();
     }
   }
 
