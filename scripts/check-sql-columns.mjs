@@ -53,7 +53,9 @@ const REQUIRED_COLUMNS = {
     "account_id",
     "source",
     "file_name",
-    "status"
+    "status",
+    "checksum",
+    "idempotency_fingerprint"
   ],
   import_batches: [
     "id",
@@ -102,9 +104,11 @@ const REQUIRED_COLUMNS = {
     "import_batch_id",
     "account_id",
     "occurred_on",
+    "description",
     "direction",
     "amount_minor",
-    "currency"
+    "currency",
+    "amount_mur_minor"
   ],
   office_cashflow_manual_entries: [
     "id",
@@ -168,6 +172,174 @@ const REQUIRED_COLUMNS = {
     "reason",
     "created_by_user_id",
     "idempotency_key"
+  ],
+  audit_logs: [
+    "id",
+    "entity_type",
+    "entity_id",
+    "action"
+  ],
+  categories: [
+    "id",
+    "name",
+    "type"
+  ],
+  departments: [
+    "id",
+    "name",
+    "slug",
+    "type"
+  ],
+  divisions: [
+    "id",
+    "department_id",
+    "name",
+    "slug"
+  ],
+  partners: [
+    "id",
+    "name"
+  ],
+  projects: [
+    "id",
+    "name"
+  ],
+  contracts: [
+    "id",
+    "title",
+    "workspace_id"
+  ],
+  payees: [
+    "id",
+    "name",
+    "workspace_id"
+  ],
+  releases: [
+    "id",
+    "title",
+    "workspace_id"
+  ],
+  tracks: [
+    "id",
+    "title",
+    "workspace_id"
+  ],
+  contract_cost_terms: [
+    "id",
+    "contract_id",
+    "amount",
+    "currency",
+    "recovery_method"
+  ],
+  royalty_rules: [
+    "id",
+    "contract_id",
+    "payee_id",
+    "percentage"
+  ],
+  earning_allocations: [
+    "id",
+    "earning_id",
+    "calculation_run_id",
+    "payee_id",
+    "gross_amount",
+    "original_gross_amount",
+    "gross_share",
+    "recoupment_applied",
+    "net_payable",
+    "split_percentage",
+    "currency",
+    "original_currency"
+  ],
+  statement_lines: [
+    "id",
+    "statement_id",
+    "gross_share",
+    "recoupment_applied",
+    "net_payable",
+    "quantity",
+    "currency"
+  ],
+  statement_payment_links: [
+    "id",
+    "statement_id",
+    "payment_id",
+    "amount_applied"
+  ],
+  payee_balances: [
+    "id",
+    "payee_id",
+    "currency",
+    "opening_balance",
+    "period_net",
+    "closing_balance",
+    "movement_type"
+  ],
+  fx_rates: [
+    "id",
+    "from_currency",
+    "to_currency",
+    "rate",
+    "effective_date"
+  ],
+  identity_link: [
+    "id",
+    "payee_id",
+    "office_partner_id",
+    "confidence"
+  ],
+  catalog_aliases: [
+    "id",
+    "alias_text"
+  ],
+  raw_import_rows: [
+    "id",
+    "batch_id",
+    "row_number",
+    "raw_data"
+  ],
+  office_bank_reconciliation_matches: [
+    "id",
+    "bank_statement_line_id",
+    "transaction_id",
+    "confidence_bp"
+  ],
+  office_cashflow_projection_rows: [
+    "workspace_id",
+    "period_month"
+  ],
+  api_idempotency_keys: [
+    "key",
+    "route",
+    "request_hash"
+  ],
+  api_import_previews: [
+    "preview_id",
+    "workspace_id",
+    "kind",
+    "payload_json"
+  ],
+  command_center_settings: [
+    "workspace_id",
+    "key",
+    "value_json",
+    "status",
+    "updated_by_user_id"
+  ],
+  command_center_integration_states: [
+    "workspace_id",
+    "integration_id",
+    "enabled",
+    "status",
+    "updated_by_user_id"
+  ],
+  command_center_user_permissions: [
+    "workspace_id",
+    "user_id",
+    "email",
+    "role",
+    "permissions_json",
+    "updated_by_user_id"
   ],
   contract_rule_set_overrides: [
     "id",
