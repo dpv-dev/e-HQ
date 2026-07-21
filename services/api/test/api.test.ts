@@ -1304,7 +1304,8 @@ test("Distribution reads migrated royalty results as fixture checksums, not reca
   assert.equal(dashboard.suspenseCount, 1);
   assert.deepEqual(dashboard.importedRevenue, [{ currency: "USD", amountMicro: "250.0000000000" }]);
   assert.deepEqual(dashboard.paidRoyalties, [{ currency: "USD", amountMicro: "15.1000000000" }]);
-  assert.equal(dashboard.contractCoverage.covered, 1);
+  assert.equal(dashboard.splitCoverage.covered, 2);
+  assert.equal(dashboard.contractCoverage.covered, 2);
   assert.equal(dashboard.contractCoverage.total, 3);
   assert.equal(dashboard.readiness.length, 7);
   assert.equal(dashboard.diagnostics.length, 4);
@@ -1443,6 +1444,16 @@ test("distribution aliases create persists a new alias and exposes it in the rea
         entry.idempotencyKey === "distribution-alias-create-1"
     )
   );
+
+  const filteredAuditResponse = await app.request("/erh/v1/audit-log?workspaceId=workspace_1&entityType=catalog_alias&limit=100", {
+    headers: authHeaders()
+  });
+  assert.equal(filteredAuditResponse.status, 200);
+  const filteredAuditPage = (await filteredAuditResponse.json()) as {
+    readonly items: readonly { readonly entityType: string }[];
+  };
+  assert.ok(filteredAuditPage.items.length > 0);
+  assert.ok(filteredAuditPage.items.every((entry) => entry.entityType === "catalog_alias"));
 });
 
 test("distribution aliases patch updates an existing alias target", async () => {

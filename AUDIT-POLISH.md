@@ -4,7 +4,7 @@ Scope: shared design system (`packages/ui`) + all three consoles (Office, Distri
 This is a **visual polish** pass — spacing, typography, color, hover/focus states, wording consistency —
 not a functional-bug audit (that was `AUDIT-INCOHERENCES.md` / `RAPPORT-REMEDIATION.md`, already resolved).
 
-54 findings total: 23 design system, 10 Office, 13 Distribution, 8 Command Center.
+53 findings total: 23 design system, 10 Office, 12 Distribution, 8 Command Center.
 Ranked by visual impact within each section.
 
 **Status: all four lots executed, in the priority order requested (design system → Distribution → Office → Command Center).**
@@ -87,15 +87,14 @@ the bottom of each section below for exactly what was fixed vs. investigated-and
 
 6. Receipt/notification toast copy has inconsistent capitalization and phrasing ("Action accepted · audit recorded." vs "Run queued · lock held by the workflow.").
 7. Button labels mix imperative verbs ("Preview export", "Validate import") with bare nouns ("Filter", "Refresh", "New release") with no consistent pattern; "Generate statements run" and "Request unpost run" read awkwardly compared to the rest.
-8. `.kpi-grid.recon` redundantly re-declares the exact same 4-column rule already set on `.kpi-grid` (`App.svelte:4134` vs `4345`) — dead CSS, and unlike the dashboard grid it has no responsive breakpoint for narrow screens.
-9. Payment panel's action buttons (edit/reconcile/void) are conditionally rendered rather than always present (disabled when inactive), causing the panel's layout to visibly shift when switching modes.
+8. Payment panel's action buttons (edit/reconcile/void) are conditionally rendered rather than always present (disabled when inactive), causing the panel's layout to visibly shift when switching modes.
 
 ### Low impact
 
-10. "Unpost" is a domain-specific term used nowhere else in the app — likely intentional, worth a quick sanity check rather than a fix.
-11. "Kontor / RouteNote" (with slash+spaces) vs "Kontor RouteNote" (no separator) used inconsistently for the same integration name.
-12. "A4 PDF" vs "A4 statement PDF preview" — same feature, two different phrasings.
-13. Aria-label/title attribute pairing looks correct throughout — flagged only as verified-fine, no action needed.
+9. "Unpost" is a domain-specific term used nowhere else in the app — likely intentional, worth a quick sanity check rather than a fix.
+10. "Kontor / RouteNote" (with slash+spaces) vs "Kontor RouteNote" (no separator) used inconsistently for the same integration name.
+11. "A4 PDF" vs "A4 statement PDF preview" — same feature, two different phrasings.
+12. Aria-label/title attribute pairing looks correct throughout — flagged only as verified-fine, no action needed.
 
 ---
 

@@ -422,6 +422,7 @@ async function readDistributionDataset(pool: Pool): Promise<DistributionReadData
   const [
     importBatches,
     normalizedEarnings,
+    earningTrackMatches,
     calculationRuns,
     earningAllocations,
     suspenseItems,
@@ -439,6 +440,7 @@ async function readDistributionDataset(pool: Pool): Promise<DistributionReadData
       "select id::text, batch_id::text, dsp, gross_amount::text, quantity::text, currency, isrc, upc, raw_title, raw_artist, raw_label, mapping_status, calculation_status from normalized_earnings order by legacy_id nulls last, id",
       []
     ),
+    queryRows(pool, "select id::text, earning_id::text, track_id::text, confidence::text, status, created_at from earning_track_matches order by legacy_id nulls last, id", []),
     queryRows(pool, "select id::text, batch_id::text, status, started_at, finished_at, created_at from calculation_runs order by legacy_id nulls last, id", []),
     queryRows(
       pool,
@@ -466,6 +468,7 @@ async function readDistributionDataset(pool: Pool): Promise<DistributionReadData
   return {
     importBatches: importBatches.map(toDistributionImportBatchRow),
     normalizedEarnings: normalizedEarnings.map(toDistributionNormalizedEarning),
+    earningTrackMatches: earningTrackMatches.map(toDistributionEarningTrackMatch),
     calculationRuns: calculationRuns.map(toDistributionCalculationRun),
     earningAllocations: earningAllocations.map(toDistributionEarningAllocation),
     suspenseItems: suspenseItems.map(toDistributionSuspenseItem),
@@ -1050,6 +1053,17 @@ function toDistributionNormalizedEarning(row: PgRow): DistributionReadDataset["n
     rawLabel: nullableStringCell(row, "raw_label"),
     mappingStatus: enumCell<DistributionMappingStatus>(row, "mapping_status", ["unmapped", "unmatched", "matched", "suspense", "ignored"]),
     calculationStatus: enumCell<DistributionCalculationStatus>(row, "calculation_status", ["pending", "allocated", "calculated", "suspense", "completed", "failed", "running", "error", "excluded"])
+  };
+}
+
+function toDistributionEarningTrackMatch(row: PgRow): NonNullable<DistributionReadDataset["earningTrackMatches"]>[number] {
+  return {
+    id: stringCell(row, "id"),
+    earningId: stringCell(row, "earning_id"),
+    trackId: stringCell(row, "track_id"),
+    confidence: stringCell(row, "confidence"),
+    status: enumCell(row, "status", ["unmapped", "unmatched", "matched", "suspense", "ignored"]),
+    createdAt: timestampCell(row, "created_at")
   };
 }
 

@@ -1,6 +1,7 @@
 import type {
   CalculationRun,
   EarningAllocation,
+  EarningTrackMatch,
   ImportBatch,
   NormalizedEarning,
   Payee,
@@ -20,6 +21,7 @@ export interface DistributionReadDataset {
   readonly importBatches: readonly DistributionImportBatchRow[];
   readonly normalizedEarnings: readonly DistributionNormalizedEarningRow[];
   readonly calculationRuns: readonly DistributionCalculationRunRow[];
+  readonly earningTrackMatches?: readonly DistributionEarningTrackMatchRow[];
   readonly earningAllocations: readonly DistributionEarningAllocationRow[];
   readonly suspenseItems: readonly DistributionSuspenseItemRow[];
   readonly statements: readonly DistributionStatementRow[];
@@ -49,6 +51,7 @@ export type DistributionNormalizedEarningRow = Pick<
   | "calculationStatus"
 >;
 export type DistributionCalculationRunRow = Pick<CalculationRun, "id" | "batchId" | "status" | "startedAt" | "finishedAt" | "createdAt">;
+export type DistributionEarningTrackMatchRow = Pick<EarningTrackMatch, "id" | "earningId" | "trackId" | "confidence" | "status" | "createdAt">;
 export type DistributionEarningAllocationRow = Pick<
   EarningAllocation,
   | "id"

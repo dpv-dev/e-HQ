@@ -115,6 +115,11 @@ import {
   type OfficeManagedAdvanceRow,
   type OfficeTransactionRow
 } from "@ehq/domain-office";
+import {
+  distributionDashboardCoverage,
+  distributionDashboardDataRange,
+  distributionDashboardEarningsInRange
+} from "./distribution-dashboard-metrics.js";
 import type {
   AllocationRunPreviewRequest,
   AllocationRunStartRequest,
@@ -1851,8 +1856,8 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
     const paymentStatus = nullableQuery(context, "paymentStatus");
     const revenueGroupBy = nullableQuery(context, "revenueGroupBy") ?? "store";
     // Keep the aggregate screen endpoint compatible with period-only callers.
-    const dateFrom = nullableQuery(context, "dateFrom") ?? `${period}-01`;
-    const dateTo = nullableQuery(context, "dateTo") ?? lastDayOfMonth(period);
+    const dateFrom = period === "all" ? null : nullableQuery(context, "dateFrom") ?? `${period}-01`;
+    const dateTo = period === "all" ? null : nullableQuery(context, "dateTo") ?? lastDayOfMonth(period);
 
     const importBatches = dependencies.fixtures.distribution.importBatches
       .map((batch) => toDistributionImportBatch(dependencies.fixtures.distribution, batch.id))
@@ -1906,7 +1911,10 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
         period,
         dependencies.fixtures.distributionContracts,
         dependencies.fixtures.distributionContractExpenses,
-        dependencies.fixtures.distributionFxRates
+        dependencies.fixtures.distributionFxRates,
+        dependencies.fixtures.distributionRoyaltyRules,
+        dateFrom,
+        dateTo
       ),
       importBatches: pageItems(context, importBatches),
       mappingRows: pageItems(context, mappingRows),
@@ -1942,13 +1950,20 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
   app.get("/erh/v1/dashboard", (context) => {
     const period = requireQuery(context, "period");
     requireQuery(context, "workspaceId");
+    const requestedDateFrom = nullableQuery(context, "dateFrom");
+    const requestedDateTo = nullableQuery(context, "dateTo");
+    const dateFrom = isIsoDate(requestedDateFrom) && isIsoDate(requestedDateTo) ? requestedDateFrom : null;
+    const dateTo = isIsoDate(requestedDateFrom) && isIsoDate(requestedDateTo) ? requestedDateTo : null;
     return context.json(
       toDistributionDashboard(
         dependencies.fixtures.distribution,
         period,
         dependencies.fixtures.distributionContracts,
         dependencies.fixtures.distributionContractExpenses,
-        dependencies.fixtures.distributionFxRates
+        dependencies.fixtures.distributionFxRates,
+        dependencies.fixtures.distributionRoyaltyRules,
+        dateFrom,
+        dateTo
       )
     );
   });
@@ -14412,17 +14427,26 @@ function toDistributionDashboard(
   period: string,
   contracts: readonly DistributionContract[],
   expenses: readonly DistributionContractExpense[],
-  fxRates: readonly DistributionFxRateInput[]
+  fxRates: readonly DistributionFxRateInput[],
+  royaltyRules: readonly ApiDistributionRoyaltyRuleInput[],
+  dateFrom: string | null,
+  dateTo: string | null
 ): DistributionDashboardResponse {
-  const totals = readAllocationTotals(dataset, { calculationRunId: null, payeeId: null, status: "posted" });
-  const total = totals[0];
-  const importedRevenue = distributionCurrencyTotals(dataset.normalizedEarnings.map((earning) => ({
+  const periodEarnings = distributionDashboardEarningsInRange(dataset, period, dateFrom, dateTo);
+  const periodEarningIds = new Set(periodEarnings.map((earning) => earning.id));
+  const postedAllocations = readAllocationList(dataset, { calculationRunId: null, payeeId: null, status: "posted" }).rows
+    .filter((allocation) => periodEarningIds.has(allocation.earningId));
+  const total = distributionAllocationTotals(postedAllocations)[0];
+  const importedRevenue = distributionCurrencyTotals(periodEarnings.map((earning) => ({
     currency: earning.currency,
     amount: earning.grossAmount
   })));
   const paidRoyalties = distributionCurrencyTotals(
     dataset.payments
       .filter((payment) => payment.status !== "void")
+      .filter((payment) => dateFrom === null || dateTo === null
+        ? true
+        : payment.paidAt !== null && isDateInRange(payment.paidAt.slice(0, 10), dateFrom, dateTo))
       .map((payment) => ({ currency: payment.currency, amount: payment.amount }))
   );
   const openRecoupments = distributionCurrencyTotals(
@@ -14430,20 +14454,12 @@ function toDistributionDashboard(
       .filter((contract) => contract.openExpenseMicro !== "0.0000000000")
       .map((contract) => ({ currency: contract.currency, amount: contract.openExpenseMicro }))
   );
-  const postedAllocations = readAllocationList(dataset, { calculationRunId: null, payeeId: null, status: "posted" }).rows;
-  const coveredEarningIds = new Set(
-    postedAllocations
-      .filter((allocation) => allocation.contractId !== null)
-      .map((allocation) => allocation.earningId)
-  );
-  const totalEarningIds = new Set(dataset.normalizedEarnings.map((earning) => earning.id));
+  const coverage = distributionDashboardCoverage(dataset, royaltyRules, contracts);
   const mappingBlockerCount = dataset.normalizedEarnings.filter((earning) => earning.mappingStatus !== "matched").length;
   const catalogQualityCount = dataset.tracks.filter(
     (track) => !postedAllocations.some((allocation) => allocation.trackId === track.id)
   ).length;
-  const contractBlockerCount = dataset.normalizedEarnings.filter(
-    (earning) => earning.mappingStatus === "matched" && !postedAllocations.some((allocation) => allocation.earningId === earning.id && allocation.contractId !== null)
-  ).length;
+  const contractBlockerCount = coverage.missingSplit;
   const expenseMissingPayeeCount = expenses.filter((expense) => expense.payeeId !== null && expense.payeeId.trim() === "").length;
   const pendingAllocationCount = dataset.normalizedEarnings.filter((earning) => earning.calculationStatus === "pending").length;
   const openSuspenseCount = countOpenSuspense(dataset, { status: "open", reasonCode: null });
@@ -14466,10 +14482,10 @@ function toDistributionDashboard(
     },
     {
       id: "contracts",
-      label: "Contracts missing effective split",
+      label: "Earnings missing effective split",
       status: contractBlockerCount === 0 ? "clear" : "fix",
       count: contractBlockerCount,
-      detail: "matched rows without a usable contract split",
+      detail: "mapped earnings without a usable 100% split",
       actionPage: "contracts"
     },
     {
@@ -14536,7 +14552,9 @@ function toDistributionDashboard(
     paidRoyalties,
     openRecoupments,
     fxRateCount: fxRates.length,
-    contractCoverage: { covered: coveredEarningIds.size, total: totalEarningIds.size },
+    availableDataRange: distributionDashboardDataRange(dataset),
+    splitCoverage: { covered: coverage.splitCovered, total: coverage.total },
+    contractCoverage: { covered: coverage.contractCovered, total: coverage.total },
     readiness,
     diagnostics,
     topArtists: topDistributionRoyalties(dataset, postedAllocations, "artist"),
@@ -14557,6 +14575,28 @@ function distributionCurrencyTotals(
   return [...totals.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([currency, amount]): DistributionDashboardCurrencyTotal => ({ currency, amountMicro: erhMoney.format(amount) }));
+}
+
+function distributionAllocationTotals(
+  rows: readonly DistributionAllocationReadRow[]
+): readonly { readonly currency: CurrencyCode; readonly grossShare: string; readonly recoupmentApplied: string; readonly netPayable: string }[] {
+  const totals = new Map<CurrencyCode, { grossShare: bigint; recoupmentApplied: bigint; netPayable: bigint }>();
+  for (const row of rows) {
+    const previous = totals.get(row.currency) ?? { grossShare: 0n, recoupmentApplied: 0n, netPayable: 0n };
+    totals.set(row.currency, {
+      grossShare: erhMoney.add(previous.grossShare, erhMoney.parse(row.grossShare)),
+      recoupmentApplied: erhMoney.add(previous.recoupmentApplied, erhMoney.parse(row.recoupmentApplied)),
+      netPayable: erhMoney.add(previous.netPayable, erhMoney.parse(row.netPayable))
+    });
+  }
+  return [...totals.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([currency, total]) => ({
+      currency,
+      grossShare: erhMoney.format(total.grossShare),
+      recoupmentApplied: erhMoney.format(total.recoupmentApplied),
+      netPayable: erhMoney.format(total.netPayable)
+    }));
 }
 
 function topDistributionRoyalties(

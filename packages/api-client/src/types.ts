@@ -1297,6 +1297,14 @@ export interface DistributionDashboardResponse {
   readonly paidRoyalties: readonly DistributionDashboardCurrencyTotal[];
   readonly openRecoupments: readonly DistributionDashboardCurrencyTotal[];
   readonly fxRateCount: number;
+  readonly availableDataRange: {
+    readonly from: IsoDateString;
+    readonly to: IsoDateString;
+  } | null;
+  readonly splitCoverage: {
+    readonly covered: number;
+    readonly total: number;
+  };
   readonly contractCoverage: {
     readonly covered: number;
     readonly total: number;

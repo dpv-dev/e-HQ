@@ -211,7 +211,9 @@
   });
   const distributionWorkspaceId = "eeee-mu";
   const allValue = "all";
-  const periodOptions = createPeriodOptions();
+  const periodOptions = createPeriodOptions().map((option) =>
+    option.value === "all" ? { ...option, label: "All imported data", detail: "All imported data" } : option
+  );
   const navGroups: readonly DistributionNavGroup[] = [
     {
       id: "overview",
@@ -588,7 +590,9 @@
     { label: "Date", align: "left", sortable: true },
     { label: "Actor", align: "left", sortable: true },
     { label: "Action", align: "left", sortable: true },
-    { label: "Entity", align: "left", sortable: true }
+    { label: "Entity", align: "left", sortable: true },
+    { label: "Idempotency", align: "left", sortable: true },
+    { label: "Context", align: "left", sortable: false }
   ];
   const fxRateColumns: readonly TableColumn[] = [
     { label: "From", align: "left", sortable: true },
@@ -685,6 +689,10 @@
   let auditLogState = $state<ApiRequestState<PageResult<AuditLogEntry>>>(
     createIdleState<PageResult<AuditLogEntry>>()
   );
+  let auditFromInput = $state("");
+  let auditToInput = $state("");
+  let auditActorInput = $state("");
+  let auditEntityInput = $state("");
   let settingsState = $state<ApiRequestState<DistributionSettingsResponse>>(
     createIdleState<DistributionSettingsResponse>()
   );
@@ -840,6 +848,14 @@
   const activePage = $derived(getNavItem(activePageId));
   const distributionPeriod = $derived(selectedPeriod);
   const activeRange = $derived(rangeForScope(periodScope, today, customRange));
+  const dashboardDataRange = $derived(
+    dashboardState.status === "success" ? dashboardState.data.availableDataRange ?? null : null
+  );
+  const periodDisplayRange = $derived(
+    activePageId === "dashboard" && periodScope === "all" && dashboardDataRange !== null
+      ? dashboardDataRange
+      : activeRange
+  );
   const periodControlVisible = $derived(pageUsesPeriodControl(activePageId));
   const importBatches = $derived(readPageItems(importBatchesState));
   const mappingRows = $derived(readPageItems(mappingState));
@@ -883,7 +899,6 @@
   const dashboardArtistRows = $derived(createDashboardTopRows(dashboardState, "artists"));
   const dashboardTrackRows = $derived(createDashboardTopRows(dashboardState, "tracks"));
   const dashboardStoreRows = $derived(createDashboardTopRows(dashboardState, "stores"));
-  const dashboardMappingBlockerCount = $derived(dashboardReadinessCount(dashboardState, "mapping"));
   const importRows = $derived(createImportRows(importBatches));
   const mappingTableRows = $derived(createMappingRows(filteredMappingRows, selectedMappingRowIds));
   const catalogRows = $derived(createCatalogRows(catalogTracks));
@@ -1014,6 +1029,13 @@
   const fxToCurrencyNormalized = $derived(normalizeCurrencyCode(fxToCurrencyInput));
   const fxEffectiveDateNormalized = $derived(normalizeIsoDate(fxEffectiveDateInput));
   const fxRateNormalized = $derived(normalizeFxRateValue(fxRateInput));
+  const auditFromNormalized = $derived(normalizeIsoDate(auditFromInput));
+  const auditToNormalized = $derived(normalizeIsoDate(auditToInput));
+  const auditFiltersValid = $derived(
+    (auditFromInput.trim() === "" || auditFromNormalized !== null)
+      && (auditToInput.trim() === "" || auditToNormalized !== null)
+      && (auditFromNormalized === null || auditToNormalized === null || auditFromNormalized <= auditToNormalized)
+  );
   const fxRateFormValid = $derived(
     fxFromCurrencyNormalized !== null &&
     fxToCurrencyNormalized !== null &&
@@ -1798,10 +1820,10 @@
       (cursor: string): Promise<PageResult<AuditLogEntry>> =>
         distributionApi.listAuditLog({
           workspaceId: distributionWorkspaceId,
-          from: null,
-          to: null,
-          actorId: null,
-          entityType: null,
+          from: auditFromNormalized,
+          to: auditToNormalized,
+          actorId: auditActorInput.trim() === "" ? null : auditActorInput.trim(),
+          entityType: auditEntityInput.trim() === "" ? null : auditEntityInput.trim(),
           cursor,
           limit: TABLE_PAGE_SIZE
         }),
@@ -2202,10 +2224,10 @@
       auditLogState = createSuccessState<PageResult<AuditLogEntry>>(
         await distributionApi.listAuditLog({
           workspaceId: distributionWorkspaceId,
-          from: null,
-          to: null,
-          actorId: null,
-          entityType: null,
+          from: auditFromNormalized,
+          to: auditToNormalized,
+          actorId: auditActorInput.trim() === "" ? null : auditActorInput.trim(),
+          entityType: auditEntityInput.trim() === "" ? null : auditEntityInput.trim(),
           cursor: null,
           limit: TABLE_PAGE_SIZE
         })
@@ -2250,7 +2272,11 @@
   }
 
   async function reloadSettingsPage(): Promise<void> {
-    await Promise.all([loadSettings(), loadFxRates()]);
+    await Promise.all([loadWriteGate(), loadSettings(), loadFxRates()]);
+  }
+
+  async function refreshRuntimeControls(): Promise<void> {
+    await reloadSettingsPage();
   }
 
   function resetFxRateSaveMessage(): void {
@@ -4705,7 +4731,8 @@
         { label: "Imported revenue", value: "—", detail: stateLabel(state), tone: "muted", accent: true },
         { label: "Paid royalties", value: "—", detail: "backend totals", tone: "muted", accent: false },
         { label: "Open recoupments", value: "—", detail: "contract balances", tone: "muted", accent: false },
-        { label: "Contract coverage", value: "—", detail: "earning tracks", tone: "muted", accent: false }
+        { label: "Effective split coverage", value: "—", detail: "valid 100% split", tone: "muted", accent: false },
+        { label: "Contract-backed coverage", value: "—", detail: "active contract + split", tone: "muted", accent: false }
       ];
     }
 
@@ -4719,7 +4746,20 @@
       },
       { label: "Paid royalties", value: dashboardCurrencyTotalsValue(state.data.paidRoyalties), detail: "recorded payments", tone: "success", accent: false },
       { label: "Open recoupments", value: dashboardCurrencyTotalsValue(state.data.openRecoupments), detail: "open by currency", tone: "warning", accent: false },
-      { label: "Contract coverage", value: `${String(state.data.contractCoverage.covered)}/${String(state.data.contractCoverage.total)}`, detail: "earning tracks covered", tone: state.data.contractCoverage.covered === state.data.contractCoverage.total ? "success" : "warning", accent: false }
+      {
+        label: "Effective split coverage",
+        value: `${String(state.data.splitCoverage.covered)}/${String(state.data.splitCoverage.total)}`,
+        detail: "valid 100% split",
+        tone: state.data.splitCoverage.covered === state.data.splitCoverage.total ? "success" : "warning",
+        accent: false
+      },
+      {
+        label: "Contract-backed coverage",
+        value: `${String(state.data.contractCoverage.covered)}/${String(state.data.contractCoverage.total)}`,
+        detail: "active contract + split",
+        tone: state.data.contractCoverage.covered === state.data.contractCoverage.total ? "success" : "warning",
+        accent: false
+      }
     ];
   }
 
@@ -4771,17 +4811,6 @@
     }));
   }
 
-  function dashboardReadinessCount(
-    state: ApiRequestState<DistributionDashboardResponse>,
-    itemId: string
-  ): number | null {
-    if (state.status !== "success") {
-      return null;
-    }
-
-    return state.data.readiness.find((item: DistributionDashboardReadinessItem): boolean => item.id === itemId)?.count ?? 0;
-  }
-
   // Client-side CSV export keeps Distribution revenue extractable without adding
   // a backend endpoint.
   function downloadCsv(filename: string, header: readonly string[], rows: readonly (readonly string[])[]): void {
@@ -4794,6 +4823,35 @@
     anchor.download = filename;
     anchor.click();
     URL.revokeObjectURL(url);
+  }
+
+  function updateAuditFromInput(value: string): void { auditFromInput = value; }
+  function updateAuditToInput(value: string): void { auditToInput = value; }
+  function updateAuditActorInput(value: string): void { auditActorInput = value; }
+  function updateAuditEntityInput(value: string): void { auditEntityInput = value; }
+
+  function clearAuditFilters(): void {
+    auditFromInput = "";
+    auditToInput = "";
+    auditActorInput = "";
+    auditEntityInput = "";
+    void loadAuditLog();
+  }
+
+  function exportAuditCsv(): void {
+    downloadCsv(
+      `distribution-audit-${today}.csv`,
+      ["Date", "Actor", "Action", "Entity type", "Entity", "Idempotency key", "Context"],
+      auditEntries.map((entry) => [
+        entry.occurredAt,
+        auditActorLabel(entry),
+        entry.action,
+        entry.entityType,
+        entry.entityReference,
+        entry.idempotencyKey ?? "",
+        JSON.stringify(entry.context)
+      ])
+    );
   }
 
   function exportRevenueCsv(): void {
@@ -5639,9 +5697,18 @@
         { kind: "text", value: formatDateOnly(entry.occurredAt), strong: false },
         { kind: "text", value: auditActorLabel(entry), strong: false },
         { kind: "badge", value: entry.action, tone: "info" },
-        { kind: "text", value: `${entry.entityType} · ${entry.entityReference}`, strong: false }
+        { kind: "text", value: `${entry.entityType} · ${entry.entityReference}`, strong: false },
+        { kind: "text", value: entry.idempotencyKey ?? "—", strong: false },
+        { kind: "text", value: auditContextLabel(entry.context), strong: false }
       ]
     }));
+  }
+
+  function auditContextLabel(context: Readonly<Record<string, string>>): string {
+    const visibleEntries = Object.entries(context)
+      .filter(([key]) => key !== "idempotencyKey")
+      .map(([key, value]) => `${key}=${value}`);
+    return visibleEntries.length === 0 ? "—" : visibleEntries.join(" · ");
   }
 
   function createFxRateRows(items: readonly DistributionFxRate[]): readonly TableRow[] {
@@ -6018,31 +6085,6 @@
         statusTone="muted"
       />
 
-      <section class="distribution-workflow-hero ehq-edge-surface" aria-label="Upload, exceptions, approval">
-        <div class="distribution-workflow-heading">
-          <p>Distribution</p>
-          <h2>Upload, exceptions, approval</h2>
-          <span>Move from distributor file delivery to sign-off while keeping financial controls in the backend.</span>
-        </div>
-        <div class="distribution-workflow-steps">
-          <article>
-            <span>Upload</span>
-            <strong>Upload</strong>
-            <small>Bring in the distributor file.</small>
-          </article>
-          <article>
-            <span>Map exceptions</span>
-            <strong>Map exceptions</strong>
-            <small>{dashboardMappingBlockerCount === null ? "Loading mapping queue." : `${String(dashboardMappingBlockerCount)} rows still need catalog mapping.`}</small>
-          </article>
-          <article>
-            <span>Stand by</span>
-            <strong>Stand by</strong>
-            <small>Approvals open once the queue is clean.</small>
-          </article>
-        </div>
-      </section>
-
       {#if periodControlVisible}
         <section class="period-control ehq-edge-surface" aria-label="Period controls">
           <Select
@@ -6064,7 +6106,7 @@
               <input type="date" value={activeRange.to} min={activeRange.from} onchange={updateCustomTo} />
             </label>
           {/if}
-          <p>{rangeLabel(activeRange)}</p>
+          <p>{activePageId === "dashboard" && periodScope === "all" ? `Import date: ${rangeLabel(periodDisplayRange)}` : rangeLabel(periodDisplayRange)}</p>
         </section>
       {/if}
 
@@ -6094,7 +6136,7 @@
         </section>
         <section class="dashboard-grid">
           <BarsChart title="Revenue by source" points={revenueChartPoints} tone="active" />
-          <Table title="Distribution readiness" columns={dashboardReadinessColumns} rows={dashboardReadinessRows} state={tableStateFor(dashboardState.status, dashboardReadinessRows.length)} actionLabel="" rowActions={dashboardReadinessRowActions} />
+          <Table title="Distribution readiness (workspace-wide)" columns={dashboardReadinessColumns} rows={dashboardReadinessRows} state={tableStateFor(dashboardState.status, dashboardReadinessRows.length)} actionLabel="" rowActions={dashboardReadinessRowActions} />
         </section>
         <section class="dashboard-top-grid">
           <Table title="Top artists" columns={dashboardTopColumns} rows={dashboardArtistRows} state={tableStateFor(dashboardState.status, dashboardArtistRows.length)} actionLabel="" />
@@ -6709,7 +6751,7 @@
             <Button label="Retry" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Retry reconciliation loading" onclick={loadReconciliation} />
           </section>
         {:else}
-          <section class="kpi-grid recon" aria-label="Reconciliation KPIs">
+          <section class="kpi-grid" aria-label="Reconciliation KPIs">
             {#each reconciliationKpis as kpi (kpi.label)}
               <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state="default" accent={kpi.accent} />
             {/each}
@@ -6876,6 +6918,21 @@
           <Table title="Same-ISRC earnings (aggregation only)" columns={duplicateColumns} rows={duplicateRows} state={tableStateFor(duplicatesState.status, duplicates.length)} actionLabel="" rowActions={duplicateRowActions} pagination={duplicatesPagination} />
         {/if}
       {:else if activePageId === "audit-log"}
+        <section class="filter-strip ehq-edge-surface" aria-label="Audit log filters">
+          <label>
+            <span>From</span>
+            <input type="date" value={auditFromInput} onchange={(event) => auditFromInput = readInputValue(event)} />
+          </label>
+          <label>
+            <span>To</span>
+            <input type="date" value={auditToInput} onchange={(event) => auditToInput = readInputValue(event)} />
+          </label>
+          <Input id="distribution-audit-actor" label="Actor ID" value={auditActorInput} placeholder="User ID" type="text" state="default" message="" oninput={updateAuditActorInput} />
+          <Input id="distribution-audit-entity" label="Entity type" value={auditEntityInput} placeholder="track, payment..." type="text" state="default" message="" oninput={updateAuditEntityInput} />
+          <Button label="Apply filters" variant="secondary" size="medium" type="button" disabled={!auditFiltersValid} loading={isLoadingStatus(auditLogState.status)} locked={false} focus={false} ariaLabel="Apply Audit Log filters" onclick={() => void loadAuditLog()} />
+          <Button label="Clear filters" variant="secondary" size="medium" type="button" disabled={auditFromInput === "" && auditToInput === "" && auditActorInput === "" && auditEntityInput === ""} loading={false} locked={false} focus={false} ariaLabel="Clear Audit Log filters" onclick={clearAuditFilters} />
+          <Button label="Export CSV" variant="secondary" size="medium" type="button" disabled={auditEntries.length === 0} loading={false} locked={false} focus={false} ariaLabel="Export Audit Log as CSV" onclick={exportAuditCsv} />
+        </section>
         {#if auditEntries.length === 0 && auditLogState.status === "success"}
           <section class="empty-state ehq-edge-surface">
             <strong>No audit entries</strong>
@@ -6906,6 +6963,21 @@
                 <div><dt>FX rates</dt><dd>{settings.fxRateCount}</dd></div>
                 <div><dt>Mutations</dt><dd>{settings.mutationsEnabled ? "enabled" : "read-only"}</dd></div>
               </dl>
+            </section>
+
+            <section class="settings-panel ehq-edge-surface" aria-label="Runtime controls">
+              <header class="settings-editor-head">
+                <strong>Runtime controls</strong>
+                <span>Write access is controlled by the API runtime environment.</span>
+              </header>
+              <dl>
+                <div><dt>Write gate</dt><dd>{writesEnabled ? "enabled" : "read-only"}</dd></div>
+                <div><dt>Gate message</dt><dd>{writeGateMessage}</dd></div>
+                <div><dt>API namespace</dt><dd>{settings.namespace}</dd></div>
+              </dl>
+              <div class="settings-editor-actions">
+                <Button label="Refresh runtime state" variant="secondary" size="medium" type="button" disabled={isLoadingStatus(settingsState.status)} loading={isLoadingStatus(settingsState.status)} locked={false} focus={false} ariaLabel="Refresh Distribution runtime state" onclick={() => void refreshRuntimeControls()} />
+              </div>
             </section>
 
             <section class="settings-panel ehq-edge-surface" aria-label="Save an FX rate">
@@ -7011,70 +7083,6 @@
     overflow-y: auto;
     overflow-x: auto;
   }
-
-  .distribution-workflow-hero {
-    display: grid;
-    grid-template-columns: minmax(220px, 0.9fr) minmax(0, 1.5fr);
-    gap: var(--ehq-space-4);
-    padding: var(--ehq-space-4);
-    border: 1px solid var(--ehq-border);
-    border-radius: var(--ehq-radius-md);
-    background: var(--ehq-surface-high);
-  }
-
-  .distribution-workflow-heading,
-  .distribution-workflow-steps,
-  .distribution-workflow-steps article {
-    display: grid;
-  }
-
-  .distribution-workflow-heading,
-  .distribution-workflow-steps article {
-    gap: var(--ehq-space-1);
-  }
-
-  .distribution-workflow-heading p,
-  .distribution-workflow-heading h2,
-  .distribution-workflow-heading span,
-  .distribution-workflow-steps article span,
-  .distribution-workflow-steps article strong,
-  .distribution-workflow-steps article small {
-    margin: 0;
-  }
-
-  .distribution-workflow-heading p,
-  .distribution-workflow-steps article span {
-    color: var(--ehq-workspace-distribution);
-    font-family: var(--ehq-mono);
-    font-size: var(--ehq-type-label-size);
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-  }
-
-  .distribution-workflow-heading h2 {
-    font-size: var(--ehq-type-section-title-size);
-    font-weight: var(--ehq-type-heading-weight);
-  }
-
-  .distribution-workflow-heading span,
-  .distribution-workflow-steps article small {
-    color: var(--ehq-text-muted);
-    font-size: var(--ehq-type-caption-size);
-    line-height: var(--ehq-type-ui-line);
-  }
-
-  .distribution-workflow-steps {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: var(--ehq-space-3);
-  }
-
-  .distribution-workflow-steps article {
-    align-content: start;
-    min-width: 0;
-    padding: var(--ehq-space-3);
-    border-left: 1px solid var(--ehq-border);
-  }
-
 
   .import-result {
     margin: 0;
@@ -7675,10 +7683,6 @@
       grid-template-columns: 1fr 1fr;
     }
 
-    .distribution-workflow-hero {
-      grid-template-columns: 1fr;
-    }
-
     .allocation-health-kpis,
     .allocation-health-grid {
       grid-template-columns: 1fr 1fr;
@@ -7701,10 +7705,6 @@
       grid-template-columns: 1fr;
     }
 
-    .distribution-workflow-steps {
-      grid-template-columns: 1fr;
-    }
-
     .allocation-readiness,
     .allocation-health-kpis,
     .allocation-health-grid {
@@ -7714,11 +7714,6 @@
     .allocation-section-heading {
       align-items: start;
       flex-direction: column;
-    }
-
-    .distribution-workflow-steps article {
-      border-left: 0;
-      border-top: 1px solid var(--ehq-border);
     }
 
     .contract-workflow,
