@@ -181,7 +181,7 @@ export interface CommandCenterUserPermission {
 
 export interface ApiRunReceipt {
   readonly runId: EntityId;
-  readonly status: "queued" | "running" | "completed" | "failed";
+  readonly status: "queued" | "running" | "completed" | "failed" | "void";
   readonly lockKey: string;
   readonly auditEventId: EntityId | null;
 }
@@ -1848,7 +1848,7 @@ export interface DistributionAllocationRecentBatch {
   readonly batchId: EntityId | null;
   readonly batchReference: string;
   readonly period: IsoMonthString;
-  readonly status: "queued" | "running" | "completed" | "failed";
+  readonly status: "queued" | "running" | "completed" | "failed" | "void";
   readonly rowCount: number;
   readonly linkIssueCount: number;
   readonly totals: readonly DistributionAllocationRunCurrencyTotal[];
@@ -1869,6 +1869,7 @@ export interface DistributionAllocationUnallocatedTrack {
   readonly isrc: string | null;
   readonly rowCount: number;
   readonly batchCount: number;
+  readonly mappingBlockedRowCount: number;
   readonly currencyTotals: readonly DistributionAllocationUnallocatedCurrencyTotal[];
   readonly firstSeenAt: IsoDateTimeString;
   readonly lastSeenAt: IsoDateTimeString;
@@ -1920,7 +1921,7 @@ export interface AllocationRunSummary {
   readonly id: EntityId;
   readonly runReference: string;
   readonly period: IsoMonthString;
-  readonly status: "queued" | "running" | "completed" | "failed";
+  readonly status: "queued" | "running" | "completed" | "failed" | "void";
   readonly lockKey: string;
   readonly startedAt: IsoDateTimeString | null;
   readonly completedAt: IsoDateTimeString | null;

@@ -1165,6 +1165,7 @@ async function readAllocationBankPage(
          coalesce(matched_track.title, isrc_track.title) as track_title,
          coalesce(matched_track.isrc, isrc_track.isrc) as isrc,
          ne.batch_id,
+         ne.mapping_status,
          si.currency,
          si.amount,
          ne.created_at
@@ -1184,6 +1185,7 @@ async function readAllocationBankPage(
        select
          track_id, release_id, release_title, track_title, isrc,
          count(*)::int as row_count,
+         count(*) filter (where mapping_status <> 'matched')::int as mapping_blocked_row_count,
          count(distinct batch_id)::int as batch_count,
          min(created_at) as first_seen_at,
          max(created_at) as last_seen_at
@@ -1212,6 +1214,7 @@ async function readAllocationBankPage(
          track_rows.track_title,
          track_rows.isrc,
          track_rows.row_count,
+         track_rows.mapping_blocked_row_count,
          track_rows.batch_count,
          track_rows.first_seen_at,
          track_rows.last_seen_at
@@ -1960,6 +1963,7 @@ function toAllocationBankRowWithCursor(row: PgRow): AllocationBankRowWithCursor 
       isrc: nullableStringCell(row, "isrc"),
       rowCount,
       batchCount: integerCell(row, "batch_count"),
+      mappingBlockedRowCount: integerCell(row, "mapping_blocked_row_count"),
       currencyTotals: allocationUnallocatedCurrencyTotalArrayCell(row, "currency_totals"),
       firstSeenAt: timestampStringCell(row, "first_seen_at"),
       lastSeenAt: timestampStringCell(row, "last_seen_at")
@@ -2008,6 +2012,7 @@ function allocationRunStatusCell(row: PgRow, column: string): AllocationRunSumma
   if (value === "running") return "running";
   if (value === "error" || value === "failed") return "failed";
   if (value === "calculated" || value === "completed") return "completed";
+  if (value === "excluded") return "void";
   return "queued";
 }
 

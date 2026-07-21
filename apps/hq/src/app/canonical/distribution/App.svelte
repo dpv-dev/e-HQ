@@ -184,6 +184,31 @@
 
   const { session, onLogout }: Props = $props();
   const client = createShellApiClient();
+  // One write at a time: every non-read client call flips this flag so buttons
+  // show a busy state and a second click cannot fire a concurrent mutation.
+  let mutationInFlight = $state(false);
+  const distributionApi: typeof client.distribution = new Proxy(client.distribution, {
+    get(target: typeof client.distribution, property: string | symbol, receiver: unknown): unknown {
+      const value: unknown = Reflect.get(target, property, receiver);
+      if (typeof value !== "function" || typeof property !== "string") {
+        return value;
+      }
+      if (property.startsWith("get") || property.startsWith("list") || property.startsWith("print")) {
+        return value;
+      }
+      return async (...args: unknown[]): Promise<unknown> => {
+        if (mutationInFlight) {
+          throw new Error("Please wait: the previous action is still processing.");
+        }
+        mutationInFlight = true;
+        try {
+          return await (value as (...callArgs: unknown[]) => Promise<unknown>).apply(target, args);
+        } finally {
+          mutationInFlight = false;
+        }
+      };
+    }
+  });
   const distributionWorkspaceId = "eeee-mu";
   const allValue = "all";
   const periodOptions = createPeriodOptions();
@@ -457,6 +482,7 @@
     { label: "ISRC", align: "left", sortable: true },
     { label: "Rows", align: "right", sortable: true },
     { label: "Batches", align: "right", sortable: true },
+    { label: "Blocked by", align: "left", sortable: true },
     { label: "Amount", align: "right", sortable: true },
     { label: "Seen", align: "left", sortable: true }
   ];
@@ -710,6 +736,9 @@
   let mutationReceipt = $state<ApiMutationReceipt | null>(null);
   let runReceiptPageId = $state<DistributionPageId | null>(null);
   let mutationReceiptPageId = $state<DistributionPageId | null>(null);
+  let actionNotice = $state<string | null>(null);
+  let actionNoticePageId = $state<DistributionPageId | null>(null);
+  let actionBannerElement = $state<HTMLElement | null>(null);
   let writesEnabled = $state(false);
   let writeGateMessage = $state("Checking write access.");
   let tablePaginationLoading = $state<DistributionPagedTableId | null>(null);
@@ -1281,7 +1310,7 @@
 
   async function loadInitialData(): Promise<void> {
     try {
-      const screen = await client.distribution.getScreen({
+      const screen = await distributionApi.getScreen({
         workspaceId: distributionWorkspaceId,
         period: distributionPeriod,
         dateFrom: activeRange.from,
@@ -1402,7 +1431,7 @@
         importBatchesState = state;
       },
       (cursor: string): Promise<PageResult<DistributionImportBatch>> =>
-        client.distribution.listImportBatches({
+        distributionApi.listImportBatches({
           workspaceId: distributionWorkspaceId,
           source: toNullableImportSource(importSourceFilter),
           status: toNullableImportBatchStatus(importStatusFilter),
@@ -1429,7 +1458,7 @@
         mappingState = state;
       },
       (cursor: string): Promise<PageResult<DistributionMappingRow>> =>
-        client.distribution.listMappingRows({
+        distributionApi.listMappingRows({
           workspaceId: distributionWorkspaceId,
           batchId: toNullableBatchFilter(mappingBatchFilter),
           status: toNullableMappingStatus(mappingStatusFilter),
@@ -1466,7 +1495,7 @@
       let cursor = loaded.nextCursor;
 
       while (cursor !== null) {
-        const nextPage = await client.distribution.getCatalogWorkbench(catalogQuery(cursor));
+        const nextPage = await distributionApi.getCatalogWorkbench(catalogQuery(cursor));
         loaded = {
           ...nextPage,
           items: [...loaded.items, ...nextPage.items]
@@ -1508,7 +1537,7 @@
       let loaded = contractWorkbenchState.data;
       let cursor = loaded.nextCursor;
       while (cursor !== null) {
-        const nextPage = await client.distribution.getContractWorkbench(contractQuery(cursor));
+        const nextPage = await distributionApi.getContractWorkbench(contractQuery(cursor));
         loaded = { ...nextPage, items: [...loaded.items, ...nextPage.items] };
         contractWorkbenchState = createSuccessState<DistributionContractWorkbenchResponse>(loaded);
         cursor = nextPage.nextCursor;
@@ -1543,7 +1572,7 @@
         expensesState = state;
       },
       (cursor: string): Promise<PageResult<DistributionContractExpense>> =>
-        client.distribution.listContractExpenses({
+        distributionApi.listContractExpenses({
           workspaceId: distributionWorkspaceId,
           contractId: expenseContractFilterId,
           status: null,
@@ -1570,7 +1599,7 @@
         allocationsState = state;
       },
       (cursor: string): Promise<PageResult<AllocationRunSummary>> =>
-        client.distribution.listAllocationRuns({
+        distributionApi.listAllocationRuns({
           workspaceId: distributionWorkspaceId,
           period: null,
           status: null,
@@ -1598,7 +1627,7 @@
     setTablePaginationError("suspense", null);
     try {
       while (cursor !== null) {
-        const next = await client.distribution.getSuspenseWorkbench(suspenseWorkbenchQuery(cursor));
+        const next = await distributionApi.getSuspenseWorkbench(suspenseWorkbenchQuery(cursor));
         current = { ...next, items: appendPageResult(current.items, next.items) };
         suspenseState = createSuccessState<DistributionSuspenseWorkbenchResponse>(current);
         cursor = current.items.nextCursor;
@@ -1627,7 +1656,7 @@
         statementsState = state;
       },
       (cursor: string): Promise<PageResult<StatementSummary>> =>
-        client.distribution.listStatements({
+        distributionApi.listStatements({
           workspaceId: distributionWorkspaceId,
           period: allocationWavePeriod,
           payeeId: toNullablePayeeFilter(statementPayeeFilter),
@@ -1655,7 +1684,7 @@
         paymentsState = state;
       },
       (cursor: string): Promise<PageResult<PaymentSummary>> =>
-        client.distribution.listPayments({
+        distributionApi.listPayments({
           workspaceId: distributionWorkspaceId,
           period: distributionPeriod,
           payeeId: null,
@@ -1685,7 +1714,7 @@
         revenueState = state;
       },
       (cursor: string): Promise<PageResult<DistributionRevenueRow>> =>
-        client.distribution.getRevenue({
+        distributionApi.getRevenue({
           workspaceId: distributionWorkspaceId,
           period: distributionPeriod,
           payeeId: toNullablePayeeFilter(revenuePayeeFilter),
@@ -1717,7 +1746,7 @@
         aliasesState = state;
       },
       (cursor: string): Promise<PageResult<DistributionAlias>> =>
-        client.distribution.listAliases({
+        distributionApi.listAliases({
           workspaceId: distributionWorkspaceId,
           cursor,
           limit: TABLE_PAGE_SIZE
@@ -1742,7 +1771,7 @@
         duplicatesState = state;
       },
       (cursor: string): Promise<PageResult<DistributionDuplicate>> =>
-        client.distribution.listDuplicates({
+        distributionApi.listDuplicates({
           workspaceId: distributionWorkspaceId,
           cursor,
           limit: TABLE_PAGE_SIZE
@@ -1767,7 +1796,7 @@
         auditLogState = state;
       },
       (cursor: string): Promise<PageResult<AuditLogEntry>> =>
-        client.distribution.listAuditLog({
+        distributionApi.listAuditLog({
           workspaceId: distributionWorkspaceId,
           from: null,
           to: null,
@@ -1784,7 +1813,7 @@
     try {
       // Distribution-scoped write gate: the distribution role is 403 on cc/v1 since the domain-authz
       // fix, so read writesEnabled from erh/v1/status — not cc/v1/status.
-      const status = await client.distribution.getStatus({
+      const status = await distributionApi.getStatus({
         workspaceId: distributionWorkspaceId
       });
       writesEnabled = status.writesEnabled;
@@ -1800,7 +1829,7 @@
 
     try {
       dashboardState = createSuccessState<DistributionDashboardResponse>(
-        await client.distribution.getDashboard({
+        await distributionApi.getDashboard({
           workspaceId: distributionWorkspaceId,
           period: distributionPeriod,
           dateFrom: activeRange.from,
@@ -1817,7 +1846,7 @@
 
     try {
       importBatchesState = createSuccessState<PageResult<DistributionImportBatch>>(
-        await client.distribution.listImportBatches({
+        await distributionApi.listImportBatches({
           workspaceId: distributionWorkspaceId,
           source: toNullableImportSource(importSourceFilter),
           status: toNullableImportBatchStatus(importStatusFilter),
@@ -1836,7 +1865,7 @@
 
     try {
       mappingState = createSuccessState<PageResult<DistributionMappingRow>>(
-        await client.distribution.listMappingRows({
+        await distributionApi.listMappingRows({
           workspaceId: distributionWorkspaceId,
           batchId: toNullableBatchFilter(mappingBatchFilter),
           status: toNullableMappingStatus(mappingStatusFilter),
@@ -1855,9 +1884,9 @@
     payeesState = beginReload<PageResult<PayeeSummary>>(payeesState);
 
     try {
-      let page = await client.distribution.listPayees({ workspaceId: distributionWorkspaceId, status: null, cursor: null, limit: TABLE_PAGE_SIZE });
+      let page = await distributionApi.listPayees({ workspaceId: distributionWorkspaceId, status: null, cursor: null, limit: TABLE_PAGE_SIZE });
       while (page.nextCursor !== null) {
-        const nextPage = await client.distribution.listPayees({ workspaceId: distributionWorkspaceId, status: null, cursor: page.nextCursor, limit: TABLE_PAGE_SIZE });
+        const nextPage = await distributionApi.listPayees({ workspaceId: distributionWorkspaceId, status: null, cursor: page.nextCursor, limit: TABLE_PAGE_SIZE });
         page = appendPageResult(page, nextPage);
       }
       payeesState = createSuccessState<PageResult<PayeeSummary>>(page);
@@ -1872,7 +1901,7 @@
 
     try {
       catalogState = createSuccessState<DistributionCatalogWorkbenchResponse>(
-        await client.distribution.getCatalogWorkbench(catalogQuery(null))
+        await distributionApi.getCatalogWorkbench(catalogQuery(null))
       );
       setTablePaginationError("catalog", null);
     } catch (error: unknown) {
@@ -1904,7 +1933,7 @@
     contractWorkbenchState = beginReload<DistributionContractWorkbenchResponse>(contractWorkbenchState);
     try {
       contractWorkbenchState = createSuccessState<DistributionContractWorkbenchResponse>(
-        await client.distribution.getContractWorkbench(contractQuery(null))
+        await distributionApi.getContractWorkbench(contractQuery(null))
       );
       setTablePaginationError("contracts", null);
     } catch (error: unknown) {
@@ -1934,7 +1963,7 @@
 
     try {
       expensesState = createSuccessState<PageResult<DistributionContractExpense>>(
-        await client.distribution.listContractExpenses({
+        await distributionApi.listContractExpenses({
           workspaceId: distributionWorkspaceId,
           contractId: expenseContractFilterId,
           status: null,
@@ -1953,7 +1982,7 @@
 
     try {
       allocationsState = createSuccessState<PageResult<AllocationRunSummary>>(
-        await client.distribution.listAllocationRuns({
+        await distributionApi.listAllocationRuns({
           workspaceId: distributionWorkspaceId,
           period: null,
           status: null,
@@ -1984,7 +2013,7 @@
     allocationWorkbenchState = beginReload<DistributionAllocationWorkbenchResponse>(allocationWorkbenchState);
     try {
       allocationWorkbenchState = createSuccessState<DistributionAllocationWorkbenchResponse>(
-        await client.distribution.getAllocationWorkbench(allocationWorkbenchQuery(null, null))
+        await distributionApi.getAllocationWorkbench(allocationWorkbenchQuery(null, null))
       );
       setTablePaginationError("allocationBatches", null);
       setTablePaginationError("allocationBank", null);
@@ -2008,7 +2037,7 @@
     setTablePaginationError(tableId, null);
     try {
       while (cursor !== null) {
-        const next = await client.distribution.getAllocationWorkbench(
+        const next = await distributionApi.getAllocationWorkbench(
           allocationWorkbenchQuery(kind === "batches" ? cursor : null, kind === "bank" ? cursor : null)
         );
         current = kind === "batches"
@@ -2030,7 +2059,7 @@
 
     try {
       suspenseState = createSuccessState<DistributionSuspenseWorkbenchResponse>(
-        await client.distribution.getSuspenseWorkbench(suspenseWorkbenchQuery(null))
+        await distributionApi.getSuspenseWorkbench(suspenseWorkbenchQuery(null))
       );
       setTablePaginationError("suspense", null);
     } catch (error: unknown) {
@@ -2057,7 +2086,7 @@
 
     try {
       statementsState = createSuccessState<PageResult<StatementSummary>>(
-        await client.distribution.listStatements({
+        await distributionApi.listStatements({
           workspaceId: distributionWorkspaceId,
           period: distributionPeriod,
           payeeId: toNullablePayeeFilter(statementPayeeFilter),
@@ -2077,7 +2106,7 @@
 
     try {
       paymentsState = createSuccessState<PageResult<PaymentSummary>>(
-        await client.distribution.listPayments({
+        await distributionApi.listPayments({
           workspaceId: distributionWorkspaceId,
           period: distributionPeriod,
           payeeId: null,
@@ -2099,7 +2128,7 @@
 
     try {
       revenueState = createSuccessState<PageResult<DistributionRevenueRow>>(
-        await client.distribution.getRevenue({
+        await distributionApi.getRevenue({
           workspaceId: distributionWorkspaceId,
           period: distributionPeriod,
           payeeId: toNullablePayeeFilter(revenuePayeeFilter),
@@ -2123,7 +2152,7 @@
 
     try {
       reconciliationState = createSuccessState<DistributionReconciliationResponse>(
-        await client.distribution.getFinancialReconciliation({
+        await distributionApi.getFinancialReconciliation({
           workspaceId: distributionWorkspaceId
         })
       );
@@ -2137,7 +2166,7 @@
 
     try {
       aliasesState = createSuccessState<PageResult<DistributionAlias>>(
-        await client.distribution.listAliases({
+        await distributionApi.listAliases({
           workspaceId: distributionWorkspaceId,
           cursor: null,
           limit: TABLE_PAGE_SIZE
@@ -2154,7 +2183,7 @@
 
     try {
       duplicatesState = createSuccessState<PageResult<DistributionDuplicate>>(
-        await client.distribution.listDuplicates({
+        await distributionApi.listDuplicates({
           workspaceId: distributionWorkspaceId,
           cursor: null,
           limit: TABLE_PAGE_SIZE
@@ -2171,7 +2200,7 @@
 
     try {
       auditLogState = createSuccessState<PageResult<AuditLogEntry>>(
-        await client.distribution.listAuditLog({
+        await distributionApi.listAuditLog({
           workspaceId: distributionWorkspaceId,
           from: null,
           to: null,
@@ -2192,7 +2221,7 @@
 
     try {
       settingsState = createSuccessState<DistributionSettingsResponse>(
-        await client.distribution.getSettings({
+        await distributionApi.getSettings({
           workspaceId: distributionWorkspaceId
         })
       );
@@ -2206,7 +2235,7 @@
 
     try {
       fxRatesState = createSuccessState<PageResult<DistributionFxRate>>(
-        await client.distribution.listFxRates({
+        await distributionApi.listFxRates({
           workspaceId: distributionWorkspaceId,
           fromCurrency: null,
           toCurrency: null,
@@ -2279,7 +2308,7 @@
     fxRateSaveMessage = null;
 
     try {
-      await client.distribution.saveFxRates(
+      await distributionApi.saveFxRates(
         {
           workspaceId: distributionWorkspaceId,
           rates: [
@@ -2542,6 +2571,8 @@
     mutationReceiptPageId = null;
     actionError = null;
     actionErrorPageId = null;
+    actionNotice = null;
+    actionNoticePageId = null;
   }
 
   function clearRunReceipt(): void {
@@ -2549,6 +2580,8 @@
     runReceiptPageId = null;
     actionError = null;
     actionErrorPageId = null;
+    actionNotice = null;
+    actionNoticePageId = null;
   }
 
   // Routes a write failure to the dedicated action banner: the loaded list
@@ -2557,6 +2590,17 @@
     actionError = getErrorMessage(error);
     actionErrorPageId = activePageId;
   }
+
+  // Feedback must be visible from drawers and scrolled positions alike.
+  $effect(() => {
+    const visible = (mutationReceipt !== null && mutationReceiptPageId === activePageId)
+      || (runReceipt !== null && runReceiptPageId === activePageId)
+      || (actionNotice !== null && actionNoticePageId === activePageId)
+      || (actionError !== null && actionErrorPageId === activePageId);
+    if (visible) {
+      actionBannerElement?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  });
 
   function updateImportFilter(value: string): void {
     importSourceFilter = value as ImportSourceFilter;
@@ -2758,7 +2802,7 @@
     clearRunReceipt();
 
     try {
-      mutationReceipt = await client.distribution.reverseImportBatch(
+      mutationReceipt = await distributionApi.reverseImportBatch(
         batch.id,
         { workspaceId: distributionWorkspaceId },
         { idempotencyKey: createIdempotencyKey("import-reverse") }
@@ -3082,7 +3126,7 @@
         checksum: importState.checksum,
         rows: importState.rows
       };
-      const preview = await client.distribution.previewImport(request, {
+      const preview = await distributionApi.previewImport(request, {
         idempotencyKey: createIdempotencyKey("import-preview")
       });
       importState = {
@@ -3125,7 +3169,7 @@
         (_: unknown, index: number): string => `row_${String(index + 1)}`
       );
 
-      const confirm = await client.distribution.confirmImport(
+      const confirm = await distributionApi.confirmImport(
         {
           workspaceId: distributionWorkspaceId,
           previewId: preview.previewId,
@@ -3174,7 +3218,7 @@
     clearRunReceipt();
 
     try {
-      mutationReceipt = await client.distribution.applyMappingRules(
+      mutationReceipt = await distributionApi.applyMappingRules(
         {
           workspaceId: distributionWorkspaceId,
           batchId,
@@ -3271,7 +3315,7 @@
     clearRunReceipt();
 
     try {
-      mutationReceipt = await client.distribution.recordContractExpense(
+      mutationReceipt = await distributionApi.recordContractExpense(
         {
           workspaceId: distributionWorkspaceId,
           contractId: contract.contractId,
@@ -3325,7 +3369,7 @@
     clearRunReceipt();
 
     try {
-      mutationReceipt = await client.distribution.createRelease(
+      mutationReceipt = await distributionApi.createRelease(
         {
           workspaceId: distributionWorkspaceId,
           id: null,
@@ -3359,7 +3403,7 @@
     clearRunReceipt();
 
     try {
-      mutationReceipt = await client.distribution.createTrack(
+      mutationReceipt = await distributionApi.createTrack(
         {
           workspaceId: distributionWorkspaceId,
           id: null,
@@ -3401,7 +3445,7 @@
     }
     clearRunReceipt();
     try {
-      mutationReceipt = await client.distribution.createPayee(
+      mutationReceipt = await distributionApi.createPayee(
         {
           workspaceId: distributionWorkspaceId,
           id: null,
@@ -3547,7 +3591,7 @@
     }));
     clearRunReceipt();
     try {
-      mutationReceipt = await client.distribution.saveContractTrackRules({
+      mutationReceipt = await distributionApi.saveContractTrackRules({
         workspaceId: distributionWorkspaceId,
         trackIds: contractEditorTrackIds,
         rules,
@@ -3569,10 +3613,11 @@
     clearMutationReceipt();
 
     try {
-      runReceipt = await client.distribution.previewAllocationRun(
+      runReceipt = await distributionApi.previewAllocationRun(
         {
           workspaceId: distributionWorkspaceId,
-          period: distributionPeriod,
+          // Same source as the lock key: the wave period, never the UI range.
+          period: allocationWavePeriod,
           lockKey: allocationLockKey,
           batchId: null
         },
@@ -3590,10 +3635,11 @@
     clearMutationReceipt();
 
     try {
-      runReceipt = await client.distribution.startCadencedAllocationRun(
+      runReceipt = await distributionApi.startCadencedAllocationRun(
         {
           workspaceId: distributionWorkspaceId,
-          period: distributionPeriod,
+          // Same source as the lock key: the wave period, never the UI range.
+          period: allocationWavePeriod,
           lockKey: allocationLockKey,
           cadence: "manual",
           batchId: null
@@ -3615,7 +3661,7 @@
     if (batch === undefined) return;
     clearMutationReceipt();
     try {
-      runReceipt = await client.distribution.previewAllocationRun({
+      runReceipt = await distributionApi.previewAllocationRun({
         workspaceId: distributionWorkspaceId,
         period: batch.period,
         lockKey: `distribution:allocation:batch:${batch.id}`,
@@ -3632,7 +3678,7 @@
     if (batch === undefined || !allocationBatchCanRun(rowId)) return;
     clearMutationReceipt();
     try {
-      runReceipt = await client.distribution.startCadencedAllocationRun({
+      runReceipt = await distributionApi.startCadencedAllocationRun({
         workspaceId: distributionWorkspaceId,
         period: batch.period,
         lockKey: `distribution:allocation:batch:${batch.id}`,
@@ -3685,11 +3731,16 @@
     if (!allocationTrackCanRetry(rowId)) return;
     clearRunReceipt();
     try {
-      mutationReceipt = await client.distribution.retryAllocationMissingContracts({
+      const receipt = await distributionApi.retryAllocationMissingContracts({
         workspaceId: distributionWorkspaceId,
         trackId: rowId
       }, { idempotencyKey: createIdempotencyKey(`allocation-retry-${rowId}`) });
+      mutationReceipt = receipt;
       mutationReceiptPageId = activePageId;
+      actionNotice = receipt.resetRowCount === 0
+        ? "0 rows released: the remaining rows for this track are blocked earlier in the pipeline (catalog mapping), not by the contract."
+        : `${String(receipt.resetRowCount)} rows released to the pending allocation queue.`;
+      actionNoticePageId = activePageId;
       await Promise.all([loadAllocationWorkbench(), loadSuspense(), loadAuditLog()]);
     } catch (error: unknown) {
       reportActionError(error);
@@ -3723,7 +3774,7 @@
     clearMutationReceipt();
 
     try {
-      runReceipt = await client.distribution.requestAllocationUnpostRun(
+      runReceipt = await distributionApi.requestAllocationUnpostRun(
         run.id,
         {
           workspaceId: distributionWorkspaceId,
@@ -3779,7 +3830,7 @@
       let cursor: string | null = null;
 
       do {
-        const page: PageResult<TrackSummary> = await client.distribution.listTracks({
+        const page: PageResult<TrackSummary> = await distributionApi.listTracks({
           workspaceId: distributionWorkspaceId,
           releaseId: null,
           status: null,
@@ -3838,7 +3889,7 @@
     clearRunReceipt();
 
     try {
-      mutationReceipt = await client.distribution.resolveSuspense(
+      mutationReceipt = await distributionApi.resolveSuspense(
         {
           workspaceId: distributionWorkspaceId,
           suspenseId: item.id,
@@ -3909,7 +3960,7 @@
     clearMutationReceipt();
 
     try {
-      runReceipt = await client.distribution.generateStatements(
+      runReceipt = await distributionApi.generateStatements(
         {
           workspaceId: distributionWorkspaceId,
           period: distributionPeriod,
@@ -3938,7 +3989,7 @@
     statementDetailState = beginReload<StatementPrintResponse>(statementDetailState);
     try {
       statementDetailState = createSuccessState<StatementPrintResponse>(
-        await client.distribution.printStatement({ workspaceId: distributionWorkspaceId, statementId })
+        await distributionApi.printStatement({ workspaceId: distributionWorkspaceId, statementId })
       );
     } catch (error: unknown) {
       statementDetailState = createErrorState<StatementPrintResponse>(error);
@@ -3953,7 +4004,7 @@
 
   async function exportStatementCsv(statementId: string): Promise<void> {
     try {
-      const payload = await client.distribution.printStatement({ workspaceId: distributionWorkspaceId, statementId });
+      const payload = await distributionApi.printStatement({ workspaceId: distributionWorkspaceId, statementId });
       downloadCsv(
         `distribution-statement-${statementId}.csv`,
         ["statement_id", "payee", "period_start", "period_end", "currency", "track", "units", "gross", "recoupment", "net_payable"],
@@ -3987,7 +4038,7 @@
     }
 
     try {
-      mutationReceipt = await client.distribution.voidStatement(
+      mutationReceipt = await distributionApi.voidStatement(
         selectedStatement.id,
         { workspaceId: distributionWorkspaceId, reason: statementVoidReason.trim() },
         { idempotencyKey: createIdempotencyKey(`statement-void-${selectedStatement.id}`) }
@@ -4031,7 +4082,7 @@
     try {
       // The print endpoint returns a typed JSON payload (header + per-track
       // lines); render it into a printable A4 HTML page on the client.
-      const payload = await client.distribution.printStatement({
+      const payload = await distributionApi.printStatement({
         workspaceId: distributionWorkspaceId,
         statementId
       });
@@ -4256,7 +4307,7 @@
     clearRunReceipt();
 
     try {
-      mutationReceipt = await client.distribution.recordPayment(
+      mutationReceipt = await distributionApi.recordPayment(
         {
           workspaceId: distributionWorkspaceId,
           statementId: recordStatement?.id ?? null,
@@ -4306,7 +4357,7 @@
     clearRunReceipt();
 
     try {
-      mutationReceipt = await client.distribution.updatePayment(
+      mutationReceipt = await distributionApi.updatePayment(
         payment.id,
         {
           workspaceId: distributionWorkspaceId,
@@ -4342,7 +4393,7 @@
     clearRunReceipt();
 
     try {
-      mutationReceipt = await client.distribution.reconcilePayment(
+      mutationReceipt = await distributionApi.reconcilePayment(
         payment.id,
         {
           workspaceId: distributionWorkspaceId,
@@ -4373,7 +4424,7 @@
     clearRunReceipt();
 
     try {
-      mutationReceipt = await client.distribution.voidPayment(
+      mutationReceipt = await distributionApi.voidPayment(
         payment.id,
         {
           workspaceId: distributionWorkspaceId,
@@ -4396,7 +4447,7 @@
 
     if (action.maintenance) {
       try {
-        mutationReceipt = await client.distribution.runFinancialReconciliationAction(
+        mutationReceipt = await distributionApi.runFinancialReconciliationAction(
           action.id,
           {
             workspaceId: distributionWorkspaceId,
@@ -4420,7 +4471,7 @@
       }
 
       try {
-        mutationReceipt = await client.distribution.recordPayment(
+        mutationReceipt = await distributionApi.recordPayment(
           {
             workspaceId: distributionWorkspaceId,
             statementId: statement.id,
@@ -4471,7 +4522,7 @@
       }
 
       try {
-        mutationReceipt = await client.distribution.voidStatement(
+        mutationReceipt = await distributionApi.voidStatement(
           statement.id,
           {
             workspaceId: distributionWorkspaceId,
@@ -4541,7 +4592,7 @@
 
     try {
       if (aliasEditorId === null) {
-        mutationReceipt = await client.distribution.createAlias(
+        mutationReceipt = await distributionApi.createAlias(
           {
             workspaceId: distributionWorkspaceId,
             aliasText: normalizedAliasText,
@@ -4553,7 +4604,7 @@
           }
         );
       } else {
-        mutationReceipt = await client.distribution.updateAlias(
+        mutationReceipt = await distributionApi.updateAlias(
           aliasEditorId,
           {
             workspaceId: distributionWorkspaceId,
@@ -4619,7 +4670,7 @@
     clearRunReceipt();
 
     try {
-      mutationReceipt = await client.distribution.resolveDuplicate(
+      mutationReceipt = await distributionApi.resolveDuplicate(
         duplicateEditorId,
         {
           workspaceId: distributionWorkspaceId,
@@ -4863,7 +4914,7 @@
 
     clearRunReceipt();
     try {
-      mutationReceipt = await client.distribution.saveCatalogContributors(
+      mutationReceipt = await distributionApi.saveCatalogContributors(
         track.id,
         {
           workspaceId: distributionWorkspaceId,
@@ -4892,7 +4943,7 @@
         contributorName: mainArtist.name,
         reason
       };
-      mutationReceipt = await client.distribution.promoteCatalogArtist(
+      mutationReceipt = await distributionApi.promoteCatalogArtist(
         track.id,
         request,
         { idempotencyKey: createIdempotencyKey("catalog-promote-main-artist") }
@@ -4908,7 +4959,7 @@
     if (!writesEnabled || suggestedCatalogArtistTracks.length === 0) return;
     try {
       for (const track of suggestedCatalogArtistTracks) {
-        await client.distribution.promoteCatalogArtist(
+        await distributionApi.promoteCatalogArtist(
           track.id,
           { workspaceId: distributionWorkspaceId, contributorName: track.suggestedCatalogArtist ?? "", reason: "Confirmed unique imported main artist." },
           { idempotencyKey: createIdempotencyKey(`catalog-promote-suggestion-${track.id}`) }
@@ -4925,7 +4976,7 @@
     if (track === null || !writesEnabled) return;
 
     try {
-      mutationReceipt = await client.distribution.linkCatalogContributorPayee(
+      mutationReceipt = await distributionApi.linkCatalogContributorPayee(
         track.id,
         contributorName,
         {
@@ -5192,7 +5243,7 @@
         { kind: "text", value: run.lockKey, strong: false },
         { kind: "text", value: formatAllocationRunTotals(run.currencyTotals, "grossMicro"), strong: false },
         { kind: "text", value: formatAllocationRunTotals(run.currencyTotals, "netMicro"), strong: true },
-        { kind: "badge", value: run.status, tone: run.status === "completed" ? "success" : "warning" }
+        { kind: "badge", value: run.status, tone: run.status === "completed" ? "success" : run.status === "failed" ? "error" : "warning" }
       ]
     }));
   }
@@ -5259,6 +5310,16 @@
     }));
   }
 
+  function allocationBankBlockedByLabel(item: DistributionAllocationUnallocatedTrack): string {
+    if (item.mappingBlockedRowCount >= item.rowCount) {
+      return `Mapping (${String(item.mappingBlockedRowCount)} rows)`;
+    }
+    if (item.mappingBlockedRowCount > 0) {
+      return `Mapping (${String(item.mappingBlockedRowCount)}) + Contract (${String(item.rowCount - item.mappingBlockedRowCount)})`;
+    }
+    return "Contract split";
+  }
+
   function createAllocationBankRows(items: readonly DistributionAllocationUnallocatedTrack[]): readonly TableRow[] {
     return items.map((item) => ({
       id: item.trackId,
@@ -5268,6 +5329,7 @@
         { kind: "text", value: item.isrc ?? "—", strong: false },
         { kind: "text", value: String(item.rowCount), strong: false },
         { kind: "text", value: String(item.batchCount), strong: false },
+        { kind: "text", value: allocationBankBlockedByLabel(item), strong: item.mappingBlockedRowCount > 0 },
         { kind: "text", value: formatAllocationUnallocatedTotals(item.currencyTotals), strong: true },
         { kind: "text", value: `${formatDateOnly(item.firstSeenAt)} → ${formatDateOnly(item.lastSeenAt)}`, strong: false }
       ]
@@ -6006,17 +6068,23 @@
         </section>
       {/if}
 
-      {#if mutationReceipt !== null && mutationReceiptPageId === activePageId}
-        <Alert tone="success" title="Action accepted" message="Audit recorded." dismissible={false} />
-      {/if}
+      <div bind:this={actionBannerElement}>
+        {#if mutationReceipt !== null && mutationReceiptPageId === activePageId}
+          <Alert tone="success" title="Action accepted" message="Audit recorded." dismissible={false} />
+        {/if}
 
-      {#if runReceipt !== null && runReceiptPageId === activePageId}
-        <Alert tone="info" title="Run scheduled" message="Lock held by the workflow." dismissible={false} />
-      {/if}
+        {#if runReceipt !== null && runReceiptPageId === activePageId}
+          <Alert tone="info" title="Run scheduled" message="Lock held by the workflow." dismissible={false} />
+        {/if}
 
-      {#if actionError !== null && actionErrorPageId === activePageId}
-        <Alert tone="error" title="Error" message={actionError} dismissible={false} />
-      {/if}
+        {#if actionNotice !== null && actionNoticePageId === activePageId}
+          <Alert tone="info" title="Result" message={actionNotice} dismissible={false} />
+        {/if}
+
+        {#if actionError !== null && actionErrorPageId === activePageId}
+          <Alert tone="error" title="Error" message={actionError} dismissible={false} />
+        {/if}
+      </div>
 
       {#if activePageId === "dashboard"}
         <section class="kpi-grid" aria-label="KPI Distribution">
@@ -6053,12 +6121,12 @@
               detail="Review parser output, catalog mapping, payee and split readiness, and FX requirements before confirmation."
               state="ready"
             >
-              <Button label="Open assistant" variant="secondary" size="medium" type="button" disabled={!canOpenImportAssistant} loading={false} locked={false} focus={false} ariaLabel="Open import assistant" title={canOpenImportAssistant ? "" : "Run the preflight assistant first"} onclick={openImportAssistant} />
+              <Button label="Open assistant" variant="secondary" size="medium" type="button" disabled={!canOpenImportAssistant} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Open import assistant" title={canOpenImportAssistant ? "" : "Run the preflight assistant first"} onclick={openImportAssistant} />
             </SectionTemplate>
           </section>
         </section>
         <section class="contracts-actions ehq-edge-surface">
-          <Button label="Import files" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Open import files" onclick={openImportPanel} />
+          <Button label="Import files" variant="primary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Open import files" onclick={openImportPanel} />
           <span>Choose a CSV or TSV export, review it, then confirm the audited batch.</span>
         </section>
         {#if importPanelOpen}
@@ -6070,11 +6138,11 @@
             <span>Export file</span>
             <input type="file" accept="text/csv,.csv,.tsv,text/tab-separated-values" bind:this={importFileInput} onchange={handleImportFile} />
           </label>
-          <Button label="Import files" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Import files" title="Choose an export file" onclick={openImportFilePicker} />
-          <Button label="Preflight assistant" variant="secondary" size="medium" type="button" disabled={!canPreviewImport} loading={false} locked={false} focus={false} ariaLabel="Preflight assistant" title={canPreviewImport ? "" : "Select a CSV/TSV export file first"} onclick={previewImport} />
-          <Button label="Open assistant" variant="secondary" size="medium" type="button" disabled={!canOpenImportAssistant} loading={false} locked={false} focus={false} ariaLabel="Open assistant" title={canOpenImportAssistant ? "" : "Run the preflight assistant first"} onclick={openImportAssistant} />
-          <Button label="Confirm import" variant="primary" size="medium" type="button" disabled={!canConfirmImport || !writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Confirm import" title={writeDisabledTitle()} onclick={confirmImport} />
-          <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel import" onclick={closeImportPanel} />
+          <Button label="Import files" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Import files" title="Choose an export file" onclick={openImportFilePicker} />
+          <Button label="Preflight assistant" variant="secondary" size="medium" type="button" disabled={!canPreviewImport} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Preflight assistant" title={canPreviewImport ? "" : "Select a CSV/TSV export file first"} onclick={previewImport} />
+          <Button label="Open assistant" variant="secondary" size="medium" type="button" disabled={!canOpenImportAssistant} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Open assistant" title={canOpenImportAssistant ? "" : "Run the preflight assistant first"} onclick={openImportAssistant} />
+          <Button label="Confirm import" variant="primary" size="medium" type="button" disabled={!canConfirmImport || !writesEnabled} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Confirm import" title={writeDisabledTitle()} onclick={confirmImport} />
+          <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Cancel import" onclick={closeImportPanel} />
         </section>
             {/snippet}
           </Drawer>
@@ -6082,7 +6150,7 @@
         <section class="filter-strip ehq-edge-surface" aria-label="Import filters">
           <Select id="distribution-import-filter" label="Source filter" value={importSourceFilter} options={importFilterOptions} state="default" message="" onchange={updateImportFilter} />
           <Select id="distribution-import-status" label="Status filter" value={importStatusFilter} options={importStatusFilterOptions} state="default" message="" onchange={updateImportStatusFilter} />
-          <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Apply import filters" onclick={loadImportBatches} />
+          <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Apply import filters" onclick={loadImportBatches} />
         </section>
         <section class="import-result ehq-edge-surface" class:error={importState.status === "error"} aria-live="polite">
           <strong>{importState.message}</strong>
@@ -6100,11 +6168,11 @@
           <Input id="distribution-mapping-search" label="Search" value={mappingSearch} placeholder="Title, artist or store" type="search" state="default" message="" oninput={updateMappingSearch} />
           <Select id="distribution-mapping-status" label="Status" value={mappingStatusFilter} options={mappingStatusOptions} state="default" message="" onchange={updateMappingStatus} />
           <Select id="distribution-mapping-batch" label="Batch" value={mappingBatchFilter} options={mappingBatchFilterOptions} state="default" message="" onchange={updateMappingBatchFilter} />
-          <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Apply mapping filters" onclick={loadMappingRows} />
-          <Button label="Automate" variant="secondary" size="medium" type="button" disabled={!writesEnabled || filteredMappingRows.length === 0} loading={false} locked={false} focus={false} ariaLabel="Automate safe mapping matches" title={writeDisabledTitle()} onclick={applyMappingRules} />
-          <Button label="Select all (page)" variant="secondary" size="medium" type="button" disabled={mappingRows.length === 0} loading={false} locked={false} focus={false} ariaLabel="Select all visible mapping rows" onclick={selectAllVisibleMappingRows} />
-          <Button label="Clear selection" variant="secondary" size="medium" type="button" disabled={selectedMappingRowIds.length === 0} loading={false} locked={false} focus={false} ariaLabel="Clear mapping selection" onclick={clearMappingSelection} />
-          <Button label="Apply reusable rules" variant="primary" size="medium" type="button" disabled={!writesEnabled || (mappingRows.length === 0 && selectedMappingRowIds.length === 0)} loading={false} locked={false} focus={false} ariaLabel="Apply reusable rules" title={writeDisabledTitle()} onclick={applyMappingRules} />
+          <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Apply mapping filters" onclick={loadMappingRows} />
+          <Button label="Automate" variant="secondary" size="medium" type="button" disabled={!writesEnabled || filteredMappingRows.length === 0} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Automate safe mapping matches" title={writeDisabledTitle()} onclick={applyMappingRules} />
+          <Button label="Select all (page)" variant="secondary" size="medium" type="button" disabled={mappingRows.length === 0} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Select all visible mapping rows" onclick={selectAllVisibleMappingRows} />
+          <Button label="Clear selection" variant="secondary" size="medium" type="button" disabled={selectedMappingRowIds.length === 0} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Clear mapping selection" onclick={clearMappingSelection} />
+          <Button label="Apply reusable rules" variant="primary" size="medium" type="button" disabled={!writesEnabled || (mappingRows.length === 0 && selectedMappingRowIds.length === 0)} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Apply reusable rules" title={writeDisabledTitle()} onclick={applyMappingRules} />
           <span class="ehq-type-label-mono">{selectedMappingRowIds.length} selected · {filteredMappingRows.length} visible</span>
         </section>
         <Table title="Rows to review" columns={mappingColumns} rows={mappingTableRows} state={isLoadingStatus(mappingState.status) ? "loading" : mappingState.status === "error" ? "error" : filteredMappingRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={mappingRowActions} pagination={mappingPagination} />
@@ -6126,7 +6194,7 @@
           </label>
           <Select id="distribution-catalog-status" label="Status" value={catalogStatusFilter} options={catalogFilterOptions} state="default" message="" onchange={updateCatalogStatus} />
           <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={isLoadingStatus(catalogState.status)} locked={false} focus={false} ariaLabel="Apply catalog filters" onclick={loadCatalog} />
-          <Button label="Clear" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Clear catalog filters" onclick={clearCatalogFilters} />
+          <Button label="Clear" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Clear catalog filters" onclick={clearCatalogFilters} />
         </section>
         <section class="kpi-grid" aria-label="Catalog KPIs">
           {#each catalogKpis as kpi (kpi.label)}
@@ -6134,9 +6202,9 @@
           {/each}
         </section>
         <section class="contracts-actions ehq-edge-surface">
-          <Button label="New release" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="New release" onclick={() => openCatalogPanel("release")} />
-          <Button label="New track" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="New track" onclick={() => openCatalogPanel("track")} />
-          <Button label={`Apply ${suggestedCatalogArtistTracks.length} visible artist suggestion${suggestedCatalogArtistTracks.length === 1 ? "" : "s"}`} variant="secondary" size="medium" type="button" disabled={!writesEnabled || suggestedCatalogArtistTracks.length === 0} loading={false} locked={false} focus={false} ariaLabel="Apply visible high-confidence Catalog Artist suggestions" title={writeDisabledTitle()} onclick={promoteVisibleCatalogArtistSuggestions} />
+          <Button label="New release" variant="primary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="New release" onclick={() => openCatalogPanel("release")} />
+          <Button label="New track" variant="primary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="New track" onclick={() => openCatalogPanel("track")} />
+          <Button label={`Apply ${suggestedCatalogArtistTracks.length} visible artist suggestion${suggestedCatalogArtistTracks.length === 1 ? "" : "s"}`} variant="secondary" size="medium" type="button" disabled={!writesEnabled || suggestedCatalogArtistTracks.length === 0} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Apply visible high-confidence Catalog Artist suggestions" title={writeDisabledTitle()} onclick={promoteVisibleCatalogArtistSuggestions} />
           <span>Imported contributors remain source data; reviewed corrections are append-only audited overrides.</span>
         </section>
         {#if catalogPanelMode === "release"}
@@ -6152,8 +6220,8 @@
                   <span>Release date (optional)</span>
                   <input type="date" value={releaseDateInput} onchange={updateReleaseDate} />
                 </label>
-                <Button label="Create release" variant="primary" size="medium" type="button" disabled={!writesEnabled || releaseTitleInput.trim() === "" || releaseArtistInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Create release" title={writesEnabled ? (releaseTitleInput.trim() === "" ? "Enter a release title first" : releaseArtistInput.trim() === "" ? "Enter an artist name first" : "") : writeGateMessage} onclick={createRelease} />
-                <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel release creation" onclick={closeCatalogPanel} />
+                <Button label="Create release" variant="primary" size="medium" type="button" disabled={!writesEnabled || releaseTitleInput.trim() === "" || releaseArtistInput.trim() === ""} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Create release" title={writesEnabled ? (releaseTitleInput.trim() === "" ? "Enter a release title first" : releaseArtistInput.trim() === "" ? "Enter an artist name first" : "") : writeGateMessage} onclick={createRelease} />
+                <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Cancel release creation" onclick={closeCatalogPanel} />
               </section>
             {/snippet}
           </Drawer>
@@ -6166,8 +6234,8 @@
                 <Input id="distribution-track-isrc" label="ISRC (optional)" value={trackIsrcInput} placeholder="" type="text" state="default" message="" oninput={updateTrackIsrc} />
                 <Select id="distribution-track-release" label="Release" value={trackReleaseIdInput} options={trackReleaseSelectOptions} state="default" message="" onchange={updateTrackRelease} />
                 <Select id="distribution-track-status" label="Status" value={trackStatusInput} options={catalogStatusOptions} state="default" message="" onchange={updateTrackStatus} />
-                <Button label="Create track" variant="primary" size="medium" type="button" disabled={!writesEnabled || trackTitleInput.trim() === "" || trackArtistInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Create track" title={writesEnabled ? (trackTitleInput.trim() === "" ? "Enter a track title first" : trackArtistInput.trim() === "" ? "Enter an artist name first" : "") : writeGateMessage} onclick={createTrack} />
-                <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel track creation" onclick={closeCatalogPanel} />
+                <Button label="Create track" variant="primary" size="medium" type="button" disabled={!writesEnabled || trackTitleInput.trim() === "" || trackArtistInput.trim() === ""} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Create track" title={writesEnabled ? (trackTitleInput.trim() === "" ? "Enter a track title first" : trackArtistInput.trim() === "" ? "Enter an artist name first" : "") : writeGateMessage} onclick={createTrack} />
+                <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Cancel track creation" onclick={closeCatalogPanel} />
               </section>
             {/snippet}
           </Drawer>
@@ -6188,21 +6256,21 @@
                 <div class="catalog-contributor-row">
                   <span>{contributor.name}</span>
                   <span>{formatCatalogRole(contributor.role)}</span>
-                  <Button label={payees.some((payee) => payee.displayName.trim().toLocaleLowerCase() === contributor.name.trim().toLocaleLowerCase()) ? "Link payee" : "Create & link payee"} variant="secondary" size="small" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel={`Create or link payee for ${contributor.name}`} title="Creates or links a Distribution payee only; it does not create a royalty entitlement." onclick={() => ensureContributorPayee(contributor.name)} />
-                  <Button label="Remove" variant="secondary" size="small" type="button" disabled={catalogContributorDrafts.length === 1} loading={false} locked={false} focus={false} ariaLabel={`Remove ${contributor.name}`} onclick={() => removeCatalogContributor(index)} />
+                  <Button label={payees.some((payee) => payee.displayName.trim().toLocaleLowerCase() === contributor.name.trim().toLocaleLowerCase()) ? "Link payee" : "Create & link payee"} variant="secondary" size="small" type="button" disabled={!writesEnabled} loading={mutationInFlight} locked={false} focus={false} ariaLabel={`Create or link payee for ${contributor.name}`} title="Creates or links a Distribution payee only; it does not create a royalty entitlement." onclick={() => ensureContributorPayee(contributor.name)} />
+                  <Button label="Remove" variant="secondary" size="small" type="button" disabled={catalogContributorDrafts.length === 1} loading={mutationInFlight} locked={false} focus={false} ariaLabel={`Remove ${contributor.name}`} onclick={() => removeCatalogContributor(index)} />
                 </div>
               {/each}
             </div>
             <div class="form-panel">
               <Input id="distribution-catalog-contributor-name" label="Contributor" value={catalogContributorNameInput} placeholder="Person or project name" type="text" state="default" message="" oninput={updateCatalogContributorName} />
               <Select id="distribution-catalog-contributor-role" label="Role" value={catalogContributorRoleInput} options={catalogContributorRoleOptions} state="default" message="" onchange={updateCatalogContributorRole} />
-              <Button label="Add contributor" variant="secondary" size="medium" type="button" disabled={catalogContributorNameInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Add contributor" onclick={addCatalogContributor} />
+              <Button label="Add contributor" variant="secondary" size="medium" type="button" disabled={catalogContributorNameInput.trim() === ""} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Add contributor" onclick={addCatalogContributor} />
               <Input id="distribution-catalog-contributor-reason" label="Review reason" value={catalogContributorReasonInput} placeholder="Why this contributor snapshot is correct" type="text" state="default" message="Required for the audit trail." oninput={updateCatalogContributorReason} />
               {#if selectedCatalogMainArtist !== null && selectedCatalogMainArtist.name.trim().toLocaleLowerCase() !== selectedCatalogTrack.catalogArtist.trim().toLocaleLowerCase()}
-                <Button label={`Promote ${selectedCatalogMainArtist.name} to Catalog Artist`} variant="primary" size="medium" type="button" disabled={!writesEnabled || catalogContributorReasonInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Promote main artist to Catalog Artist" title={catalogContributorReasonInput.trim() === "" ? "Enter a review reason first." : writeDisabledTitle()} onclick={promoteCatalogMainArtist} />
+                <Button label={`Promote ${selectedCatalogMainArtist.name} to Catalog Artist`} variant="primary" size="medium" type="button" disabled={!writesEnabled || catalogContributorReasonInput.trim() === ""} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Promote main artist to Catalog Artist" title={catalogContributorReasonInput.trim() === "" ? "Enter a review reason first." : writeDisabledTitle()} onclick={promoteCatalogMainArtist} />
               {/if}
-              <Button label="Save reviewed contributors" variant="primary" size="medium" type="button" disabled={!writesEnabled || catalogContributorDrafts.length === 0 || catalogContributorReasonInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Save reviewed contributors" title={writeDisabledTitle()} onclick={saveCatalogContributors} />
-              <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel contributor review" onclick={closeCatalogContributorPanel} />
+              <Button label="Save reviewed contributors" variant="primary" size="medium" type="button" disabled={!writesEnabled || catalogContributorDrafts.length === 0 || catalogContributorReasonInput.trim() === ""} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Save reviewed contributors" title={writeDisabledTitle()} onclick={saveCatalogContributors} />
+              <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Cancel contributor review" onclick={closeCatalogContributorPanel} />
             </div>
           </section>
             {/snippet}
@@ -6216,28 +6284,28 @@
           {/each}
         </section>
         <section class="contracts-actions ehq-edge-surface">
-          <Button label="New payee" variant="secondary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="New Distribution payee" title={writeDisabledTitle()} onclick={openPayeePanel} />
-          <Button label="New contract" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="New contract" onclick={openContractPanel} />
+          <Button label="New payee" variant="secondary" size="medium" type="button" disabled={!writesEnabled} loading={mutationInFlight} locked={false} focus={false} ariaLabel="New Distribution payee" title={writeDisabledTitle()} onclick={openPayeePanel} />
+          <Button label="New contract" variant="primary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="New contract" onclick={openContractPanel} />
           <span>Imported agreements remain immutable; split corrections are complete, audited override snapshots.</span>
         </section>
         <section class="filter-strip ehq-edge-surface" aria-label="Contract filters">
           <Input id="distribution-contract-search" label="Search" value={contractSearch} placeholder="Track, release, artist, ISRC, label or payee" type="search" state="default" message="" oninput={updateContractSearch} />
           <Select id="distribution-contract-status-filter" label="Status" value={contractStatusFilter} options={contractTrackStatusOptions} state="default" message="" onchange={updateContractStatus} />
           <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={isLoadingStatus(contractWorkbenchState.status)} locked={false} focus={false} ariaLabel="Apply contract filters" onclick={loadContractWorkbench} />
-          <Button label="Clear" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Clear contract filters" onclick={clearContractFilters} />
+          <Button label="Clear" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Clear contract filters" onclick={clearContractFilters} />
         </section>
         <nav class="contract-workflow ehq-edge-surface" aria-label="Contracts workflow filters">
-          <Button label="All" variant={contractWorkflowFilter === allValue ? "primary" : "secondary"} size="small" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Show all contract tracks" onclick={() => applyContractWorkflow(allValue)} />
-          <Button label="All splits" variant={contractWorkflowFilter === "all_splits" ? "primary" : "secondary"} size="small" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Show all tracks with splits" onclick={() => applyContractWorkflow("all_splits")} />
-          <Button label="Needs attention" variant={contractWorkflowFilter === "needs_attention" ? "primary" : "secondary"} size="small" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Show contract tracks needing attention" onclick={() => applyContractWorkflow("needs_attention")} />
-          <Button label="Ready" variant={contractWorkflowFilter === "ready" ? "primary" : "secondary"} size="small" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Show ready contract tracks" onclick={() => applyContractWorkflow("ready")} />
-          <Button label="With expenses" variant={contractWorkflowFilter === "with_expenses" ? "primary" : "secondary"} size="small" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Show contract tracks with expenses" onclick={() => applyContractWorkflow("with_expenses")} />
+          <Button label="All" variant={contractWorkflowFilter === allValue ? "primary" : "secondary"} size="small" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Show all contract tracks" onclick={() => applyContractWorkflow(allValue)} />
+          <Button label="All splits" variant={contractWorkflowFilter === "all_splits" ? "primary" : "secondary"} size="small" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Show all tracks with splits" onclick={() => applyContractWorkflow("all_splits")} />
+          <Button label="Needs attention" variant={contractWorkflowFilter === "needs_attention" ? "primary" : "secondary"} size="small" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Show contract tracks needing attention" onclick={() => applyContractWorkflow("needs_attention")} />
+          <Button label="Ready" variant={contractWorkflowFilter === "ready" ? "primary" : "secondary"} size="small" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Show ready contract tracks" onclick={() => applyContractWorkflow("ready")} />
+          <Button label="With expenses" variant={contractWorkflowFilter === "with_expenses" ? "primary" : "secondary"} size="small" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Show contract tracks with expenses" onclick={() => applyContractWorkflow("with_expenses")} />
         </nav>
         <section class="contracts-actions ehq-edge-surface" aria-label="Contract selection">
           <span>{selectedContractRowIds.length} tracks selected · {contractTracks.length} loaded</span>
-          <Button label="Select all page" variant="secondary" size="medium" type="button" disabled={contractTracks.length === 0} loading={false} locked={false} focus={false} ariaLabel="Select all loaded contract tracks" onclick={selectAllVisibleContractRows} />
-          <Button label="Apply splits to selected" variant="primary" size="medium" type="button" disabled={selectedContractRowIds.length === 0} loading={false} locked={false} focus={false} ariaLabel="Apply split group to selected tracks" onclick={openSelectedContractEditor} />
-          <Button label="Clear selection" variant="secondary" size="medium" type="button" disabled={selectedContractRowIds.length === 0} loading={false} locked={false} focus={false} ariaLabel="Clear contract track selection" onclick={clearContractSelection} />
+          <Button label="Select all page" variant="secondary" size="medium" type="button" disabled={contractTracks.length === 0} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Select all loaded contract tracks" onclick={selectAllVisibleContractRows} />
+          <Button label="Apply splits to selected" variant="primary" size="medium" type="button" disabled={selectedContractRowIds.length === 0} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Apply split group to selected tracks" onclick={openSelectedContractEditor} />
+          <Button label="Clear selection" variant="secondary" size="medium" type="button" disabled={selectedContractRowIds.length === 0} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Clear contract track selection" onclick={clearContractSelection} />
         </section>
         {#if contractPickerOpen}
           <Drawer open={true} presentation="overlay" showFooter={false} title="New contract" badgeLabel="split setup" badgeTone="info" body="" primaryAction="" secondaryAction="Close" state="default" onSecondary={closeContractPanel}>
@@ -6248,8 +6316,8 @@
               <span>Select a loaded track. Saving creates an audited contract anchor only when the track has no current agreement.</span>
             </div>
             <Select id="distribution-contract-track-picker" label="Track" value={contractPickerTrackId} options={contractPickerOptions} state="default" message="Use search and filters first if the track is not loaded." onchange={updateContractPickerTrack} />
-            <Button label="Open split editor" variant="primary" size="medium" type="button" disabled={contractPickerTrackId === ""} loading={false} locked={false} focus={false} ariaLabel="Open selected track split editor" onclick={openPickedContractTrack} />
-            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel new contract" onclick={closeContractPanel} />
+            <Button label="Open split editor" variant="primary" size="medium" type="button" disabled={contractPickerTrackId === ""} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Open selected track split editor" onclick={openPickedContractTrack} />
+            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Cancel new contract" onclick={closeContractPanel} />
           </section>
             {/snippet}
           </Drawer>
@@ -6261,8 +6329,8 @@
             <Input id="distribution-payee-name" label="Name" value={payeeNameInput} placeholder="Artist, staff member, supplier or freelancer" type="text" state="default" message="Any royalty or expense counterparty can be a payee." oninput={updatePayeeName} />
             <Input id="distribution-payee-email" label="Email (optional)" value={payeeEmailInput} placeholder="" type="text" state="default" message="" oninput={updatePayeeEmail} />
             <Input id="distribution-payee-currency" label="Preferred currency" value={payeeCurrencyInput} placeholder="MUR" type="text" state={normalizeCurrencyCode(payeeCurrencyInput) === null ? "error" : "default"} message="ISO 3-letter code" oninput={updatePayeeCurrency} />
-            <Button label="Create payee" variant="primary" size="medium" type="button" disabled={!writesEnabled || payeeNameInput.trim() === "" || normalizeCurrencyCode(payeeCurrencyInput) === null} loading={false} locked={false} focus={false} ariaLabel="Create Distribution payee" title={writeDisabledTitle()} onclick={createPayee} />
-            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel payee creation" onclick={closePayeePanel} />
+            <Button label="Create payee" variant="primary" size="medium" type="button" disabled={!writesEnabled || payeeNameInput.trim() === "" || normalizeCurrencyCode(payeeCurrencyInput) === null} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Create Distribution payee" title={writeDisabledTitle()} onclick={createPayee} />
+            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Cancel payee creation" onclick={closePayeePanel} />
           </section>
             {/snippet}
           </Drawer>
@@ -6283,7 +6351,7 @@
                 <div class="contract-split-row">
                   <Select id={`distribution-contract-split-payee-${index}`} label="Payee" value={split.payeeId} options={payeeSelectOptions} state="default" message="" onchange={(value) => updateContractSplitPayee(index, value)} />
                   <Input id={`distribution-contract-split-percentage-${index}`} label="Split (%)" value={split.percentage} placeholder="50" type="text" state={parseContractPercentageUnits(split.percentage) === null ? "error" : "default"} message="Up to 6 decimals" oninput={(value) => updateContractSplitPercentage(index, value)} />
-                  <Button label="Remove" variant="secondary" size="small" type="button" disabled={contractSplitDrafts.length === 1} loading={false} locked={false} focus={false} ariaLabel={`Remove split ${index + 1}`} onclick={() => removeContractSplit(index)} />
+                  <Button label="Remove" variant="secondary" size="small" type="button" disabled={contractSplitDrafts.length === 1} loading={mutationInFlight} locked={false} focus={false} ariaLabel={`Remove split ${index + 1}`} onclick={() => removeContractSplit(index)} />
                 </div>
               {/each}
             </div>
@@ -6304,10 +6372,10 @@
               <Input id="distribution-contract-rule-reason" label="Audit reason" value={contractRuleReasonInput} placeholder="Agreement, amendment or verified instruction" type="text" state="default" message="Required. Imported rules are never mutated." oninput={updateContractRuleReason} />
             </div>
             <div class="contract-editor-actions">
-              <Button label="Add split payee" variant="secondary" size="medium" type="button" disabled={contractSplitDrafts.length >= payees.length} loading={false} locked={false} focus={false} ariaLabel="Add split payee" onclick={addContractSplit} />
-              <Button label="Save complete split set" variant="primary" size="medium" type="button" disabled={!writesEnabled || !contractSplitDraftValid} loading={false} locked={false} focus={false} ariaLabel="Save complete track split set" title={writeDisabledTitle()} onclick={saveContractTrackRules} />
-              <Button label="Record expense / advance" variant="secondary" size="medium" type="button" disabled={!writesEnabled || contractEditorTracks.length !== 1 || primaryContractEditorTrack.contractId === null} loading={false} locked={false} focus={false} ariaLabel="Record an expense or advance for this contract" title={primaryContractEditorTrack.contractId === null ? "Save the split set first to create the contract anchor." : writeDisabledTitle()} onclick={openExpensePanel} />
-              <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel split editing" onclick={closeContractEditor} />
+              <Button label="Add split payee" variant="secondary" size="medium" type="button" disabled={contractSplitDrafts.length >= payees.length} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Add split payee" onclick={addContractSplit} />
+              <Button label="Save complete split set" variant="primary" size="medium" type="button" disabled={!writesEnabled || !contractSplitDraftValid} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Save complete track split set" title={writeDisabledTitle()} onclick={saveContractTrackRules} />
+              <Button label="Record expense / advance" variant="secondary" size="medium" type="button" disabled={!writesEnabled || contractEditorTracks.length !== 1 || primaryContractEditorTrack.contractId === null} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Record an expense or advance for this contract" title={primaryContractEditorTrack.contractId === null ? "Save the split set first to create the contract anchor." : writeDisabledTitle()} onclick={openExpensePanel} />
+              <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Cancel split editing" onclick={closeContractEditor} />
             </div>
           </section>
             {/snippet}
@@ -6328,8 +6396,8 @@
               <span>Expense date</span>
               <input type="date" value={expenseDateInput} onchange={updateExpenseDate} />
             </label>
-            <Button label="Record expense" variant="primary" size="medium" type="button" disabled={!writesEnabled || selectedExpenseContract === null || selectedExpenseContract.contractId === null || expenseLabelInput.trim() === "" || expenseAmountMicro === null || expenseDateInput === "" || normalizeCurrencyCode(expenseCurrencyInput) === null} loading={false} locked={false} focus={false} ariaLabel="Record expense" title={writesEnabled ? (selectedExpenseContract === null ? "Select a contract first" : expenseLabelInput.trim() === "" ? "Enter a label first" : expenseAmountMicro === null ? "Enter a positive amount, e.g. 2500.00" : expenseDateInput === "" ? "Choose the expense date first" : "") : writeGateMessage} onclick={recordExpense} />
-            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel expense entry" onclick={closeExpensePanel} />
+            <Button label="Record expense" variant="primary" size="medium" type="button" disabled={!writesEnabled || selectedExpenseContract === null || selectedExpenseContract.contractId === null || expenseLabelInput.trim() === "" || expenseAmountMicro === null || expenseDateInput === "" || normalizeCurrencyCode(expenseCurrencyInput) === null} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Record expense" title={writesEnabled ? (selectedExpenseContract === null ? "Select a contract first" : expenseLabelInput.trim() === "" ? "Enter a label first" : expenseAmountMicro === null ? "Enter a positive amount, e.g. 2500.00" : expenseDateInput === "" ? "Choose the expense date first" : "") : writeGateMessage} onclick={recordExpense} />
+            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Cancel expense entry" onclick={closeExpensePanel} />
           </section>
             {/snippet}
           </Drawer>
@@ -6338,7 +6406,7 @@
         {#if expenseContractFilterId !== ""}
           <section class="filter-strip ehq-edge-surface" aria-label="Expense contract filter">
             <Select id="distribution-expense-contract-filter" label="Expense contract" value={expenseContractFilterId} options={expenseContractSelectOptions} state="default" message="" onchange={updateExpenseContractFilter} />
-            <Button label="Reload expenses" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Reload expenses for the selected contract" onclick={loadExpenses} />
+            <Button label="Reload expenses" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Reload expenses for the selected contract" onclick={loadExpenses} />
           </section>
           <Table title={expenseTableTitle} columns={expenseColumns} rows={expenseRows} state={tableStateFor(expensesState.status, expenses.length)} actionLabel="" pagination={expensesPagination} />
         {/if}
@@ -6347,8 +6415,8 @@
         <section class="filter-strip allocation-command-bar ehq-edge-surface" aria-label="Allocation commands">
           <Input id="distribution-allocation-search" label="Search" value={allocationSearch} placeholder="Batch file, source, release, track, ISRC…" type="search" state="default" message="" oninput={updateAllocationSearch} />
           <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={allocationWorkbenchState.status === "loading"} locked={false} focus={false} ariaLabel="Filter allocation workbench" onclick={loadAllocationWorkbench} />
-          <Button label="Preview" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Preview the safe pending allocation wave" onclick={previewAllocationRun} />
-          <Button label="Run safe pending wave" variant="primary" size="medium" type="button" disabled={!writesEnabled || (allocationWorkbench?.summary.readyRowCount ?? 0) === 0} loading={false} locked={false} focus={false} ariaLabel="Run safe pending allocation wave" title={writeDisabledTitle()} onclick={startCadencedAllocationRun} />
+          <Button label="Preview" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Preview the safe pending allocation wave" onclick={previewAllocationRun} />
+          <Button label="Run safe pending wave" variant="primary" size="medium" type="button" disabled={!writesEnabled || (allocationWorkbench?.summary.readyRowCount ?? 0) === 0} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Run safe pending allocation wave" title={writeDisabledTitle()} onclick={startCadencedAllocationRun} />
         </section>
         <section class="kpi-grid allocation-readiness" aria-label="Allocation readiness">
           {#each allocationKpis as kpi (kpi.label)}
@@ -6401,8 +6469,8 @@
             state="ready"
           >
             {#snippet action()}
-              <Button label="Preview locked run" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Preview locked run" onclick={previewAllocationRun} />
-              <Button label="Post scheduled batch" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Post scheduled batch" title={writeDisabledTitle()} onclick={startCadencedAllocationRun} />
+              <Button label="Preview locked run" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Preview locked run" onclick={previewAllocationRun} />
+              <Button label="Post scheduled batch" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Post scheduled batch" title={writeDisabledTitle()} onclick={startCadencedAllocationRun} />
             {/snippet}
             <p class="lock-key">{allocationLockKey}</p>
           </SectionTemplate>
@@ -6416,8 +6484,8 @@
                   <span>{selectedRun.period} · {selectedRun.status} · lock {selectedRun.lockKey}</span>
                 </div>
                 <Input id="distribution-unpost-reason" label="Reversal reason" value={unpostReasonInput} placeholder="" type="text" state="default" message="" oninput={updateUnpostReason} />
-                <Button label="Reverse run" variant="danger" size="medium" type="button" disabled={!writesEnabled || unpostReasonInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Reverse run" title={writesEnabled ? (unpostReasonInput.trim() === "" ? "Enter a reversal reason first" : "") : writeGateMessage} onclick={unpostAllocationRun} />
-                <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel reversal request" onclick={closeUnpostPanel} />
+                <Button label="Reverse run" variant="danger" size="medium" type="button" disabled={!writesEnabled || unpostReasonInput.trim() === ""} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Reverse run" title={writesEnabled ? (unpostReasonInput.trim() === "" ? "Enter a reversal reason first" : "") : writeGateMessage} onclick={unpostAllocationRun} />
+                <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Cancel reversal request" onclick={closeUnpostPanel} />
               </section>
             {/snippet}
           </Drawer>
@@ -6430,9 +6498,9 @@
           <Select id="distribution-suspense-reason" label="Reason" value={suspenseReasonFilter} options={suspenseReasonOptions} state="default" message="" onchange={updateSuspenseReason} />
           <Select id="distribution-suspense-status" label="Status" value={suspenseStatusFilter} options={suspenseStatusOptions} state="default" message="" onchange={updateSuspenseStatus} />
           <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={isLoadingStatus(suspenseState.status)} locked={false} focus={false} ariaLabel="Apply suspense filters" onclick={loadSuspense} />
-          <Button label="Clear" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Clear suspense filters" onclick={clearSuspenseFilters} />
-          <Button label="Export CSV" variant="secondary" size="medium" type="button" disabled={suspenseItems.length === 0} loading={false} locked={false} focus={false} ariaLabel="Export suspense as CSV" onclick={exportSuspenseCsv} />
-          <Button label="Run safe pending wave" variant="primary" size="medium" type="button" disabled={!writesEnabled || (allocationWorkbench?.summary.readyRowCount ?? 0) === 0} loading={false} locked={false} focus={false} ariaLabel="Run the safe pending allocation wave" title={writeDisabledTitle()} onclick={startCadencedAllocationRun} />
+          <Button label="Clear" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Clear suspense filters" onclick={clearSuspenseFilters} />
+          <Button label="Export CSV" variant="secondary" size="medium" type="button" disabled={suspenseItems.length === 0} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Export suspense as CSV" onclick={exportSuspenseCsv} />
+          <Button label="Run safe pending wave" variant="primary" size="medium" type="button" disabled={!writesEnabled || (allocationWorkbench?.summary.readyRowCount ?? 0) === 0} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Run the safe pending allocation wave" title={writeDisabledTitle()} onclick={startCadencedAllocationRun} />
         </section>
         <section class="kpi-grid" aria-label="Suspense KPIs">
           {#each suspenseKpis as kpi (kpi.label)}
@@ -6466,14 +6534,14 @@
             {/if}
             {#if selectedSuspenseResolution === "mark_resolved"}
               <Input id="distribution-suspense-note" label="Manual decision note" value={suspenseResolutionNote} placeholder="Explain the verified decision" type="text" state={suspenseResolutionNote.trim() === "" ? "error" : "default"} message="Required and recorded in the audit trail." oninput={updateSuspenseResolutionNote} />
-              <Button label="Retry row" variant="secondary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Retry suspense row" title={writeDisabledTitle()} onclick={() => resolveSelectedSuspense("retry_row")} />
-              <Button label="Mark resolved" variant="primary" size="medium" type="button" disabled={!writesEnabled || suspenseResolutionNote.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Mark suspense resolved" title={writesEnabled ? (suspenseResolutionNote.trim() === "" ? "Enter a manual decision note first" : "") : writeGateMessage} onclick={() => resolveSelectedSuspense("mark_resolved")} />
+              <Button label="Retry row" variant="secondary" size="medium" type="button" disabled={!writesEnabled} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Retry suspense row" title={writeDisabledTitle()} onclick={() => resolveSelectedSuspense("retry_row")} />
+              <Button label="Mark resolved" variant="primary" size="medium" type="button" disabled={!writesEnabled || suspenseResolutionNote.trim() === ""} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Mark suspense resolved" title={writesEnabled ? (suspenseResolutionNote.trim() === "" ? "Enter a manual decision note first" : "") : writeGateMessage} onclick={() => resolveSelectedSuspense("mark_resolved")} />
             {:else if selectedSuspenseResolution === "retry_row"}
-              <Button label="Retry row" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Retry suspense row" title={writeDisabledTitle()} onclick={() => resolveSelectedSuspense("retry_row")} />
+              <Button label="Retry row" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Retry suspense row" title={writeDisabledTitle()} onclick={() => resolveSelectedSuspense("retry_row")} />
             {:else}
-              <Button label="Map and retry" variant="primary" size="medium" type="button" disabled={!writesEnabled || !suspenseResolveTarget.ready} loading={false} locked={false} focus={false} ariaLabel="Map suspense row to target track and retry" title={writesEnabled ? suspenseResolveTarget.hint : writeGateMessage} onclick={() => resolveSelectedSuspense("map_to_track")} />
+              <Button label="Map and retry" variant="primary" size="medium" type="button" disabled={!writesEnabled || !suspenseResolveTarget.ready} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Map suspense row to target track and retry" title={writesEnabled ? suspenseResolveTarget.hint : writeGateMessage} onclick={() => resolveSelectedSuspense("map_to_track")} />
             {/if}
-            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel suspense resolution" onclick={closeSuspensePanel} />
+            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Cancel suspense resolution" onclick={closeSuspensePanel} />
           </section>
             {/snippet}
           </Drawer>
@@ -6483,7 +6551,7 @@
         <section class="filter-strip ehq-edge-surface" aria-label="Statement filters">
           <Select id="distribution-statement-payee" label="Payee" value={statementPayeeFilter} options={statementPayeeOptions} state="default" message="" onchange={updateStatementPayee} />
           <Select id="distribution-statement-currency" label="Currency" value={statementCurrencyFilter} options={statementCurrencyOptions} state="default" message="" onchange={updateStatementCurrency} />
-          <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Apply statement filters" onclick={loadStatements} />
+          <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Apply statement filters" onclick={loadStatements} />
         </section>
         <section class="kpi-grid" aria-label="Statement lifecycle summary">
           <KPI label="Draft" value={String(statementDraftCount)} detail="can still change" tone="warning" state={isLoadingStatus(statementsState.status) ? "loading" : "default"} accent={true} />
@@ -6505,7 +6573,7 @@
             </div>
           {/if}
           <div class="statement-summary-actions">
-            <Button label="Generate statements" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Generate statements" title={writeDisabledTitle()} onclick={generateStatements} />
+            <Button label="Generate statements" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Generate statements" title={writeDisabledTitle()} onclick={generateStatements} />
           </div>
         </section>
         {#if selectedStatement !== null && statementDetailState.status === "idle"}
@@ -6518,8 +6586,8 @@
                 </div>
                 <p>This removes the statement from the active list without changing source calculations. It remains in the audit trail with its reversal.</p>
                 <Input id="distribution-statement-void-reason" label="Removal reason" value={statementVoidReason} placeholder="Explain why this statement is not needed" type="text" state={statementVoidReason.trim() === "" ? "error" : "default"} message="Required and recorded in the audit trail." oninput={(value: string): void => { statementVoidReason = value; }} />
-                <Button label="Remove statement" variant="danger" size="medium" type="button" disabled={!writesEnabled || statementVoidReason.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Remove statement from active list" title={writeDisabledTitle()} onclick={voidSelectedStatement} />
-                <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel statement removal" onclick={closeStatementDetail} />
+                <Button label="Remove statement" variant="danger" size="medium" type="button" disabled={!writesEnabled || statementVoidReason.trim() === ""} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Remove statement from active list" title={writeDisabledTitle()} onclick={voidSelectedStatement} />
+                <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Cancel statement removal" onclick={closeStatementDetail} />
               </section>
             {/snippet}
           </Drawer>
@@ -6539,7 +6607,7 @@
               <p class="statement-detail-note">{statementDetailRows.length} title summaries from {statementDetailSourceLineCount} source lines. Export CSV keeps every source line.</p>
               <Table title="Statement summary by track" columns={statementLineColumns} rows={statementDetailRows} state={statementDetailRows.length === 0 ? "empty" : "default"} actionLabel="" />
             {/if}
-            <Button label="Close detail" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Close statement detail" onclick={closeStatementDetail} />
+            <Button label="Close detail" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Close statement detail" onclick={closeStatementDetail} />
           </section>
             {/snippet}
           </Drawer>
@@ -6555,9 +6623,9 @@
         <Alert tone="info" title="Distribution subledger" message="Payments are recorded and linked to Distribution statements here. Office bank and accounting integration is intentionally out of scope." dismissible={false} />
         <section class="filter-strip ehq-edge-surface" aria-label="Payment filters">
           <Select id="distribution-payment-status" label="Status" value={paymentStatusFilter} options={paymentStatusOptions} state="default" message="" onchange={updatePaymentStatus} />
-          <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Apply payment filters" onclick={loadPayments} />
-          <Button label="Export CSV" variant="secondary" size="medium" type="button" disabled={payments.length === 0} loading={false} locked={false} focus={false} ariaLabel="Export payments as CSV" onclick={exportPaymentsCsv} />
-          <Button label="Record payment" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Open payment recording" title={writeDisabledTitle()} onclick={openPaymentCreatePanel} />
+          <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Apply payment filters" onclick={loadPayments} />
+          <Button label="Export CSV" variant="secondary" size="medium" type="button" disabled={payments.length === 0} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Export payments as CSV" onclick={exportPaymentsCsv} />
+          <Button label="Record payment" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Open payment recording" title={writeDisabledTitle()} onclick={openPaymentCreatePanel} />
         </section>
         {#if paymentCreatePanelOpen}
           <Drawer open={true} presentation="overlay" showFooter={false} title="Record payment" badgeLabel="new payment" badgeTone="info" body="" primaryAction="" secondaryAction="Close" state="default" onSecondary={closePaymentCreatePanel}>
@@ -6575,8 +6643,8 @@
           {/if}
           <Input id="distribution-record-notes" label="Notes (optional)" value={recordPaymentNotes} placeholder="" type="text" state="default" message="" oninput={updateRecordPaymentNotes} />
           <Select id="distribution-record-statement" label="Link statement now (optional)" value={recordStatementId} options={openStatementSelectOptions} state="default" message="Can be linked later from the reconciliation queue." onchange={updateRecordStatement} />
-          <Button label="Record payment" variant="primary" size="medium" type="button" disabled={!writesEnabled || recordPaymentPayeeId === "" || recordPaymentAmountMicro === null || normalizeCurrencyCode(recordPaymentCurrency) === null || (recordPaymentStatus === "paid" && recordPaymentPaidDate === "")} loading={false} locked={false} focus={false} ariaLabel="Record payment" title={writeDisabledTitle()} onclick={recordPayment} />
-          <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel payment recording" onclick={closePaymentCreatePanel} />
+          <Button label="Record payment" variant="primary" size="medium" type="button" disabled={!writesEnabled || recordPaymentPayeeId === "" || recordPaymentAmountMicro === null || normalizeCurrencyCode(recordPaymentCurrency) === null || (recordPaymentStatus === "paid" && recordPaymentPaidDate === "")} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Record payment" title={writeDisabledTitle()} onclick={recordPayment} />
+          <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Cancel payment recording" onclick={closePaymentCreatePanel} />
         </section>
             {/snippet}
           </Drawer>
@@ -6598,16 +6666,16 @@
                 <label><span>Paid date</span><input type="date" value={paymentPaidDateInput} onchange={updatePaymentPaidDateInput} /></label>
               {/if}
               <Input id="distribution-payment-notes" label="Notes (optional)" value={paymentNotesInput} placeholder="" type="text" state="default" message="" oninput={updatePaymentNotesInput} />
-              <Button label="Save payment" variant="primary" size="medium" type="button" disabled={!writesEnabled || (paymentStatusInput === "paid" && paymentPaidDateInput === "")} loading={false} locked={false} focus={false} ariaLabel="Save payment" title={writeDisabledTitle()} onclick={editPayment} />
+              <Button label="Save payment" variant="primary" size="medium" type="button" disabled={!writesEnabled || (paymentStatusInput === "paid" && paymentPaidDateInput === "")} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Save payment" title={writeDisabledTitle()} onclick={editPayment} />
             {:else if paymentPanelMode === "reconcile"}
               <Select id="distribution-payment-statement" label="Distribution statement" value={paymentReconcileStatementId} options={paymentReconcileStatementOptions} state="default" message="Only same-payee, same-currency statements are eligible." onchange={updatePaymentReconcileStatement} />
               <Input id="distribution-payment-applied" label="Amount applied" value={paymentReconcileAmountInput} placeholder="" type="text" state={paymentReconcileAmountInput !== "" && paymentReconcileAmountMicro === null ? "error" : "default"} message="Cannot exceed the payment or open statement balance." oninput={updatePaymentReconcileAmount} />
-              <Button label="Link statement" variant="primary" size="medium" type="button" disabled={!writesEnabled || paymentReconcileStatementId === "" || paymentReconcileAmountMicro === null || selectedPayment.status !== "paid"} loading={false} locked={false} focus={false} ariaLabel="Link payment to statement" title={selectedPayment.status === "draft" ? "Post the draft payment first." : writeDisabledTitle()} onclick={reconcilePayment} />
+              <Button label="Link statement" variant="primary" size="medium" type="button" disabled={!writesEnabled || paymentReconcileStatementId === "" || paymentReconcileAmountMicro === null || selectedPayment.status !== "paid"} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Link payment to statement" title={selectedPayment.status === "draft" ? "Post the draft payment first." : writeDisabledTitle()} onclick={reconcilePayment} />
             {:else}
               <Input id="distribution-payment-void-reason" label="Void reason" value={paymentReferenceInput} placeholder="" type="text" state="default" message="" oninput={updatePaymentReferenceInput} />
-              <Button label="Void payment" variant="danger" size="medium" type="button" disabled={!writesEnabled || paymentReferenceInput.trim() === ""} loading={false} locked={false} focus={false} ariaLabel="Void payment" title={writesEnabled ? (paymentReferenceInput.trim() === "" ? "Enter a void reason first" : "") : writeGateMessage} onclick={voidPayment} />
+              <Button label="Void payment" variant="danger" size="medium" type="button" disabled={!writesEnabled || paymentReferenceInput.trim() === ""} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Void payment" title={writesEnabled ? (paymentReferenceInput.trim() === "" ? "Enter a void reason first" : "") : writeGateMessage} onclick={voidPayment} />
             {/if}
-            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Close payment panel" onclick={closePaymentPanel} />
+            <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Close payment panel" onclick={closePaymentPanel} />
           </section>
             {/snippet}
           </Drawer>
@@ -6624,8 +6692,8 @@
           <Select id="distribution-revenue-payee" label="Payee" value={revenuePayeeFilter} options={revenuePayeeOptions} state="default" message="" onchange={updateRevenuePayee} />
           <Select id="distribution-revenue-store" label="Store" value={revenueStoreFilter} options={revenueStoreOptions} state="default" message="" onchange={updateRevenueStore} />
           <Select id="distribution-revenue-currency" label="Currency" value={revenueCurrencyFilter} options={revenueCurrencyOptions} state="default" message="" onchange={updateRevenueCurrency} />
-          <Button label="Export CSV" variant="secondary" size="medium" type="button" disabled={revenueRows.length === 0} loading={false} locked={false} focus={false} ariaLabel="Export revenue as CSV" onclick={exportRevenueCsv} />
-          <Button label="Refresh" variant="primary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Refresh revenue" onclick={loadRevenue} />
+          <Button label="Export CSV" variant="secondary" size="medium" type="button" disabled={revenueRows.length === 0} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Export revenue as CSV" onclick={exportRevenueCsv} />
+          <Button label="Refresh" variant="primary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Refresh revenue" onclick={loadRevenue} />
         </section>
         <section class="dashboard-grid">
           <BarsChart title="Grouped revenue view" points={revenueChartPoints} tone="active" />
@@ -6638,7 +6706,7 @@
           <section class="empty-state error ehq-edge-surface">
             <strong>Reconciliation unavailable</strong>
             <span>The read-only diagnostic could not be loaded. Try the request again.</span>
-            <Button label="Retry" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Retry reconciliation loading" onclick={loadReconciliation} />
+            <Button label="Retry" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Retry reconciliation loading" onclick={loadReconciliation} />
           </section>
         {:else}
           <section class="kpi-grid recon" aria-label="Reconciliation KPIs">
@@ -6671,7 +6739,7 @@
                     size="medium"
                     type="button"
                     disabled={!writesEnabled}
-                    loading={false}
+                    loading={mutationInFlight}
                     locked={false}
                     focus={false}
                     ariaLabel={action.maintenance ? `Run maintenance: ${action.label}` : `Run secure action: ${action.label}`}
@@ -6686,7 +6754,7 @@
         {/if}
       {:else if activePageId === "aliases"}
         <section class="contracts-actions ehq-edge-surface">
-          <Button label="New alias" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={false} locked={false} focus={false} ariaLabel="Create catalog alias" title={writeDisabledTitle()} onclick={openAliasCreatePanel} />
+          <Button label="New alias" variant="primary" size="medium" type="button" disabled={!writesEnabled} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Create catalog alias" title={writeDisabledTitle()} onclick={openAliasCreatePanel} />
           <span>Aliases route imported names to canonical entities without changing imported source data.</span>
         </section>
         {#if aliasEditorOpen}
@@ -6747,7 +6815,7 @@
               size="medium"
               type="button"
               disabled={!writesEnabled || !aliasFormValid}
-              loading={false}
+              loading={mutationInFlight}
               locked={false}
               focus={false}
               ariaLabel={aliasEditorId === null ? "Create alias" : "Update alias"}
@@ -6760,7 +6828,7 @@
               size="medium"
               type="button"
               disabled={false}
-              loading={false}
+              loading={mutationInFlight}
               locked={false}
               focus={false}
               ariaLabel="Reset alias editor"
@@ -6793,8 +6861,8 @@
             {#snippet content()}
               <section class="form-panel" aria-label="Merge duplicate into master">
                 <Select id="distribution-duplicate-master" label="Master record" value={duplicateMasterId} options={duplicateMasterOptions} state="default" message="" onchange={updateDuplicateMaster} />
-                <Button label="Merge into master" variant="primary" size="medium" type="button" disabled={!writesEnabled || duplicateMasterId === ""} loading={false} locked={false} focus={false} ariaLabel="Merge duplicate into selected master" title={writeDisabledTitle()} onclick={mergeDuplicate} />
-                <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Cancel duplicate merge" onclick={closeDuplicateMerge} />
+                <Button label="Merge into master" variant="primary" size="medium" type="button" disabled={!writesEnabled || duplicateMasterId === ""} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Merge duplicate into selected master" title={writeDisabledTitle()} onclick={mergeDuplicate} />
+                <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Cancel duplicate merge" onclick={closeDuplicateMerge} />
               </section>
             {/snippet}
           </Drawer>
@@ -6823,7 +6891,7 @@
           <section class="empty-state error ehq-edge-surface">
             <strong>Settings unavailable</strong>
             <span>The workspace configuration could not be loaded.</span>
-            <Button label="Retry" variant="secondary" size="medium" type="button" disabled={false} loading={false} locked={false} focus={false} ariaLabel="Retry settings loading" onclick={reloadSettingsPage} />
+            <Button label="Retry" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Retry settings loading" onclick={reloadSettingsPage} />
           </section>
         {:else if settings !== null}
           <div class="settings-grid">
