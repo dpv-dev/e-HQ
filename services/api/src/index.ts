@@ -5516,9 +5516,36 @@ async function officePartnerPayeeUnlinkResponse(context: ApiContext, dependencie
   return context.json(result.body, result.status);
 }
 
+// The Mapping page is read from live Postgres (services/api/src/distribution-repository.ts),
+// but the in-memory fixtures only ever seed a small demo dataset. Row ids the operator
+// actually selects come from the live 90k+ row table, so validating them against
+// dependencies.fixtures always 404s outside of memory/test mode. Mirror the read path here.
+async function resolveDistributionMappingRowsForApply(
+  dependencies: ApiServiceDependencies,
+  workspaceId: string,
+  rowIds: readonly string[]
+): Promise<readonly DistributionMappingRow[]> {
+  const repository = dependencies.distributionReads;
+  if (repository === undefined) {
+    return rowIds.map((rowId) => requireDistributionMappingRow(dependencies.fixtures, rowId));
+  }
+  const found = await repository.getMappingRowsByIds(workspaceId, rowIds);
+  const byId = new Map(found.map((row) => [row.id, row]));
+  return rowIds.map((rowId) => {
+    const row = byId.get(rowId);
+    if (row === undefined) {
+      throw new ApiRouteError(404, "distribution_mapping_row_not_found", "Distribution mapping row was not found.", [`rowId=${rowId}`]);
+    }
+    if (row.suggestedTrackId === null) {
+      throw new ApiRouteError(422, "distribution_mapping_target_missing", "Mapping row cannot be applied without a suggested track.", [`rowId=${rowId}`]);
+    }
+    return row;
+  });
+}
+
 async function distributionMappingApplyRulesResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
   const request = await readZodBody<DistributionMappingApplyRulesRequest>(context, distributionMappingApplyRulesSchema);
-  const rows = request.rowIds.map((rowId) => requireDistributionMappingRow(dependencies.fixtures, rowId));
+  const rows = await resolveDistributionMappingRowsForApply(dependencies, request.workspaceId, request.rowIds);
   // P7b: verify every requested row belongs to the stated batch — reject mismatched
   // rowIds that could silently apply rules across different import batches.
   const mismatch = rows.find((row) => row.batchId !== request.batchId);

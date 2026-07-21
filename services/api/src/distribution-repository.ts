@@ -99,6 +99,7 @@ export interface DistributionAllocationBatchIdentity {
 
 export interface DistributionReadRuntime {
   readonly listMappingRows: (query: DistributionMappingPageQuery) => Promise<PageResult<DistributionMappingRow>>;
+  readonly getMappingRowsByIds: (workspaceId: string, rowIds: readonly string[]) => Promise<readonly DistributionMappingRow[]>;
   readonly listCatalogTracks: (query: DistributionCatalogPageQuery) => Promise<DistributionCatalogWorkbenchResponse>;
   readonly getCatalogTrack: (workspaceId: string, trackId: string) => Promise<DistributionCatalogTrackRow | null>;
   readonly listContractTracks: (query: DistributionContractPageQuery) => Promise<DistributionContractWorkbenchResponse>;
@@ -220,6 +221,8 @@ export function createPostgresDistributionReadRuntime(pool: Pick<Pool, "query">)
   return {
     listMappingRows: async (query: DistributionMappingPageQuery): Promise<PageResult<DistributionMappingRow>> =>
       readDistributionMappingPage(pool, query),
+    getMappingRowsByIds: async (workspaceId: string, rowIds: readonly string[]): Promise<readonly DistributionMappingRow[]> =>
+      readDistributionMappingRowsByIds(pool, workspaceId, rowIds),
     listCatalogTracks: async (query: DistributionCatalogPageQuery): Promise<DistributionCatalogWorkbenchResponse> =>
       readDistributionCatalogPage(pool, query),
     getCatalogTrack: async (workspaceId: string, trackId: string): Promise<DistributionCatalogTrackRow | null> =>
@@ -338,6 +341,54 @@ export async function readDistributionMappingPage(
     items: pageRows.map((row) => row.item),
     nextCursor: hasMore && last !== undefined ? encodeMappingCursor(last.cursor) : null
   };
+}
+
+export async function readDistributionMappingRowsByIds(
+  pool: Pick<Pool, "query">,
+  workspaceId: string,
+  rowIds: readonly string[]
+): Promise<readonly DistributionMappingRow[]> {
+  if (rowIds.length === 0) {
+    return [];
+  }
+  const result = await pool.query(
+    `select
+       ne.id::text,
+       ne.batch_id::text,
+       ne.raw_title,
+       ne.raw_artist,
+       ne.raw_label,
+       ne.dsp,
+       ne.isrc,
+       ne.upc,
+       ne.gross_amount::text,
+       ne.currency,
+       ne.mapping_status,
+       track_match.track_id,
+       track_match.track_title,
+       track_match.confidence,
+       coalesce(ne.legacy_id, 2147483647) as legacy_sort
+     from normalized_earnings ne
+     left join lateral (
+       select
+         etm.track_id::text,
+         t.title as track_title,
+         etm.confidence::text
+       from earning_track_matches etm
+       join tracks t on t.id = etm.track_id
+       where etm.earning_id = ne.id
+         and etm.status not in ('ignored', 'suspense')
+       order by
+         case when etm.status = 'matched' then 0 else 1 end,
+         etm.confidence desc,
+         etm.id
+       limit 1
+     ) track_match on true
+     where ne.workspace_id = $1
+       and ne.id = any($2::uuid[])`,
+    [workspaceId, rowIds]
+  );
+  return result.rows.map((row) => toMappingRowWithCursor(row).item);
 }
 
 export async function readDistributionCatalogPage(

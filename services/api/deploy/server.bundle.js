@@ -26179,6 +26179,7 @@ var DistributionSuspenseCursorError = class extends Error {
 function createPostgresDistributionReadRuntime(pool) {
   return {
     listMappingRows: async (query) => readDistributionMappingPage(pool, query),
+    getMappingRowsByIds: async (workspaceId, rowIds) => readDistributionMappingRowsByIds(pool, workspaceId, rowIds),
     listCatalogTracks: async (query) => readDistributionCatalogPage(pool, query),
     getCatalogTrack: async (workspaceId, trackId) => readDistributionCatalogTrack(pool, workspaceId, trackId),
     listContractTracks: async (query) => readDistributionContractPage(pool, query),
@@ -26277,6 +26278,49 @@ async function readDistributionMappingPage(pool, query) {
     items: pageRows.map((row) => row.item),
     nextCursor: hasMore && last !== void 0 ? encodeMappingCursor(last.cursor) : null
   };
+}
+async function readDistributionMappingRowsByIds(pool, workspaceId, rowIds) {
+  if (rowIds.length === 0) {
+    return [];
+  }
+  const result = await pool.query(
+    `select
+       ne.id::text,
+       ne.batch_id::text,
+       ne.raw_title,
+       ne.raw_artist,
+       ne.raw_label,
+       ne.dsp,
+       ne.isrc,
+       ne.upc,
+       ne.gross_amount::text,
+       ne.currency,
+       ne.mapping_status,
+       track_match.track_id,
+       track_match.track_title,
+       track_match.confidence,
+       coalesce(ne.legacy_id, 2147483647) as legacy_sort
+     from normalized_earnings ne
+     left join lateral (
+       select
+         etm.track_id::text,
+         t.title as track_title,
+         etm.confidence::text
+       from earning_track_matches etm
+       join tracks t on t.id = etm.track_id
+       where etm.earning_id = ne.id
+         and etm.status not in ('ignored', 'suspense')
+       order by
+         case when etm.status = 'matched' then 0 else 1 end,
+         etm.confidence desc,
+         etm.id
+       limit 1
+     ) track_match on true
+     where ne.workspace_id = $1
+       and ne.id = any($2::uuid[])`,
+    [workspaceId, rowIds]
+  );
+  return result.rows.map((row) => toMappingRowWithCursor(row).item);
 }
 async function readDistributionCatalogPage(pool, query) {
   const limit = normalizeLimit(query.limit);
@@ -47027,9 +47071,27 @@ async function officePartnerPayeeUnlinkResponse(context, dependencies) {
   });
   return context.json(result.body, result.status);
 }
+async function resolveDistributionMappingRowsForApply(dependencies, workspaceId, rowIds) {
+  const repository = dependencies.distributionReads;
+  if (repository === void 0) {
+    return rowIds.map((rowId) => requireDistributionMappingRow(dependencies.fixtures, rowId));
+  }
+  const found = await repository.getMappingRowsByIds(workspaceId, rowIds);
+  const byId = new Map(found.map((row) => [row.id, row]));
+  return rowIds.map((rowId) => {
+    const row = byId.get(rowId);
+    if (row === void 0) {
+      throw new ApiRouteError(404, "distribution_mapping_row_not_found", "Distribution mapping row was not found.", [`rowId=${rowId}`]);
+    }
+    if (row.suggestedTrackId === null) {
+      throw new ApiRouteError(422, "distribution_mapping_target_missing", "Mapping row cannot be applied without a suggested track.", [`rowId=${rowId}`]);
+    }
+    return row;
+  });
+}
 async function distributionMappingApplyRulesResponse(context, dependencies) {
   const request = await readZodBody(context, distributionMappingApplyRulesSchema);
-  const rows = request.rowIds.map((rowId) => requireDistributionMappingRow(dependencies.fixtures, rowId));
+  const rows = await resolveDistributionMappingRowsForApply(dependencies, request.workspaceId, request.rowIds);
   const mismatch = rows.find((row) => row.batchId !== request.batchId);
   if (mismatch !== void 0) {
     throw new ApiRouteError(
