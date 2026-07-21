@@ -133,11 +133,34 @@ export interface PersistDistributionImportInput {
   readonly workspaceId: string;
   readonly source: "kontor" | "routenote";
   readonly fileName: string;
-  readonly status: "processing" | "failed" | "void";
+  readonly status: "processing" | "normalized" | "failed" | "void";
   readonly importedAtIso: string;
   readonly rows: readonly ApiImportPreviewRow[];
   readonly acceptedRowIds: readonly string[];
   readonly rejectedRowIds: readonly string[];
+  readonly normalizedRows: readonly PersistDistributionNormalizedEarningInput[];
+  readonly issues: readonly PersistDistributionImportIssueInput[];
+  readonly metadata: JsonRecord;
+}
+
+export interface PersistDistributionNormalizedEarningInput {
+  readonly rowId: string;
+  readonly dsp: string;
+  readonly grossAmount: string;
+  readonly quantity: string;
+  readonly currency: string;
+  readonly isrc: string | null;
+  readonly upc: string | null;
+  readonly rawTitle: string | null;
+  readonly rawArtist: string | null;
+  readonly rawLabel: string | null;
+}
+
+export interface PersistDistributionImportIssueInput {
+  readonly rowId: string;
+  readonly severity: "info" | "warning" | "error";
+  readonly code: string;
+  readonly message: string;
   readonly metadata: JsonRecord;
 }
 
@@ -807,48 +830,169 @@ export async function persistDistributionImportConfirmation(tx: ApiWriteTransact
     )
   `);
 
-  const accepted = new Set<string>(input.acceptedRowIds);
-  const rejected = new Set<string>(input.rejectedRowIds);
-  for (const row of input.rows) {
-    const rawImportRowId = randomUUID();
+  const rawRows = input.rows.map((row) => ({ ...row, rawImportRowId: randomUUID() }));
+  const rawRowIdByPreviewId = new Map(rawRows.map((row) => [row.id, row.rawImportRowId]));
+  const insertChunkSize = 400;
+  for (let offset = 0; offset < rawRows.length; offset += insertChunkSize) {
+    const chunk = rawRows.slice(offset, offset + insertChunkSize);
+    const rows = chunk.map((row): SQL => sql`(
+      ${row.rawImportRowId},
+      ${input.batchId},
+      ${row.rowNumber},
+      ${JSON.stringify(row.rawData)}::jsonb
+    )`);
     await tx.executor.execute(sql`
-      insert into raw_import_rows (
-        id,
-        batch_id,
-        row_number,
-        raw_data
-      )
-      values (
-        ${rawImportRowId},
-        ${input.batchId},
-        ${row.rowNumber},
-        ${JSON.stringify(row.rawData)}::jsonb
-      )
-    `);
-    await tx.executor.execute(sql`
-      insert into import_issues (
-        id,
-        batch_id,
-        raw_import_row_id,
-        severity,
-        code,
-        message,
-        metadata
-      )
-      values (
-        ${randomUUID()},
-        ${input.batchId},
-        ${rawImportRowId},
-        'warning',
-        'runtime_parser_missing',
-        'Structured preview rows were persisted as raw import rows; no runtime distribution parser is enabled in services/api yet.',
-        ${JSON.stringify({
-          operatorDecision: accepted.has(row.id) ? "accepted" : rejected.has(row.id) ? "rejected" : "unselected",
-          previewRowId: row.id
-        })}::jsonb
-      )
+      insert into raw_import_rows (id, batch_id, row_number, raw_data)
+      values ${sql.join(rows, sql`, `)}
     `);
   }
+
+  const normalizedRows = input.normalizedRows.map((row) => ({
+    ...row,
+    id: randomUUID(),
+    rawImportRowId: rawRowIdByPreviewId.get(row.rowId)
+  }));
+  for (let offset = 0; offset < normalizedRows.length; offset += insertChunkSize) {
+    const chunk = normalizedRows.slice(offset, offset + insertChunkSize);
+    const rows = chunk.map((row): SQL => sql`(
+      ${row.id},
+      ${input.workspaceId},
+      ${input.batchId},
+      ${row.rawImportRowId},
+      ${row.dsp},
+      ${row.grossAmount},
+      ${row.quantity},
+      ${row.currency},
+      ${row.isrc},
+      ${row.upc},
+      ${row.rawTitle},
+      ${row.rawArtist},
+      ${row.rawLabel},
+      'unmapped',
+      'pending'
+    )`);
+    await tx.executor.execute(sql`
+      insert into normalized_earnings (
+        id, workspace_id, batch_id, raw_import_row_id, dsp, gross_amount, quantity,
+        currency, isrc, upc, raw_title, raw_artist, raw_label, mapping_status, calculation_status
+      ) values ${sql.join(rows, sql`, `)}
+    `);
+  }
+
+  const issueRows = input.issues.flatMap((issue) => {
+    const rawImportRowId = rawRowIdByPreviewId.get(issue.rowId);
+    return rawImportRowId === undefined ? [] : [{ ...issue, id: randomUUID(), rawImportRowId }];
+  });
+  for (let offset = 0; offset < issueRows.length; offset += insertChunkSize) {
+    const chunk = issueRows.slice(offset, offset + insertChunkSize);
+    const rows = chunk.map((issue): SQL => sql`(
+      ${issue.id},
+      ${input.batchId},
+      ${issue.rawImportRowId},
+      ${issue.severity},
+      ${issue.code},
+      ${issue.message},
+      ${JSON.stringify(issue.metadata)}::jsonb
+    )`);
+    await tx.executor.execute(sql`
+      insert into import_issues (id, batch_id, raw_import_row_id, severity, code, message, metadata)
+      values ${sql.join(rows, sql`, `)}
+    `);
+  }
+}
+
+export async function findDistributionImportBatchByFingerprint(
+  tx: ApiWriteTransaction,
+  workspaceId: string,
+  source: string,
+  fileName: string,
+  checksum: string
+): Promise<{ readonly id: string; readonly status: string } | null> {
+  if (tx.kind === "memory") return null;
+  const rows = rowsFromQueryResult(await tx.executor.execute(sql`
+    select id::text, status::text
+    from import_batches
+    where workspace_id = ${workspaceId}
+      and source = ${source}
+      and file_name = ${fileName}
+      and metadata->>'checksum' = ${checksum}
+      and status not in ('failed', 'void')
+    order by created_at desc
+    limit 1
+  `));
+  const row = rows[0];
+  return row === undefined ? null : { id: stringField(row, "id"), status: stringField(row, "status") };
+}
+
+export async function applyDistributionImportMappingRules(
+  tx: ApiWriteTransaction,
+  workspaceId: string,
+  batchId: string,
+  source: string
+): Promise<number> {
+  if (tx.kind === "memory") return 0;
+  const rules = rowsFromQueryResult(await tx.executor.execute(sql`
+    select mr.conditions_json, mr.source, mr.target_track_id::text as target_track_id
+    from mapping_rules mr
+    join tracks t on t.id = mr.target_track_id and t.workspace_id = ${workspaceId}
+    where mr.is_active = true
+  `));
+  const earnings = rowsFromQueryResult(await tx.executor.execute(sql`
+    select id::text, dsp, isrc, upc, raw_title, raw_artist, raw_label
+    from normalized_earnings
+    where workspace_id = ${workspaceId} and batch_id = ${batchId} and mapping_status = 'unmapped'
+  `));
+  const matches: Array<{ readonly earningId: string; readonly trackId: string }> = [];
+  for (const earning of earnings) {
+    const matchingRules = rules.filter((rule) => {
+      const ruleSource = stringField(rule, "source").toLocaleLowerCase();
+      if (ruleSource !== "" && ruleSource !== "all" && ruleSource !== "*" && ruleSource !== source.toLocaleLowerCase()) return false;
+      return mappingConditionsMatch(rule.conditions_json, earning);
+    });
+    const targetIds = [...new Set(matchingRules.map((rule) => nullableStringField(rule, "target_track_id")).filter((id): id is string => id !== null))];
+    if (targetIds.length === 1) matches.push({ earningId: stringField(earning, "id"), trackId: targetIds[0] as string });
+  }
+  if (matches.length === 0) return 0;
+  const chunkSize = 400;
+  for (let offset = 0; offset < matches.length; offset += chunkSize) {
+    const chunk = matches.slice(offset, offset + chunkSize);
+    const earningIds = sql.join(chunk.map((match) => sql`${match.earningId}`), sql`, `);
+    await tx.executor.execute(sql`
+      update normalized_earnings
+      set mapping_status = 'matched', calculation_status = 'pending', updated_at = now()
+      where workspace_id = ${workspaceId} and id in (${earningIds})
+    `);
+    const insertRows = chunk.map((match): SQL => sql`(
+      ${randomUUID()}, ${match.earningId}, ${match.trackId}, '100.000000', 'matched'
+    )`);
+    await tx.executor.execute(sql`
+      insert into earning_track_matches (id, earning_id, track_id, confidence, status)
+      values ${sql.join(insertRows, sql`, `)}
+    `);
+  }
+  return matches.length;
+}
+
+function mappingConditionsMatch(value: unknown, earning: JsonRecord): boolean {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const conditions = value as JsonRecord;
+  const fields: Record<string, string> = {
+    dsp: stringField(earning, "dsp"),
+    store: stringField(earning, "dsp"),
+    isrc: nullableStringField(earning, "isrc") ?? "",
+    upc: nullableStringField(earning, "upc") ?? "",
+    ean: nullableStringField(earning, "upc") ?? "",
+    title: nullableStringField(earning, "raw_title") ?? "",
+    artist: nullableStringField(earning, "raw_artist") ?? "",
+    label: nullableStringField(earning, "raw_label") ?? ""
+  };
+  return Object.entries(conditions).every(([key, expected]) => {
+    const actual = fields[key.toLocaleLowerCase()];
+    if (actual === undefined) return false;
+    if (typeof expected === "string") return actual.trim().toLocaleLowerCase() === expected.trim().toLocaleLowerCase();
+    if (Array.isArray(expected)) return expected.some((item) => typeof item === "string" && actual.trim().toLocaleLowerCase() === item.trim().toLocaleLowerCase());
+    return false;
+  });
 }
 
 export async function persistOfficeBankImportConfirmation(tx: ApiWriteTransaction, input: PersistOfficeBankImportInput): Promise<void> {
@@ -1676,10 +1820,29 @@ export async function markDistributionImportBatchVoid(tx: ApiWriteTransaction, b
     where id = ${batchId}
   `));
   const previousStatus = stringField(beforeRows[0], "status");
+  const allocationRows = rowsFromQueryResult(await tx.executor.execute(sql`
+    select count(*)::int as count
+    from earning_allocations ea
+    join normalized_earnings ne on ne.id = ea.earning_id
+    where ne.batch_id = ${batchId}
+      and ea.status not in ('void', 'error')
+  `));
+  const activeAllocationCount = integerField(allocationRows[0] ?? {}, "count");
+  if (activeAllocationCount > 0) {
+    throwPersistenceHttpError(409, "distribution_import_has_allocations", "Reverse the allocation run before voiding this import batch.", [
+      `batchId=${batchId}`,
+      `activeAllocationCount=${String(activeAllocationCount)}`
+    ]);
+  }
   await tx.executor.execute(sql`
     update import_batches
     set status = 'void', updated_at = now()
     where id = ${batchId}
+  `);
+  await tx.executor.execute(sql`
+    update normalized_earnings
+    set mapping_status = 'ignored', calculation_status = 'excluded', updated_at = now()
+    where batch_id = ${batchId}
   `);
   return {
     previousStatus,

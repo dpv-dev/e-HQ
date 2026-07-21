@@ -434,7 +434,7 @@ async function readDistributionDataset(pool: Pool): Promise<DistributionReadData
     releases,
     tracks
   ] = await Promise.all([
-    queryRows(pool, "select id::text, source, file_name, status, coalesce(imported_at, created_at) as imported_at from import_batches order by legacy_id nulls last, id", []),
+    queryRows(pool, "select id::text, source, file_name, status, coalesce(imported_at, created_at) as imported_at, metadata from import_batches order by legacy_id nulls last, id", []),
     queryRows(
       pool,
       "select id::text, batch_id::text, dsp, gross_amount::text, quantity::text, currency, isrc, upc, raw_title, raw_artist, raw_label, mapping_status, calculation_status from normalized_earnings order by legacy_id nulls last, id",
@@ -1034,7 +1034,8 @@ function toDistributionImportBatchRow(row: PgRow): DistributionReadDataset["impo
     source: stringCell(row, "source"),
     fileName: stringCell(row, "file_name"),
     status: enumCell<DistributionImportStatus>(row, "status", ["draft", "processing", "normalized", "completed", "failed", "void"]),
-    importedAt: nullableTimestampCell(row, "imported_at")
+    importedAt: nullableTimestampCell(row, "imported_at"),
+    ...(isJsonRecordCell(row, "metadata") ? { metadata: row.metadata as Readonly<Record<string, unknown>> } : {})
   };
 }
 
@@ -1285,6 +1286,11 @@ function nullableStringCell(row: PgRow, columnName: string): string | null {
   }
 
   return String(value);
+}
+
+function isJsonRecordCell(row: PgRow, columnName: string): boolean {
+  const value = row[columnName];
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function booleanCell(row: PgRow, columnName: string): boolean {

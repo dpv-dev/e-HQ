@@ -259,7 +259,11 @@ import {
   type AuthenticatedApiUser,
   type SupabaseJwtVerifier
 } from "./auth.js";
-import { parseDistributionImportPreview } from "./distribution-import-parser.js";
+import {
+  normalizeDistributionImportRows,
+  parseDistributionImportPreview
+} from "./distribution-import-parser.js";
+import type { DistributionNormalizedImportRow } from "./distribution-import-parser.js";
 import {
   DistributionAllocationCursorError,
   DistributionCatalogCursorError,
@@ -273,6 +277,7 @@ import { createFixtureStore, type ApiDistributionRoyaltyRuleInput, type ApiFixtu
 import type { ApiStartupReadiness } from "./startup.js";
 import {
   appendAuditEvent,
+  applyDistributionImportMappingRules,
   acquireAdvisoryLock,
   createMemoryPersistenceRuntime,
   findOfficeBankImportBatchByFingerprint,
@@ -287,6 +292,7 @@ import {
   persistDistributionDuplicateResolve,
   persistDistributionFxRates,
   persistDistributionImportConfirmation,
+  findDistributionImportBatchByFingerprint,
   persistDistributionPaymentReconcile,
   persistDistributionPaymentRecord,
   persistDistributionPaymentUpdate,
@@ -321,6 +327,8 @@ import {
   type PersistDistributionPaymentVoidInput,
   type PersistedAuditEvent,
   type PersistDistributionRoyaltyRulesInput,
+  type PersistDistributionNormalizedEarningInput,
+  type PersistDistributionImportIssueInput,
   type PersistDistributionStatementVoidInput,
   type PersistIdentityLinkInput,
   type PersistedDistributionRoyaltyRule,
@@ -9255,6 +9263,20 @@ async function distributionImportConfirmResponse(context: ApiContext, dependenci
     requestBody: request,
     write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<DistributionImportConfirmMutationResponse> => {
       const preview = await requireDistributionPreviewInWrite(context, dependencies, tx, request.previewId, request.workspaceId);
+      const persistedDuplicate = await findDistributionImportBatchByFingerprint(
+        tx,
+        request.workspaceId,
+        preview.source,
+        preview.fileName,
+        preview.checksum
+      );
+      if (persistedDuplicate !== null) {
+        throw new ApiRouteError(409, "distribution_import_duplicate", "This source file has already been imported for this workspace.", [
+          `existingBatchId=${persistedDuplicate.id}`,
+          `fileName=${preview.fileName}`,
+          `source=${preview.source}`
+        ]);
+      }
       // P7c: light dedup guard — if a non-failed batch with the same fileName+source
       // already exists for this workspace, reject with 409 instead of writing a
       // duplicate. The idempotency key protects same-key retries; this catches
@@ -9271,26 +9293,62 @@ async function distributionImportConfirmResponse(context: ApiContext, dependenci
       }
       const batchId = randomUUID();
       const importedAtIso = dependencies.nowIso();
+      const normalization = normalizeDistributionImportRows(preview.source, preview.rows);
+      const acceptedRowIds = new Set(request.acceptedRowIds);
+      const normalizedRows = normalization.acceptedRows.filter((row) => acceptedRowIds.has(row.row.id));
+      const operatorRejectedRows = normalization.acceptedRows
+        .filter((row) => !acceptedRowIds.has(row.row.id))
+        .map((row) => ({ row: row.row, issues: ["operator_rejected"] }));
+      const rejectedRows = [...normalization.rejectedRows, ...operatorRejectedRows];
+      const normalizedInputs: readonly PersistDistributionNormalizedEarningInput[] = normalizedRows.map((row) => ({
+        rowId: row.row.id,
+        dsp: row.dsp,
+        grossAmount: row.grossAmount,
+        quantity: row.quantity,
+        currency: row.currency,
+        isrc: row.isrc,
+        upc: row.upc,
+        rawTitle: row.title,
+        rawArtist: row.artist,
+        rawLabel: row.label
+      }));
+      const issueInputs: readonly PersistDistributionImportIssueInput[] = rejectedRows.flatMap(({ row, issues }) =>
+        issues.map((code) => ({
+          rowId: row.id,
+          severity: code === "operator_rejected" ? "warning" as const : "error" as const,
+          code,
+          message: distributionImportIssueMessage(code),
+          metadata: { rowNumber: row.rowNumber, previewRowId: row.id, source: preview.source }
+        }))
+      );
+      const sourceDates = normalizedRows.flatMap((row) => [row.sourcePeriodStart, row.sourcePeriodEnd].filter((date): date is string => date !== null)).sort();
+      const normalizedStatus = normalizedRows.length === 0 ? "failed" as const : "normalized" as const;
       await persistDistributionImportConfirmation(tx, {
         batchId,
         workspaceId: request.workspaceId,
         source: preview.source,
         fileName: preview.fileName,
-        status: "failed",
+        status: normalizedStatus,
         importedAtIso,
         rows: preview.rows,
         acceptedRowIds: request.acceptedRowIds,
         rejectedRowIds: request.rejectedRowIds,
+        normalizedRows: normalizedInputs,
+        issues: issueInputs,
         metadata: {
           workspaceId: request.workspaceId,
           previewId: request.previewId,
           checksum: preview.checksum,
           acceptedRowIds: request.acceptedRowIds,
           rejectedRowIds: request.rejectedRowIds,
-          normalizedRowCount: 0,
-          parserStatus: "runtime_parser_missing"
+          normalizedRowCount: normalizedRows.length,
+          issueCount: issueInputs.length,
+          parserStatus: "normalized",
+          sourceReportPeriodStart: sourceDates[0] ?? null,
+          sourceReportPeriodEnd: sourceDates[sourceDates.length - 1] ?? null
         }
       });
+      const mappedByRuleCount = await applyDistributionImportMappingRules(tx, request.workspaceId, batchId, preview.source);
       const auditEventId = await appendAuditEvent(tx, {
         actor,
         action: "distribution_import_confirm",
@@ -9300,9 +9358,10 @@ async function distributionImportConfirmResponse(context: ApiContext, dependenci
         after: {
           previewId: request.previewId,
           rawRowCount: preview.rows.length,
-          normalizedRowCount: 0,
-          issueCount: preview.rows.length,
-          status: "failed"
+          normalizedRowCount: normalizedRows.length,
+          issueCount: issueInputs.length,
+          mappingRuleMatchedCount: mappedByRuleCount,
+          status: normalizedStatus
         },
         idempotencyKey: resolvedIdempotencyKey
       });
@@ -9310,17 +9369,22 @@ async function distributionImportConfirmResponse(context: ApiContext, dependenci
         id: batchId,
         source: preview.source,
         fileName: preview.fileName,
-        status: "failed",
-        importedAt: importedAtIso
+        status: normalizedStatus,
+        importedAt: importedAtIso,
+        metadata: {
+          sourceReportPeriodStart: sourceDates[0] ?? null,
+          sourceReportPeriodEnd: sourceDates[sourceDates.length - 1] ?? null
+        }
       });
+      appendDistributionImportNormalizationFixture(dependencies.fixtures, batchId, normalizedRows);
       return {
         id: batchId,
         status: "completed",
         auditEventId,
-        importedRoyaltyEventCount: 0,
+        importedRoyaltyEventCount: normalizedRows.length,
         rawRowCount: preview.rows.length,
-        normalizedRowCount: 0,
-        issueCount: preview.rows.length
+        normalizedRowCount: normalizedRows.length,
+        issueCount: issueInputs.length
       };
     }
   });
@@ -10517,10 +10581,11 @@ function earningMatchesPeriod(
 ): boolean {
   const batch = dataset.importBatches.find((candidate) => candidate.id === earning.batchId);
   if (batch === undefined || batch.importedAt === null) {
-    return false;
+    return batch?.metadata?.sourceReportPeriodStart?.toString().startsWith(period) ?? false;
   }
 
-  return batch.importedAt.startsWith(period);
+  const sourcePeriod = batch.metadata?.sourceReportPeriodStart;
+  return typeof sourcePeriod === "string" ? sourcePeriod.startsWith(period) : batch.importedAt.startsWith(period);
 }
 
 function trackForEarning(
@@ -11519,6 +11584,66 @@ function appendDistributionImportFixture(
   mutableDistribution.importBatches = [...fixtures.distribution.importBatches, batch];
 }
 
+function appendDistributionImportNormalizationFixture(
+  fixtures: ApiFixtureStore,
+  batchId: string,
+  rows: readonly DistributionNormalizedImportRow[]
+): void {
+  if (rows.length === 0) return;
+  const mutableDistribution = fixtures.distribution as Mutable<DistributionReadDataset>;
+  mutableDistribution.normalizedEarnings = [
+    ...fixtures.distribution.normalizedEarnings,
+    ...rows.map((row) => ({
+      id: `earning_${batchId}_${row.row.id}`,
+      batchId,
+      dsp: row.dsp,
+      grossAmount: row.grossAmount,
+      quantity: row.quantity,
+      currency: row.currency,
+      isrc: row.isrc,
+      upc: row.upc,
+      rawTitle: row.title,
+      rawArtist: row.artist,
+      rawLabel: row.label,
+      mappingStatus: "unmapped" as const,
+      calculationStatus: "pending" as const
+    }))
+  ];
+  const mutableFixtures = fixtures as Mutable<ApiFixtureStore>;
+  mutableFixtures.distributionMappingRows = [
+    ...fixtures.distributionMappingRows,
+    ...rows.map((row) => ({
+      id: `earning_${batchId}_${row.row.id}`,
+      batchId,
+      sourceTitle: row.title ?? "",
+      sourceArtist: row.artist ?? "",
+      sourceLabel: row.label ?? "",
+      sourceStore: row.dsp,
+      sourceIsrc: row.isrc,
+      sourceUpc: row.upc,
+      grossMicro: row.grossAmount,
+      currency: row.currency,
+      suggestedTrackId: null,
+      suggestedTrackTitle: null,
+      confidenceBp: 0,
+      status: "unmapped" as const,
+      exactFixPath: row.isrc !== null || row.upc !== null ? "catalog" as const : "manual_track" as const
+    }))
+  ];
+}
+
+function distributionImportIssueMessage(code: string): string {
+  const messages: Readonly<Record<string, string>> = {
+    invalid_or_missing_amount: "The source row has no valid exact-decimal royalty amount.",
+    invalid_or_missing_currency: "The source row has no valid ISO-4217 currency code.",
+    missing_track_identity: "The source row has no title, artist, ISRC, or UPC/EAN identity.",
+    invalid_quantity: "The source row quantity is not a valid non-negative scale-6 number.",
+    duplicate_source_row: "The source row duplicates another row in the same imported file.",
+    operator_rejected: "The operator excluded this accepted preview row from confirmation."
+  };
+  return messages[code] ?? "The source row could not be normalized.";
+}
+
 function appendAllocationRunFixture(fixtures: ApiFixtureStore, input: PersistDistributionAllocationRunInput): void {
   const mutableDistribution = fixtures.distribution as Mutable<DistributionReadDataset>;
   const createdAt = input.finishedAtIso;
@@ -12156,6 +12281,10 @@ function appendDistributionAllocationStateFixture(fixtures: ApiFixtureStore, inp
 function markDistributionImportFixtureVoid(fixtures: ApiFixtureStore, batchId: string): void {
   const mutableDistribution = fixtures.distribution as Mutable<DistributionReadDataset>;
   mutableDistribution.importBatches = fixtures.distribution.importBatches.map((batch) => batch.id === batchId ? { ...batch, status: "void" } : batch);
+  const earningIds = new Set(fixtures.distribution.normalizedEarnings.filter((earning) => earning.batchId === batchId).map((earning) => earning.id));
+  mutableDistribution.normalizedEarnings = fixtures.distribution.normalizedEarnings.map((earning) =>
+    earningIds.has(earning.id) ? { ...earning, mappingStatus: "ignored", calculationStatus: "excluded" } : earning
+  );
 }
 
 function appendOfficeBankImportFixture(fixtures: ApiFixtureStore, patch: OfficeBankFixturePatch): void {
@@ -14651,7 +14780,9 @@ function toDistributionImportBatch(dataset: DistributionReadDataset, batchId: st
     id: batch.id,
     source: batch.source === "routenote" ? "routenote" : "kontor",
     fileName: batch.fileName,
-    period: (batch.importedAt ?? "1970-01").slice(0, 7),
+    period: typeof batch.metadata?.sourceReportPeriodStart === "string"
+      ? batch.metadata.sourceReportPeriodStart.slice(0, 7)
+      : (batch.importedAt ?? "1970-01").slice(0, 7),
     statementReference: batch.id,
     accountReference: batch.source,
     rowCount: rows.length,
@@ -14682,7 +14813,7 @@ function toApiImportStatus(status: string): DistributionImportBatch["status"] {
     return "failed";
   }
 
-  if (status === "processing") {
+  if (status === "processing" || status === "normalized") {
     return "mapped";
   }
 

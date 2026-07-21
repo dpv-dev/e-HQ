@@ -62,6 +62,29 @@ const REQUIRED_COLUMNS = {
     "file_name",
     "status"
   ],
+  normalized_earnings: [
+    "id",
+    "workspace_id",
+    "batch_id",
+    "dsp",
+    "gross_amount",
+    "quantity",
+    "currency"
+  ],
+  earning_track_matches: [
+    "id",
+    "earning_id",
+    "track_id",
+    "confidence",
+    "status"
+  ],
+  import_issues: [
+    "id",
+    "batch_id",
+    "severity",
+    "code",
+    "message"
+  ],
   office_bank_statement_lines: [
     "id",
     "import_batch_id",

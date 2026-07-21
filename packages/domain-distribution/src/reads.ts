@@ -33,7 +33,9 @@ export interface DistributionReadDataset {
   readonly tracks: readonly DistributionTrackRow[];
 }
 
-export type DistributionImportBatchRow = Pick<ImportBatch, "id" | "source" | "fileName" | "status" | "importedAt">;
+export type DistributionImportBatchRow = Pick<ImportBatch, "id" | "source" | "fileName" | "status" | "importedAt"> & {
+  readonly metadata?: Readonly<Record<string, unknown>>;
+};
 export type DistributionNormalizedEarningRow = Pick<
   NormalizedEarning,
   | "id"

@@ -5172,7 +5172,7 @@ test("office bank import confirm skips ambiguous reconciliation suggestions", as
   assert.equal(rawRow?.matchedTransactionId, null);
 });
 
-test("distribution import confirm persists raw rows and does not fabricate normalized earnings", async () => {
+test("distribution import confirm persists raw rows and creates normalized unmapped earnings", async () => {
   const app = createWriteEnabledFixtureApiService();
   const preview = await app.request("/erh/v1/imports/preview", {
     method: "POST",
@@ -5201,15 +5201,24 @@ test("distribution import confirm persists raw rows and does not fabricate norma
   });
   assert.equal(confirm.status, 200);
   const receipt = (await confirm.json()) as { readonly id: string; readonly importedRoyaltyEventCount: number; readonly normalizedRowCount: number };
-  assert.equal(receipt.importedRoyaltyEventCount, 0);
-  assert.equal(receipt.normalizedRowCount, 0);
+  assert.equal(receipt.importedRoyaltyEventCount, 1);
+  assert.equal(receipt.normalizedRowCount, 1);
 
-  const batches = await app.request("/erh/v1/imports/batches?workspaceId=workspace_1&status=failed&limit=100", {
+  const batches = await app.request("/erh/v1/imports/batches?workspaceId=workspace_1&status=mapped&limit=100", {
     headers: authHeaders()
   });
   assert.equal(batches.status, 200);
   const batchPage = (await batches.json()) as { readonly items: readonly { readonly id: string; readonly status: string }[] };
-  assert.ok(batchPage.items.some((item) => item.id === receipt.id && item.status === "failed"));
+  assert.ok(batchPage.items.some((item) => item.id === receipt.id && item.status === "mapped"));
+
+  const mapping = await app.request("/erh/v1/mapping/rows?workspaceId=workspace_1&search=Raw%20song&limit=100", {
+    headers: authHeaders()
+  });
+  assert.equal(mapping.status, 200);
+  const mappingPage = (await mapping.json()) as {
+    readonly items: readonly { readonly sourceTitle: string; readonly status: string; readonly grossMicro: string; readonly currency: string }[];
+  };
+  assert.ok(mappingPage.items.some((item) => item.sourceTitle === "Raw song" && item.status === "unmapped" && item.grossMicro === "9.9900000000" && item.currency === "USD"));
 });
 
 test("distribution import reverse exposes voided status in list and screen filters", async () => {
@@ -5265,6 +5274,71 @@ test("distribution import reverse exposes voided status in list and screen filte
 
   assert.ok(screenJson.importBatches.items.some((item) => item.id === confirmJson.id && item.status === "voided"));
   assert.equal(screenJson.importBatches.items.every((item) => item.status === "voided"), true);
+});
+
+test("distribution import confirm writes normalized earnings and source-period metadata in PGlite", async () => {
+  const pglite = new PGlite();
+  await createPgliteWriteTables(pglite);
+  await createPgliteDistributionImportTables(pglite);
+  await pglite.exec(`
+    insert into tracks (id, workspace_id) values ('10000000-0000-0000-0000-000000000901', 'workspace_1');
+    insert into mapping_rules (id, name, source, conditions_json, target_track_id, is_active)
+    values ('20000000-0000-0000-0000-000000000901', 'June ISRC rule', 'kontor', '{"isrc":"MUJUNE2600001"}'::jsonb, '10000000-0000-0000-0000-000000000901', true);
+  `);
+  const app = createApiService({
+    fixtures: createFixtureStore(),
+    persistence: createDrizzlePersistenceRuntime(drizzle(pglite) as Parameters<typeof createDrizzlePersistenceRuntime>[0], { WRITES_ENABLED: "true" }),
+    health: null,
+    nowIso: (): string => "2026-07-21T00:00:00.000Z",
+    auth: createTestAuthVerifier()
+  });
+
+  try {
+    const preview = await app.request("/erh/v1/imports/preview", {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workspaceId: "workspace_1",
+        source: "kontor",
+        fileName: "kontor-june.csv",
+        checksum: "pglite-kontor-june",
+        rows: [
+          { Title: "June song", Artist: "June artist", ISRC: "MU-JUNE-26-00001", Currency: "EUR", Amount: "12.50", Quantity: "3", "Report Period": "2026-06" },
+          { Title: "Rejected song", Artist: "Rejected artist", Currency: "EUR", Amount: "bad" }
+        ]
+      })
+    });
+    assert.equal(preview.status, 200);
+    const previewJson = (await preview.json()) as { readonly previewId: string };
+
+    const confirm = await app.request("/erh/v1/imports/confirm", {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "pglite-kontor-confirm-1" },
+      body: JSON.stringify({ workspaceId: "workspace_1", previewId: previewJson.previewId, acceptedRowIds: ["row_1"], rejectedRowIds: ["row_2"] })
+    });
+    assert.equal(confirm.status, 200);
+    const receipt = (await confirm.json()) as { readonly normalizedRowCount: number; readonly issueCount: number };
+    assert.equal(receipt.normalizedRowCount, 1);
+    assert.equal(receipt.issueCount, 1);
+
+    const batch = await pglite.query("select status, metadata->>'sourceReportPeriodStart' as period_start from import_batches");
+    assert.deepEqual(batch.rows[0], { status: "normalized", period_start: "2026-06-01" });
+    const normalized = await pglite.query("select gross_amount::text, quantity::text, currency, raw_title, mapping_status, calculation_status from normalized_earnings");
+    assert.deepEqual(normalized.rows[0], {
+      gross_amount: "12.5000000000",
+      quantity: "3.000000",
+      currency: "EUR",
+      raw_title: "June song",
+      mapping_status: "matched",
+      calculation_status: "pending"
+    });
+    assert.equal(await pgliteCount(pglite, "earning_track_matches"), 1);
+    const issues = await pglite.query("select code, severity from import_issues");
+    assert.deepEqual(issues.rows[0], { code: "invalid_or_missing_amount", severity: "error" });
+    assert.equal(await pgliteCount(pglite, "raw_import_rows"), 2);
+  } finally {
+    await pglite.close();
+  }
 });
 
 test("distribution import preview keeps currencies from file rows and never emits RS fallback", async () => {
@@ -6355,6 +6429,78 @@ async function createPgliteWriteTables(pglite: PGlite): Promise<void> {
       created_at timestamp with time zone default now() not null,
       updated_at timestamp with time zone default now() not null,
       primary key (workspace_id, user_id)
+    );
+  `);
+}
+
+async function createPgliteDistributionImportTables(pglite: PGlite): Promise<void> {
+  await pglite.exec(`
+    create table import_batches (
+      id uuid primary key,
+      workspace_id text not null,
+      source text not null,
+      file_name text not null,
+      status text not null,
+      imported_at timestamp with time zone,
+      metadata jsonb not null default '{}'::jsonb,
+      created_at timestamp with time zone default now() not null,
+      updated_at timestamp with time zone default now() not null
+    );
+    create table raw_import_rows (
+      id uuid primary key,
+      batch_id uuid not null,
+      row_number integer not null,
+      raw_data jsonb not null,
+      created_at timestamp with time zone default now() not null
+    );
+    create table import_issues (
+      id uuid primary key,
+      batch_id uuid not null,
+      raw_import_row_id uuid,
+      severity text not null,
+      code text not null,
+      message text not null,
+      metadata jsonb not null default '{}'::jsonb,
+      created_at timestamp with time zone default now() not null
+    );
+    create table normalized_earnings (
+      id uuid primary key,
+      workspace_id text not null,
+      batch_id uuid not null,
+      raw_import_row_id uuid,
+      dsp text not null,
+      gross_amount numeric(28, 10) not null,
+      quantity numeric(24, 6) not null,
+      currency char(3) not null,
+      isrc text,
+      upc text,
+      raw_title text,
+      raw_artist text,
+      raw_label text,
+      mapping_status text not null default 'unmapped',
+      calculation_status text not null default 'pending',
+      created_at timestamp with time zone default now() not null,
+      updated_at timestamp with time zone default now() not null
+    );
+    create table earning_track_matches (
+      id uuid primary key,
+      earning_id uuid not null,
+      track_id uuid not null,
+      confidence numeric(12, 6) not null,
+      status text not null,
+      created_at timestamp with time zone default now() not null
+    );
+    create table mapping_rules (
+      id uuid primary key,
+      name text not null,
+      source text not null,
+      conditions_json jsonb not null default '{}'::jsonb,
+      target_track_id uuid,
+      is_active boolean not null default true
+    );
+    create table tracks (
+      id uuid primary key,
+      workspace_id text not null
     );
   `);
 }

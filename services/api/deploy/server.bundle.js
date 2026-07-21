@@ -25834,6 +25834,19 @@ var GENERAL_ARTIST_KEYS = [
 var GENERAL_ISRC_KEYS = ["isrc"];
 var GENERAL_UPC_KEYS = ["upc", "ean"];
 var GENERAL_QUANTITY_KEYS = ["quantity", "units", "streams", "downloads"];
+var GENERAL_DSP_KEYS = ["dsp", "store", "platform", "service", "partner"];
+var GENERAL_LABEL_KEYS = ["label", "record label", "label name"];
+var GENERAL_DATE_KEYS = [
+  "report date",
+  "report period",
+  "statement period",
+  "period",
+  "sale date",
+  "transaction date",
+  "earning date",
+  "date",
+  "month"
+];
 var KONTOR_PROFILE = {
   amountKeys: ["amount eur", "amount usd", "gross payout", ...GENERAL_AMOUNT_KEYS],
   currencyKeys: ["currency", "curr", ...GENERAL_CURRENCY_KEYS],
@@ -25860,16 +25873,13 @@ function parseDistributionImportPreview(source, rows) {
   const joinKeySourceRows = [];
   const currencyCodes = /* @__PURE__ */ new Set();
   for (const previewRow of previewRows) {
-    const parsed = parseRow(profile, previewRow);
+    const parsed = parseRow(source, profile, previewRow);
     if (parsed === null) {
       rowResults.push({
         id: previewRow.id,
         rowNumber: previewRow.rowNumber,
         status: "rejected",
-        issues: [
-          "amount_or_currency_missing",
-          "title_or_identifier_missing"
-        ]
+        issues: rowIssues(source, profile, previewRow)
       });
       continue;
     }
@@ -25902,6 +25912,37 @@ function parseDistributionImportPreview(source, rows) {
     warnings
   };
 }
+function normalizeDistributionImportRows(source, rows) {
+  const profile = source === "kontor" ? KONTOR_PROFILE : ROUTENOTE_PROFILE;
+  const acceptedRows = [];
+  const rejectedRows = [];
+  const seenFingerprints = /* @__PURE__ */ new Set();
+  for (const row of rows) {
+    const parsed = parseRow(source, profile, row);
+    if (parsed === null) {
+      rejectedRows.push({ row, issues: rowIssues(source, profile, row) });
+      continue;
+    }
+    const fingerprint = [
+      parsed.dsp,
+      parsed.currency,
+      parsed.grossAmount,
+      parsed.quantity,
+      parsed.isrc ?? "",
+      parsed.upc ?? "",
+      parsed.title ?? "",
+      parsed.artist ?? "",
+      parsed.sourceReportDate ?? parsed.sourcePeriodStart ?? ""
+    ].join("").toLocaleLowerCase();
+    if (seenFingerprints.has(fingerprint)) {
+      rejectedRows.push({ row, issues: ["duplicate_source_row"] });
+      continue;
+    }
+    seenFingerprints.add(fingerprint);
+    acceptedRows.push(parsed);
+  }
+  return { acceptedRows, rejectedRows };
+}
 function toPreviewRows(rows) {
   return rows.map(
     (row, index) => ({
@@ -25911,7 +25952,7 @@ function toPreviewRows(rows) {
     })
   );
 }
-function parseRow(profile, row) {
+function parseRow(source, profile, row) {
   const amountValue = rowValue(row.rawData, profile.amountKeys);
   const currency = normalizedCurrency(rowValue(row.rawData, profile.currencyKeys));
   const isrc = normalizeIdentifier(rowValue(row.rawData, profile.isrcKeys));
@@ -25934,12 +25975,39 @@ function parseRow(profile, row) {
   if (quantity === null) {
     return null;
   }
-  void quantity;
+  const sourcePeriod = parseSourceDate(rowValue(row.rawData, GENERAL_DATE_KEYS));
   return {
     row,
+    dsp: nonEmptyValue(rowValue(row.rawData, GENERAL_DSP_KEYS)) ?? source,
     currency,
-    grossAmount
+    grossAmount,
+    quantity,
+    isrc,
+    upc,
+    title,
+    artist,
+    label: nonEmptyValue(rowValue(row.rawData, GENERAL_LABEL_KEYS)),
+    sourcePeriodStart: sourcePeriod?.start ?? null,
+    sourcePeriodEnd: sourcePeriod?.end ?? null,
+    sourceReportDate: sourcePeriod?.reportDate ?? null
   };
+}
+function rowIssues(_source, profile, row) {
+  const issues = [];
+  const amount = rowValue(row.rawData, profile.amountKeys);
+  const currency = rowValue(row.rawData, profile.currencyKeys);
+  const identity = [
+    rowValue(row.rawData, profile.titleKeys),
+    rowValue(row.rawData, profile.artistKeys),
+    rowValue(row.rawData, profile.isrcKeys),
+    rowValue(row.rawData, profile.upcKeys)
+  ].some((value) => value !== null && value.trim() !== "");
+  if (amount === null || parseErhAmount4(amount) === null) issues.push("invalid_or_missing_amount");
+  if (currency === null || normalizedCurrency(currency) === null) issues.push("invalid_or_missing_currency");
+  if (!identity) issues.push("missing_track_identity");
+  const quantity = rowValue(row.rawData, profile.quantityKeys);
+  if (quantity !== null && parseQuantity(quantity) === null) issues.push("invalid_quantity");
+  return issues.length === 0 ? ["row_not_normalizable"] : issues;
 }
 function parseErhAmount4(value) {
   if (value === null) {
@@ -25972,6 +26040,22 @@ function parseQuantity(value) {
   } catch {
     return null;
   }
+}
+function parseSourceDate(value) {
+  if (value === null) return null;
+  const normalized = value.trim().replaceAll("/", "-");
+  const dateMatch = /^(\d{4})-(\d{2})-(\d{2})/.exec(normalized);
+  if (dateMatch !== null) {
+    const date = `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`;
+    return { start: date, end: date, reportDate: date };
+  }
+  const periodMatch = /^(\d{4})-(\d{2})$/.exec(normalized);
+  if (periodMatch !== null) {
+    const period = `${periodMatch[1]}-${periodMatch[2]}`;
+    const lastDay = new Date(Date.UTC(Number(periodMatch[1]), Number(periodMatch[2]), 0)).getUTCDate();
+    return { start: `${period}-01`, end: `${period}-${String(lastDay).padStart(2, "0")}`, reportDate: null };
+  }
+  return null;
 }
 function normalizeDecimalText(value) {
   const compact = value.trim().replace(/,/gu, "");
@@ -41553,48 +41637,153 @@ async function persistDistributionImportConfirmation(tx, input) {
       ${JSON.stringify(input.metadata)}::jsonb
     )
   `);
-  const accepted = new Set(input.acceptedRowIds);
-  const rejected = new Set(input.rejectedRowIds);
-  for (const row of input.rows) {
-    const rawImportRowId = randomUUID();
+  const rawRows = input.rows.map((row) => ({ ...row, rawImportRowId: randomUUID() }));
+  const rawRowIdByPreviewId = new Map(rawRows.map((row) => [row.id, row.rawImportRowId]));
+  const insertChunkSize = 400;
+  for (let offset = 0; offset < rawRows.length; offset += insertChunkSize) {
+    const chunk = rawRows.slice(offset, offset + insertChunkSize);
+    const rows = chunk.map((row) => sql`(
+      ${row.rawImportRowId},
+      ${input.batchId},
+      ${row.rowNumber},
+      ${JSON.stringify(row.rawData)}::jsonb
+    )`);
     await tx.executor.execute(sql`
-      insert into raw_import_rows (
-        id,
-        batch_id,
-        row_number,
-        raw_data
-      )
-      values (
-        ${rawImportRowId},
-        ${input.batchId},
-        ${row.rowNumber},
-        ${JSON.stringify(row.rawData)}::jsonb
-      )
-    `);
-    await tx.executor.execute(sql`
-      insert into import_issues (
-        id,
-        batch_id,
-        raw_import_row_id,
-        severity,
-        code,
-        message,
-        metadata
-      )
-      values (
-        ${randomUUID()},
-        ${input.batchId},
-        ${rawImportRowId},
-        'warning',
-        'runtime_parser_missing',
-        'Structured preview rows were persisted as raw import rows; no runtime distribution parser is enabled in services/api yet.',
-        ${JSON.stringify({
-      operatorDecision: accepted.has(row.id) ? "accepted" : rejected.has(row.id) ? "rejected" : "unselected",
-      previewRowId: row.id
-    })}::jsonb
-      )
+      insert into raw_import_rows (id, batch_id, row_number, raw_data)
+      values ${sql.join(rows, sql`, `)}
     `);
   }
+  const normalizedRows = input.normalizedRows.map((row) => ({
+    ...row,
+    id: randomUUID(),
+    rawImportRowId: rawRowIdByPreviewId.get(row.rowId)
+  }));
+  for (let offset = 0; offset < normalizedRows.length; offset += insertChunkSize) {
+    const chunk = normalizedRows.slice(offset, offset + insertChunkSize);
+    const rows = chunk.map((row) => sql`(
+      ${row.id},
+      ${input.workspaceId},
+      ${input.batchId},
+      ${row.rawImportRowId},
+      ${row.dsp},
+      ${row.grossAmount},
+      ${row.quantity},
+      ${row.currency},
+      ${row.isrc},
+      ${row.upc},
+      ${row.rawTitle},
+      ${row.rawArtist},
+      ${row.rawLabel},
+      'unmapped',
+      'pending'
+    )`);
+    await tx.executor.execute(sql`
+      insert into normalized_earnings (
+        id, workspace_id, batch_id, raw_import_row_id, dsp, gross_amount, quantity,
+        currency, isrc, upc, raw_title, raw_artist, raw_label, mapping_status, calculation_status
+      ) values ${sql.join(rows, sql`, `)}
+    `);
+  }
+  const issueRows = input.issues.flatMap((issue) => {
+    const rawImportRowId = rawRowIdByPreviewId.get(issue.rowId);
+    return rawImportRowId === void 0 ? [] : [{ ...issue, id: randomUUID(), rawImportRowId }];
+  });
+  for (let offset = 0; offset < issueRows.length; offset += insertChunkSize) {
+    const chunk = issueRows.slice(offset, offset + insertChunkSize);
+    const rows = chunk.map((issue) => sql`(
+      ${issue.id},
+      ${input.batchId},
+      ${issue.rawImportRowId},
+      ${issue.severity},
+      ${issue.code},
+      ${issue.message},
+      ${JSON.stringify(issue.metadata)}::jsonb
+    )`);
+    await tx.executor.execute(sql`
+      insert into import_issues (id, batch_id, raw_import_row_id, severity, code, message, metadata)
+      values ${sql.join(rows, sql`, `)}
+    `);
+  }
+}
+async function findDistributionImportBatchByFingerprint(tx, workspaceId, source, fileName, checksum) {
+  if (tx.kind === "memory") return null;
+  const rows = rowsFromQueryResult(await tx.executor.execute(sql`
+    select id::text, status::text
+    from import_batches
+    where workspace_id = ${workspaceId}
+      and source = ${source}
+      and file_name = ${fileName}
+      and metadata->>'checksum' = ${checksum}
+      and status not in ('failed', 'void')
+    order by created_at desc
+    limit 1
+  `));
+  const row = rows[0];
+  return row === void 0 ? null : { id: stringField(row, "id"), status: stringField(row, "status") };
+}
+async function applyDistributionImportMappingRules(tx, workspaceId, batchId, source) {
+  if (tx.kind === "memory") return 0;
+  const rules = rowsFromQueryResult(await tx.executor.execute(sql`
+    select mr.conditions_json, mr.source, mr.target_track_id::text as target_track_id
+    from mapping_rules mr
+    join tracks t on t.id = mr.target_track_id and t.workspace_id = ${workspaceId}
+    where mr.is_active = true
+  `));
+  const earnings = rowsFromQueryResult(await tx.executor.execute(sql`
+    select id::text, dsp, isrc, upc, raw_title, raw_artist, raw_label
+    from normalized_earnings
+    where workspace_id = ${workspaceId} and batch_id = ${batchId} and mapping_status = 'unmapped'
+  `));
+  const matches = [];
+  for (const earning of earnings) {
+    const matchingRules = rules.filter((rule) => {
+      const ruleSource = stringField(rule, "source").toLocaleLowerCase();
+      if (ruleSource !== "" && ruleSource !== "all" && ruleSource !== "*" && ruleSource !== source.toLocaleLowerCase()) return false;
+      return mappingConditionsMatch(rule.conditions_json, earning);
+    });
+    const targetIds = [...new Set(matchingRules.map((rule) => nullableStringField(rule, "target_track_id")).filter((id) => id !== null))];
+    if (targetIds.length === 1) matches.push({ earningId: stringField(earning, "id"), trackId: targetIds[0] });
+  }
+  if (matches.length === 0) return 0;
+  const chunkSize = 400;
+  for (let offset = 0; offset < matches.length; offset += chunkSize) {
+    const chunk = matches.slice(offset, offset + chunkSize);
+    const earningIds = sql.join(chunk.map((match2) => sql`${match2.earningId}`), sql`, `);
+    await tx.executor.execute(sql`
+      update normalized_earnings
+      set mapping_status = 'matched', calculation_status = 'pending', updated_at = now()
+      where workspace_id = ${workspaceId} and id in (${earningIds})
+    `);
+    const insertRows = chunk.map((match2) => sql`(
+      ${randomUUID()}, ${match2.earningId}, ${match2.trackId}, '100.000000', 'matched'
+    )`);
+    await tx.executor.execute(sql`
+      insert into earning_track_matches (id, earning_id, track_id, confidence, status)
+      values ${sql.join(insertRows, sql`, `)}
+    `);
+  }
+  return matches.length;
+}
+function mappingConditionsMatch(value, earning) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const conditions = value;
+  const fields = {
+    dsp: stringField(earning, "dsp"),
+    store: stringField(earning, "dsp"),
+    isrc: nullableStringField(earning, "isrc") ?? "",
+    upc: nullableStringField(earning, "upc") ?? "",
+    ean: nullableStringField(earning, "upc") ?? "",
+    title: nullableStringField(earning, "raw_title") ?? "",
+    artist: nullableStringField(earning, "raw_artist") ?? "",
+    label: nullableStringField(earning, "raw_label") ?? ""
+  };
+  return Object.entries(conditions).every(([key, expected]) => {
+    const actual = fields[key.toLocaleLowerCase()];
+    if (actual === void 0) return false;
+    if (typeof expected === "string") return actual.trim().toLocaleLowerCase() === expected.trim().toLocaleLowerCase();
+    if (Array.isArray(expected)) return expected.some((item) => typeof item === "string" && actual.trim().toLocaleLowerCase() === item.trim().toLocaleLowerCase());
+    return false;
+  });
 }
 async function persistOfficeBankImportConfirmation(tx, input) {
   if (tx.kind === "memory") {
@@ -42335,10 +42524,29 @@ async function markDistributionImportBatchVoid(tx, batchId) {
     where id = ${batchId}
   `));
   const previousStatus = stringField(beforeRows[0], "status");
+  const allocationRows = rowsFromQueryResult(await tx.executor.execute(sql`
+    select count(*)::int as count
+    from earning_allocations ea
+    join normalized_earnings ne on ne.id = ea.earning_id
+    where ne.batch_id = ${batchId}
+      and ea.status not in ('void', 'error')
+  `));
+  const activeAllocationCount = integerField(allocationRows[0] ?? {}, "count");
+  if (activeAllocationCount > 0) {
+    throwPersistenceHttpError(409, "distribution_import_has_allocations", "Reverse the allocation run before voiding this import batch.", [
+      `batchId=${batchId}`,
+      `activeAllocationCount=${String(activeAllocationCount)}`
+    ]);
+  }
   await tx.executor.execute(sql`
     update import_batches
     set status = 'void', updated_at = now()
     where id = ${batchId}
+  `);
+  await tx.executor.execute(sql`
+    update normalized_earnings
+    set mapping_status = 'ignored', calculation_status = 'excluded', updated_at = now()
+    where batch_id = ${batchId}
   `);
   return {
     previousStatus,
@@ -50077,6 +50285,20 @@ async function distributionImportConfirmResponse(context, dependencies) {
     requestBody: request,
     write: async (tx, resolvedIdempotencyKey) => {
       const preview = await requireDistributionPreviewInWrite(context, dependencies, tx, request.previewId, request.workspaceId);
+      const persistedDuplicate = await findDistributionImportBatchByFingerprint(
+        tx,
+        request.workspaceId,
+        preview.source,
+        preview.fileName,
+        preview.checksum
+      );
+      if (persistedDuplicate !== null) {
+        throw new ApiRouteError(409, "distribution_import_duplicate", "This source file has already been imported for this workspace.", [
+          `existingBatchId=${persistedDuplicate.id}`,
+          `fileName=${preview.fileName}`,
+          `source=${preview.source}`
+        ]);
+      }
       const existingBatch = dependencies.fixtures.distribution.importBatches.find(
         (batch) => batch.fileName === preview.fileName && batch.source === preview.source && batch.status !== "failed" && batch.status !== "void"
       );
@@ -50090,26 +50312,60 @@ async function distributionImportConfirmResponse(context, dependencies) {
       }
       const batchId = randomUUID2();
       const importedAtIso = dependencies.nowIso();
+      const normalization = normalizeDistributionImportRows(preview.source, preview.rows);
+      const acceptedRowIds = new Set(request.acceptedRowIds);
+      const normalizedRows = normalization.acceptedRows.filter((row) => acceptedRowIds.has(row.row.id));
+      const operatorRejectedRows = normalization.acceptedRows.filter((row) => !acceptedRowIds.has(row.row.id)).map((row) => ({ row: row.row, issues: ["operator_rejected"] }));
+      const rejectedRows = [...normalization.rejectedRows, ...operatorRejectedRows];
+      const normalizedInputs = normalizedRows.map((row) => ({
+        rowId: row.row.id,
+        dsp: row.dsp,
+        grossAmount: row.grossAmount,
+        quantity: row.quantity,
+        currency: row.currency,
+        isrc: row.isrc,
+        upc: row.upc,
+        rawTitle: row.title,
+        rawArtist: row.artist,
+        rawLabel: row.label
+      }));
+      const issueInputs = rejectedRows.flatMap(
+        ({ row, issues }) => issues.map((code) => ({
+          rowId: row.id,
+          severity: code === "operator_rejected" ? "warning" : "error",
+          code,
+          message: distributionImportIssueMessage(code),
+          metadata: { rowNumber: row.rowNumber, previewRowId: row.id, source: preview.source }
+        }))
+      );
+      const sourceDates = normalizedRows.flatMap((row) => [row.sourcePeriodStart, row.sourcePeriodEnd].filter((date) => date !== null)).sort();
+      const normalizedStatus = normalizedRows.length === 0 ? "failed" : "normalized";
       await persistDistributionImportConfirmation(tx, {
         batchId,
         workspaceId: request.workspaceId,
         source: preview.source,
         fileName: preview.fileName,
-        status: "failed",
+        status: normalizedStatus,
         importedAtIso,
         rows: preview.rows,
         acceptedRowIds: request.acceptedRowIds,
         rejectedRowIds: request.rejectedRowIds,
+        normalizedRows: normalizedInputs,
+        issues: issueInputs,
         metadata: {
           workspaceId: request.workspaceId,
           previewId: request.previewId,
           checksum: preview.checksum,
           acceptedRowIds: request.acceptedRowIds,
           rejectedRowIds: request.rejectedRowIds,
-          normalizedRowCount: 0,
-          parserStatus: "runtime_parser_missing"
+          normalizedRowCount: normalizedRows.length,
+          issueCount: issueInputs.length,
+          parserStatus: "normalized",
+          sourceReportPeriodStart: sourceDates[0] ?? null,
+          sourceReportPeriodEnd: sourceDates[sourceDates.length - 1] ?? null
         }
       });
+      const mappedByRuleCount = await applyDistributionImportMappingRules(tx, request.workspaceId, batchId, preview.source);
       const auditEventId = await appendAuditEvent(tx, {
         actor,
         action: "distribution_import_confirm",
@@ -50119,9 +50375,10 @@ async function distributionImportConfirmResponse(context, dependencies) {
         after: {
           previewId: request.previewId,
           rawRowCount: preview.rows.length,
-          normalizedRowCount: 0,
-          issueCount: preview.rows.length,
-          status: "failed"
+          normalizedRowCount: normalizedRows.length,
+          issueCount: issueInputs.length,
+          mappingRuleMatchedCount: mappedByRuleCount,
+          status: normalizedStatus
         },
         idempotencyKey: resolvedIdempotencyKey
       });
@@ -50129,17 +50386,22 @@ async function distributionImportConfirmResponse(context, dependencies) {
         id: batchId,
         source: preview.source,
         fileName: preview.fileName,
-        status: "failed",
-        importedAt: importedAtIso
+        status: normalizedStatus,
+        importedAt: importedAtIso,
+        metadata: {
+          sourceReportPeriodStart: sourceDates[0] ?? null,
+          sourceReportPeriodEnd: sourceDates[sourceDates.length - 1] ?? null
+        }
       });
+      appendDistributionImportNormalizationFixture(dependencies.fixtures, batchId, normalizedRows);
       return {
         id: batchId,
         status: "completed",
         auditEventId,
-        importedRoyaltyEventCount: 0,
+        importedRoyaltyEventCount: normalizedRows.length,
         rawRowCount: preview.rows.length,
-        normalizedRowCount: 0,
-        issueCount: preview.rows.length
+        normalizedRowCount: normalizedRows.length,
+        issueCount: issueInputs.length
       };
     }
   });
@@ -51137,9 +51399,10 @@ function costStateForAllocation(dependencies) {
 function earningMatchesPeriod(dataset, earning, period) {
   const batch = dataset.importBatches.find((candidate) => candidate.id === earning.batchId);
   if (batch === void 0 || batch.importedAt === null) {
-    return false;
+    return batch?.metadata?.sourceReportPeriodStart?.toString().startsWith(period) ?? false;
   }
-  return batch.importedAt.startsWith(period);
+  const sourcePeriod = batch.metadata?.sourceReportPeriodStart;
+  return typeof sourcePeriod === "string" ? sourcePeriod.startsWith(period) : batch.importedAt.startsWith(period);
 }
 function trackForEarning(dataset, earning) {
   if (earning.isrc !== null) {
@@ -51821,6 +52084,60 @@ function appendDistributionImportFixture(fixtures, batch) {
   const mutableDistribution = fixtures.distribution;
   mutableDistribution.importBatches = [...fixtures.distribution.importBatches, batch];
 }
+function appendDistributionImportNormalizationFixture(fixtures, batchId, rows) {
+  if (rows.length === 0) return;
+  const mutableDistribution = fixtures.distribution;
+  mutableDistribution.normalizedEarnings = [
+    ...fixtures.distribution.normalizedEarnings,
+    ...rows.map((row) => ({
+      id: `earning_${batchId}_${row.row.id}`,
+      batchId,
+      dsp: row.dsp,
+      grossAmount: row.grossAmount,
+      quantity: row.quantity,
+      currency: row.currency,
+      isrc: row.isrc,
+      upc: row.upc,
+      rawTitle: row.title,
+      rawArtist: row.artist,
+      rawLabel: row.label,
+      mappingStatus: "unmapped",
+      calculationStatus: "pending"
+    }))
+  ];
+  const mutableFixtures = fixtures;
+  mutableFixtures.distributionMappingRows = [
+    ...fixtures.distributionMappingRows,
+    ...rows.map((row) => ({
+      id: `earning_${batchId}_${row.row.id}`,
+      batchId,
+      sourceTitle: row.title ?? "",
+      sourceArtist: row.artist ?? "",
+      sourceLabel: row.label ?? "",
+      sourceStore: row.dsp,
+      sourceIsrc: row.isrc,
+      sourceUpc: row.upc,
+      grossMicro: row.grossAmount,
+      currency: row.currency,
+      suggestedTrackId: null,
+      suggestedTrackTitle: null,
+      confidenceBp: 0,
+      status: "unmapped",
+      exactFixPath: row.isrc !== null || row.upc !== null ? "catalog" : "manual_track"
+    }))
+  ];
+}
+function distributionImportIssueMessage(code) {
+  const messages = {
+    invalid_or_missing_amount: "The source row has no valid exact-decimal royalty amount.",
+    invalid_or_missing_currency: "The source row has no valid ISO-4217 currency code.",
+    missing_track_identity: "The source row has no title, artist, ISRC, or UPC/EAN identity.",
+    invalid_quantity: "The source row quantity is not a valid non-negative scale-6 number.",
+    duplicate_source_row: "The source row duplicates another row in the same imported file.",
+    operator_rejected: "The operator excluded this accepted preview row from confirmation."
+  };
+  return messages[code] ?? "The source row could not be normalized.";
+}
 function appendAllocationRunFixture(fixtures, input) {
   const mutableDistribution = fixtures.distribution;
   const createdAt = input.finishedAtIso;
@@ -52317,6 +52634,10 @@ function appendDistributionAllocationStateFixture(fixtures, input) {
 function markDistributionImportFixtureVoid(fixtures, batchId) {
   const mutableDistribution = fixtures.distribution;
   mutableDistribution.importBatches = fixtures.distribution.importBatches.map((batch) => batch.id === batchId ? { ...batch, status: "void" } : batch);
+  const earningIds = new Set(fixtures.distribution.normalizedEarnings.filter((earning) => earning.batchId === batchId).map((earning) => earning.id));
+  mutableDistribution.normalizedEarnings = fixtures.distribution.normalizedEarnings.map(
+    (earning) => earningIds.has(earning.id) ? { ...earning, mappingStatus: "ignored", calculationStatus: "excluded" } : earning
+  );
 }
 function appendOfficeBankImportFixture(fixtures, patch) {
   const mutableOffice = fixtures.office;
@@ -54249,7 +54570,7 @@ function toDistributionImportBatch(dataset, batchId) {
     id: batch.id,
     source: batch.source === "routenote" ? "routenote" : "kontor",
     fileName: batch.fileName,
-    period: (batch.importedAt ?? "1970-01").slice(0, 7),
+    period: typeof batch.metadata?.sourceReportPeriodStart === "string" ? batch.metadata.sourceReportPeriodStart.slice(0, 7) : (batch.importedAt ?? "1970-01").slice(0, 7),
     statementReference: batch.id,
     accountReference: batch.source,
     rowCount: rows.length,
@@ -54276,7 +54597,7 @@ function toApiImportStatus(status) {
   if (status === "failed") {
     return "failed";
   }
-  if (status === "processing") {
+  if (status === "processing" || status === "normalized") {
     return "mapped";
   }
   return "uploaded";
@@ -55614,7 +55935,7 @@ async function readDistributionDataset(pool) {
     releases,
     tracks
   ] = await Promise.all([
-    queryRows(pool, "select id::text, source, file_name, status, coalesce(imported_at, created_at) as imported_at from import_batches order by legacy_id nulls last, id", []),
+    queryRows(pool, "select id::text, source, file_name, status, coalesce(imported_at, created_at) as imported_at, metadata from import_batches order by legacy_id nulls last, id", []),
     queryRows(
       pool,
       "select id::text, batch_id::text, dsp, gross_amount::text, quantity::text, currency, isrc, upc, raw_title, raw_artist, raw_label, mapping_status, calculation_status from normalized_earnings order by legacy_id nulls last, id",
@@ -56183,7 +56504,8 @@ function toDistributionImportBatchRow(row) {
     source: stringCell2(row, "source"),
     fileName: stringCell2(row, "file_name"),
     status: enumCell(row, "status", ["draft", "processing", "normalized", "completed", "failed", "void"]),
-    importedAt: nullableTimestampCell(row, "imported_at")
+    importedAt: nullableTimestampCell(row, "imported_at"),
+    ...isJsonRecordCell(row, "metadata") ? { metadata: row.metadata } : {}
   };
 }
 function toDistributionNormalizedEarning(row) {
@@ -56407,6 +56729,10 @@ function nullableStringCell2(row, columnName) {
     return value.toISOString();
   }
   return String(value);
+}
+function isJsonRecordCell(row, columnName) {
+  const value = row[columnName];
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function booleanCell2(row, columnName) {
   const value = row[columnName];

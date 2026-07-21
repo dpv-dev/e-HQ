@@ -13,8 +13,42 @@ export type DistributionImportSource = "kontor" | "routenote";
 
 interface ParsedDistributionImportRow {
   readonly row: ApiImportPreviewRow;
+  readonly dsp: string;
   readonly currency: CurrencyCode;
   readonly grossAmount: string;
+  readonly quantity: string;
+  readonly isrc: string | null;
+  readonly upc: string | null;
+  readonly title: string | null;
+  readonly artist: string | null;
+  readonly label: string | null;
+  readonly sourcePeriodStart: string | null;
+  readonly sourcePeriodEnd: string | null;
+  readonly sourceReportDate: string | null;
+}
+
+export interface DistributionNormalizedImportRow {
+  readonly row: ApiImportPreviewRow;
+  readonly dsp: string;
+  readonly currency: CurrencyCode;
+  readonly grossAmount: string;
+  readonly quantity: string;
+  readonly isrc: string | null;
+  readonly upc: string | null;
+  readonly title: string | null;
+  readonly artist: string | null;
+  readonly label: string | null;
+  readonly sourcePeriodStart: string | null;
+  readonly sourcePeriodEnd: string | null;
+  readonly sourceReportDate: string | null;
+}
+
+export interface DistributionImportNormalization {
+  readonly acceptedRows: readonly DistributionNormalizedImportRow[];
+  readonly rejectedRows: readonly {
+    readonly row: ApiImportPreviewRow;
+    readonly issues: readonly string[];
+  }[];
 }
 
 interface DistributionColumnProfile {
@@ -70,6 +104,19 @@ const GENERAL_ARTIST_KEYS: readonly string[] = [
 const GENERAL_ISRC_KEYS: readonly string[] = ["isrc"];
 const GENERAL_UPC_KEYS: readonly string[] = ["upc", "ean"];
 const GENERAL_QUANTITY_KEYS: readonly string[] = ["quantity", "units", "streams", "downloads"];
+const GENERAL_DSP_KEYS: readonly string[] = ["dsp", "store", "platform", "service", "partner"];
+const GENERAL_LABEL_KEYS: readonly string[] = ["label", "record label", "label name"];
+const GENERAL_DATE_KEYS: readonly string[] = [
+  "report date",
+  "report period",
+  "statement period",
+  "period",
+  "sale date",
+  "transaction date",
+  "earning date",
+  "date",
+  "month"
+];
 
 const KONTOR_PROFILE: DistributionColumnProfile = {
   amountKeys: ["amount eur", "amount usd", "gross payout", ...GENERAL_AMOUNT_KEYS],
@@ -104,16 +151,13 @@ export function parseDistributionImportPreview(
   const currencyCodes = new Set<CurrencyCode>();
 
   for (const previewRow of previewRows) {
-    const parsed = parseRow(profile, previewRow);
+    const parsed = parseRow(source, profile, previewRow);
     if (parsed === null) {
       rowResults.push({
         id: previewRow.id,
         rowNumber: previewRow.rowNumber,
         status: "rejected",
-        issues: [
-          "amount_or_currency_missing",
-          "title_or_identifier_missing"
-        ]
+        issues: rowIssues(source, profile, previewRow)
       });
       continue;
     }
@@ -151,6 +195,44 @@ export function parseDistributionImportPreview(
   };
 }
 
+export function normalizeDistributionImportRows(
+  source: DistributionImportSource,
+  rows: readonly ApiImportPreviewRow[]
+): DistributionImportNormalization {
+  const profile = source === "kontor" ? KONTOR_PROFILE : ROUTENOTE_PROFILE;
+  const acceptedRows: DistributionNormalizedImportRow[] = [];
+  const rejectedRows: Array<{ readonly row: ApiImportPreviewRow; readonly issues: readonly string[] }> = [];
+  const seenFingerprints = new Set<string>();
+
+  for (const row of rows) {
+    const parsed = parseRow(source, profile, row);
+    if (parsed === null) {
+      rejectedRows.push({ row, issues: rowIssues(source, profile, row) });
+      continue;
+    }
+
+    const fingerprint = [
+      parsed.dsp,
+      parsed.currency,
+      parsed.grossAmount,
+      parsed.quantity,
+      parsed.isrc ?? "",
+      parsed.upc ?? "",
+      parsed.title ?? "",
+      parsed.artist ?? "",
+      parsed.sourceReportDate ?? parsed.sourcePeriodStart ?? ""
+    ].join("\u001f").toLocaleLowerCase();
+    if (seenFingerprints.has(fingerprint)) {
+      rejectedRows.push({ row, issues: ["duplicate_source_row"] });
+      continue;
+    }
+    seenFingerprints.add(fingerprint);
+    acceptedRows.push(parsed);
+  }
+
+  return { acceptedRows, rejectedRows };
+}
+
 function toPreviewRows(
   rows: readonly Readonly<Record<string, string>>[]
 ): readonly ApiImportPreviewRow[] {
@@ -164,6 +246,7 @@ function toPreviewRows(
 }
 
 function parseRow(
+  source: DistributionImportSource,
   profile: DistributionColumnProfile,
   row: ApiImportPreviewRow
 ): ParsedDistributionImportRow | null {
@@ -195,12 +278,44 @@ function parseRow(
     return null;
   }
 
-  void quantity;
+  const sourcePeriod = parseSourceDate(rowValue(row.rawData, GENERAL_DATE_KEYS));
   return {
     row,
+    dsp: nonEmptyValue(rowValue(row.rawData, GENERAL_DSP_KEYS)) ?? source,
     currency,
-    grossAmount
+    grossAmount,
+    quantity,
+    isrc,
+    upc,
+    title,
+    artist,
+    label: nonEmptyValue(rowValue(row.rawData, GENERAL_LABEL_KEYS)),
+    sourcePeriodStart: sourcePeriod?.start ?? null,
+    sourcePeriodEnd: sourcePeriod?.end ?? null,
+    sourceReportDate: sourcePeriod?.reportDate ?? null
   };
+}
+
+function rowIssues(
+  _source: DistributionImportSource,
+  profile: DistributionColumnProfile,
+  row: ApiImportPreviewRow
+): readonly string[] {
+  const issues: string[] = [];
+  const amount = rowValue(row.rawData, profile.amountKeys);
+  const currency = rowValue(row.rawData, profile.currencyKeys);
+  const identity = [
+    rowValue(row.rawData, profile.titleKeys),
+    rowValue(row.rawData, profile.artistKeys),
+    rowValue(row.rawData, profile.isrcKeys),
+    rowValue(row.rawData, profile.upcKeys)
+  ].some((value) => value !== null && value.trim() !== "");
+  if (amount === null || parseErhAmount(amount) === null) issues.push("invalid_or_missing_amount");
+  if (currency === null || normalizedCurrency(currency) === null) issues.push("invalid_or_missing_currency");
+  if (!identity) issues.push("missing_track_identity");
+  const quantity = rowValue(row.rawData, profile.quantityKeys);
+  if (quantity !== null && parseQuantity(quantity) === null) issues.push("invalid_quantity");
+  return issues.length === 0 ? ["row_not_normalizable"] : issues;
 }
 
 function parseErhAmount(value: string | null): string | null {
@@ -240,6 +355,23 @@ function parseQuantity(value: string | null): string | null {
   } catch {
     return null;
   }
+}
+
+function parseSourceDate(value: string | null): { readonly start: string; readonly end: string; readonly reportDate: string | null } | null {
+  if (value === null) return null;
+  const normalized = value.trim().replaceAll("/", "-");
+  const dateMatch = /^(\d{4})-(\d{2})-(\d{2})/.exec(normalized);
+  if (dateMatch !== null) {
+    const date = `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`;
+    return { start: date, end: date, reportDate: date };
+  }
+  const periodMatch = /^(\d{4})-(\d{2})$/.exec(normalized);
+  if (periodMatch !== null) {
+    const period = `${periodMatch[1]}-${periodMatch[2]}`;
+    const lastDay = new Date(Date.UTC(Number(periodMatch[1]), Number(periodMatch[2]), 0)).getUTCDate();
+    return { start: `${period}-01`, end: `${period}-${String(lastDay).padStart(2, "0")}`, reportDate: null };
+  }
+  return null;
 }
 
 function normalizeDecimalText(value: string): string | null {
