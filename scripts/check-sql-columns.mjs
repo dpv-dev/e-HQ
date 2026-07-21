@@ -55,6 +55,13 @@ const REQUIRED_COLUMNS = {
     "file_name",
     "status"
   ],
+  import_batches: [
+    "id",
+    "workspace_id",
+    "source",
+    "file_name",
+    "status"
+  ],
   office_bank_statement_lines: [
     "id",
     "import_batch_id",

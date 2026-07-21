@@ -130,6 +130,7 @@ export interface AppendAuditEventInput {
 
 export interface PersistDistributionImportInput {
   readonly batchId: string;
+  readonly workspaceId: string;
   readonly source: "kontor" | "routenote";
   readonly fileName: string;
   readonly status: "processing" | "failed" | "void";
@@ -788,6 +789,7 @@ export async function persistDistributionImportConfirmation(tx: ApiWriteTransact
   await tx.executor.execute(sql`
     insert into import_batches (
       id,
+      workspace_id,
       source,
       file_name,
       status,
@@ -796,6 +798,7 @@ export async function persistDistributionImportConfirmation(tx: ApiWriteTransact
     )
     values (
       ${input.batchId},
+      ${input.workspaceId},
       ${input.source},
       ${input.fileName},
       ${input.status},

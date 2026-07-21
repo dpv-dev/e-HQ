@@ -9273,6 +9273,7 @@ async function distributionImportConfirmResponse(context: ApiContext, dependenci
       const importedAtIso = dependencies.nowIso();
       await persistDistributionImportConfirmation(tx, {
         batchId,
+        workspaceId: request.workspaceId,
         source: preview.source,
         fileName: preview.fileName,
         status: "failed",

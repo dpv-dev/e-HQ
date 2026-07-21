@@ -41536,6 +41536,7 @@ async function persistDistributionImportConfirmation(tx, input) {
   await tx.executor.execute(sql`
     insert into import_batches (
       id,
+      workspace_id,
       source,
       file_name,
       status,
@@ -41544,6 +41545,7 @@ async function persistDistributionImportConfirmation(tx, input) {
     )
     values (
       ${input.batchId},
+      ${input.workspaceId},
       ${input.source},
       ${input.fileName},
       ${input.status},
@@ -50090,6 +50092,7 @@ async function distributionImportConfirmResponse(context, dependencies) {
       const importedAtIso = dependencies.nowIso();
       await persistDistributionImportConfirmation(tx, {
         batchId,
+        workspaceId: request.workspaceId,
         source: preview.source,
         fileName: preview.fileName,
         status: "failed",
