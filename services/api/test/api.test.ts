@@ -6680,6 +6680,7 @@ async function createPgliteStatementTables(pglite: PGlite): Promise<void> {
   await pglite.exec(`
     create table statements (
       id text primary key,
+      workspace_id text not null,
       payee_id text not null,
       calculation_run_id text,
       period_start date not null,

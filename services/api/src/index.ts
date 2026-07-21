@@ -8687,6 +8687,7 @@ async function distributionStatementGenerateResponse(context: ApiContext, depend
       }
 
       await persistDistributionStatements(tx, {
+        workspaceId: request.workspaceId,
         statements: plan.statementPlans
       });
       const auditEventId = await appendAuditEvent(tx, {

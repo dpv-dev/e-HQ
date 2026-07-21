@@ -247,6 +247,7 @@ export interface StatementPersistPlan {
 }
 
 export interface PersistDistributionStatementsInput {
+  readonly workspaceId: string;
   readonly statements: readonly StatementPersistPlan[];
 }
 
@@ -1362,6 +1363,7 @@ export async function persistDistributionStatements(tx: ApiWriteTransaction, inp
     const insertedRows = rowsFromQueryResult(await tx.executor.execute(sql`
       insert into statements (
         id,
+        workspace_id,
         payee_id,
         period_start,
         period_end,
@@ -1375,6 +1377,7 @@ export async function persistDistributionStatements(tx: ApiWriteTransaction, inp
       )
       values (
         ${plan.statementId},
+        ${input.workspaceId},
         ${plan.statement.payeeId},
         ${plan.statement.periodStart},
         ${plan.statement.periodEnd},

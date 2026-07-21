@@ -42150,6 +42150,7 @@ async function persistDistributionStatements(tx, input) {
     const insertedRows = rowsFromQueryResult(await tx.executor.execute(sql`
       insert into statements (
         id,
+        workspace_id,
         payee_id,
         period_start,
         period_end,
@@ -42163,6 +42164,7 @@ async function persistDistributionStatements(tx, input) {
       )
       values (
         ${plan.statementId},
+        ${input.workspaceId},
         ${plan.statement.payeeId},
         ${plan.statement.periodStart},
         ${plan.statement.periodEnd},
@@ -49777,6 +49779,7 @@ async function distributionStatementGenerateResponse(context, dependencies) {
         await acquireAdvisoryLock(tx, statementLockKey(statementPlan.statement.payeeId, statementPlan.statement.periodStart, statementPlan.statement.currency));
       }
       await persistDistributionStatements(tx, {
+        workspaceId: request.workspaceId,
         statements: plan.statementPlans
       });
       const auditEventId = await appendAuditEvent(tx, {

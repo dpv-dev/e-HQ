@@ -62,6 +62,18 @@ const REQUIRED_COLUMNS = {
     "file_name",
     "status"
   ],
+  statements: [
+    "id",
+    "workspace_id",
+    "payee_id",
+    "period_start",
+    "period_end",
+    "currency",
+    "gross_total",
+    "recoupment_total",
+    "net_payable",
+    "amount_due"
+  ],
   normalized_earnings: [
     "id",
     "workspace_id",
