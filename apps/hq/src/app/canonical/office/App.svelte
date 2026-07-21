@@ -232,7 +232,12 @@
       ]
     }
   ];
-  const officeNavItems: readonly OfficeNavItem[] = officeNavGroups.flatMap((group: OfficeNavGroup): readonly OfficeNavItem[] => group.items);
+  // `imports` remains a supported direct/legacy route. It deliberately stays out
+  // of the visible menu in favour of the clearer PDF Import workflow.
+  const officeNavItems: readonly OfficeNavItem[] = [
+    ...officeNavGroups.flatMap((group: OfficeNavGroup): readonly OfficeNavItem[] => group.items),
+    { id: "imports", label: "Imports", title: "Bank imports", subtitle: "Upload · Analyze · Review · Import." }
+  ];
 
   const typeOptions: readonly SelectOption[] = [
     { label: "All types", value: allValue },
@@ -2241,12 +2246,14 @@
 
   function updateCustomFrom(event: Event): void {
     const base = customRange ?? activeRange;
+    periodScope = "custom";
     customRange = { from: readInputValue(event), to: base.to };
     void reloadPeriodScopedData();
   }
 
   function updateCustomTo(event: Event): void {
     const base = customRange ?? activeRange;
+    periodScope = "custom";
     customRange = { from: base.from, to: readInputValue(event) };
     void reloadPeriodScopedData();
   }
@@ -4256,7 +4263,7 @@
             message=""
             onchange={updatePeriodScope}
           />
-          {#if periodScope === "custom"}
+          <div class="period-range">
             <label>
               <span class="ehq-type-label-mono">From</span>
               <input type="date" value={activeRange.from} max={activeRange.to} onchange={updateCustomFrom} />
@@ -4265,7 +4272,7 @@
               <span class="ehq-type-label-mono">To</span>
               <input type="date" value={activeRange.to} min={activeRange.from} onchange={updateCustomTo} />
             </label>
-          {/if}
+          </div>
           <p class="ehq-type-label-mono">{rangeLabel(activeRange)}</p>
         </section>
       {/if}
@@ -5107,6 +5114,17 @@
   .period-control label,
   .period-control :global(.ehq-select-field) {
     width: min(360px, 100%);
+  }
+
+  .period-range {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(132px, 1fr));
+    gap: var(--ehq-space-2);
+    width: min(360px, 100%);
+  }
+
+  .period-range label {
+    width: auto;
   }
 
   .period-control p {

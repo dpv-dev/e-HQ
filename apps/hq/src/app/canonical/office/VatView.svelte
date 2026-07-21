@@ -1,6 +1,7 @@
 <script lang="ts">
   import {
     BarsChart,
+    Button,
     EmptyState,
     KPI,
     Loader,
@@ -189,6 +190,50 @@
     return `${String(Math.trunc(rateBp / 100))}%`;
   }
 
+  // Export the exact API amounts as decimal text; no VAT is recomputed in the UI.
+  function exportVatCsv(): void {
+    if (vatState.status !== "success") {
+      return;
+    }
+
+    const rows = vatState.data.rows.map((row: OfficeVatRow): readonly string[] => [
+      row.label,
+      microToDecimalCsv(row.baseMicro),
+      basisPointsToPercentCsv(row.rateBp),
+      microToDecimalCsv(row.vatMicro)
+    ]);
+    downloadCsv(`office-vat-${props.dateFrom}-to-${props.dateTo}.csv`, ["Line", "Base (MUR)", "Rate (%)", "VAT (MUR)"], rows);
+  }
+
+  function downloadCsv(filename: string, header: readonly string[], rows: readonly (readonly string[])[]): void {
+    const escapeCell = (value: string): string => (/[",\n]/u.test(value) ? `"${value.replaceAll('"', '""')}"` : value);
+    const content = [header, ...rows].map((cells: readonly string[]): string => cells.map(escapeCell).join(",")).join("\n");
+    const blob = new Blob([content], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function microToDecimalCsv(value: string): string {
+    try {
+      const amount = BigInt(value);
+      const sign = amount < 0n ? "-" : "";
+      const absolute = amount < 0n ? -amount : amount;
+      return `${sign}${(absolute / 1_000_000n).toString()}.${(absolute % 1_000_000n).toString().padStart(6, "0")}`;
+    } catch {
+      return "0.000000";
+    }
+  }
+
+  function basisPointsToPercentCsv(value: number): string {
+    const sign = value < 0 ? "-" : "";
+    const absolute = BigInt(Math.trunc(Math.abs(value)));
+    return `${sign}${(absolute / 100n).toString()}.${(absolute % 100n).toString().padStart(2, "0")}`;
+  }
+
   function formatMicro(amountMicro: string): string {
     return formatMoneyValue(amountMicro, "MUR");
   }
@@ -216,6 +261,21 @@
       <KPI label={kpi.label} value={kpi.value} detail={kpi.detail} tone={kpi.tone} state={isLoadingState(vatState) ? "loading" : "default"} accent={kpi.accent} />
     {/each}
   </section>
+
+  <div class="vat-actions">
+    <Button
+      label="Export CSV"
+      variant="secondary"
+      size="medium"
+      type="button"
+      disabled={vatState.status !== "success" || vatRows.length === 0}
+      loading={false}
+      locked={false}
+      focus={false}
+      ariaLabel="Export VAT report as CSV"
+      onclick={exportVatCsv}
+    />
+  </div>
 
   {#if isLoadingState(vatState)}
     <Loader label="Loading VAT" detail="Reading the VAT report for the period." size="medium" />
@@ -272,6 +332,11 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr);
     gap: var(--ehq-space-3);
+  }
+
+  .vat-actions {
+    display: flex;
+    justify-content: flex-end;
   }
 
   .state-copy {
