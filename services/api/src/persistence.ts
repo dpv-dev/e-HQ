@@ -1088,7 +1088,29 @@ export async function persistDistributionAllocationRun(tx: ApiWriteTransaction, 
     )
   `);
 
-  for (const allocation of input.allocations) {
+  // Production waves contain tens of thousands of rows. Keep the whole run
+  // atomic, but avoid one network round trip per row inside the transaction.
+  const INSERT_CHUNK_SIZE = 400;
+  for (let offset = 0; offset < input.allocations.length; offset += INSERT_CHUNK_SIZE) {
+    const chunk = input.allocations.slice(offset, offset + INSERT_CHUNK_SIZE);
+    const rows = chunk.map((allocation): SQL => sql`(
+      ${allocation.id},
+      ${allocation.earningId},
+      ${input.runId},
+      ${allocation.payeeId},
+      ${allocation.contractId},
+      ${allocation.trackId},
+      ${allocation.grossAmount},
+      ${allocation.originalGrossAmount},
+      ${allocation.fxRate},
+      ${allocation.grossShare},
+      ${allocation.recoupmentApplied},
+      ${allocation.netPayable},
+      ${allocation.splitPercentage},
+      ${allocation.currency},
+      ${allocation.originalCurrency},
+      'calculated'
+    )`);
     await tx.executor.execute(sql`
       insert into earning_allocations (
         id,
@@ -1107,29 +1129,20 @@ export async function persistDistributionAllocationRun(tx: ApiWriteTransaction, 
         currency,
         original_currency,
         status
-      )
-      values (
-        ${allocation.id},
-        ${allocation.earningId},
-        ${input.runId},
-        ${allocation.payeeId},
-        ${allocation.contractId},
-        ${allocation.trackId},
-        ${allocation.grossAmount},
-        ${allocation.originalGrossAmount},
-        ${allocation.fxRate},
-        ${allocation.grossShare},
-        ${allocation.recoupmentApplied},
-        ${allocation.netPayable},
-        ${allocation.splitPercentage},
-        ${allocation.currency},
-        ${allocation.originalCurrency},
-        'calculated'
-      )
+      ) values ${sql.join(rows, sql`, `)}
     `);
   }
 
-  for (const application of input.expenseApplications) {
+  for (let offset = 0; offset < input.expenseApplications.length; offset += INSERT_CHUNK_SIZE) {
+    const chunk = input.expenseApplications.slice(offset, offset + INSERT_CHUNK_SIZE);
+    const rows = chunk.map((application): SQL => sql`(
+      ${randomUUID()},
+      ${application.costTermId},
+      ${application.payeeId},
+      ${input.runId},
+      ${application.amountApplied},
+      ${application.currency}
+    )`);
     await tx.executor.execute(sql`
       insert into expense_applications (
         id,
@@ -1138,15 +1151,7 @@ export async function persistDistributionAllocationRun(tx: ApiWriteTransaction, 
         calculation_run_id,
         amount_applied,
         currency
-      )
-      values (
-        ${randomUUID()},
-        ${application.costTermId},
-        ${application.payeeId},
-        ${input.runId},
-        ${application.amountApplied},
-        ${application.currency}
-      )
+      ) values ${sql.join(rows, sql`, `)}
     `);
   }
 
@@ -1158,7 +1163,16 @@ export async function persistDistributionAllocationRun(tx: ApiWriteTransaction, 
     `);
   }
 
-  for (const suspense of input.suspenseItems) {
+  for (let offset = 0; offset < input.suspenseItems.length; offset += INSERT_CHUNK_SIZE) {
+    const chunk = input.suspenseItems.slice(offset, offset + INSERT_CHUNK_SIZE);
+    const rows = chunk.map((suspense): SQL => sql`(
+      ${randomUUID()},
+      ${input.workspaceId},
+      ${suspense.earningId},
+      ${suspense.amount},
+      ${suspense.currency},
+      ${suspense.reasonCode}
+    )`);
     await tx.executor.execute(sql`
       insert into suspense_items (
         id,
@@ -1167,15 +1181,7 @@ export async function persistDistributionAllocationRun(tx: ApiWriteTransaction, 
         amount,
         currency,
         reason_code
-      )
-      values (
-        ${randomUUID()},
-        ${input.workspaceId},
-        ${suspense.earningId},
-        ${suspense.amount},
-        ${suspense.currency},
-        ${suspense.reasonCode}
-      )
+      ) values ${sql.join(rows, sql`, `)}
     `);
   }
 
