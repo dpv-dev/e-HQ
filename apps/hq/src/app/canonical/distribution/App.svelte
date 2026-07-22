@@ -764,7 +764,7 @@
     checksum: "",
     preview: null,
     confirm: null,
-    message: "Select a Kontor or RouteNote export (CSV/TSV) to start the preview."
+    message: "Select a Kontor CSV/TSV or RouteNote Excel export to start the preview."
   });
   let importFileInput = $state<HTMLInputElement | null>(null);
   let importPanelOpen = $state(false);
