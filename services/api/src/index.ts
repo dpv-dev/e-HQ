@@ -9520,7 +9520,17 @@ async function generateImportCatalogRows(
     return { createdTrackCount: 0, existingTrackCount: 0, mappedEarningCount: 0, skippedEarningCount: 0 };
   }
 
-  for (const isrc of isrcs) await acquireAdvisoryLock(tx, `distribution:track-isrc:${workspaceId}:${isrc}`);
+  const trackLockValues = sql.join(
+    isrcs.map((isrc) => sql`(${`distribution:track-isrc:${workspaceId}:${isrc}`})`),
+    sql`, `
+  );
+  const lockRows = queryRowsFromResult(await tx.executor.execute(sql`
+    select bool_and(pg_try_advisory_xact_lock(hashtext(lock_key))) as locked
+    from (values ${trackLockValues}) as locks(lock_key)
+  `));
+  if (!booleanQueryField(lockRows[0], "locked")) {
+    throw new ApiRouteError(409, "write_lock_unavailable", "Another write is already running for this lock key.", [`batchId=${batchId}`]);
+  }
   const isrcValues = sql.join(isrcs.map((isrc) => sql`${isrc}`), sql`, `);
   const existingRows = queryRowsFromResult(await tx.executor.execute(sql`
     select distinct on (upper(isrc)) id::text, upper(isrc) as isrc
@@ -9532,31 +9542,51 @@ async function generateImportCatalogRows(
   for (const row of existingRows) trackIdByIsrc.set(stringQueryField(row, "isrc"), stringQueryField(row, "id"));
   const existingTrackCount = trackIdByIsrc.size;
 
+  const tracksToCreate: { readonly id: string; readonly isrc: string; readonly title: string; readonly artist: string }[] = [];
   for (const isrc of isrcs) {
     if (trackIdByIsrc.has(isrc)) continue;
     const candidate = byIsrc.get(isrc);
     if (candidate === undefined) continue;
     const trackId = randomUUID();
+    tracksToCreate.push({ id: trackId, isrc, title: candidate.title, artist: candidate.artist });
+    trackIdByIsrc.set(isrc, trackId);
+  }
+  if (tracksToCreate.length > 0) {
+    const trackValues = sql.join(
+      tracksToCreate.map((track) => sql`(${track.id}, ${workspaceId}, ${track.title}, ${track.artist}, 'draft', ${track.isrc})`),
+      sql`, `
+    );
     await tx.executor.execute(sql`
       insert into tracks (id, workspace_id, title, artist_name, catalog_status, isrc)
-      values (${trackId}, ${workspaceId}, ${candidate.title}, ${candidate.artist}, 'draft', ${isrc})
+      values ${trackValues}
     `);
-    trackIdByIsrc.set(isrc, trackId);
   }
 
   const matches = [...byIsrc.entries()].flatMap(([isrc, candidate]) => {
     const trackId = trackIdByIsrc.get(isrc);
     return trackId === undefined ? [] : candidate.earningIds.map((earningId) => ({ earningId, trackId }));
   });
-  for (const match of matches) {
+  if (matches.length > 0) {
+    const matchValues = sql.join(
+      matches.map((match) => sql`(${match.earningId}, ${match.trackId})`),
+      sql`, `
+    );
     await tx.executor.execute(sql`
+      with matches(earning_id, track_id) as (values ${matchValues})
       update normalized_earnings
       set mapping_status = 'matched', calculation_status = 'pending', updated_at = now()
-      where id = ${match.earningId} and workspace_id = ${workspaceId} and mapping_status = 'unmapped'
+      from matches
+      where normalized_earnings.id = matches.earning_id
+        and normalized_earnings.workspace_id = ${workspaceId}
+        and normalized_earnings.mapping_status = 'unmapped'
     `);
+    const earningTrackMatchValues = sql.join(
+      matches.map((match) => sql`(${randomUUID()}, ${match.earningId}, ${match.trackId}, '100.000000', 'matched')`),
+      sql`, `
+    );
     await tx.executor.execute(sql`
       insert into earning_track_matches (id, earning_id, track_id, confidence, status)
-      values (${randomUUID()}, ${match.earningId}, ${match.trackId}, '100.000000', 'matched')
+      values ${earningTrackMatchValues}
     `);
   }
   return {
