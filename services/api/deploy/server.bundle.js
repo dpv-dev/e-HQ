@@ -50613,7 +50613,7 @@ async function generateImportCatalogRows(tx, workspaceId, batchId) {
   });
   if (matches.length > 0) {
     const matchValues = sql.join(
-      matches.map((match2) => sql`(${match2.earningId}, ${match2.trackId})`),
+      matches.map((match2) => sql`(${match2.earningId}::uuid, ${match2.trackId}::uuid)`),
       sql`, `
     );
     await tx.executor.execute(sql`

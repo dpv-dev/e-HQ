@@ -9568,7 +9568,7 @@ async function generateImportCatalogRows(
   });
   if (matches.length > 0) {
     const matchValues = sql.join(
-      matches.map((match) => sql`(${match.earningId}, ${match.trackId})`),
+      matches.map((match) => sql`(${match.earningId}::uuid, ${match.trackId}::uuid)`),
       sql`, `
     );
     await tx.executor.execute(sql`
