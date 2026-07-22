@@ -41,6 +41,7 @@ import type {
   DistributionImportConfirmResponse,
   DistributionImportPreviewRequest,
   DistributionImportPreviewResponse,
+  DistributionFinancialResetRequest,
   DistributionMappingApplyRulesRequest,
   DistributionCatalogArtistPromoteRequest,
   DistributionCatalogContributorPayeeLinkRequest,
@@ -109,6 +110,10 @@ export interface DistributionApiClient {
   readonly reverseImportBatch: (
     batchId: EntityId,
     request: DistributionWorkspaceQuery,
+    options: WriteRequestOptions
+  ) => Promise<ApiMutationReceipt>;
+  readonly resetFinancialData: (
+    request: DistributionFinancialResetRequest,
     options: WriteRequestOptions
   ) => Promise<ApiMutationReceipt>;
   readonly listMappingRows: (query: DistributionMappingRowsQuery) => Promise<PageResult<DistributionMappingRow>>;
@@ -333,6 +338,10 @@ export function createDistributionApiClient(config: ApiClientConfig): Distributi
         request,
         options.idempotencyKey
       ),
+    resetFinancialData: (
+      request: DistributionFinancialResetRequest,
+      options: WriteRequestOptions
+    ): Promise<ApiMutationReceipt> => transport.post<ApiMutationReceipt>("financial-reset", request, options.idempotencyKey),
     listMappingRows: (query: DistributionMappingRowsQuery): Promise<PageResult<DistributionMappingRow>> =>
       transport.get<PageResult<DistributionMappingRow>>("mapping/rows", {
         workspaceId: query.workspaceId,

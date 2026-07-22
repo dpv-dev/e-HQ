@@ -1422,6 +1422,11 @@ export interface DistributionImportConfirmResponse extends ApiMutationReceipt {
   readonly importedRoyaltyEventCount: number;
 }
 
+export interface DistributionFinancialResetRequest {
+  readonly workspaceId: EntityId;
+  readonly confirmationPhrase: "DELETE ALL DISTRIBUTION IMPORT DATA";
+}
+
 export interface DistributionMappingRowsQuery extends PageQuery {
   readonly workspaceId: EntityId;
   readonly batchId: EntityId | null;

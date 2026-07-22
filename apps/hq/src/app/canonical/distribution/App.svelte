@@ -768,6 +768,8 @@
   });
   let importFileInput = $state<HTMLInputElement | null>(null);
   let importPanelOpen = $state(false);
+  let importResetPanelOpen = $state(false);
+  let importResetConfirmation = $state("");
   let runReceipt = $state<ApiRunReceipt | null>(null);
   let mutationReceipt = $state<ApiMutationReceipt | null>(null);
   let runReceiptPageId = $state<DistributionPageId | null>(null);
@@ -2841,6 +2843,32 @@
 
   function closeImportPanel(): void {
     importPanelOpen = false;
+  }
+
+  function openImportResetPanel(): void {
+    importResetConfirmation = "";
+    importResetPanelOpen = true;
+  }
+
+  function closeImportResetPanel(): void {
+    importResetPanelOpen = false;
+    importResetConfirmation = "";
+  }
+
+  async function resetDistributionImports(): Promise<void> {
+    if (importResetConfirmation !== "DELETE ALL DISTRIBUTION IMPORT DATA") return;
+    try {
+      mutationReceipt = await distributionApi.resetFinancialData(
+        { workspaceId: distributionWorkspaceId, confirmationPhrase: "DELETE ALL DISTRIBUTION IMPORT DATA" },
+        { idempotencyKey: createIdempotencyKey("distribution-financial-reset") }
+      );
+      mutationReceiptPageId = activePageId;
+      closeImportResetPanel();
+      clearImportFile();
+      await Promise.all([loadImportBatches(), loadMappingRows(), loadAllocationWorkbench(), loadAllocationRuns(), loadSuspense(), loadStatements(), loadPayments(), loadRevenue(), loadReconciliation(), loadAuditLog()]);
+    } catch (error: unknown) {
+      reportActionError(error);
+    }
   }
 
   async function openImportAssistant(): Promise<void> {
@@ -6323,34 +6351,13 @@
         </section>
       {:else if activePageId === "imports"}
         <Toolbar label="Import Kontor RouteNote" filters={importToolbarFilters} actionLabel="" loading={isLoadingStatus(importState.status)} onFilterSelect={selectImportToolbarFilter} />
-        <section class="dashboard-grid import-parity-grid" aria-label="Import workflow">
-          <section class="command-card ehq-edge-surface">
-            <SectionTemplate
-              eyebrow="upload"
-              title="Upload capacity"
-              detail="The API accepts one or more distributor exports and processes each confirmed file as an auditable import batch."
-              state="ready"
-            >
-              <p>Preview and validation run before any import write.</p>
-            </SectionTemplate>
-          </section>
-          <section class="command-card ehq-edge-surface">
-            <SectionTemplate
-              eyebrow="assistant"
-              title="Import assistant"
-              detail="Review parser output, catalog mapping, payee and split readiness, and FX requirements before confirmation."
-              state="ready"
-            >
-              <Button label="Open assistant" variant="secondary" size="medium" type="button" disabled={!canOpenImportAssistant} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Open import assistant" title={canOpenImportAssistant ? "" : "Run the preflight assistant first"} onclick={openImportAssistant} />
-            </SectionTemplate>
-          </section>
-        </section>
         <section class="contracts-actions ehq-edge-surface">
-          <Button label="Import files" variant="primary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Open import files" onclick={openImportPanel} />
-          <span>Choose a CSV or TSV export, review it, then confirm the audited batch.</span>
+          <Button label="Import one file" variant="primary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Import one file" onclick={openImportPanel} />
+          <Button label="Start fresh" variant="danger" size="medium" type="button" disabled={!writesEnabled} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Delete all Distribution imported data" title={writeDisabledTitle()} onclick={openImportResetPanel} />
+          <span>One CSV or TSV at a time: select, preview, confirm.</span>
         </section>
         {#if importPanelOpen}
-          <Drawer open={true} presentation="overlay" showFooter={false} title="Import Kontor or RouteNote" badgeLabel="audited batch" badgeTone="info" body="" primaryAction="" secondaryAction="Close" state="default" onSecondary={closeImportPanel}>
+          <Drawer open={true} presentation="overlay" showFooter={false} title="Import one file" badgeLabel="audited batch" badgeTone="info" body="" primaryAction="" secondaryAction="Close" state="default" onSecondary={closeImportPanel}>
             {#snippet content()}
         <section class="form-panel" aria-label="Import Kontor RouteNote">
           <Select id="distribution-import-source" label="Source" value={importState.source} options={importSourceOptions} state="default" message="" onchange={updateImportSource} />
@@ -6358,12 +6365,22 @@
             <span>Export file</span>
             <input type="file" accept="text/csv,.csv,.tsv,text/tab-separated-values" bind:this={importFileInput} onchange={handleImportFile} />
           </label>
-          <Button label="Import files" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Import files" title="Choose an export file" onclick={openImportFilePicker} />
-          <Button label="Preflight assistant" variant="secondary" size="medium" type="button" disabled={!canPreviewImport} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Preflight assistant" title={canPreviewImport ? "" : "Select a CSV/TSV export file first"} onclick={previewImport} />
-          <Button label="Open assistant" variant="secondary" size="medium" type="button" disabled={!canOpenImportAssistant} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Open assistant" title={canOpenImportAssistant ? "" : "Run the preflight assistant first"} onclick={openImportAssistant} />
+          <Button label="Choose file" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Choose one import file" title="Choose one CSV or TSV export" onclick={openImportFilePicker} />
+          <Button label="Preview" variant="secondary" size="medium" type="button" disabled={!canPreviewImport} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Preview import file" title={canPreviewImport ? "" : "Choose a CSV or TSV file first"} onclick={previewImport} />
           <Button label="Confirm import" variant="primary" size="medium" type="button" disabled={!canConfirmImport || !writesEnabled} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Confirm import" title={writeDisabledTitle()} onclick={confirmImport} />
           <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Cancel import" onclick={closeImportPanel} />
         </section>
+            {/snippet}
+          </Drawer>
+        {/if}
+        {#if importResetPanelOpen}
+          <Drawer open={true} presentation="overlay" showFooter={false} title="Start fresh" badgeLabel="administrator only" badgeTone="warning" body="" primaryAction="" secondaryAction="Cancel" state="default" onSecondary={closeImportResetPanel}>
+            {#snippet content()}
+              <section class="form-panel" aria-label="Delete Distribution imported data">
+                <div class="panel-context"><strong>Delete all imported Distribution data</strong><span>Imports, allocation runs, suspense, statements, and payments will be permanently removed. Contracts, catalog, payees, aliases, and FX rates remain.</span></div>
+                <Input id="distribution-import-reset-confirmation" label="Type confirmation" value={importResetConfirmation} placeholder="DELETE ALL DISTRIBUTION IMPORT DATA" type="text" state="default" message="" oninput={(value) => importResetConfirmation = value} />
+                <Button label="Delete imported data" variant="danger" size="medium" type="button" disabled={!writesEnabled || importResetConfirmation !== "DELETE ALL DISTRIBUTION IMPORT DATA"} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Delete all Distribution imported data" title={writeDisabledTitle()} onclick={resetDistributionImports} />
+              </section>
             {/snippet}
           </Drawer>
         {/if}

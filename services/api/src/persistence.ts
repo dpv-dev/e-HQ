@@ -433,6 +433,7 @@ const SENSITIVE_ACTIONS = new Set<string>([
   "office_cashflow_import_reverse",
   "office_bank_import_delete",
   "office_financial_reset",
+  "distribution_financial_reset",
   "office_bank_account_delete",
   "office_partner_payee_link",
   "office_partner_payee_unlink"

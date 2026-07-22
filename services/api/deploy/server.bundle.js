@@ -41368,6 +41368,7 @@ var SENSITIVE_ACTIONS = /* @__PURE__ */ new Set([
   "office_cashflow_import_reverse",
   "office_bank_import_delete",
   "office_financial_reset",
+  "distribution_financial_reset",
   "office_bank_account_delete",
   "office_partner_payee_link",
   "office_partner_payee_unlink"
@@ -42953,6 +42954,10 @@ var OFFICE_FINANCIAL_RESET_PHRASE = "DELETE ALL OFFICE DATA";
 var officeFinancialResetSchema = workspaceBodySchema.extend({
   confirmationPhrase: external_exports.literal(OFFICE_FINANCIAL_RESET_PHRASE)
 });
+var DISTRIBUTION_FINANCIAL_RESET_PHRASE = "DELETE ALL DISTRIBUTION IMPORT DATA";
+var distributionFinancialResetSchema = workspaceBodySchema.extend({
+  confirmationPhrase: external_exports.literal(DISTRIBUTION_FINANCIAL_RESET_PHRASE)
+});
 var jsonRecordSchema = external_exports.record(external_exports.string(), external_exports.unknown());
 var commandCenterSettingUpdateSchema = workspaceBodySchema.extend({
   key: external_exports.string().min(1),
@@ -43973,6 +43978,9 @@ function registerDistributionRoutes(app, dependencies) {
   });
   app.post("/erh/v1/imports/batches/:batchId/reverse", async (context) => {
     return distributionImportReverseResponse(context, dependencies);
+  });
+  app.post("/erh/v1/financial-reset", async (context) => {
+    return distributionFinancialResetResponse(context, dependencies);
   });
   app.get("/erh/v1/mapping/rows", async (context) => {
     const workspaceId = requireQuery(context, "workspaceId");
@@ -50932,6 +50940,51 @@ async function officeFinancialResetResponse(context, dependencies) {
   });
   return context.json(result.body, result.status);
 }
+async function distributionFinancialResetResponse(context, dependencies) {
+  const request = await readZodBody(context, distributionFinancialResetSchema);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const actor = context.get("authUser");
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "distribution_financial_reset",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: { workspaceId: request.workspaceId },
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `distribution:financial-reset:${request.workspaceId}`);
+      if (tx.kind !== "memory") {
+        await tx.executor.execute(sql`delete from statement_payment_links where statement_id in (select id from statements where workspace_id = ${request.workspaceId}) or payment_id in (select id from payments where workspace_id = ${request.workspaceId})`);
+        await tx.executor.execute(sql`delete from statement_lines where statement_id in (select id from statements where workspace_id = ${request.workspaceId})`);
+        await tx.executor.execute(sql`delete from suspense_resolution_overrides where suspense_id in (select id from suspense_items where workspace_id = ${request.workspaceId})`);
+        await tx.executor.execute(sql`delete from payee_balances where statement_id in (select id from statements where workspace_id = ${request.workspaceId}) or payee_id in (select id from payees where workspace_id = ${request.workspaceId})`);
+        await tx.executor.execute(sql`delete from expense_applications where calculation_run_id in (select id from calculation_runs where workspace_id = ${request.workspaceId}) or statement_id in (select id from statements where workspace_id = ${request.workspaceId})`);
+        await tx.executor.execute(sql`delete from earning_allocations where calculation_run_id in (select id from calculation_runs where workspace_id = ${request.workspaceId})`);
+        await tx.executor.execute(sql`delete from earning_track_matches where earning_id in (select id from normalized_earnings where workspace_id = ${request.workspaceId})`);
+        await tx.executor.execute(sql`delete from suspense_items where workspace_id = ${request.workspaceId}`);
+        await tx.executor.execute(sql`delete from normalized_earnings where workspace_id = ${request.workspaceId}`);
+        await tx.executor.execute(sql`delete from raw_import_rows where batch_id in (select id from import_batches where workspace_id = ${request.workspaceId})`);
+        await tx.executor.execute(sql`delete from import_issues where batch_id in (select id from import_batches where workspace_id = ${request.workspaceId})`);
+        await tx.executor.execute(sql`delete from calculation_runs where workspace_id = ${request.workspaceId}`);
+        await tx.executor.execute(sql`delete from payments where workspace_id = ${request.workspaceId}`);
+        await tx.executor.execute(sql`delete from statements where workspace_id = ${request.workspaceId}`);
+        await tx.executor.execute(sql`delete from import_batches where workspace_id = ${request.workspaceId}`);
+      }
+      resetDistributionOperationalFixtures(dependencies.fixtures);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_financial_reset",
+        targetType: "distribution_workspace",
+        targetId: request.workspaceId,
+        before: { workspaceId: request.workspaceId },
+        after: { workspaceId: request.workspaceId, reset: "import-derived operational data" },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      return mutationReceipt(request.workspaceId, auditEventId);
+    }
+  });
+  return context.json(result.body, result.status);
+}
 async function persistOfficeFinancialReset(tx, workspaceId) {
   if (tx.kind === "memory") {
     return { transactionCount: 0, statementLineCount: 0, reconciliationMatchCount: 0, importBatchCount: 0, bankAccountCount: 0 };
@@ -52140,6 +52193,23 @@ function requireOfficeBankPreviewRecord(context, preview, previewId, workspaceId
 function appendDistributionImportFixture(fixtures, batch) {
   const mutableDistribution = fixtures.distribution;
   mutableDistribution.importBatches = [...fixtures.distribution.importBatches, batch];
+}
+function resetDistributionOperationalFixtures(fixtures) {
+  const mutableDistribution = fixtures.distribution;
+  const mutableFixtures = fixtures;
+  mutableDistribution.importBatches = [];
+  mutableDistribution.normalizedEarnings = [];
+  mutableDistribution.calculationRuns = [];
+  mutableDistribution.earningTrackMatches = [];
+  mutableDistribution.earningAllocations = [];
+  mutableDistribution.suspenseItems = [];
+  mutableDistribution.statements = [];
+  mutableDistribution.statementLines = [];
+  mutableDistribution.statementPaymentLinks = [];
+  mutableDistribution.payments = [];
+  mutableFixtures.distributionMappingRows = [];
+  mutableFixtures.distributionExpenseApplications = [];
+  mutableFixtures.distributionPayeeBalances = [];
 }
 function appendDistributionImportNormalizationFixture(fixtures, batchId, rows) {
   if (rows.length === 0) return;

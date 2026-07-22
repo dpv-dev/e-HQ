@@ -5595,6 +5595,60 @@ test("office bank import transactional dedupe crosses occurred and value dates i
   }
 });
 
+test("Distribution financial reset clears operational fixtures, preserves setup, and replays idempotently", async () => {
+  const fixtures = createFixtureStore();
+  const preserved = {
+    contracts: fixtures.distributionContracts.length,
+    payees: fixtures.distribution.payees.length,
+    releases: fixtures.distribution.releases.length,
+    tracks: fixtures.distribution.tracks.length,
+    aliases: fixtures.distributionAliases.length
+  };
+  const app = createApiService({
+    fixtures,
+    persistence: createMemoryPersistenceRuntime({ WRITES_ENABLED: "true" }),
+    health: null,
+    nowIso: (): string => "2026-06-21T00:00:00.000Z",
+    auth: createTestAuthVerifier()
+  });
+  const payload = { workspaceId: "eeee-mu", confirmationPhrase: "DELETE ALL DISTRIBUTION IMPORT DATA" };
+
+  const first = await app.request("/erh/v1/financial-reset", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "distribution-reset-1" },
+    body: JSON.stringify(payload)
+  });
+  assert.equal(first.status, 200);
+  const firstReceipt = await first.json() as { readonly auditEventId: string | null };
+  assert.ok(firstReceipt.auditEventId !== null);
+
+  const second = await app.request("/erh/v1/financial-reset", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "distribution-reset-1" },
+    body: JSON.stringify(payload)
+  });
+  assert.equal(second.status, 200);
+  assert.deepEqual(await second.json(), await Promise.resolve({ ...firstReceipt, id: "eeee-mu" }));
+
+  assert.equal(fixtures.distribution.importBatches.length, 0);
+  assert.equal(fixtures.distribution.normalizedEarnings.length, 0);
+  assert.equal(fixtures.distribution.calculationRuns.length, 0);
+  assert.equal(fixtures.distribution.earningAllocations.length, 0);
+  assert.equal(fixtures.distribution.suspenseItems.length, 0);
+  assert.equal(fixtures.distribution.statements.length, 0);
+  assert.equal(fixtures.distribution.statementLines.length, 0);
+  assert.equal(fixtures.distribution.statementPaymentLinks.length, 0);
+  assert.equal(fixtures.distribution.payments.length, 0);
+  assert.equal(fixtures.distributionMappingRows.length, 0);
+  assert.equal(fixtures.distributionExpenseApplications.length, 0);
+  assert.equal(fixtures.distributionPayeeBalances.length, 0);
+  assert.equal(fixtures.distributionContracts.length, preserved.contracts);
+  assert.equal(fixtures.distribution.payees.length, preserved.payees);
+  assert.equal(fixtures.distribution.releases.length, preserved.releases);
+  assert.equal(fixtures.distribution.tracks.length, preserved.tracks);
+  assert.equal(fixtures.distributionAliases.length, preserved.aliases);
+});
+
 function authHeaders(): Readonly<Record<string, string>> {
   return authHeadersForToken("fixture-valid-token");
 }
