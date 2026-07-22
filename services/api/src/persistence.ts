@@ -544,7 +544,7 @@ export function createDrizzlePersistenceRuntime(database: TransactionalDrizzleDa
       }
 
       const stored = await database.transaction(async (executor: SqlExecutor): Promise<DistributionImportPreviewRecord | null> =>
-        readApiImportPreview<DistributionImportPreviewRecord>(executor, "distribution_import", previewId)
+        readApiImportPreview<DistributionImportPreviewRecord>(executor, "distribution_import", previewId, new Date().toISOString())
       );
       if (stored !== null) {
         state.distributionPreviews.set(stored.previewId, stored);
@@ -564,7 +564,7 @@ export function createDrizzlePersistenceRuntime(database: TransactionalDrizzleDa
       }
 
       const stored = await database.transaction(async (executor: SqlExecutor): Promise<OfficeBankImportPreviewRecord | null> =>
-        readApiImportPreview<OfficeBankImportPreviewRecord>(executor, "office_bank_import", previewId)
+        readApiImportPreview<OfficeBankImportPreviewRecord>(executor, "office_bank_import", previewId, new Date().toISOString())
       );
       if (stored !== null) {
         state.officeBankPreviews.set(stored.previewId, stored);
@@ -1089,24 +1089,26 @@ export async function persistOfficeBankImportConfirmation(tx: ApiWriteTransactio
 
 export async function getDistributionImportPreviewInTransaction(
   tx: ApiWriteTransaction,
-  previewId: string
+  previewId: string,
+  nowIso: string
 ): Promise<DistributionImportPreviewRecord | null> {
   if (tx.kind === "memory") {
     return null;
   }
 
-  return readApiImportPreview<DistributionImportPreviewRecord>(tx.executor, "distribution_import", previewId);
+  return readApiImportPreview<DistributionImportPreviewRecord>(tx.executor, "distribution_import", previewId, nowIso);
 }
 
 export async function getOfficeBankImportPreviewInTransaction(
   tx: ApiWriteTransaction,
-  previewId: string
+  previewId: string,
+  nowIso: string
 ): Promise<OfficeBankImportPreviewRecord | null> {
   if (tx.kind === "memory") {
     return null;
   }
 
-  return readApiImportPreview<OfficeBankImportPreviewRecord>(tx.executor, "office_bank_import", previewId);
+  return readApiImportPreview<OfficeBankImportPreviewRecord>(tx.executor, "office_bank_import", previewId, nowIso);
 }
 
 export async function findOfficeBankImportBatchByFingerprint(
@@ -2004,14 +2006,20 @@ async function persistApiImportPreview<TPreview extends DistributionImportPrevie
 async function readApiImportPreview<TPreview extends DistributionImportPreviewRecord | OfficeBankImportPreviewRecord>(
   executor: SqlExecutor,
   kind: ImportPreviewKind,
-  previewId: string
+  previewId: string,
+  nowIso: string
 ): Promise<TPreview | null> {
+  // Compare against the caller's clock (nowIso), not Postgres' own now() — expires_at
+  // is derived from that same clock at write time (persistApiImportPreview), and tests
+  // inject a fixed nowIso, so mixing in the DB's real wall clock here drifts the two
+  // apart and makes previews spuriously "expire" once real time moves past the fixed
+  // test date.
   const rows = rowsFromQueryResult(await executor.execute(sql`
     select payload_json
     from api_import_previews
     where preview_id = ${previewId}
       and kind = ${kind}
-      and (expires_at is null or expires_at > now())
+      and (expires_at is null or expires_at > ${nowIso}::timestamptz)
   `));
   const row = rows[0];
   if (row === undefined) {

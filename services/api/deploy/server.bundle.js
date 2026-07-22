@@ -41471,7 +41471,7 @@ function createDrizzlePersistenceRuntime(database, env) {
         return cached;
       }
       const stored = await database.transaction(
-        async (executor) => readApiImportPreview(executor, "distribution_import", previewId)
+        async (executor) => readApiImportPreview(executor, "distribution_import", previewId, (/* @__PURE__ */ new Date()).toISOString())
       );
       if (stored !== null) {
         state.distributionPreviews.set(stored.previewId, stored);
@@ -41490,7 +41490,7 @@ function createDrizzlePersistenceRuntime(database, env) {
         return cached;
       }
       const stored = await database.transaction(
-        async (executor) => readApiImportPreview(executor, "office_bank_import", previewId)
+        async (executor) => readApiImportPreview(executor, "office_bank_import", previewId, (/* @__PURE__ */ new Date()).toISOString())
       );
       if (stored !== null) {
         state.officeBankPreviews.set(stored.previewId, stored);
@@ -41909,17 +41909,17 @@ async function persistOfficeBankImportConfirmation(tx, input) {
     `);
   }
 }
-async function getDistributionImportPreviewInTransaction(tx, previewId) {
+async function getDistributionImportPreviewInTransaction(tx, previewId, nowIso) {
   if (tx.kind === "memory") {
     return null;
   }
-  return readApiImportPreview(tx.executor, "distribution_import", previewId);
+  return readApiImportPreview(tx.executor, "distribution_import", previewId, nowIso);
 }
-async function getOfficeBankImportPreviewInTransaction(tx, previewId) {
+async function getOfficeBankImportPreviewInTransaction(tx, previewId, nowIso) {
   if (tx.kind === "memory") {
     return null;
   }
-  return readApiImportPreview(tx.executor, "office_bank_import", previewId);
+  return readApiImportPreview(tx.executor, "office_bank_import", previewId, nowIso);
 }
 async function findOfficeBankImportBatchByFingerprint(tx, workspaceId, idempotencyFingerprint) {
   if (tx.kind === "memory") {
@@ -42719,13 +42719,13 @@ async function persistApiImportPreview(executor, kind, preview) {
       expires_at = excluded.expires_at
   `);
 }
-async function readApiImportPreview(executor, kind, previewId) {
+async function readApiImportPreview(executor, kind, previewId, nowIso) {
   const rows = rowsFromQueryResult(await executor.execute(sql`
     select payload_json
     from api_import_previews
     where preview_id = ${previewId}
       and kind = ${kind}
-      and (expires_at is null or expires_at > now())
+      and (expires_at is null or expires_at > ${nowIso}::timestamptz)
   `));
   const row = rows[0];
   if (row === void 0) {
@@ -52087,7 +52087,7 @@ async function requireDistributionPreviewInWrite(context, dependencies, tx, prev
   if (tx.kind === "memory") {
     return requireDistributionPreview(context, dependencies, previewId, workspaceId);
   }
-  const preview = await getDistributionImportPreviewInTransaction(tx, previewId);
+  const preview = await getDistributionImportPreviewInTransaction(tx, previewId, dependencies.nowIso());
   return requireDistributionPreviewRecord(context, preview, previewId, workspaceId);
 }
 function requireDistributionPreviewRecord(context, preview, previewId, workspaceId) {
@@ -52115,7 +52115,7 @@ async function requireOfficeBankPreviewInWrite(context, dependencies, tx, previe
   if (tx.kind === "memory") {
     return requireOfficeBankPreview(context, dependencies, previewId, workspaceId);
   }
-  const preview = await getOfficeBankImportPreviewInTransaction(tx, previewId);
+  const preview = await getOfficeBankImportPreviewInTransaction(tx, previewId, dependencies.nowIso());
   return requireOfficeBankPreviewRecord(context, preview, previewId, workspaceId);
 }
 function requireOfficeBankPreviewRecord(context, preview, previewId, workspaceId) {
@@ -54704,11 +54704,17 @@ function toAllocationRunSummary(dataset, run) {
   };
 }
 function toApiRunStatus(status) {
-  if (status === "calculated") {
+  if (status === "running") {
+    return "running";
+  }
+  if (status === "error" || status === "failed") {
+    return "failed";
+  }
+  if (status === "calculated" || status === "completed") {
     return "completed";
   }
-  if (status === "error") {
-    return "failed";
+  if (status === "excluded") {
+    return "void";
   }
   return "queued";
 }

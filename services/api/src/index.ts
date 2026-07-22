@@ -11518,7 +11518,7 @@ async function requireDistributionPreviewInWrite(
     return requireDistributionPreview(context, dependencies, previewId, workspaceId);
   }
 
-  const preview = await getDistributionImportPreviewInTransaction(tx, previewId);
+  const preview = await getDistributionImportPreviewInTransaction(tx, previewId, dependencies.nowIso());
   return requireDistributionPreviewRecord(context, preview, previewId, workspaceId);
 }
 
@@ -11568,7 +11568,7 @@ async function requireOfficeBankPreviewInWrite(
     return requireOfficeBankPreview(context, dependencies, previewId, workspaceId);
   }
 
-  const preview = await getOfficeBankImportPreviewInTransaction(tx, previewId);
+  const preview = await getOfficeBankImportPreviewInTransaction(tx, previewId, dependencies.nowIso());
   return requireOfficeBankPreviewRecord(context, preview, previewId, workspaceId);
 }
 
@@ -14893,12 +14893,20 @@ function toAllocationRunSummary(dataset: DistributionReadDataset, run: Distribut
 }
 
 function toApiRunStatus(status: string): AllocationRunSummary["status"] {
-  if (status === "calculated") {
+  if (status === "running") {
+    return "running";
+  }
+
+  if (status === "error" || status === "failed") {
+    return "failed";
+  }
+
+  if (status === "calculated" || status === "completed") {
     return "completed";
   }
 
-  if (status === "error") {
-    return "failed";
+  if (status === "excluded") {
+    return "void";
   }
 
   return "queued";
