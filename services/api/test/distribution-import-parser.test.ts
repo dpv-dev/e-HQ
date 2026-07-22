@@ -24,6 +24,58 @@ test("distribution parse-preview: Kontor rows parse amount/currency and join key
   assert.equal(parsed.rowResults[0]?.status, "accepted");
 });
 
+test("distribution parse-preview: Kontor royalty statement fields preserve customer royalty and sales period", () => {
+  const parsed = parseDistributionImportPreview("kontor", [{
+    "Tracktitle": "Mon Kèr",
+    "Artist": "Ribongia & Kaloune",
+    "ISRC": "FR9W12204372",
+    "EAN/UPC": "3516628391439",
+    "Labelname": "Babani Records",
+    "Outletname": "Spotify",
+    "Sales Period": "202305",
+    "Units": "26",
+    "Royalty Amount Customer": "0,10738811",
+    "Currency": "EUR"
+  }]);
+
+  assert.equal(parsed.acceptedRowCount, 1);
+  assert.equal(parsed.payableMicro, "0.1073881100");
+  const normalized = normalizeDistributionImportRows("kontor", parsed.rows);
+  assert.equal(normalized.acceptedRows[0]?.dsp, "Spotify");
+  assert.equal(normalized.acceptedRows[0]?.sourcePeriodStart, "2023-05-01");
+  assert.equal(normalized.acceptedRows[0]?.sourcePeriodEnd, "2023-05-31");
+});
+
+test("distribution parse-preview: RouteNote workbook-normalized rows use USD earnings, streams, and report month", () => {
+  const normalized = normalizeDistributionImportRows("routenote", [{
+    id: "row_1",
+    rowNumber: 1,
+    rawData: {
+      "Track Title": "REAL BAD MAN",
+      "Track Artist": "JOKER KARTEL",
+      "ISRC": "DEPI82432632",
+      "UPC/EAN": "4056813797787",
+      "Label": "BAD",
+      "Retailer": "Apple Music",
+      "Streams": "23",
+      "Downloads": "0",
+      "Creations": "0",
+      "Earnings($)": "0.15788",
+      "Currency": "USD",
+      "Store": "Apple Music",
+      "Quantity": "23",
+      "Report Period": "2026-01"
+    }
+  }]);
+
+  assert.equal(normalized.acceptedRows.length, 1);
+  assert.equal(normalized.acceptedRows[0]?.currency, "USD");
+  assert.equal(normalized.acceptedRows[0]?.grossAmount, "0.1578800000");
+  assert.equal(normalized.acceptedRows[0]?.quantity, "23.000000");
+  assert.equal(normalized.acceptedRows[0]?.dsp, "Apple Music");
+  assert.equal(normalized.acceptedRows[0]?.sourcePeriodStart, "2026-01-01");
+});
+
 test("distribution parse-preview: RouteNote parser falls back to generic columns", () => {
   const parsed = parseDistributionImportPreview("routenote", [
     {

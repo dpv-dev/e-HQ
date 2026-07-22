@@ -2726,23 +2726,26 @@
       return;
     }
 
-    if (/\.xlsx?$/iu.test(file.name)) {
-      importState = {
-        ...importState,
-        status: "error",
-        fileName: file.name,
-        rows: [],
-        checksum: "",
-        preview: null,
-        confirm: null,
-        message: `${file.name} is a binary Excel export and cannot be read here. Export it as CSV and try again.`
-      };
-      return;
-    }
-
     try {
-      const text = await file.text();
-      const rows = file.name.toLowerCase().endsWith(".tsv") ? parseTsvRecords(text) : parseCsvRecords(text);
+      const isExcel = /\.xlsx?$/iu.test(file.name);
+      let rows: readonly Readonly<Record<string, string>>[];
+      let checksum: string;
+      let source: ImportSource;
+      if (isExcel) {
+        const content = await file.arrayBuffer();
+        rows = await parseRouteNoteWorkbook(content);
+        checksum = importContentChecksum(content);
+        source = "routenote";
+      } else {
+        const content = await file.text();
+        source = detectImportSource(content, importState.source);
+        rows = source === "kontor"
+          ? parseKontorRecords(content)
+          : file.name.toLowerCase().endsWith(".tsv")
+            ? parseTsvRecords(content)
+            : parseCsvRecords(content);
+        checksum = importContentChecksum(content);
+      }
 
       if (rows.length === 0) {
         importState = {
@@ -2760,13 +2763,14 @@
 
       importState = {
         ...importState,
+        source,
         status: "idle",
         fileName: file.name,
         rows,
-        checksum: importContentChecksum(text),
+        checksum,
         preview: null,
         confirm: null,
-        message: `${String(rows.length)} rows read and ready for preview.`
+        message: `${String(rows.length)} ${source === "kontor" ? "Kontor" : "RouteNote"} rows read and ready for preview.`
       };
     } catch (error: unknown) {
       importState = {
@@ -2829,7 +2833,7 @@
       checksum: "",
       preview: null,
       confirm: null,
-      message: "Select a Kontor or RouteNote export (CSV/TSV) to start the preview."
+      message: "Select a Kontor CSV/TSV or RouteNote Excel export to start the preview."
     };
   }
 
@@ -6109,13 +6113,121 @@
     });
   }
 
+  function parseKontorRecords(text: string): readonly Readonly<Record<string, string>>[] {
+    const lines = text.split(/\r\n|\r|\n/u).filter((line: string): boolean => line.trim().length > 0);
+    const headerIndex = lines.findIndex((line: string): boolean => line.includes("Royalty Amount Customer") && line.includes(";"));
+    const headerLine = lines[headerIndex];
+    if (headerIndex < 0 || headerLine === undefined) return [];
+
+    const currency = readKontorMetadata(lines, "Currency") ?? "";
+    const accountingPeriod = readKontorMetadata(lines, "Accounting Period") ?? "";
+    const header = parseDelimitedLine(headerLine, ";");
+
+    return lines.slice(headerIndex + 1).map((line: string): Readonly<Record<string, string>> => {
+      const cells = parseDelimitedLine(line, ";");
+      const record: Record<string, string> = { Currency: currency, "Report Period": accountingPeriod };
+      for (let index = 0; index < header.length; index += 1) {
+        const key = header[index];
+        if (key !== undefined && key.length > 0) record[key] = cells[index] ?? "";
+      }
+      return record;
+    });
+  }
+
+  function detectImportSource(content: string, fallback: ImportSource): ImportSource {
+    if (content.includes("KONTOR NEW MEDIA Royalty Statement") || content.includes("Royalty Amount Customer")) {
+      return "kontor";
+    }
+
+    return fallback;
+  }
+
+  function readKontorMetadata(lines: readonly string[], label: string): string | null {
+    const prefix = `${label}:`;
+    const line = lines.find((candidate: string): boolean => candidate.trim().startsWith(prefix));
+    if (line === undefined) return null;
+    const value = line.slice(line.indexOf(":") + 1).trim();
+    return value.length > 0 ? value : null;
+  }
+
+  async function parseRouteNoteWorkbook(content: ArrayBuffer): Promise<readonly Readonly<Record<string, string>>[]> {
+    const XLSX = await import("xlsx");
+    const workbook = XLSX.read(content, { type: "array", raw: true });
+    const sheetName = workbook.SheetNames[0];
+    if (sheetName === undefined) return [];
+    const sheet = workbook.Sheets[sheetName];
+    if (sheet === undefined) return [];
+    const values = XLSX.utils.sheet_to_json<readonly unknown[]>(sheet, { header: 1, defval: "", raw: true });
+    const header = values[0]?.map(spreadsheetCellText) ?? [];
+    if (header.length === 0) return [];
+
+    return values.slice(1).flatMap((cells: readonly unknown[]): readonly Readonly<Record<string, string>>[] => {
+      const record: Record<string, string> = {};
+      for (let index = 0; index < header.length; index += 1) {
+        const key = header[index];
+        if (key !== undefined && key.length > 0) record[key] = spreadsheetCellText(cells[index]);
+      }
+      const streamCount = parseRouteNoteCount(record.Stream);
+      const downloadCount = parseRouteNoteCount(record.Downloads);
+      const creationCount = parseRouteNoteCount(record.Creations);
+      const month = routeNoteMonthNumber(record.Month);
+      const year = record.Year?.trim();
+      record.Currency = "USD";
+      record.Store = record.Retailer ?? "RouteNote";
+      record.Quantity = String(streamCount + downloadCount + creationCount);
+      if (month !== null && year !== undefined && /^\d{4}$/u.test(year)) record["Report Period"] = `${year}-${month}`;
+      return record["Track Title"]?.trim() === "" && record.ISRC?.trim() === "" ? [] : [record];
+    });
+  }
+
+  function spreadsheetCellText(value: unknown): string {
+    return value === null || value === undefined ? "" : String(value).trim();
+  }
+
+  function parseRouteNoteCount(value: string | undefined): bigint {
+    const normalized = value ?? "";
+    if (!/^\d+$/u.test(normalized)) return 0n;
+    return BigInt(normalized);
+  }
+
+  function routeNoteMonthNumber(value: string | undefined): string | null {
+    const month = value?.trim().split("-")[1]?.toUpperCase();
+    const months: Readonly<Record<string, string>> = { JAN: "01", FEB: "02", MAR: "03", APR: "04", MAY: "05", JUN: "06", JUL: "07", AUG: "08", SEP: "09", OCT: "10", NOV: "11", DEC: "12" };
+    return month === undefined ? null : months[month] ?? null;
+  }
+
+  function parseDelimitedLine(line: string, delimiter: string): readonly string[] {
+    const cells: string[] = [];
+    let cell = "";
+    let inQuotes = false;
+    for (let index = 0; index < line.length; index += 1) {
+      const character = line[index] ?? "";
+      if (character === '"') {
+        if (inQuotes && line[index + 1] === '"') {
+          cell += '"';
+          index += 1;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (character === delimiter && !inQuotes) {
+        cells.push(cell.trim());
+        cell = "";
+      } else {
+        cell += character;
+      }
+    }
+    cells.push(cell.trim());
+    return cells;
+  }
+
   // FNV-1a 32-bit over the raw file text: a stable client-side content fingerprint
   // used as the preview checksum (the server folds it into its idempotency fingerprint).
-  function importContentChecksum(text: string): string {
+  function importContentChecksum(content: string | ArrayBuffer): string {
     let hash = 0x811c9dc5;
 
-    for (let index = 0; index < text.length; index += 1) {
-      hash ^= text.charCodeAt(index);
+    const values = typeof content === "string" ? Array.from(content, (character: string): number => character.charCodeAt(0)) : new Uint8Array(content);
+    for (const value of values) {
+      hash ^= value;
       hash = Math.imul(hash, 0x01000193);
     }
 
@@ -6354,7 +6466,7 @@
         <section class="contracts-actions ehq-edge-surface">
           <Button label="Import one file" variant="primary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Import one file" onclick={openImportPanel} />
           <Button label="Start fresh" variant="danger" size="medium" type="button" disabled={!writesEnabled} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Delete all Distribution data" title={writeDisabledTitle()} onclick={openImportResetPanel} />
-          <span>One CSV or TSV at a time: select, preview, confirm.</span>
+          <span>One Kontor CSV/TSV or RouteNote Excel export at a time: select, preview, confirm.</span>
         </section>
         {#if importPanelOpen}
           <Drawer open={true} presentation="overlay" showFooter={false} title="Import one file" badgeLabel="audited batch" badgeTone="info" body="" primaryAction="" secondaryAction="Close" state="default" onSecondary={closeImportPanel}>
@@ -6363,10 +6475,10 @@
           <Select id="distribution-import-source" label="Source" value={importState.source} options={importSourceOptions} state="default" message="" onchange={updateImportSource} />
           <label>
             <span>Export file</span>
-            <input type="file" accept="text/csv,.csv,.tsv,text/tab-separated-values" bind:this={importFileInput} onchange={handleImportFile} />
+            <input type="file" accept="text/csv,.csv,.tsv,text/tab-separated-values,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" bind:this={importFileInput} onchange={handleImportFile} />
           </label>
-          <Button label="Choose file" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Choose one import file" title="Choose one CSV or TSV export" onclick={openImportFilePicker} />
-          <Button label="Preview" variant="secondary" size="medium" type="button" disabled={!canPreviewImport} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Preview import file" title={canPreviewImport ? "" : "Choose a CSV or TSV file first"} onclick={previewImport} />
+          <Button label="Choose file" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Choose one import file" title="Choose one Kontor CSV/TSV or RouteNote Excel export" onclick={openImportFilePicker} />
+          <Button label="Preview" variant="secondary" size="medium" type="button" disabled={!canPreviewImport} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Preview import file" title={canPreviewImport ? "" : "Choose an import file first"} onclick={previewImport} />
           <Button label="Confirm import" variant="primary" size="medium" type="button" disabled={!canConfirmImport || !writesEnabled} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Confirm import" title={writeDisabledTitle()} onclick={confirmImport} />
           <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Cancel import" onclick={closeImportPanel} />
         </section>

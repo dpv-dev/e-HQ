@@ -119,20 +119,20 @@ const GENERAL_DATE_KEYS: readonly string[] = [
 ];
 
 const KONTOR_PROFILE: DistributionColumnProfile = {
-  amountKeys: ["amount eur", "amount usd", "gross payout", ...GENERAL_AMOUNT_KEYS],
+  amountKeys: ["royalty amount customer", "roy amount before copyright ded", "amount eur", "amount usd", "gross payout", ...GENERAL_AMOUNT_KEYS],
   currencyKeys: ["currency", "curr", ...GENERAL_CURRENCY_KEYS],
-  titleKeys: ["title", "song", "track", ...GENERAL_TITLE_KEYS],
+  titleKeys: ["tracktitle", "producttitle", "title", "song", "track", ...GENERAL_TITLE_KEYS],
   artistKeys: ["artist", "main artist", ...GENERAL_ARTIST_KEYS],
   isrcKeys: [...GENERAL_ISRC_KEYS],
-  upcKeys: [...GENERAL_UPC_KEYS],
-  quantityKeys: [...GENERAL_QUANTITY_KEYS]
+  upcKeys: ["ean/upc", ...GENERAL_UPC_KEYS],
+  quantityKeys: ["units", ...GENERAL_QUANTITY_KEYS]
 };
 
 const ROUTENOTE_PROFILE: DistributionColumnProfile = {
   amountKeys: ["earnings", "net earnings", "royalty", "royalty amount", ...GENERAL_AMOUNT_KEYS],
   currencyKeys: ["currency", "currency code", ...GENERAL_CURRENCY_KEYS],
   titleKeys: ["track name", "title", ...GENERAL_TITLE_KEYS],
-  artistKeys: ["artist name", "artist", ...GENERAL_ARTIST_KEYS],
+  artistKeys: ["track artist", "artist name", "artist", ...GENERAL_ARTIST_KEYS],
   isrcKeys: [...GENERAL_ISRC_KEYS],
   upcKeys: [...GENERAL_UPC_KEYS],
   quantityKeys: [...GENERAL_QUANTITY_KEYS]
@@ -278,10 +278,12 @@ function parseRow(
     return null;
   }
 
-  const sourcePeriod = parseSourceDate(rowValue(row.rawData, GENERAL_DATE_KEYS));
+  const sourcePeriod = parseSourceDate(rowValue(row.rawData, [...GENERAL_DATE_KEYS, "sales period"]));
   return {
     row,
-    dsp: nonEmptyValue(rowValue(row.rawData, GENERAL_DSP_KEYS)) ?? source,
+    dsp: nonEmptyValue(rowValue(row.rawData, source === "kontor"
+      ? ["dmb store name", "outletname", ...GENERAL_DSP_KEYS]
+      : ["retailer", ...GENERAL_DSP_KEYS])) ?? source,
     currency,
     grossAmount,
     quantity,
@@ -371,11 +373,26 @@ function parseSourceDate(value: string | null): { readonly start: string; readon
     const lastDay = new Date(Date.UTC(Number(periodMatch[1]), Number(periodMatch[2]), 0)).getUTCDate();
     return { start: `${period}-01`, end: `${period}-${String(lastDay).padStart(2, "0")}`, reportDate: null };
   }
+  const compactPeriodMatch = /^(\d{4})(\d{2})$/.exec(normalized);
+  if (compactPeriodMatch !== null) {
+    return parseSourceDate(`${compactPeriodMatch[1]}-${compactPeriodMatch[2]}`);
+  }
+  const quarterMatch = /^(\d{4})Q([1-4])$/i.exec(normalized);
+  if (quarterMatch !== null) {
+    const quarter = Number(quarterMatch[2]);
+    const startMonth = String((quarter - 1) * 3 + 1).padStart(2, "0");
+    const endMonth = String(quarter * 3).padStart(2, "0");
+    const endDay = new Date(Date.UTC(Number(quarterMatch[1]), quarter * 3, 0)).getUTCDate();
+    return { start: `${quarterMatch[1]}-${startMonth}-01`, end: `${quarterMatch[1]}-${endMonth}-${String(endDay).padStart(2, "0")}`, reportDate: null };
+  }
   return null;
 }
 
 function normalizeDecimalText(value: string): string | null {
-  const compact = value.trim().replace(/,/gu, "");
+  const trimmed = value.trim();
+  const compact = trimmed.includes(",") && !trimmed.includes(".")
+    ? trimmed.replace(",", ".")
+    : trimmed.replace(/,/gu, "");
   if (compact.length === 0) {
     return null;
   }

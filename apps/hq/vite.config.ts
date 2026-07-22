@@ -49,6 +49,10 @@ export default defineConfig({
             return "pdfjs";
           }
 
+          if (id.includes("/xlsx/")) {
+            return "xlsx";
+          }
+
           if (id.includes("node_modules")) {
             return "vendor";
           }
