@@ -932,6 +932,26 @@
   const dashboardStoreRows = $derived(createDashboardTopRows(dashboardState, "stores"));
   const importRows = $derived(createImportRows(importBatches));
   const mappingTableRows = $derived(createMappingRows(filteredMappingRows, selectedMappingRowIds));
+  const selectedMappingRows = $derived(
+    mappingRows.filter((row: DistributionMappingRow): boolean => selectedMappingRowIds.includes(row.id))
+  );
+  const visibleSuggestedMappingRows = $derived(
+    filteredMappingRows.filter((row: DistributionMappingRow): boolean => row.status === "suggested" && row.suggestedTrackId !== null)
+  );
+  const mappingRowsForRuleApplication = $derived(
+    selectedMappingRows.length > 0 ? selectedMappingRows : visibleSuggestedMappingRows
+  );
+  const mappingRulesSelectionIsApplicable = $derived(
+    mappingRowsForRuleApplication.length > 0
+      && mappingRowsForRuleApplication.every((row: DistributionMappingRow): boolean => row.status === "suggested" && row.suggestedTrackId !== null)
+      && new Set(mappingRowsForRuleApplication.map((row: DistributionMappingRow): string => row.batchId)).size === 1
+  );
+  const mappingRulesDisabledReason = $derived(
+    !writesEnabled ? writeGateMessage
+      : mappingRowsForRuleApplication.length === 0 ? "No suggested mapping rows are ready to apply."
+      : !mappingRulesSelectionIsApplicable ? "Select only suggested mapping rows with a target track."
+      : null
+  );
   const catalogRows = $derived(createCatalogRows(catalogTracks));
   const catalogReviewRows = $derived(createCatalogReviewRows(catalogTracks));
   const suggestedCatalogArtistTracks = $derived(catalogTracks.filter((track) => track.suggestedCatalogArtist !== null));
@@ -3363,10 +3383,16 @@
   }
 
   async function applyMappingRules(): Promise<void> {
-    const selectedRows = mappingRows.filter((row: DistributionMappingRow): boolean => selectedMappingRowIds.includes(row.id));
-    const targetRows = selectedMappingRowIds.length > 0 ? selectedRows : filteredMappingRows;
+    const targetRows = mappingRowsForRuleApplication;
 
     if (targetRows.length === 0) {
+      actionNotice = "No suggested mapping rows are ready to apply. ISRC-mapped rows are already complete.";
+      actionNoticePageId = activePageId;
+      return;
+    }
+
+    if (!mappingRulesSelectionIsApplicable) {
+      reportActionError(new Error("Select only suggested mapping rows with a target track. Rows already mapped by ISRC do not need reusable rules."));
       return;
     }
 
@@ -6566,10 +6592,10 @@
           <Select id="distribution-mapping-status" label="Status" value={mappingStatusFilter} options={mappingStatusOptions} state="default" message="" onchange={updateMappingStatus} />
           <Select id="distribution-mapping-batch" label="Batch" value={mappingBatchFilter} options={mappingBatchFilterOptions} state="default" message="" onchange={updateMappingBatchFilter} />
           <Button label="Filter" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Apply mapping filters" onclick={loadMappingRows} />
-          <Button label="Automate" variant="secondary" size="medium" type="button" disabled={!writesEnabled || filteredMappingRows.length === 0} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Automate safe mapping matches" title={writeDisabledTitle()} onclick={applyMappingRules} />
+          <Button label="Automate" variant="secondary" size="medium" type="button" disabled={!mappingRulesSelectionIsApplicable} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Automate safe mapping matches" title={mappingRulesDisabledReason ?? writeDisabledTitle()} onclick={applyMappingRules} />
           <Button label="Select all (page)" variant="secondary" size="medium" type="button" disabled={mappingRows.length === 0} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Select all visible mapping rows" onclick={selectAllVisibleMappingRows} />
           <Button label="Clear selection" variant="secondary" size="medium" type="button" disabled={selectedMappingRowIds.length === 0} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Clear mapping selection" onclick={clearMappingSelection} />
-          <Button label="Apply reusable rules" variant="primary" size="medium" type="button" disabled={!writesEnabled || (mappingRows.length === 0 && selectedMappingRowIds.length === 0)} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Apply reusable rules" title={writeDisabledTitle()} onclick={applyMappingRules} />
+          <Button label="Apply reusable rules" variant="primary" size="medium" type="button" disabled={!mappingRulesSelectionIsApplicable} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Apply reusable rules" title={mappingRulesDisabledReason ?? writeDisabledTitle()} onclick={applyMappingRules} />
           <span class="ehq-type-label-mono">{selectedMappingRowIds.length} selected · {filteredMappingRows.length} visible</span>
         </section>
         <Table title="Rows to review" columns={mappingColumns} rows={mappingTableRows} state={isLoadingStatus(mappingState.status) ? "loading" : mappingState.status === "error" ? "error" : filteredMappingRows.length === 0 ? "empty" : "default"} actionLabel="" rowActions={mappingRowActions} pagination={mappingPagination} />
