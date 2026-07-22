@@ -1291,7 +1291,7 @@
       disabledReason: importBatchReadOnlyReason
     },
     {
-      label: "Generate tracks",
+      label: "Process royalties",
       onAction: generateTracksFromImportBatch,
       isEnabled: canGenerateTracksFromImportBatch,
       disabledReason: generateTracksFromImportBatchDisabledReason
@@ -2971,6 +2971,12 @@
       return;
     }
 
+    const batch = importBatchById(batchId);
+    if (batch === null) {
+      reportActionError(new Error("Batch not found in the loaded list."));
+      return;
+    }
+
     clearMutationReceipt();
     try {
       const receipt = await distributionApi.generateTracksFromImportBatch(
@@ -2978,11 +2984,21 @@
         { workspaceId: distributionWorkspaceId },
         { idempotencyKey: createIdempotencyKey("import-generate-tracks") }
       );
+      await distributionApi.startCadencedAllocationRun(
+        {
+          workspaceId: distributionWorkspaceId,
+          period: batch.period,
+          lockKey: `distribution:allocation:batch:${batch.id}`,
+          cadence: "manual",
+          batchId: batch.id
+        },
+        { idempotencyKey: createIdempotencyKey(`allocation-run-${batch.id}`) }
+      );
       mutationReceipt = receipt;
       mutationReceiptPageId = activePageId;
-      actionNotice = `Created ${receipt.createdTrackCount} draft tracks, reused ${receipt.existingTrackCount}, and mapped ${receipt.mappedEarningCount} earnings. ${receipt.skippedEarningCount} rows remain in suspense.`;
+      actionNotice = `Processed ${receipt.mappedEarningCount} earnings and completed allocation. Created ${receipt.createdTrackCount} draft tracks, reused ${receipt.existingTrackCount}, and left ${receipt.skippedEarningCount} rows for review.`;
       actionNoticePageId = activePageId;
-      await Promise.all([loadImportBatches(), loadMappingRows(), loadCatalog(), loadDashboard(), loadAllocationWorkbench(), loadSuspense(), loadRevenue(), loadReconciliation(), loadAuditLog()]);
+      await Promise.all([loadImportBatches(), loadMappingRows(), loadCatalog(), loadDashboard(), loadAllocationWorkbench(), loadAllocationRuns(), loadSuspense(), loadRevenue(), loadReconciliation(), loadAuditLog()]);
     } catch (error: unknown) {
       reportActionError(error);
     }
@@ -3365,14 +3381,33 @@
           idempotencyKey: createIdempotencyKey("import-confirm")
         }
       );
+      const catalog = await distributionApi.generateTracksFromImportBatch(
+        confirm.id,
+        { workspaceId: distributionWorkspaceId },
+        { idempotencyKey: createIdempotencyKey("import-generate-tracks") }
+      );
+      const allocation = confirm.period === null
+        ? null
+        : await distributionApi.startCadencedAllocationRun(
+          {
+            workspaceId: distributionWorkspaceId,
+            period: confirm.period,
+            lockKey: `distribution:allocation:batch:${confirm.id}`,
+            cadence: "manual",
+            batchId: confirm.id
+          },
+          { idempotencyKey: createIdempotencyKey(`allocation-run-${confirm.id}`) }
+        );
       importState = {
         ...importState,
         status: "success",
         confirm,
-        message: "Import confirmed."
+        message: allocation === null
+          ? `Import processed: ${catalog.mappedEarningCount} earnings mapped. Review the source period before allocation.`
+          : `Import processed: ${catalog.mappedEarningCount} earnings mapped and allocation completed. ${catalog.skippedEarningCount} rows need review.`
       };
       closeImportPanel();
-      await Promise.all([loadImportBatches(), loadMappingRows(), loadDashboard(), loadSuspense(), loadRevenue(), loadReconciliation(), loadAuditLog()]);
+      await Promise.all([loadImportBatches(), loadMappingRows(), loadCatalog(), loadDashboard(), loadAllocationWorkbench(), loadAllocationRuns(), loadSuspense(), loadRevenue(), loadReconciliation(), loadAuditLog()]);
     } catch (error: unknown) {
       importState = {
         ...importState,
@@ -6540,7 +6575,7 @@
         <section class="contracts-actions ehq-edge-surface">
           <Button label="Import one file" variant="primary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Import one file" onclick={openImportPanel} />
           <Button label="Start fresh" variant="danger" size="medium" type="button" disabled={!writesEnabled} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Delete all Distribution data" title={writeDisabledTitle()} onclick={openImportResetPanel} />
-          <span>One Kontor CSV/TSV or RouteNote Excel export at a time: select, preview, confirm.</span>
+          <span>One Kontor CSV/TSV or RouteNote Excel export at a time: select, preview, then process royalties.</span>
         </section>
         {#if importPanelOpen}
           <Drawer open={true} presentation="overlay" showFooter={false} title="Import one file" badgeLabel="audited batch" badgeTone="info" body="" primaryAction="" secondaryAction="Close" state="default" onSecondary={closeImportPanel}>
@@ -6553,7 +6588,7 @@
           </label>
           <Button label="Choose file" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Choose one import file" title="Choose one Kontor CSV/TSV or RouteNote Excel export" onclick={openImportFilePicker} />
           <Button label="Preview" variant="secondary" size="medium" type="button" disabled={!canPreviewImport} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Preview import file" title={canPreviewImport ? "" : "Choose an import file first"} onclick={previewImport} />
-          <Button label="Confirm import" variant="primary" size="medium" type="button" disabled={!canConfirmImport || !writesEnabled} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Confirm import" title={writeDisabledTitle()} onclick={confirmImport} />
+          <Button label="Process royalties" variant="primary" size="medium" type="button" disabled={!canConfirmImport || !writesEnabled} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Process royalties" title={writeDisabledTitle()} onclick={confirmImport} />
           <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Cancel import" onclick={closeImportPanel} />
         </section>
             {/snippet}

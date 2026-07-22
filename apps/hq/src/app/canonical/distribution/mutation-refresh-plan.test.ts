@@ -51,12 +51,19 @@ describe("distribution mutation refresh plans", () => {
     expectRefreshCalls("confirmImport", [
       "loadImportBatches",
       "loadMappingRows",
+      "loadCatalog",
       "loadDashboard",
+      "loadAllocationWorkbench",
+      "loadAllocationRuns",
       "loadSuspense",
       "loadRevenue",
       "loadReconciliation",
       "loadAuditLog"
     ]);
+
+    const confirmation = functionSource("confirmImport");
+    expect(confirmation).toContain("generateTracksFromImportBatch(");
+    expect(confirmation).toContain("startCadencedAllocationRun(");
 
     expectRefreshCalls("applyMappingRules", [
       "loadMappingRows",

@@ -1431,6 +1431,7 @@ export interface DistributionImportConfirmRequest {
 
 export interface DistributionImportConfirmResponse extends ApiMutationReceipt {
   readonly importedRoyaltyEventCount: number;
+  readonly period: IsoMonthString | null;
 }
 
 export interface DistributionFinancialResetRequest {

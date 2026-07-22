@@ -9418,6 +9418,7 @@ async function distributionImportConfirmResponse(context: ApiContext, dependenci
         status: "completed",
         auditEventId,
         importedRoyaltyEventCount: normalizedRows.length,
+        period: sourceDates[0]?.slice(0, 7) ?? null,
         rawRowCount: preview.rows.length,
         normalizedRowCount: normalizedRows.length,
         issueCount: issueInputs.length
