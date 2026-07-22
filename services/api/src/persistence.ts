@@ -402,6 +402,7 @@ const SENSITIVE_ACTIONS = new Set<string>([
   "distribution_catalog_artist_promote",
   "distribution_catalog_contributor_payee_link",
   "distribution_catalog_contributors_override",
+  "distribution_import_generate_tracks",
   "distribution_allocations_preview",
   "distribution_allocations_retry_missing_contracts",
   "distribution_allocations_run",

@@ -170,6 +170,8 @@ import type {
   DistributionDashboardResponse,
   DistributionDashboardTopRoyalty,
   DistributionImportBatch,
+  DistributionImportCatalogGenerateRequest,
+  DistributionImportCatalogGenerateResponse,
   DistributionImportConfirmRequest,
   DistributionImportConfirmResponse,
   DistributionImportPreviewRequest,
@@ -868,6 +870,7 @@ const distributionMappingApplyRulesSchema = workspaceBodySchema.extend({
   batchId: z.string().min(1),
   rowIds: z.array(z.string().min(1)).min(1)
 });
+const distributionImportCatalogGenerateSchema = workspaceBodySchema.strict();
 const distributionCatalogContributorSchema = z.object({
   name: z.string().trim().min(1).max(240),
   role: z.string().trim().regex(/^[a-z][a-z0-9_]{1,79}$/u)
@@ -1994,6 +1997,10 @@ function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: Ap
 
   app.post("/erh/v1/imports/batches/:batchId/reverse", async (context) => {
     return distributionImportReverseResponse(context, dependencies);
+  });
+
+  app.post("/erh/v1/imports/batches/:batchId/generate-tracks", async (context) => {
+    return distributionImportCatalogGenerateResponse(context, dependencies);
   });
 
   app.post("/erh/v1/financial-reset", async (context) => {
@@ -9418,6 +9425,228 @@ async function distributionImportConfirmResponse(context: ApiContext, dependenci
     }
   });
   return context.json(result.body, result.status);
+}
+
+async function distributionImportCatalogGenerateResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {
+  const request = await readZodBody<DistributionImportCatalogGenerateRequest>(context, distributionImportCatalogGenerateSchema);
+  const batchId = requirePathParam(context, "batchId");
+  const actor = context.get("authUser");
+  requirePermissionForWorkspace(actor, "distribution_import_generate_tracks", request.workspaceId);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const result = await runIdempotentMutation<DistributionImportCatalogGenerateResponse & ApiMutationResponse>({
+    runtime: dependencies.persistence,
+    actor,
+    action: "distribution_import_generate_tracks",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx: ApiWriteTransaction, resolvedIdempotencyKey: string): Promise<DistributionImportCatalogGenerateResponse & ApiMutationResponse> => {
+      await acquireAdvisoryLock(tx, `distribution:import-catalog:${batchId}`);
+      const outcome = tx.kind === "memory"
+        ? generateImportCatalogFixture(dependencies.fixtures, request.workspaceId, batchId)
+        : await generateImportCatalogRows(tx, request.workspaceId, batchId);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_import_generate_tracks",
+        targetType: "import_batch",
+        targetId: batchId,
+        before: {},
+        after: {
+          createdTrackCount: outcome.createdTrackCount,
+          existingTrackCount: outcome.existingTrackCount,
+          mappedEarningCount: outcome.mappedEarningCount,
+          skippedEarningCount: outcome.skippedEarningCount
+        },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      return { id: batchId, status: "completed", auditEventId, ...outcome };
+    }
+  });
+  return context.json(result.body, result.status);
+}
+
+interface ImportCatalogGenerationOutcome {
+  readonly createdTrackCount: number;
+  readonly existingTrackCount: number;
+  readonly mappedEarningCount: number;
+  readonly skippedEarningCount: number;
+}
+
+async function generateImportCatalogRows(
+  tx: Extract<ApiWriteTransaction, { readonly kind: "postgres" }>,
+  workspaceId: string,
+  batchId: string
+): Promise<ImportCatalogGenerationOutcome> {
+  const batchRows = queryRowsFromResult(await tx.executor.execute(sql`
+    select status::text
+    from import_batches
+    where id = ${batchId} and workspace_id = ${workspaceId}
+  `));
+  const batchStatus = stringQueryField(batchRows[0], "status");
+  if (batchStatus === "") {
+    throw new ApiRouteError(404, "distribution_import_batch_not_found", "Distribution import batch was not found.", [`batchId=${batchId}`]);
+  }
+  if (batchStatus !== "normalized" && batchStatus !== "completed") {
+    throw new ApiRouteError(409, "distribution_import_batch_not_usable", "Only a confirmed, non-void import batch can generate tracks.", [`batchId=${batchId}`, `status=${batchStatus}`]);
+  }
+
+  const earnings = queryRowsFromResult(await tx.executor.execute(sql`
+    select id::text as earning_id,
+           isrc,
+           coalesce(nullif(trim(raw_title), ''), 'Unknown track') as title,
+           coalesce(nullif(trim(raw_artist), ''), 'Unknown artist') as artist
+    from normalized_earnings
+    where workspace_id = ${workspaceId}
+      and batch_id = ${batchId}
+      and mapping_status = 'unmapped'
+      and nullif(trim(isrc), '') is not null
+    order by isrc, id
+  `));
+  const byIsrc = new Map<string, { readonly title: string; readonly artist: string; readonly earningIds: string[] }>();
+  for (const earning of earnings) {
+    const isrc = stringQueryField(earning, "isrc").trim().toUpperCase();
+    const earningId = stringQueryField(earning, "earning_id");
+    if (isrc === "" || earningId === "") continue;
+    const candidate = byIsrc.get(isrc) ?? {
+      title: stringQueryField(earning, "title"),
+      artist: stringQueryField(earning, "artist"),
+      earningIds: []
+    };
+    candidate.earningIds.push(earningId);
+    byIsrc.set(isrc, candidate);
+  }
+  const isrcs = [...byIsrc.keys()];
+  if (isrcs.length === 0) {
+    return { createdTrackCount: 0, existingTrackCount: 0, mappedEarningCount: 0, skippedEarningCount: 0 };
+  }
+
+  for (const isrc of isrcs) await acquireAdvisoryLock(tx, `distribution:track-isrc:${workspaceId}:${isrc}`);
+  const isrcValues = sql.join(isrcs.map((isrc) => sql`${isrc}`), sql`, `);
+  const existingRows = queryRowsFromResult(await tx.executor.execute(sql`
+    select distinct on (upper(isrc)) id::text, upper(isrc) as isrc
+    from tracks
+    where workspace_id = ${workspaceId} and upper(isrc) in (${isrcValues})
+    order by upper(isrc), created_at, id
+  `));
+  const trackIdByIsrc = new Map<string, string>();
+  for (const row of existingRows) trackIdByIsrc.set(stringQueryField(row, "isrc"), stringQueryField(row, "id"));
+  const existingTrackCount = trackIdByIsrc.size;
+
+  for (const isrc of isrcs) {
+    if (trackIdByIsrc.has(isrc)) continue;
+    const candidate = byIsrc.get(isrc);
+    if (candidate === undefined) continue;
+    const trackId = randomUUID();
+    await tx.executor.execute(sql`
+      insert into tracks (id, workspace_id, title, artist_name, catalog_status, isrc)
+      values (${trackId}, ${workspaceId}, ${candidate.title}, ${candidate.artist}, 'draft', ${isrc})
+    `);
+    trackIdByIsrc.set(isrc, trackId);
+  }
+
+  const matches = [...byIsrc.entries()].flatMap(([isrc, candidate]) => {
+    const trackId = trackIdByIsrc.get(isrc);
+    return trackId === undefined ? [] : candidate.earningIds.map((earningId) => ({ earningId, trackId }));
+  });
+  for (const match of matches) {
+    await tx.executor.execute(sql`
+      update normalized_earnings
+      set mapping_status = 'matched', calculation_status = 'pending', updated_at = now()
+      where id = ${match.earningId} and workspace_id = ${workspaceId} and mapping_status = 'unmapped'
+    `);
+    await tx.executor.execute(sql`
+      insert into earning_track_matches (id, earning_id, track_id, confidence, status)
+      values (${randomUUID()}, ${match.earningId}, ${match.trackId}, '100.000000', 'matched')
+    `);
+  }
+  return {
+    createdTrackCount: trackIdByIsrc.size - existingTrackCount,
+    existingTrackCount,
+    mappedEarningCount: matches.length,
+    skippedEarningCount: earnings.length - matches.length
+  };
+}
+
+function generateImportCatalogFixture(
+  fixtures: ApiFixtureStore,
+  workspaceId: string,
+  batchId: string
+): ImportCatalogGenerationOutcome {
+  const batch = fixtures.distribution.importBatches.find((candidate) => candidate.id === batchId);
+  if (batch === undefined) {
+    throw new ApiRouteError(404, "distribution_import_batch_not_found", "Distribution import batch was not found.", [`batchId=${batchId}`]);
+  }
+  if (batch.status !== "normalized" && batch.status !== "completed") {
+    throw new ApiRouteError(409, "distribution_import_batch_not_usable", "Only a confirmed, non-void import batch can generate tracks.", [`batchId=${batchId}`, `status=${batch.status}`]);
+  }
+
+  const earnings = fixtures.distribution.normalizedEarnings.filter((earning) =>
+    earning.batchId === batchId && earning.mappingStatus === "unmapped" && earning.isrc !== null && earning.isrc.trim() !== ""
+  );
+  const trackIdByIsrc = new Map<string, string>();
+  const existingTrackIds = new Set<string>();
+  let createdTrackCount = 0;
+  for (const track of fixtures.distribution.tracks) {
+    if (track.isrc !== null && track.isrc.trim() !== "") trackIdByIsrc.set(track.isrc.trim().toUpperCase(), track.id);
+  }
+  for (const earning of earnings) {
+    const isrc = earning.isrc?.trim().toUpperCase();
+    if (isrc === undefined || isrc === "") continue;
+    const existingTrackId = trackIdByIsrc.get(isrc);
+    if (existingTrackId !== undefined) existingTrackIds.add(existingTrackId);
+  }
+  for (const earning of earnings) {
+    const isrc = earning.isrc?.trim().toUpperCase();
+    if (isrc === undefined || isrc === "") continue;
+    const existingTrackId = trackIdByIsrc.get(isrc);
+    if (existingTrackId !== undefined) continue;
+    const trackId = randomUUID();
+    trackIdByIsrc.set(isrc, trackId);
+    createdTrackCount += 1;
+    upsertDistributionTrackFixture(fixtures, {
+      id: trackId,
+      releaseId: null,
+      title: earning.rawTitle?.trim() || "Unknown track",
+      artistName: earning.rawArtist?.trim() || "Unknown artist",
+      isrc,
+      catalogStatus: "draft"
+    });
+  }
+  const matchedEarningIds = new Set<string>();
+  const generatedMatches: NonNullable<DistributionReadDataset["earningTrackMatches"]>[number][] = [];
+  const mutableDistribution = fixtures.distribution as Mutable<DistributionReadDataset>;
+  mutableDistribution.normalizedEarnings = fixtures.distribution.normalizedEarnings.map((earning) => {
+    if (earning.batchId !== batchId || earning.mappingStatus !== "unmapped" || earning.isrc === null) return earning;
+    const trackId = trackIdByIsrc.get(earning.isrc.trim().toUpperCase());
+    if (trackId === undefined) return earning;
+    matchedEarningIds.add(earning.id);
+    generatedMatches.push({
+      id: randomUUID(),
+      earningId: earning.id,
+      trackId,
+      confidence: "100.000000",
+      status: "matched",
+      createdAt: new Date().toISOString()
+    });
+    return { ...earning, mappingStatus: "matched", calculationStatus: "pending" };
+  });
+  mutableDistribution.earningTrackMatches = [
+    ...(fixtures.distribution.earningTrackMatches ?? []).filter((match) => !matchedEarningIds.has(match.earningId)),
+    ...generatedMatches
+  ];
+  const mutableFixtures = fixtures as Mutable<ApiFixtureStore>;
+  mutableFixtures.distributionMappingRows = fixtures.distributionMappingRows.map((row) => {
+    const trackId = row.sourceIsrc === null ? undefined : trackIdByIsrc.get(row.sourceIsrc.trim().toUpperCase());
+    if (row.batchId !== batchId || row.status !== "unmapped" || trackId === undefined) return row;
+    const track = fixtures.distribution.tracks.find((candidate) => candidate.id === trackId);
+    return { ...row, suggestedTrackId: trackId, suggestedTrackTitle: track?.title ?? null, confidenceBp: 10000, status: "mapped" };
+  });
+  return {
+    createdTrackCount,
+    existingTrackCount: existingTrackIds.size,
+    mappedEarningCount: matchedEarningIds.size,
+    skippedEarningCount: earnings.length - matchedEarningIds.size
+  };
 }
 
 async function distributionImportReverseResponse(context: ApiContext, dependencies: ApiServiceDependencies): Promise<Response> {

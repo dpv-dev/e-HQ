@@ -41350,6 +41350,7 @@ var SENSITIVE_ACTIONS = /* @__PURE__ */ new Set([
   "distribution_catalog_artist_promote",
   "distribution_catalog_contributor_payee_link",
   "distribution_catalog_contributors_override",
+  "distribution_import_generate_tracks",
   "distribution_allocations_preview",
   "distribution_allocations_retry_missing_contracts",
   "distribution_allocations_run",
@@ -43107,6 +43108,7 @@ var distributionMappingApplyRulesSchema = workspaceBodySchema.extend({
   batchId: external_exports.string().min(1),
   rowIds: external_exports.array(external_exports.string().min(1)).min(1)
 });
+var distributionImportCatalogGenerateSchema = workspaceBodySchema.strict();
 var distributionCatalogContributorSchema = external_exports.object({
   name: external_exports.string().trim().min(1).max(240),
   role: external_exports.string().trim().regex(/^[a-z][a-z0-9_]{1,79}$/u)
@@ -43991,6 +43993,9 @@ function registerDistributionRoutes(app, dependencies) {
   });
   app.post("/erh/v1/imports/batches/:batchId/reverse", async (context) => {
     return distributionImportReverseResponse(context, dependencies);
+  });
+  app.post("/erh/v1/imports/batches/:batchId/generate-tracks", async (context) => {
+    return distributionImportCatalogGenerateResponse(context, dependencies);
   });
   app.post("/erh/v1/financial-reset", async (context) => {
     return distributionFinancialResetResponse(context, dependencies);
@@ -50484,6 +50489,203 @@ async function distributionImportConfirmResponse(context, dependencies) {
     }
   });
   return context.json(result.body, result.status);
+}
+async function distributionImportCatalogGenerateResponse(context, dependencies) {
+  const request = await readZodBody(context, distributionImportCatalogGenerateSchema);
+  const batchId = requirePathParam(context, "batchId");
+  const actor = context.get("authUser");
+  requirePermissionForWorkspace(actor, "distribution_import_generate_tracks", request.workspaceId);
+  const idempotencyKey = requireIdempotencyKey(context);
+  const result = await runIdempotentMutation({
+    runtime: dependencies.persistence,
+    actor,
+    action: "distribution_import_generate_tracks",
+    route: context.req.path,
+    idempotencyKey,
+    requestBody: request,
+    write: async (tx, resolvedIdempotencyKey) => {
+      await acquireAdvisoryLock(tx, `distribution:import-catalog:${batchId}`);
+      const outcome = tx.kind === "memory" ? generateImportCatalogFixture(dependencies.fixtures, request.workspaceId, batchId) : await generateImportCatalogRows(tx, request.workspaceId, batchId);
+      const auditEventId = await appendAuditEvent(tx, {
+        actor,
+        action: "distribution_import_generate_tracks",
+        targetType: "import_batch",
+        targetId: batchId,
+        before: {},
+        after: {
+          createdTrackCount: outcome.createdTrackCount,
+          existingTrackCount: outcome.existingTrackCount,
+          mappedEarningCount: outcome.mappedEarningCount,
+          skippedEarningCount: outcome.skippedEarningCount
+        },
+        idempotencyKey: resolvedIdempotencyKey
+      });
+      return { id: batchId, status: "completed", auditEventId, ...outcome };
+    }
+  });
+  return context.json(result.body, result.status);
+}
+async function generateImportCatalogRows(tx, workspaceId, batchId) {
+  const batchRows = queryRowsFromResult(await tx.executor.execute(sql`
+    select status::text
+    from import_batches
+    where id = ${batchId} and workspace_id = ${workspaceId}
+  `));
+  const batchStatus = stringQueryField(batchRows[0], "status");
+  if (batchStatus === "") {
+    throw new ApiRouteError(404, "distribution_import_batch_not_found", "Distribution import batch was not found.", [`batchId=${batchId}`]);
+  }
+  if (batchStatus !== "normalized" && batchStatus !== "completed") {
+    throw new ApiRouteError(409, "distribution_import_batch_not_usable", "Only a confirmed, non-void import batch can generate tracks.", [`batchId=${batchId}`, `status=${batchStatus}`]);
+  }
+  const earnings = queryRowsFromResult(await tx.executor.execute(sql`
+    select id::text as earning_id,
+           isrc,
+           coalesce(nullif(trim(raw_title), ''), 'Unknown track') as title,
+           coalesce(nullif(trim(raw_artist), ''), 'Unknown artist') as artist
+    from normalized_earnings
+    where workspace_id = ${workspaceId}
+      and batch_id = ${batchId}
+      and mapping_status = 'unmapped'
+      and nullif(trim(isrc), '') is not null
+    order by isrc, id
+  `));
+  const byIsrc = /* @__PURE__ */ new Map();
+  for (const earning of earnings) {
+    const isrc = stringQueryField(earning, "isrc").trim().toUpperCase();
+    const earningId = stringQueryField(earning, "earning_id");
+    if (isrc === "" || earningId === "") continue;
+    const candidate = byIsrc.get(isrc) ?? {
+      title: stringQueryField(earning, "title"),
+      artist: stringQueryField(earning, "artist"),
+      earningIds: []
+    };
+    candidate.earningIds.push(earningId);
+    byIsrc.set(isrc, candidate);
+  }
+  const isrcs = [...byIsrc.keys()];
+  if (isrcs.length === 0) {
+    return { createdTrackCount: 0, existingTrackCount: 0, mappedEarningCount: 0, skippedEarningCount: 0 };
+  }
+  for (const isrc of isrcs) await acquireAdvisoryLock(tx, `distribution:track-isrc:${workspaceId}:${isrc}`);
+  const isrcValues = sql.join(isrcs.map((isrc) => sql`${isrc}`), sql`, `);
+  const existingRows = queryRowsFromResult(await tx.executor.execute(sql`
+    select distinct on (upper(isrc)) id::text, upper(isrc) as isrc
+    from tracks
+    where workspace_id = ${workspaceId} and upper(isrc) in (${isrcValues})
+    order by upper(isrc), created_at, id
+  `));
+  const trackIdByIsrc = /* @__PURE__ */ new Map();
+  for (const row of existingRows) trackIdByIsrc.set(stringQueryField(row, "isrc"), stringQueryField(row, "id"));
+  const existingTrackCount = trackIdByIsrc.size;
+  for (const isrc of isrcs) {
+    if (trackIdByIsrc.has(isrc)) continue;
+    const candidate = byIsrc.get(isrc);
+    if (candidate === void 0) continue;
+    const trackId = randomUUID2();
+    await tx.executor.execute(sql`
+      insert into tracks (id, workspace_id, title, artist_name, catalog_status, isrc)
+      values (${trackId}, ${workspaceId}, ${candidate.title}, ${candidate.artist}, 'draft', ${isrc})
+    `);
+    trackIdByIsrc.set(isrc, trackId);
+  }
+  const matches = [...byIsrc.entries()].flatMap(([isrc, candidate]) => {
+    const trackId = trackIdByIsrc.get(isrc);
+    return trackId === void 0 ? [] : candidate.earningIds.map((earningId) => ({ earningId, trackId }));
+  });
+  for (const match2 of matches) {
+    await tx.executor.execute(sql`
+      update normalized_earnings
+      set mapping_status = 'matched', calculation_status = 'pending', updated_at = now()
+      where id = ${match2.earningId} and workspace_id = ${workspaceId} and mapping_status = 'unmapped'
+    `);
+    await tx.executor.execute(sql`
+      insert into earning_track_matches (id, earning_id, track_id, confidence, status)
+      values (${randomUUID2()}, ${match2.earningId}, ${match2.trackId}, '100.000000', 'matched')
+    `);
+  }
+  return {
+    createdTrackCount: trackIdByIsrc.size - existingTrackCount,
+    existingTrackCount,
+    mappedEarningCount: matches.length,
+    skippedEarningCount: earnings.length - matches.length
+  };
+}
+function generateImportCatalogFixture(fixtures, workspaceId, batchId) {
+  const batch = fixtures.distribution.importBatches.find((candidate) => candidate.id === batchId);
+  if (batch === void 0) {
+    throw new ApiRouteError(404, "distribution_import_batch_not_found", "Distribution import batch was not found.", [`batchId=${batchId}`]);
+  }
+  if (batch.status !== "normalized" && batch.status !== "completed") {
+    throw new ApiRouteError(409, "distribution_import_batch_not_usable", "Only a confirmed, non-void import batch can generate tracks.", [`batchId=${batchId}`, `status=${batch.status}`]);
+  }
+  const earnings = fixtures.distribution.normalizedEarnings.filter(
+    (earning) => earning.batchId === batchId && earning.mappingStatus === "unmapped" && earning.isrc !== null && earning.isrc.trim() !== ""
+  );
+  const trackIdByIsrc = /* @__PURE__ */ new Map();
+  const existingTrackIds = /* @__PURE__ */ new Set();
+  let createdTrackCount = 0;
+  for (const track of fixtures.distribution.tracks) {
+    if (track.isrc !== null && track.isrc.trim() !== "") trackIdByIsrc.set(track.isrc.trim().toUpperCase(), track.id);
+  }
+  for (const earning of earnings) {
+    const isrc = earning.isrc?.trim().toUpperCase();
+    if (isrc === void 0 || isrc === "") continue;
+    const existingTrackId = trackIdByIsrc.get(isrc);
+    if (existingTrackId !== void 0) existingTrackIds.add(existingTrackId);
+  }
+  for (const earning of earnings) {
+    const isrc = earning.isrc?.trim().toUpperCase();
+    if (isrc === void 0 || isrc === "") continue;
+    const existingTrackId = trackIdByIsrc.get(isrc);
+    if (existingTrackId !== void 0) continue;
+    const trackId = randomUUID2();
+    trackIdByIsrc.set(isrc, trackId);
+    createdTrackCount += 1;
+    upsertDistributionTrackFixture(fixtures, {
+      id: trackId,
+      releaseId: null,
+      title: earning.rawTitle?.trim() || "Unknown track",
+      artistName: earning.rawArtist?.trim() || "Unknown artist",
+      isrc,
+      catalogStatus: "draft"
+    });
+  }
+  const matchedEarningIds = /* @__PURE__ */ new Set();
+  const generatedMatches = [];
+  const mutableDistribution = fixtures.distribution;
+  mutableDistribution.normalizedEarnings = fixtures.distribution.normalizedEarnings.map((earning) => {
+    if (earning.batchId !== batchId || earning.mappingStatus !== "unmapped" || earning.isrc === null) return earning;
+    const trackId = trackIdByIsrc.get(earning.isrc.trim().toUpperCase());
+    if (trackId === void 0) return earning;
+    matchedEarningIds.add(earning.id);
+    generatedMatches.push({
+      id: randomUUID2(),
+      earningId: earning.id,
+      trackId,
+      confidence: "100.000000",
+      status: "matched",
+      createdAt: (/* @__PURE__ */ new Date()).toISOString()
+    });
+    return { ...earning, mappingStatus: "matched", calculationStatus: "pending" };
+  });
+  mutableDistribution.earningTrackMatches = [
+    ...(fixtures.distribution.earningTrackMatches ?? []).filter((match2) => !matchedEarningIds.has(match2.earningId)),
+    ...generatedMatches
+  ];
+  const mutableFixtures = fixtures;
+  mutableFixtures.distributionMappingRows = fixtures.distributionMappingRows.map((row) => {
+    const trackId = row.sourceIsrc === null ? void 0 : trackIdByIsrc.get(row.sourceIsrc.trim().toUpperCase());
+    if (row.batchId !== batchId || row.status !== "unmapped" || trackId === void 0) return row;
+    const track = fixtures.distribution.tracks.find((candidate) => candidate.id === trackId);
+    return { ...row, suggestedTrackId: trackId, suggestedTrackTitle: track?.title ?? null, confidenceBp: 1e4, status: "mapped" };
+  });
+  return {
+    createdTrackCount,
+    existingTrackCount: existingTrackIds.size,
+    mappedEarningCount: matchedEarningIds.size,
+    skippedEarningCount: earnings.length - matchedEarningIds.size
+  };
 }
 async function distributionImportReverseResponse(context, dependencies) {
   const body = await readOptionalJsonBody(context);

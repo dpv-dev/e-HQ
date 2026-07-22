@@ -5221,6 +5221,70 @@ test("distribution import confirm persists raw rows and creates normalized unmap
   assert.ok(mappingPage.items.some((item) => item.sourceTitle === "Raw song" && item.status === "unmapped" && item.grossMicro === "9.9900000000" && item.currency === "USD"));
 });
 
+test("distribution import batch generates draft tracks by ISRC and maps matching earnings", async () => {
+  const app = createWriteEnabledFixtureApiService();
+  const preview = await app.request("/erh/v1/imports/preview", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      workspaceId: "workspace_1",
+      source: "routenote",
+      fileName: "routenote-catalog.csv",
+      checksum: "checksum-distribution-catalog-generate",
+      rows: [
+        { "Track Title": "Track A", "Track Artist": "Artist A", ISRC: "ZZTST2600001", Currency: "USD", "Earnings($)": "1.25", Streams: "10" },
+        { "Track Title": "Track A", "Track Artist": "Artist A", ISRC: "ZZTST2600001", Currency: "USD", "Earnings($)": "2.50", Streams: "20" },
+        { "Track Title": "Track B", "Track Artist": "Artist B", ISRC: "ZZTST2600002", Currency: "USD", "Earnings($)": "3.75", Streams: "30" }
+      ]
+    })
+  });
+  assert.equal(preview.status, 200);
+  const previewJson = (await preview.json()) as { readonly previewId: string };
+  const confirm = await app.request("/erh/v1/imports/confirm", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "distribution-catalog-confirm-1" },
+    body: JSON.stringify({ workspaceId: "workspace_1", previewId: previewJson.previewId, acceptedRowIds: ["row_1", "row_2", "row_3"], rejectedRowIds: [] })
+  });
+  assert.equal(confirm.status, 200);
+  const confirmJson = (await confirm.json()) as { readonly id: string };
+
+  const generated = await app.request(`/erh/v1/imports/batches/${confirmJson.id}/generate-tracks`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "distribution-catalog-generate-1" },
+    body: JSON.stringify({ workspaceId: "workspace_1" })
+  });
+  assert.equal(generated.status, 200);
+  const generatedJson = (await generated.json()) as {
+    readonly createdTrackCount: number;
+    readonly existingTrackCount: number;
+    readonly mappedEarningCount: number;
+    readonly skippedEarningCount: number;
+  };
+  assert.deepEqual(generatedJson, {
+    id: confirmJson.id,
+    status: "completed",
+    auditEventId: generatedJson.auditEventId,
+    createdTrackCount: 2,
+    existingTrackCount: 0,
+    mappedEarningCount: 3,
+    skippedEarningCount: 0
+  });
+
+  const mapping = await app.request(`/erh/v1/mapping/rows?workspaceId=workspace_1&batchId=${confirmJson.id}&status=mapped&limit=100`, { headers: authHeaders() });
+  assert.equal(mapping.status, 200);
+  const mappingJson = (await mapping.json()) as { readonly items: readonly { readonly status: string; readonly suggestedTrackId: string | null }[] };
+  assert.equal(mappingJson.items.length, 3);
+  assert.ok(mappingJson.items.every((row) => row.status === "mapped" && row.suggestedTrackId !== null));
+
+  const replay = await app.request(`/erh/v1/imports/batches/${confirmJson.id}/generate-tracks`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json", "Idempotency-Key": "distribution-catalog-generate-1" },
+    body: JSON.stringify({ workspaceId: "workspace_1" })
+  });
+  assert.equal(replay.status, 200);
+  assert.deepEqual(await replay.json(), generatedJson);
+});
+
 test("distribution import reverse exposes voided status in list and screen filters", async () => {
   const app = createWriteEnabledFixtureApiService();
   const preview = await app.request("/erh/v1/imports/preview", {

@@ -73,6 +73,17 @@ export interface ApiMutationReceipt {
   readonly auditEventId: EntityId | null;
 }
 
+export interface DistributionImportCatalogGenerateRequest {
+  readonly workspaceId: EntityId;
+}
+
+export interface DistributionImportCatalogGenerateResponse extends ApiMutationReceipt {
+  readonly createdTrackCount: number;
+  readonly existingTrackCount: number;
+  readonly mappedEarningCount: number;
+  readonly skippedEarningCount: number;
+}
+
 export interface CommandCenterWorkspaceQuery {
   readonly workspaceId: EntityId;
 }

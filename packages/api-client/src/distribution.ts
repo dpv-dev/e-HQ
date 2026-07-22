@@ -37,6 +37,8 @@ import type {
   DistributionFxRatesSaveRequest,
   DistributionImportBatchesQuery,
   DistributionImportBatch,
+  DistributionImportCatalogGenerateRequest,
+  DistributionImportCatalogGenerateResponse,
   DistributionImportConfirmRequest,
   DistributionImportConfirmResponse,
   DistributionImportPreviewRequest,
@@ -112,6 +114,11 @@ export interface DistributionApiClient {
     request: DistributionWorkspaceQuery,
     options: WriteRequestOptions
   ) => Promise<ApiMutationReceipt>;
+  readonly generateTracksFromImportBatch: (
+    batchId: EntityId,
+    request: DistributionImportCatalogGenerateRequest,
+    options: WriteRequestOptions
+  ) => Promise<DistributionImportCatalogGenerateResponse>;
   readonly resetFinancialData: (
     request: DistributionFinancialResetRequest,
     options: WriteRequestOptions
@@ -335,6 +342,16 @@ export function createDistributionApiClient(config: ApiClientConfig): Distributi
     ): Promise<ApiMutationReceipt> =>
       transport.post<ApiMutationReceipt>(
         `imports/batches/${encodePathSegment(batchId)}/reverse`,
+        request,
+        options.idempotencyKey
+      ),
+    generateTracksFromImportBatch: (
+      batchId: EntityId,
+      request: DistributionImportCatalogGenerateRequest,
+      options: WriteRequestOptions
+    ): Promise<DistributionImportCatalogGenerateResponse> =>
+      transport.post<DistributionImportCatalogGenerateResponse>(
+        `imports/batches/${encodePathSegment(batchId)}/generate-tracks`,
         request,
         options.idempotencyKey
       ),

@@ -1271,6 +1271,12 @@
       disabledReason: importBatchReadOnlyReason
     },
     {
+      label: "Generate tracks",
+      onAction: generateTracksFromImportBatch,
+      isEnabled: canGenerateTracksFromImportBatch,
+      disabledReason: generateTracksFromImportBatchDisabledReason
+    },
+    {
       label: "Cancel batch",
       onAction: reverseImportBatch,
       danger: true,
@@ -2934,12 +2940,54 @@
     }
   }
 
+  async function generateTracksFromImportBatch(batchId: string): Promise<void> {
+    if (!writesEnabled) {
+      reportActionError(new Error(writeGateMessage));
+      return;
+    }
+
+    if (!canGenerateTracksFromImportBatch(batchId)) {
+      reportActionError(new Error(generateTracksFromImportBatchDisabledReason(batchId) ?? "This batch cannot generate tracks."));
+      return;
+    }
+
+    clearMutationReceipt();
+    try {
+      const receipt = await distributionApi.generateTracksFromImportBatch(
+        batchId,
+        { workspaceId: distributionWorkspaceId },
+        { idempotencyKey: createIdempotencyKey("import-generate-tracks") }
+      );
+      mutationReceipt = receipt;
+      mutationReceiptPageId = activePageId;
+      actionNotice = `Created ${receipt.createdTrackCount} draft tracks, reused ${receipt.existingTrackCount}, and mapped ${receipt.mappedEarningCount} earnings. ${receipt.skippedEarningCount} rows remain in suspense.`;
+      actionNoticePageId = activePageId;
+      await Promise.all([loadImportBatches(), loadMappingRows(), loadCatalog(), loadDashboard(), loadAllocationWorkbench(), loadSuspense(), loadRevenue(), loadReconciliation(), loadAuditLog()]);
+    } catch (error: unknown) {
+      reportActionError(error);
+    }
+  }
+
   function canCancelImportBatch(batchId: string): boolean {
     return canCancelDistributionImportBatch(importBatchById(batchId));
   }
 
   function canOpenImportBatch(batchId: string): boolean {
     return canOpenDistributionImportBatch(importBatchById(batchId));
+  }
+
+  function canGenerateTracksFromImportBatch(batchId: string): boolean {
+    const batch = importBatchById(batchId);
+    return batch !== null && (batch.status === "mapped" || batch.status === "validated");
+  }
+
+  function generateTracksFromImportBatchDisabledReason(batchId: string): string | null {
+    const batch = importBatchById(batchId);
+    if (batch === null) return "Batch not loaded.";
+    if (batch.status === "voided") return "Voided batches cannot generate tracks.";
+    if (batch.status === "failed") return "Failed batches cannot generate tracks.";
+    if (batch.status === "uploaded") return "Confirm the import before generating tracks.";
+    return null;
   }
 
   function importBatchReadOnlyReason(batchId: string): string | null {
