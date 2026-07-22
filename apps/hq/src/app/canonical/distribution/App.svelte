@@ -6475,7 +6475,7 @@
           <Select id="distribution-import-source" label="Source" value={importState.source} options={importSourceOptions} state="default" message="" onchange={updateImportSource} />
           <label>
             <span>Export file</span>
-            <input type="file" accept="text/csv,.csv,.tsv,text/tab-separated-values,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" bind:this={importFileInput} onchange={handleImportFile} />
+            <input type="file" bind:this={importFileInput} onchange={handleImportFile} />
           </label>
           <Button label="Choose file" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Choose one import file" title="Choose one Kontor CSV/TSV or RouteNote Excel export" onclick={openImportFilePicker} />
           <Button label="Preview" variant="secondary" size="medium" type="button" disabled={!canPreviewImport} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Preview import file" title={canPreviewImport ? "" : "Choose an import file first"} onclick={previewImport} />
