@@ -43413,7 +43413,7 @@ function registerOfficeRoutes(app, dependencies) {
     const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
     const filters = rangeFiltersFromContext(context, period, null);
     const monthlyRows = readMonthlyPnl(dataset, filters);
-    const runwayWindowMonths = filterRunwayWindowMonths(monthlyRows, ["2026-02"]);
+    const runwayWindowMonths = selectRunwayWindowMonths(monthlyRows);
     const dashboard = readOfficeDashboardFull(dataset, period, filters, runwayWindowMonths);
     const recentImports = dataset.bankImportBatches;
     const response = {
@@ -43843,10 +43843,6 @@ function registerOfficeRoutes(app, dependencies) {
     resolveWorkspaceId(context);
     return context.json(toOfficeVatReport(dependencies.fixtures.office, period));
   });
-}
-function filterRunwayWindowMonths(monthlyRows, runwayWindowMonths) {
-  const availableMonths = new Set(monthlyRows.map((row) => row.month));
-  return runwayWindowMonths.filter((month) => availableMonths.has(month));
 }
 function registerDistributionRoutes(app, dependencies) {
   app.get("/erh/v1/screen", async (context) => {
@@ -53249,7 +53245,7 @@ function readOfficeDashboardPrevious(dataset, filters) {
   }
   const previousPeriod = previousFilters.dateTo.slice(0, 7);
   const monthlyRows = readMonthlyPnl(dataset, previousFilters);
-  const runwayWindowMonths = filterRunwayWindowMonths(monthlyRows, ["2026-02"]);
+  const runwayWindowMonths = selectRunwayWindowMonths(monthlyRows);
   const dashboard = readOfficeDashboardFull(dataset, previousPeriod, previousFilters, runwayWindowMonths);
   return {
     dateFrom: previousFilters.dateFrom,
@@ -54400,7 +54396,7 @@ function projectPnlLines(dataset, projectId, filters) {
   }));
 }
 function toOfficeIntegrity(dataset, checkedAt) {
-  const bankQuality = readOfficeBankQuality(dataset, "2026-02");
+  const bankQuality = readOfficeBankQuality(dataset, checkedAt.slice(0, 7));
   const checks = [
     {
       id: "integrity_bank_quality",

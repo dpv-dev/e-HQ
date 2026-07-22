@@ -1311,7 +1311,7 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
     const dataset = officeDatasetForWorkspace(dependencies.fixtures.office, workspaceId);
     const filters = rangeFiltersFromContext(context, period, null);
     const monthlyRows = readMonthlyPnl(dataset, filters);
-    const runwayWindowMonths = filterRunwayWindowMonths(monthlyRows, ["2026-02"]);
+    const runwayWindowMonths = selectRunwayWindowMonths(monthlyRows);
     const dashboard = readOfficeDashboardFull(dataset, period, filters, runwayWindowMonths);
     const recentImports = dataset.bankImportBatches;
     const response: OfficeDashboardResponse = {
@@ -1843,14 +1843,6 @@ function registerOfficeRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServi
     resolveWorkspaceId(context);
     return context.json(toOfficeVatReport(dependencies.fixtures.office, period));
   });
-}
-
-function filterRunwayWindowMonths(
-  monthlyRows: readonly OfficePnlMonthlyRow[],
-  runwayWindowMonths: readonly string[]
-): readonly string[] {
-  const availableMonths = new Set<string>(monthlyRows.map((row) => row.month));
-  return runwayWindowMonths.filter((month) => availableMonths.has(month));
 }
 
 function registerDistributionRoutes(app: Hono<ApiAuthBindings>, dependencies: ApiServiceDependencies): void {
@@ -13060,7 +13052,7 @@ function readOfficeDashboardPrevious(dataset: OfficeAnalyticsDataset, filters: O
 
   const previousPeriod = previousFilters.dateTo.slice(0, 7);
   const monthlyRows = readMonthlyPnl(dataset, previousFilters);
-  const runwayWindowMonths = filterRunwayWindowMonths(monthlyRows, ["2026-02"]);
+  const runwayWindowMonths = selectRunwayWindowMonths(monthlyRows);
   const dashboard = readOfficeDashboardFull(dataset, previousPeriod, previousFilters, runwayWindowMonths);
   return {
     dateFrom: previousFilters.dateFrom,
@@ -14526,7 +14518,7 @@ function projectPnlLines(dataset: OfficeAnalyticsDataset, projectId: string, fil
 }
 
 function toOfficeIntegrity(dataset: OfficeAnalyticsDataset, checkedAt: string): OfficeIntegrityCheckAllResponse {
-  const bankQuality = readOfficeBankQuality(dataset, "2026-02");
+  const bankQuality = readOfficeBankQuality(dataset, checkedAt.slice(0, 7));
   const checks: readonly OfficeIntegrityCheck[] = [
     {
       id: "integrity_bank_quality",
