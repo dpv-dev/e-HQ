@@ -189,7 +189,7 @@
         <p class="status" class:error={statusTone === "error"} role="status">{statusMessage}</p>
       {/if}
 
-      <p class="foot">© 2026 ë · wip v0001 · port louis, mu</p>
+      <p class="foot">© 2026 ë · port louis, mu · since 2006</p>
     </form>
   </section>
 </main>

@@ -14,6 +14,8 @@
     type CurrencyCode,
     type DistributionAlias,
     type DistributionAliasTargetType,
+    type DistributionAllocationRow,
+    type DistributionAllocationTotal,
     type DistributionAllocationBatchCurrencyTotal,
     type DistributionAllocationBatchRow,
     type DistributionAllocationRecentBatch,
@@ -459,6 +461,20 @@
     { label: "Allocated", align: "right", sortable: true },
     { label: "Status", align: "left", sortable: true }
   ];
+  const allocationDetailColumns: readonly TableColumn[] = [
+    { label: "Payee", align: "left", sortable: true },
+    { label: "Track", align: "left", sortable: true },
+    { label: "Gross share", align: "right", sortable: true },
+    { label: "Recouped", align: "right", sortable: true },
+    { label: "Net payable", align: "right", sortable: true },
+    { label: "Status", align: "left", sortable: true }
+  ];
+  const allocationCurrencyTotalColumns: readonly TableColumn[] = [
+    { label: "Currency", align: "left", sortable: true },
+    { label: "Gross share", align: "right", sortable: true },
+    { label: "Recouped", align: "right", sortable: true },
+    { label: "Net payable", align: "right", sortable: true }
+  ];
   const allocationReasonColumns: readonly TableColumn[] = [
     { label: "Suspense reason", align: "left", sortable: true },
     { label: "Open rows", align: "right", sortable: true }
@@ -673,6 +689,12 @@
   let allocationWorkbenchState = $state<ApiRequestState<DistributionAllocationWorkbenchResponse>>(
     createIdleState<DistributionAllocationWorkbenchResponse>()
   );
+  let allocationDetailState = $state<ApiRequestState<PageResult<DistributionAllocationRow>>>(
+    createIdleState<PageResult<DistributionAllocationRow>>()
+  );
+  let allocationCurrencyTotalsState = $state<ApiRequestState<PageResult<DistributionAllocationTotal>>>(
+    createIdleState<PageResult<DistributionAllocationTotal>>()
+  );
   let suspenseState = $state<ApiRequestState<DistributionSuspenseWorkbenchResponse>>(
     createIdleState<DistributionSuspenseWorkbenchResponse>()
   );
@@ -787,6 +809,7 @@
   let suspenseTrackOptions = $state<readonly TrackSummary[] | null>(null);
   let suspenseTrackOptionsError = $state<string | null>(null);
   let selectedRunId = $state<string | null>(null);
+  let allocationDetailRunId = $state<string | null>(null);
   let unpostReasonInput = $state("");
   let catalogPanelMode = $state<CatalogPanelMode | null>(null);
   let releaseTitleInput = $state("");
@@ -913,6 +936,15 @@
   const contractRows = $derived(createContractRows(contractTracks, selectedContractRowIds));
   const expenseRows = $derived(createExpenseRows(expenses));
   const allocationRows = $derived(createAllocationRows(allocationRuns));
+  const allocationDetailRows = $derived(
+    allocationDetailState.status === "success" ? createAllocationDetailRows(allocationDetailState.data.items) : []
+  );
+  const allocationCurrencyTotalRows = $derived(
+    allocationCurrencyTotalsState.status === "success" ? createAllocationCurrencyTotalRows(allocationCurrencyTotalsState.data.items) : []
+  );
+  const allocationDetailRun = $derived(
+    allocationDetailRunId === null ? null : allocationRuns.find((run: AllocationRunSummary): boolean => run.id === allocationDetailRunId) ?? null
+  );
   const allocationKpis = $derived(createAllocationKpis(allocationWorkbench));
   const allocationHealthKpis = $derived(createAllocationHealthKpis(allocationWorkbench));
   const allocationReasonRows = $derived(createAllocationReasonRows(allocationWorkbench?.suspenseReasons ?? []));
@@ -1263,6 +1295,7 @@
     { label: (rowId: string): string => `Fix ${humanizeIssueCode(rowId)} queue`, onAction: openSuspenseReasonQueue }
   ];
   const allocationRowActions: readonly TableRowAction[] = [
+    { label: "View allocations", onAction: openAllocationDetail },
     { label: "Request reversal", onAction: selectRunForUnpost, danger: true }
   ];
   const allocationReasonRowActions: readonly TableRowAction[] = [
@@ -2022,6 +2055,26 @@
     } catch (error: unknown) {
       allocationsState = createErrorState<PageResult<AllocationRunSummary>>(error);
     }
+  }
+
+  function openAllocationDetail(runId: string): void {
+    allocationDetailRunId = runId;
+    void loadAllocationDetail(runId);
+  }
+
+  async function loadAllocationDetail(runId: string): Promise<void> {
+    allocationDetailState = beginReload<PageResult<DistributionAllocationRow>>(allocationDetailState);
+    allocationCurrencyTotalsState = beginReload<PageResult<DistributionAllocationTotal>>(allocationCurrencyTotalsState);
+    const query = { workspaceId: distributionWorkspaceId, runId, payeeId: null, status: null, cursor: null, limit: TABLE_PAGE_SIZE };
+    const [lines, totals] = await Promise.allSettled([distributionApi.listAllocations(query), distributionApi.listAllocationsByCurrency(query)]);
+    allocationDetailState = lines.status === "fulfilled" ? createSuccessState<PageResult<DistributionAllocationRow>>(lines.value) : createErrorState<PageResult<DistributionAllocationRow>>(lines.reason);
+    allocationCurrencyTotalsState = totals.status === "fulfilled" ? createSuccessState<PageResult<DistributionAllocationTotal>>(totals.value) : createErrorState<PageResult<DistributionAllocationTotal>>(totals.reason);
+  }
+
+  function closeAllocationDetail(): void {
+    allocationDetailRunId = null;
+    allocationDetailState = createIdleState<PageResult<DistributionAllocationRow>>();
+    allocationCurrencyTotalsState = createIdleState<PageResult<DistributionAllocationTotal>>();
   }
 
   function allocationWorkbenchQuery(batchCursor: string | null, bankCursor: string | null) {
@@ -5405,6 +5458,32 @@
     }));
   }
 
+  function createAllocationDetailRows(items: readonly DistributionAllocationRow[]): readonly TableRow[] {
+    return items.map((item: DistributionAllocationRow): TableRow => ({
+      id: item.id,
+      cells: [
+        { kind: "text", value: item.payeeName, strong: true },
+        { kind: "text", value: item.trackTitle ?? "Unassigned track", strong: false },
+        { kind: "money", value: formatMoney(item.grossShare, item.currency), tone: moneyTone(item.grossShare) },
+        { kind: "money", value: formatMoney(item.recoupmentApplied, item.currency), tone: moneyTone(item.recoupmentApplied) },
+        { kind: "money", value: formatMoney(item.netPayable, item.currency), tone: moneyTone(item.netPayable) },
+        { kind: "badge", value: item.status, tone: item.status === "posted" ? "success" : "info" }
+      ]
+    }));
+  }
+
+  function createAllocationCurrencyTotalRows(items: readonly DistributionAllocationTotal[]): readonly TableRow[] {
+    return items.map((item: DistributionAllocationTotal): TableRow => ({
+      id: item.currency,
+      cells: [
+        { kind: "badge", value: item.currency, tone: "muted" },
+        { kind: "money", value: formatMoney(item.grossShare, item.currency), tone: moneyTone(item.grossShare) },
+        { kind: "money", value: formatMoney(item.recoupmentApplied, item.currency), tone: moneyTone(item.recoupmentApplied) },
+        { kind: "money", value: formatMoney(item.netPayable, item.currency), tone: moneyTone(item.netPayable) }
+      ]
+    }));
+  }
+
   function createAllocationKpis(workbench: DistributionAllocationWorkbenchResponse | null): readonly DistributionKpi[] {
     const summary = workbench?.summary;
     return [
@@ -6627,6 +6706,17 @@
                 <Input id="distribution-unpost-reason" label="Reversal reason" value={unpostReasonInput} placeholder="" type="text" state="default" message="" oninput={updateUnpostReason} />
                 <Button label="Reverse run" variant="danger" size="medium" type="button" disabled={!writesEnabled || unpostReasonInput.trim() === ""} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Reverse run" title={writesEnabled ? (unpostReasonInput.trim() === "" ? "Enter a reversal reason first" : "") : writeGateMessage} onclick={unpostAllocationRun} />
                 <Button label="Cancel" variant="secondary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Cancel reversal request" onclick={closeUnpostPanel} />
+              </section>
+            {/snippet}
+          </Drawer>
+        {/if}
+        {#if allocationDetailRun !== null}
+          <Drawer open={true} presentation="overlay" showFooter={false} title="Allocation breakdown" badgeLabel={allocationDetailRun.status} badgeTone="info" body="" primaryAction="" secondaryAction="Close" state="default" onSecondary={closeAllocationDetail}>
+            {#snippet content()}
+              <section class="allocation-detail-panel" aria-label="Allocation breakdown">
+                <div class="panel-context"><strong>{allocationDetailRun.runReference}</strong><span>{allocationDetailRun.period} · {allocationDetailRun.lockKey}</span></div>
+                <Table title="Totals by currency" columns={allocationCurrencyTotalColumns} rows={allocationCurrencyTotalRows} state={tableStateFor(allocationCurrencyTotalsState.status, allocationCurrencyTotalRows.length)} actionLabel="" />
+                <Table title="Allocation lines" columns={allocationDetailColumns} rows={allocationDetailRows} state={tableStateFor(allocationDetailState.status, allocationDetailRows.length)} actionLabel="" />
               </section>
             {/snippet}
           </Drawer>

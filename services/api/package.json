@@ -17,7 +17,6 @@
     "@ehq/api-client": "workspace:*",
     "@ehq/api-contracts": "workspace:*",
     "@ehq/auth": "workspace:*",
-    "@ehq/db": "workspace:*",
     "@ehq/domain-distribution": "workspace:*",
     "@ehq/domain-finance": "workspace:*",
     "@ehq/domain-office": "workspace:*",

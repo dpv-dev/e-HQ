@@ -112,9 +112,6 @@ importers:
       '@ehq/auth':
         specifier: workspace:*
         version: link:../../packages/auth
-      '@ehq/db':
-        specifier: workspace:*
-        version: link:../../packages/db
       '@ehq/domain-distribution':
         specifier: workspace:*
         version: link:../../packages/domain-distribution
