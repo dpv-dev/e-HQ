@@ -46,6 +46,25 @@ test("distribution parse-preview: Kontor royalty statement fields preserve custo
   assert.equal(normalized.acceptedRows[0]?.sourcePeriodEnd, "2023-05-31");
 });
 
+test("distribution normalization: Kontor line sales period overrides accounting quarter", () => {
+  const normalized = normalizeDistributionImportRows("kontor", [{
+    id: "row_1",
+    rowNumber: 1,
+    rawData: {
+      "Report Period": "2024Q04",
+      "Sales Period": "202411",
+      "Tracktitle": "Kole",
+      "Artist": "TAF TAF",
+      "ISRC": "DEPI82447158",
+      "Royalty Amount Customer": "0,00405938",
+      "Currency": "EUR"
+    }
+  }]);
+
+  assert.equal(normalized.acceptedRows[0]?.sourcePeriodStart, "2024-11-01");
+  assert.equal(normalized.acceptedRows[0]?.sourcePeriodEnd, "2024-11-30");
+});
+
 test("distribution parse-preview: RouteNote workbook-normalized rows use USD earnings, streams, and report month", () => {
   const normalized = normalizeDistributionImportRows("routenote", [{
     id: "row_1",

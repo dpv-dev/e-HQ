@@ -25971,7 +25971,7 @@ function parseRow(source, profile, row) {
   if (quantity === null) {
     return null;
   }
-  const sourcePeriod = parseSourceDate(rowValue(row.rawData, [...GENERAL_DATE_KEYS, "sales period"]));
+  const sourcePeriod = sourcePeriodForRow(row.rawData, source);
   return {
     row,
     dsp: nonEmptyValue(rowValue(row.rawData, source === "kontor" ? ["dmb store name", "outletname", ...GENERAL_DSP_KEYS] : ["retailer", ...GENERAL_DSP_KEYS])) ?? source,
@@ -26062,6 +26062,18 @@ function parseSourceDate(value) {
     const endMonth = String(quarter * 3).padStart(2, "0");
     const endDay = new Date(Date.UTC(Number(quarterMatch[1]), quarter * 3, 0)).getUTCDate();
     return { start: `${quarterMatch[1]}-${startMonth}-01`, end: `${quarterMatch[1]}-${endMonth}-${String(endDay).padStart(2, "0")}`, reportDate: null };
+  }
+  return null;
+}
+function sourcePeriodForRow(row, source) {
+  const candidateKeys = source === "kontor" ? ["sales period", ...GENERAL_DATE_KEYS] : GENERAL_DATE_KEYS;
+  for (const candidateKey of candidateKeys) {
+    const normalizedCandidate = normalizeColumnKey(candidateKey);
+    const sourceValue = Object.entries(row).find(
+      ([key, value]) => normalizeColumnKey(key) === normalizedCandidate && value.trim().length > 0
+    )?.[1] ?? null;
+    const parsed = parseSourceDate(sourceValue);
+    if (parsed !== null) return parsed;
   }
   return null;
 }
