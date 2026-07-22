@@ -42954,7 +42954,7 @@ var OFFICE_FINANCIAL_RESET_PHRASE = "DELETE ALL OFFICE DATA";
 var officeFinancialResetSchema = workspaceBodySchema.extend({
   confirmationPhrase: external_exports.literal(OFFICE_FINANCIAL_RESET_PHRASE)
 });
-var DISTRIBUTION_FINANCIAL_RESET_PHRASE = "DELETE ALL DISTRIBUTION IMPORT DATA";
+var DISTRIBUTION_FINANCIAL_RESET_PHRASE = "DELETE ALL DISTRIBUTION DATA";
 var distributionFinancialResetSchema = workspaceBodySchema.extend({
   confirmationPhrase: external_exports.literal(DISTRIBUTION_FINANCIAL_RESET_PHRASE)
 });
@@ -50969,6 +50969,20 @@ async function distributionFinancialResetResponse(context, dependencies) {
         await tx.executor.execute(sql`delete from payments where workspace_id = ${request.workspaceId}`);
         await tx.executor.execute(sql`delete from statements where workspace_id = ${request.workspaceId}`);
         await tx.executor.execute(sql`delete from import_batches where workspace_id = ${request.workspaceId}`);
+        await tx.executor.execute(sql`delete from catalog_contributor_overrides where workspace_id = ${request.workspaceId}`);
+        await tx.executor.execute(sql`delete from contract_rule_set_overrides where workspace_id = ${request.workspaceId}`);
+        await tx.executor.execute(sql`delete from catalog_aliases where track_id in (select id from tracks where workspace_id = ${request.workspaceId}) or release_id in (select id from releases where workspace_id = ${request.workspaceId}) or payee_id in (select id from payees where workspace_id = ${request.workspaceId})`);
+        await tx.executor.execute(sql`delete from mapping_rules where target_track_id in (select id from tracks where workspace_id = ${request.workspaceId})`);
+        await tx.executor.execute(sql`delete from track_contributors where track_id in (select id from tracks where workspace_id = ${request.workspaceId})`);
+        await tx.executor.execute(sql`delete from identity_link where payee_id in (select id from payees where workspace_id = ${request.workspaceId})`);
+        await tx.executor.execute(sql`delete from royalty_rules where contract_id in (select id from contracts where workspace_id = ${request.workspaceId})`);
+        await tx.executor.execute(sql`delete from contract_extractions where contract_id in (select id from contracts where workspace_id = ${request.workspaceId})`);
+        await tx.executor.execute(sql`delete from contract_scopes where contract_id in (select id from contracts where workspace_id = ${request.workspaceId})`);
+        await tx.executor.execute(sql`delete from contract_cost_terms where contract_id in (select id from contracts where workspace_id = ${request.workspaceId})`);
+        await tx.executor.execute(sql`delete from tracks where workspace_id = ${request.workspaceId}`);
+        await tx.executor.execute(sql`delete from releases where workspace_id = ${request.workspaceId}`);
+        await tx.executor.execute(sql`delete from contracts where workspace_id = ${request.workspaceId}`);
+        await tx.executor.execute(sql`delete from payees where workspace_id = ${request.workspaceId}`);
       }
       resetDistributionOperationalFixtures(dependencies.fixtures);
       const auditEventId = await appendAuditEvent(tx, {
@@ -50977,7 +50991,7 @@ async function distributionFinancialResetResponse(context, dependencies) {
         targetType: "distribution_workspace",
         targetId: request.workspaceId,
         before: { workspaceId: request.workspaceId },
-        after: { workspaceId: request.workspaceId, reset: "import-derived operational data" },
+        after: { workspaceId: request.workspaceId, reset: "all workspace-scoped Distribution data" },
         idempotencyKey: resolvedIdempotencyKey
       });
       return mutationReceipt(request.workspaceId, auditEventId);
@@ -52207,9 +52221,17 @@ function resetDistributionOperationalFixtures(fixtures) {
   mutableDistribution.statementLines = [];
   mutableDistribution.statementPaymentLinks = [];
   mutableDistribution.payments = [];
+  mutableDistribution.payees = [];
+  mutableDistribution.releases = [];
+  mutableDistribution.tracks = [];
   mutableFixtures.distributionMappingRows = [];
+  mutableFixtures.distributionContracts = [];
+  mutableFixtures.distributionContractExpenses = [];
+  mutableFixtures.distributionRoyaltyRules = [];
+  mutableFixtures.distributionCostTerms = [];
   mutableFixtures.distributionExpenseApplications = [];
   mutableFixtures.distributionPayeeBalances = [];
+  mutableFixtures.distributionAliases = [];
 }
 function appendDistributionImportNormalizationFixture(fixtures, batchId, rows) {
   if (rows.length === 0) return;

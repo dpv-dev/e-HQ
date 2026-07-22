@@ -2856,10 +2856,10 @@
   }
 
   async function resetDistributionImports(): Promise<void> {
-    if (importResetConfirmation !== "DELETE ALL DISTRIBUTION IMPORT DATA") return;
+    if (importResetConfirmation !== "DELETE ALL DISTRIBUTION DATA") return;
     try {
       mutationReceipt = await distributionApi.resetFinancialData(
-        { workspaceId: distributionWorkspaceId, confirmationPhrase: "DELETE ALL DISTRIBUTION IMPORT DATA" },
+        { workspaceId: distributionWorkspaceId, confirmationPhrase: "DELETE ALL DISTRIBUTION DATA" },
         { idempotencyKey: createIdempotencyKey("distribution-financial-reset") }
       );
       mutationReceiptPageId = activePageId;
@@ -6353,7 +6353,7 @@
         <Toolbar label="Import Kontor RouteNote" filters={importToolbarFilters} actionLabel="" loading={isLoadingStatus(importState.status)} onFilterSelect={selectImportToolbarFilter} />
         <section class="contracts-actions ehq-edge-surface">
           <Button label="Import one file" variant="primary" size="medium" type="button" disabled={false} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Import one file" onclick={openImportPanel} />
-          <Button label="Start fresh" variant="danger" size="medium" type="button" disabled={!writesEnabled} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Delete all Distribution imported data" title={writeDisabledTitle()} onclick={openImportResetPanel} />
+          <Button label="Start fresh" variant="danger" size="medium" type="button" disabled={!writesEnabled} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Delete all Distribution data" title={writeDisabledTitle()} onclick={openImportResetPanel} />
           <span>One CSV or TSV at a time: select, preview, confirm.</span>
         </section>
         {#if importPanelOpen}
@@ -6376,10 +6376,10 @@
         {#if importResetPanelOpen}
           <Drawer open={true} presentation="overlay" showFooter={false} title="Start fresh" badgeLabel="administrator only" badgeTone="warning" body="" primaryAction="" secondaryAction="Cancel" state="default" onSecondary={closeImportResetPanel}>
             {#snippet content()}
-              <section class="form-panel" aria-label="Delete Distribution imported data">
-                <div class="panel-context"><strong>Delete all imported Distribution data</strong><span>Imports, allocation runs, suspense, statements, and payments will be permanently removed. Contracts, catalog, payees, aliases, and FX rates remain.</span></div>
-                <Input id="distribution-import-reset-confirmation" label="Type confirmation" value={importResetConfirmation} placeholder="DELETE ALL DISTRIBUTION IMPORT DATA" type="text" state="default" message="" oninput={(value) => importResetConfirmation = value} />
-                <Button label="Delete imported data" variant="danger" size="medium" type="button" disabled={!writesEnabled || importResetConfirmation !== "DELETE ALL DISTRIBUTION IMPORT DATA"} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Delete all Distribution imported data" title={writeDisabledTitle()} onclick={resetDistributionImports} />
+              <section class="form-panel" aria-label="Delete all Distribution data">
+                <div class="panel-context"><strong>Delete all Distribution data</strong><span>Imports, catalogue, contracts, payees, aliases, rules, allocation history, statements, and payments will be permanently removed. The audit log and shared FX rates remain.</span></div>
+                <Input id="distribution-import-reset-confirmation" label="Type confirmation" value={importResetConfirmation} placeholder="DELETE ALL DISTRIBUTION DATA" type="text" state="default" message="" oninput={(value) => importResetConfirmation = value} />
+                <Button label="Delete all Distribution data" variant="danger" size="medium" type="button" disabled={!writesEnabled || importResetConfirmation !== "DELETE ALL DISTRIBUTION DATA"} loading={mutationInFlight} locked={false} focus={false} ariaLabel="Delete all Distribution data" title={writeDisabledTitle()} onclick={resetDistributionImports} />
               </section>
             {/snippet}
           </Drawer>

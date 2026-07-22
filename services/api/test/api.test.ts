@@ -5597,13 +5597,6 @@ test("office bank import transactional dedupe crosses occurred and value dates i
 
 test("Distribution financial reset clears operational fixtures, preserves setup, and replays idempotently", async () => {
   const fixtures = createFixtureStore();
-  const preserved = {
-    contracts: fixtures.distributionContracts.length,
-    payees: fixtures.distribution.payees.length,
-    releases: fixtures.distribution.releases.length,
-    tracks: fixtures.distribution.tracks.length,
-    aliases: fixtures.distributionAliases.length
-  };
   const app = createApiService({
     fixtures,
     persistence: createMemoryPersistenceRuntime({ WRITES_ENABLED: "true" }),
@@ -5611,7 +5604,7 @@ test("Distribution financial reset clears operational fixtures, preserves setup,
     nowIso: (): string => "2026-06-21T00:00:00.000Z",
     auth: createTestAuthVerifier()
   });
-  const payload = { workspaceId: "eeee-mu", confirmationPhrase: "DELETE ALL DISTRIBUTION IMPORT DATA" };
+  const payload = { workspaceId: "eeee-mu", confirmationPhrase: "DELETE ALL DISTRIBUTION DATA" };
 
   const first = await app.request("/erh/v1/financial-reset", {
     method: "POST",
@@ -5642,11 +5635,11 @@ test("Distribution financial reset clears operational fixtures, preserves setup,
   assert.equal(fixtures.distributionMappingRows.length, 0);
   assert.equal(fixtures.distributionExpenseApplications.length, 0);
   assert.equal(fixtures.distributionPayeeBalances.length, 0);
-  assert.equal(fixtures.distributionContracts.length, preserved.contracts);
-  assert.equal(fixtures.distribution.payees.length, preserved.payees);
-  assert.equal(fixtures.distribution.releases.length, preserved.releases);
-  assert.equal(fixtures.distribution.tracks.length, preserved.tracks);
-  assert.equal(fixtures.distributionAliases.length, preserved.aliases);
+  assert.equal(fixtures.distributionContracts.length, 0);
+  assert.equal(fixtures.distribution.payees.length, 0);
+  assert.equal(fixtures.distribution.releases.length, 0);
+  assert.equal(fixtures.distribution.tracks.length, 0);
+  assert.equal(fixtures.distributionAliases.length, 0);
 });
 
 function authHeaders(): Readonly<Record<string, string>> {

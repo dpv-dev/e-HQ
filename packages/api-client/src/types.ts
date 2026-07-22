@@ -1424,7 +1424,7 @@ export interface DistributionImportConfirmResponse extends ApiMutationReceipt {
 
 export interface DistributionFinancialResetRequest {
   readonly workspaceId: EntityId;
-  readonly confirmationPhrase: "DELETE ALL DISTRIBUTION IMPORT DATA";
+  readonly confirmationPhrase: "DELETE ALL DISTRIBUTION DATA";
 }
 
 export interface DistributionMappingRowsQuery extends PageQuery {
