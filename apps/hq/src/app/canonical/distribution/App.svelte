@@ -201,9 +201,15 @@
           throw new Error("Please wait: the previous action is still processing.");
         }
         mutationInFlight = true;
+        // Safety net: a hung request (dead connection, unresponsive server) must not
+        // wedge every button on the page forever behind this single shared flag.
+        const timeoutId = setTimeout((): void => {
+          mutationInFlight = false;
+        }, 60_000);
         try {
           return await (value as (...callArgs: unknown[]) => Promise<unknown>).apply(target, args);
         } finally {
+          clearTimeout(timeoutId);
           mutationInFlight = false;
         }
       };
