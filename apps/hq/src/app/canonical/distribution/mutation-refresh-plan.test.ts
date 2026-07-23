@@ -94,6 +94,12 @@ describe("distribution mutation refresh plans", () => {
     ]);
   });
 
+  it("surfaces structured API errors in the action banner", () => {
+    expect(source).toContain("error instanceof ApiClientHttpError");
+    expect(source).toContain("apiErrorMessage(error.responseBody)");
+    expect(source).toContain('JSON.parse(responseBody)');
+  });
+
   it("payment mutations refresh statements, reconciliation, revenue, and audit views", () => {
     expectRefreshCalls("recordPayment", [
       "loadPayments",

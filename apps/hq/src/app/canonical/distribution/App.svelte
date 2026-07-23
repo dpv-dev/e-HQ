@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import type { AuthSession } from "@ehq/auth";
   import {
+    ApiClientHttpError,
     beginReload,
     createErrorState,
     createIdleState,
@@ -6472,7 +6473,33 @@
     return `distribution-${scope}-${Date.now().toString()}`;
   }
 
+  function apiErrorMessage(responseBody: string): string | null {
+    let payload: unknown;
+
+    try {
+      payload = JSON.parse(responseBody);
+    } catch {
+      return null;
+    }
+
+    if (typeof payload !== "object" || payload === null || !("error" in payload)) {
+      return null;
+    }
+
+    const error = payload.error;
+    if (typeof error !== "object" || error === null || !("message" in error)) {
+      return null;
+    }
+
+    const message = error.message;
+    return typeof message === "string" && message.trim() !== "" ? message : null;
+  }
+
   function getErrorMessage(error: unknown): string {
+    if (error instanceof ApiClientHttpError) {
+      return apiErrorMessage(error.responseBody) ?? error.message;
+    }
+
     if (error instanceof Error) {
       return error.message;
     }
