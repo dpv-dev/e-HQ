@@ -772,6 +772,7 @@
   let importResetPanelOpen = $state(false);
   let importResetConfirmation = $state("");
   let runReceipt = $state<ApiRunReceipt | null>(null);
+  let runReceiptIsPreview = $state(false);
   let mutationReceipt = $state<ApiMutationReceipt | null>(null);
   let runReceiptPageId = $state<DistributionPageId | null>(null);
   let mutationReceiptPageId = $state<DistributionPageId | null>(null);
@@ -2691,6 +2692,7 @@
 
   function clearRunReceipt(): void {
     runReceipt = null;
+    runReceiptIsPreview = false;
     runReceiptPageId = null;
     actionError = null;
     actionErrorPageId = null;
@@ -3853,6 +3855,7 @@
         }
       );
       runReceiptPageId = activePageId;
+      runReceiptIsPreview = true;
     } catch (error: unknown) {
       reportActionError(error);
     }
@@ -3876,6 +3879,7 @@
         }
       );
       runReceiptPageId = activePageId;
+      runReceiptIsPreview = false;
       // The cadenced run persists a new calculation run; refresh the run list.
       await Promise.all([loadAllocationWorkbench(), loadAllocationRuns(), loadStatements(), loadPayments(), loadRevenue(), loadReconciliation(), loadAuditLog()]);
     } catch (error: unknown) {
@@ -3895,6 +3899,7 @@
         batchId: batch.id
       }, { idempotencyKey: createIdempotencyKey(`allocation-preview-${batch.id}`) });
       runReceiptPageId = activePageId;
+      runReceiptIsPreview = true;
     } catch (error: unknown) {
       reportActionError(error);
     }
@@ -3913,6 +3918,7 @@
         batchId: batch.id
       }, { idempotencyKey: createIdempotencyKey(`allocation-run-${batch.id}`) });
       runReceiptPageId = activePageId;
+      runReceiptIsPreview = false;
       await Promise.all([loadAllocationWorkbench(), loadAllocationRuns(), loadAuditLog()]);
     } catch (error: unknown) {
       reportActionError(error);
@@ -6570,7 +6576,14 @@
         {/if}
 
         {#if runReceipt !== null && runReceiptPageId === activePageId}
-          <Alert tone="info" title="Run scheduled" message="Lock held by the workflow." dismissible={false} />
+          <Alert
+            tone="info"
+            title={runReceiptIsPreview ? "Preview ready" : "Run scheduled"}
+            message={runReceiptIsPreview
+              ? "Read-only preview. No allocation run, lock, financial data, or audit record was created."
+              : "Allocation run accepted. The workflow lock protects this financial write while it completes."}
+            dismissible={false}
+          />
         {/if}
 
         {#if actionNotice !== null && actionNoticePageId === activePageId}
@@ -7530,12 +7543,13 @@
   .content {
     flex: 1 1 auto;
     min-height: 0;
+    min-width: 0;
     padding: var(--ehq-space-5);
     display: grid;
     align-content: start;
     gap: var(--ehq-space-4);
     overflow-y: auto;
-    overflow-x: auto;
+    overflow-x: hidden;
   }
 
   .import-result {

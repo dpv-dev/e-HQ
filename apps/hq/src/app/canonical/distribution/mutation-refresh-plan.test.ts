@@ -94,6 +94,13 @@ describe("distribution mutation refresh plans", () => {
     ]);
   });
 
+  it("labels previews as read-only and keeps horizontal scrolling inside tables", () => {
+    expect(source).toContain('title={runReceiptIsPreview ? "Preview ready" : "Run scheduled"}');
+    expect(source).toContain("Read-only preview. No allocation run, lock, financial data, or audit record was created.");
+    expect(source).toContain("runReceiptIsPreview = true;");
+    expect(source).toContain("overflow-x: hidden;");
+  });
+
   it("surfaces structured API errors in the action banner", () => {
     expect(source).toContain("error instanceof ApiClientHttpError");
     expect(source).toContain("apiErrorMessage(error.responseBody)");
